@@ -1,6 +1,6 @@
 # Bloom
 
-Bloom is a friendly control room for your online files. Imagine each Blossom server as a secure locker on the internet. Bloom lets you pick the lockers you trust, put your photos or audio inside, and make sure copies live in more than one place so nothing gets lost.
+Bloom is a simple to use and intuitive file manager utilizing Blossom and NIP-96 servers to store files in a distributed way. 
 
 ## What Bloom Helps You Do
 - **Save time:** Add a server once, then reuse it whenever you upload or copy files.
