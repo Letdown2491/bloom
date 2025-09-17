@@ -1,0 +1,20 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+button {
+  @apply px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 transition shadow;
+}
+input, select, textarea {
+  @apply bg-slate-900 border border-slate-700 rounded-xl px-3 py-2;
+}
+.card {
+  @apply rounded-2xl bg-slate-900 border border-slate-800 shadow p-4;
+}
+.grid-col {
+  @apply rounded-xl bg-slate-900 border border-slate-800 p-3;
+}

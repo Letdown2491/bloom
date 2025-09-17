@@ -1,0 +1,781 @@
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import type { ManagedServer } from "../hooks/useServers";
+import { CancelIcon, EditIcon, FolderIcon, SaveIcon, TrashIcon } from "./icons";
+
+export type ServerListProps = {
+  servers: ManagedServer[];
+  selected: string | null;
+  onSelect: (serverUrl: string | null) => void;
+  onAdd: (server: ManagedServer) => void;
+  onUpdate: (originalUrl: string, server: ManagedServer) => void;
+  onSave: () => void;
+  saving?: boolean;
+  disabled?: boolean;
+  onRemove: (url: string) => void;
+  onToggleAuth: (url: string, value: boolean) => void;
+  onToggleSync: (url: string, value: boolean) => void;
+  validationError?: string | null;
+};
+
+type ServerDraft = {
+  name: string;
+  url: string;
+  type: ManagedServer["type"];
+  requiresAuth: boolean;
+  sync: boolean;
+};
+
+const deriveNameFromUrl = (value: string) => value.replace(/^https?:\/\//, "").replace(/\/$/, "");
+
+const createEmptyDraft = (): ServerDraft => ({
+  name: "",
+  url: "https://",
+  type: "blossom",
+  requiresAuth: true,
+  sync: false,
+});
+
+type ServerHealthStatus = "checking" | "online" | "auth" | "offline";
+
+type ServerHealth = {
+  status: ServerHealthStatus;
+  checkedAt?: number;
+  httpStatus?: number;
+  latencyMs?: number;
+  error?: string;
+};
+
+export const ServerList: React.FC<ServerListProps> = ({
+  servers,
+  selected,
+  onSelect,
+  onAdd,
+  onUpdate,
+  onSave,
+  saving,
+  disabled,
+  onRemove,
+  onToggleAuth,
+  onToggleSync,
+  validationError,
+}) => {
+  const [isAdding, setIsAdding] = useState(false);
+  const [editingUrl, setEditingUrl] = useState<string | null>(null);
+  const [draft, setDraft] = useState<ServerDraft>(createEmptyDraft);
+  const [error, setError] = useState<string | null>(null);
+  const urlInputRef = useRef<HTMLInputElement | null>(null);
+  const [healthMap, setHealthMap] = useState<Record<string, ServerHealth>>({});
+  const controlsDisabled = Boolean(disabled || saving);
+  const saveButtonDisabled = Boolean(saving || disabled || validationError);
+  const saveButtonLabel = saving ? "Saving…" : disabled ? "Save (connect signer)" : "Save";
+
+  const handleDraftKeyDown = (event: React.KeyboardEvent<HTMLElement>) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      handleSubmit();
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      cancelDraft();
+    }
+    event.stopPropagation();
+  };
+
+  useEffect(() => {
+    if (isAdding || editingUrl) {
+      urlInputRef.current?.focus({ preventScroll: true });
+    }
+  }, [isAdding, editingUrl]);
+
+  useEffect(() => {
+    let active = true;
+    const controllers = new Map<string, AbortController>();
+
+    setHealthMap(prev => {
+      const next: Record<string, ServerHealth> = {};
+      servers.forEach(server => {
+        next[server.url] = prev[server.url] ?? { status: "checking" };
+      });
+      return next;
+    });
+
+    const checkServer = async (server: ManagedServer) => {
+      const normalizedUrl = server.url.replace(/\/$/, "");
+      const targetUrl = `${normalizedUrl}/`;
+      const controller = new AbortController();
+      controllers.set(server.url, controller);
+      let timedOut = false;
+      const timeoutId = window.setTimeout(() => {
+        timedOut = true;
+        controller.abort();
+      }, 8000);
+
+      if (active) {
+        setHealthMap(prev => ({
+          ...prev,
+          [server.url]: { ...prev[server.url], status: "checking" },
+        }));
+      }
+
+      const finalize = (entry: ServerHealth) => {
+        if (!active) return;
+        setHealthMap(prev => ({
+          ...prev,
+          [server.url]: entry,
+        }));
+      };
+
+      const start = performance.now();
+
+      try {
+        let response: Response | null = null;
+
+        try {
+          response = await fetch(targetUrl, {
+            method: "HEAD",
+            mode: "cors",
+            cache: "no-store",
+            signal: controller.signal,
+          });
+
+          if (response.status === 405 || response.status === 501) {
+            response = await fetch(targetUrl, {
+              method: "GET",
+              mode: "cors",
+              cache: "no-store",
+              signal: controller.signal,
+            });
+          }
+        } catch (error) {
+          if (error instanceof DOMException && error.name === "AbortError") {
+            if (!active) return;
+            if (timedOut) {
+              finalize({ status: "offline", checkedAt: Date.now(), error: "Timed out" });
+            }
+            return;
+          }
+
+          try {
+            response = await fetch(targetUrl, {
+              method: "GET",
+              mode: "no-cors",
+              cache: "no-store",
+              signal: controller.signal,
+            });
+          } catch (fallbackError) {
+            if (fallbackError instanceof DOMException && fallbackError.name === "AbortError") {
+              if (!active) return;
+              if (timedOut) {
+                finalize({ status: "offline", checkedAt: Date.now(), error: "Timed out" });
+              }
+              return;
+            }
+
+            const message = fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
+            finalize({ status: "offline", checkedAt: Date.now(), error: message });
+            return;
+          }
+        }
+
+        if (!response) return;
+
+        const duration = Math.max(0, Math.round(performance.now() - start));
+        const checkedAt = Date.now();
+
+        if (response.type === "opaque") {
+          finalize({ status: "online", checkedAt, latencyMs: duration });
+          return;
+        }
+
+        const httpStatus = response.status;
+        const requiresAuth = httpStatus === 401 || httpStatus === 403;
+        const reachable = response.ok || requiresAuth;
+        const status: ServerHealthStatus = requiresAuth ? "auth" : reachable ? "online" : "offline";
+
+        finalize({ status, checkedAt, httpStatus, latencyMs: duration, error: reachable ? undefined : response.statusText });
+      } finally {
+        clearTimeout(timeoutId);
+        controllers.delete(server.url);
+      }
+    };
+
+    servers.forEach(server => {
+      checkServer(server);
+    });
+
+    return () => {
+      active = false;
+      controllers.forEach(controller => controller.abort());
+    };
+  }, [servers]);
+
+  const statusStyles = useMemo<Record<ServerHealthStatus, { label: string; dot: string; text: string }>>(
+    () => ({
+      checking: {
+        label: "Checking…",
+        dot: "bg-slate-500 animate-pulse",
+        text: "text-slate-400",
+      },
+      online: {
+        label: "Reachable",
+        dot: "bg-emerald-500",
+        text: "text-emerald-300",
+      },
+      auth: {
+        label: "Reachable (auth)",
+        dot: "bg-amber-500",
+        text: "text-amber-300",
+      },
+      offline: {
+        label: "Unreachable",
+        dot: "bg-red-500",
+        text: "text-red-400",
+      },
+    }),
+    []
+  );
+
+  const renderHealthCell = (server: ManagedServer, showPendingNote = false) => {
+    const health = healthMap[server.url];
+    if (!health) {
+      return <span className="text-xs text-slate-500">Not checked</span>;
+    }
+
+    const styles = statusStyles[health.status];
+    const latency = typeof health.latencyMs === "number" ? `${health.latencyMs}ms` : null;
+
+    return (
+      <div className="flex flex-col gap-1">
+        <span className={`inline-flex items-center gap-2 text-xs ${styles.text}`}>
+          <span className={`h-2 w-2 rounded-full ${styles.dot}`} aria-hidden />
+          {styles.label}
+          {health.status === "auth" && health.httpStatus ? ` (${health.httpStatus})` : null}
+          {latency ? <span className="text-[11px] text-slate-400">{latency}</span> : null}
+        </span>
+        {showPendingNote ? (
+          <span className="text-[11px] text-slate-500">Will refresh after saving</span>
+        ) : null}
+      </div>
+    );
+  };
+
+  const beginAdd = () => {
+    setEditingUrl(null);
+    setDraft(createEmptyDraft());
+    setError(null);
+    setIsAdding(true);
+  };
+
+  const beginEdit = (server: ManagedServer) => {
+    setIsAdding(false);
+    setError(null);
+    setEditingUrl(server.url);
+    setDraft({
+      name: server.name,
+      url: server.url,
+      type: server.type,
+      requiresAuth: Boolean(server.requiresAuth),
+      sync: Boolean(server.sync),
+    });
+  };
+
+  const cancelDraft = () => {
+    setIsAdding(false);
+    setEditingUrl(null);
+    setDraft(createEmptyDraft());
+    setError(null);
+  };
+
+  const handleSubmit = () => {
+    if (editingUrl) {
+      handleEditSubmit();
+    } else {
+      handleAddSubmit();
+    }
+  };
+
+  const handleAddSubmit = () => {
+    const trimmedUrl = draft.url.trim();
+    if (!trimmedUrl) {
+      setError("Enter a server URL");
+      return;
+    }
+    if (!/^https?:\/\//i.test(trimmedUrl)) {
+      setError("URL must start with http:// or https://");
+      return;
+    }
+    const normalizedUrl = trimmedUrl.replace(/\/$/, "");
+    if (servers.some(server => server.url === normalizedUrl)) {
+      setError("Server already added");
+      return;
+    }
+    const name = draft.name.trim() || deriveNameFromUrl(normalizedUrl);
+    if (!name) {
+      setError("Enter a server name");
+      return;
+    }
+
+    onAdd({
+      name,
+      url: normalizedUrl,
+      type: draft.type,
+      requiresAuth: draft.requiresAuth,
+      sync: draft.sync,
+    });
+    setIsAdding(false);
+    setEditingUrl(null);
+    setDraft(createEmptyDraft());
+    setError(null);
+  };
+
+  const handleEditSubmit = () => {
+    if (!editingUrl) return;
+
+    const trimmedUrl = draft.url.trim();
+    if (!trimmedUrl) {
+      setError("Enter a server URL");
+      return;
+    }
+    if (!/^https?:\/\//i.test(trimmedUrl)) {
+      setError("URL must start with http:// or https://");
+      return;
+    }
+    const normalizedUrl = trimmedUrl.replace(/\/$/, "");
+    if (servers.some(server => server.url !== editingUrl && server.url === normalizedUrl)) {
+      setError("Server already added");
+      return;
+    }
+    const name = draft.name.trim() || deriveNameFromUrl(normalizedUrl);
+    if (!name) {
+      setError("Enter a server name");
+      return;
+    }
+
+    onUpdate(editingUrl, {
+      name,
+      url: normalizedUrl,
+      type: draft.type,
+      requiresAuth: draft.requiresAuth,
+      sync: draft.sync,
+    });
+    setEditingUrl(null);
+    setIsAdding(false);
+    setDraft(createEmptyDraft());
+    setError(null);
+  };
+
+  const handleToggle = (server: ManagedServer) => {
+    if (selected === server.url) {
+      onSelect(null);
+    } else {
+      onSelect(server.url);
+    }
+  };
+
+  return (
+    <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4">
+      <header className="flex items-center justify-between mb-3">
+        <div>
+          <h2 className="text-lg font-semibold text-slate-100">Servers</h2>
+          <p className="text-xs text-slate-400">Select where your content lives. Please note that the NIP-96 server spec has been deprecated.</p>
+        </div>
+        <div className="flex gap-2">
+          <button
+            onClick={beginAdd}
+            className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-sm disabled:opacity-40 disabled:cursor-not-allowed"
+            disabled={saving || isAdding || Boolean(editingUrl)}
+          >
+            Add server
+          </button>
+          <button
+            onClick={onSave}
+            className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-sm disabled:opacity-40"
+            disabled={saveButtonDisabled}
+          >
+            {saveButtonLabel}
+          </button>
+        </div>
+      </header>
+
+      {(validationError || saving) && (
+        <div
+          className={`mb-3 rounded-xl border px-3 py-2 text-xs ${
+            validationError
+              ? "border-amber-600/40 bg-amber-500/5 text-amber-200"
+              : "border-emerald-600/30 bg-emerald-500/5 text-emerald-200"
+          }`}
+          role="alert"
+        >
+          {validationError || "Saving changes…"}
+        </div>
+      )}
+
+      <div className="overflow-x-auto">
+        <table className="min-w-full table-fixed text-sm text-slate-300">
+          <thead className="text-[11px] uppercase tracking-wide text-slate-500">
+            <tr>
+              <th scope="col" className="py-2 px-3 text-left font-semibold">Server</th>
+              <th scope="col" className="py-2 px-3 text-left font-semibold">URL</th>
+              <th scope="col" className="w-44 py-2 px-3 text-left font-semibold">Status</th>
+              <th scope="col" className="w-32 py-2 px-3 text-left font-semibold">Type</th>
+              <th scope="col" className="w-24 py-2 px-3 text-center font-semibold">Auth</th>
+              <th scope="col" className="w-24 py-2 px-3 text-center font-semibold">Sync</th>
+              <th scope="col" className="w-28 py-2 px-3 text-center font-semibold">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {isAdding && (
+              <tr className="border-t border-slate-800 bg-slate-900/70">
+                <td className="py-3 px-3">
+                  <input
+                    type="text"
+                    value={draft.name}
+                    onChange={event => {
+                      setDraft(prev => ({ ...prev, name: event.target.value }));
+                      if (error) setError(null);
+                    }}
+                    className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-200 focus:border-emerald-500 focus:outline-none"
+                    placeholder="Server name"
+                    aria-label="Server name"
+                    onClick={event => event.stopPropagation()}
+                    onKeyDown={handleDraftKeyDown}
+                    autoComplete="off"
+                  />
+                </td>
+                <td className="py-3 px-3">
+                  <input
+                    ref={urlInputRef}
+                    type="url"
+                    value={draft.url}
+                    onChange={event => {
+                      const value = event.target.value;
+                      setDraft(prev => {
+                        const next = { ...prev, url: value };
+                        const previousDerived = deriveNameFromUrl(prev.url.trim());
+                        if (!prev.name || prev.name === previousDerived) {
+                          const derived = deriveNameFromUrl(value.trim());
+                          if (derived) next.name = derived;
+                        }
+                        return next;
+                      });
+                      if (error) setError(null);
+                    }}
+                    className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-200 focus:border-emerald-500 focus:outline-none"
+                    placeholder="https://example.com"
+                    aria-label="Server URL"
+                    onClick={event => event.stopPropagation()}
+                    onKeyDown={handleDraftKeyDown}
+                    autoComplete="off"
+                  />
+                </td>
+                <td className="py-3 px-3 text-xs text-slate-500">
+                  Health check runs after saving
+                </td>
+                <td className="py-3 px-3">
+                  <select
+                    value={draft.type}
+                    onChange={event => {
+                      setDraft(prev => ({ ...prev, type: event.target.value as ManagedServer["type"] }));
+                      if (error) setError(null);
+                    }}
+                    className="w-full min-w-[8rem] rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-200 focus:border-emerald-500 focus:outline-none"
+                    aria-label="Server type"
+                    onClick={event => event.stopPropagation()}
+                    onKeyDown={handleDraftKeyDown}
+                  >
+                    <option value="blossom">Blossom</option>
+                    <option value="nip96">NIP-96</option>
+                  </select>
+                </td>
+                <td className="py-3 px-3 text-center">
+                  <div className="flex justify-center">
+                    <input
+                      type="checkbox"
+                      checked={draft.requiresAuth}
+                      onChange={event => {
+                        setDraft(prev => ({ ...prev, requiresAuth: event.target.checked }));
+                        if (error) setError(null);
+                      }}
+                      aria-label="Requires auth"
+                      onClick={event => event.stopPropagation()}
+                      onKeyDown={handleDraftKeyDown}
+                      disabled={saving}
+                    />
+                  </div>
+                </td>
+                <td className="py-3 px-3 text-center">
+                  <div className="flex justify-center">
+                    <input
+                      type="checkbox"
+                      checked={draft.sync}
+                      onChange={event => {
+                        setDraft(prev => ({ ...prev, sync: event.target.checked }));
+                        if (error) setError(null);
+                      }}
+                      aria-label="Sync server"
+                      onClick={event => event.stopPropagation()}
+                      onKeyDown={handleDraftKeyDown}
+                      disabled={saving}
+                    />
+                  </div>
+                </td>
+                <td className="py-3 px-3 text-right">
+                  <div className="flex justify-end gap-2">
+                    <button
+                      type="button"
+                      className="text-xs px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500"
+                      onClick={event => {
+                        event.stopPropagation();
+                        handleSubmit();
+                      }}
+                    >
+                      Add
+                    </button>
+                    <button
+                      type="button"
+                      className="text-xs px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700"
+                      onClick={event => {
+                        event.stopPropagation();
+                        cancelDraft();
+                      }}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                  {error && (
+                    <div className="mt-2 text-xs text-red-400 text-right">{error}</div>
+                  )}
+                </td>
+              </tr>
+            )}
+            {servers.map(server => {
+              const isEditing = editingUrl === server.url;
+
+              if (isEditing) {
+                return (
+                  <tr key={server.url} className="border-t border-slate-800 bg-slate-900/70">
+                    <td className="py-3 px-3">
+                      <input
+                        type="text"
+                        value={draft.name}
+                        onChange={event => {
+                          setDraft(prev => ({ ...prev, name: event.target.value }));
+                          if (error) setError(null);
+                        }}
+                        className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-200 focus:border-emerald-500 focus:outline-none"
+                        placeholder="Server name"
+                        aria-label="Server name"
+                        onClick={event => event.stopPropagation()}
+                        onKeyDown={handleDraftKeyDown}
+                        autoComplete="off"
+                      />
+                  </td>
+                  <td className="py-3 px-3">
+                    <input
+                      ref={urlInputRef}
+                      type="url"
+                      value={draft.url}
+                      onChange={event => {
+                        const value = event.target.value;
+                        setDraft(prev => {
+                          const next = { ...prev, url: value };
+                          const previousDerived = deriveNameFromUrl(prev.url.trim());
+                          if (!prev.name || prev.name === previousDerived) {
+                            const derived = deriveNameFromUrl(value.trim());
+                            if (derived) next.name = derived;
+                          }
+                          return next;
+                        });
+                        if (error) setError(null);
+                      }}
+                      className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-200 focus:border-emerald-500 focus:outline-none"
+                      placeholder="https://example.com"
+                      aria-label="Server URL"
+                      onClick={event => event.stopPropagation()}
+                      onKeyDown={handleDraftKeyDown}
+                      autoComplete="off"
+                    />
+                  </td>
+                  <td className="py-3 px-3">{renderHealthCell(server, true)}</td>
+                  <td className="py-3 px-3">
+                    <select
+                      value={draft.type}
+                      onChange={event => {
+                          setDraft(prev => ({ ...prev, type: event.target.value as ManagedServer["type"] }));
+                          if (error) setError(null);
+                        }}
+                        className="w-full min-w-[8rem] rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-200 focus:border-emerald-500 focus:outline-none"
+                        aria-label="Server type"
+                        onClick={event => event.stopPropagation()}
+                        onKeyDown={handleDraftKeyDown}
+                      >
+                        <option value="blossom">Blossom</option>
+                        <option value="nip96">NIP-96</option>
+                      </select>
+                    </td>
+                    <td className="py-3 px-3 text-center">
+                      <div className="flex justify-center">
+                    <input
+                      type="checkbox"
+                      checked={draft.requiresAuth}
+                      onChange={event => {
+                        setDraft(prev => ({ ...prev, requiresAuth: event.target.checked }));
+                        if (error) setError(null);
+                      }}
+                      aria-label="Requires auth"
+                      onClick={event => event.stopPropagation()}
+                      onKeyDown={handleDraftKeyDown}
+                      disabled={saving}
+                    />
+                  </div>
+                </td>
+                <td className="py-3 px-3 text-center">
+                  <div className="flex justify-center">
+                    <input
+                      type="checkbox"
+                      checked={draft.sync}
+                      onChange={event => {
+                        setDraft(prev => ({ ...prev, sync: event.target.checked }));
+                        if (error) setError(null);
+                      }}
+                      aria-label="Sync server"
+                      onClick={event => event.stopPropagation()}
+                      onKeyDown={handleDraftKeyDown}
+                      disabled={saving}
+                    />
+                  </div>
+                </td>
+                    <td className="py-3 px-3 text-right">
+                      <div className="flex justify-end gap-2">
+                        <button
+                          type="button"
+                          className="flex items-center justify-center rounded-lg bg-emerald-600 p-2 text-slate-50 transition hover:bg-emerald-500"
+                          onClick={event => {
+                            event.stopPropagation();
+                            handleSubmit();
+                          }}
+                          aria-label="Save server"
+                          title="Save server"
+                        >
+                          <SaveIcon size={16} />
+                        </button>
+                        <button
+                          type="button"
+                          className="flex items-center justify-center rounded-lg bg-slate-800 p-2 text-slate-200 transition hover:bg-slate-700"
+                          onClick={event => {
+                            event.stopPropagation();
+                            cancelDraft();
+                          }}
+                          aria-label="Cancel editing"
+                          title="Cancel editing"
+                        >
+                          <CancelIcon size={16} />
+                        </button>
+                      </div>
+                      {error && (
+                        <div className="mt-2 text-xs text-red-400 text-right">{error}</div>
+                      )}
+                    </td>
+                  </tr>
+                );
+              }
+
+              return (
+                <tr
+                  key={server.url}
+                  role="button"
+                  tabIndex={0}
+                  aria-pressed={selected === server.url}
+                  onClick={() => handleToggle(server)}
+                  onKeyDown={e => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      handleToggle(server);
+                    }
+                  }}
+                  className={`border-t border-slate-800 first:border-t-0 cursor-pointer transition-colors focus:outline-none focus:ring-2 focus:ring-emerald-500/60 focus:ring-offset-2 focus:ring-offset-slate-900 ${
+                    selected === server.url ? "bg-emerald-500/10" : "hover:bg-slate-800/50"
+                  }`}
+                >
+                  <td className="py-3 px-3 font-medium text-slate-100">
+                    <div className="flex items-center gap-2">
+                      <FolderIcon size={18} className="text-slate-300" />
+                      <span className="truncate">{server.name}</span>
+                    </div>
+                  </td>
+                  <td className="py-3 px-3 text-xs text-slate-400">
+                    <span className="break-all">{server.url}</span>
+                  </td>
+                  <td className="py-3 px-3">{renderHealthCell(server)}</td>
+                  <td className="py-3 px-3 text-[11px] uppercase tracking-wide text-slate-500">
+                    {server.type}
+                  </td>
+                  <td className="py-3 px-3 text-center">
+                    <label
+                      className="inline-flex items-center gap-2 text-xs text-slate-300"
+                      onClick={e => e.stopPropagation()}
+                      onKeyDown={e => e.stopPropagation()}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={Boolean(server.requiresAuth)}
+                        onChange={e => onToggleAuth(server.url, e.target.checked)}
+                        disabled={controlsDisabled}
+                      />
+                      <span className="sr-only">Requires auth</span>
+                    </label>
+                  </td>
+                  <td className="py-3 px-3 text-center">
+                    <label
+                      className="inline-flex items-center gap-2 text-xs text-slate-300"
+                      onClick={e => e.stopPropagation()}
+                      onKeyDown={e => e.stopPropagation()}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={Boolean(server.sync)}
+                        onChange={e => onToggleSync(server.url, e.target.checked)}
+                        disabled={controlsDisabled}
+                      />
+                      <span className="sr-only">Sync server</span>
+                    </label>
+                  </td>
+                  <td className="py-3 px-3 text-right">
+                    <div className="flex justify-end gap-2">
+                      <button
+                        type="button"
+                        className="text-xs px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700"
+                        onClick={e => {
+                          e.stopPropagation();
+                          beginEdit(server);
+                        }}
+                      >
+                        <EditIcon size={16} />
+                      </button>
+                      <button
+                        type="button"
+                        className="text-xs px-2 py-1 rounded-lg bg-red-900/70 hover:bg-red-800"
+                        onClick={e => {
+                          e.stopPropagation();
+                          onRemove(server.url);
+                        }}
+                      >
+                        <TrashIcon size={16} />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+            {servers.length === 0 && !isAdding && !editingUrl && (
+              <tr>
+                <td colSpan={7} className="py-6 px-3 text-sm text-center text-slate-400">
+                  No servers yet. Add your first Blossom or NIP-96 server.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+};
