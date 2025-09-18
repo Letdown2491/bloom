@@ -72,7 +72,9 @@ export const deriveServerNameFromUrl = (rawUrl: string): string => {
   }
 
   const segments = [...originalSegments];
-  while (segments.length > 1 && IGNORED_SUBDOMAIN_PREFIXES.has(segments[0])) {
+  while (segments.length > 1) {
+    const firstSegment = segments[0];
+    if (!firstSegment || !IGNORED_SUBDOMAIN_PREFIXES.has(firstSegment)) break;
     segments.shift();
   }
 
@@ -86,7 +88,7 @@ export const deriveServerNameFromUrl = (rawUrl: string): string => {
 
   if (coreSegments.length > 1) {
     const last = coreSegments[coreSegments.length - 1];
-    if (GENERIC_TLDS.has(last)) {
+    if (last && GENERIC_TLDS.has(last)) {
       coreSegments = coreSegments.slice(0, -1);
     }
   }

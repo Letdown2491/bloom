@@ -164,7 +164,8 @@ export default function App() {
 
       if (localServers.length === 2) {
         const fallback = localServers.find(server => server.url !== selectedServer) ?? localServers[0];
-        return fallback ? [fallback.url] : [];
+        const fallbackUrl = fallback?.url;
+        return fallbackUrl ? [fallbackUrl] : [];
       }
 
       if (filtered.length > 0) {
@@ -174,8 +175,10 @@ export default function App() {
       }
 
       const preferred = localServers.filter(server => !sourceServerUrls.has(server.url));
-      if (preferred.length > 0) return [preferred[0].url];
-      if (validTargetUrls.length > 0) return [validTargetUrls[0]];
+      const firstPreferred = preferred[0];
+      if (firstPreferred?.url) return [firstPreferred.url];
+      const firstValid = validTargetUrls[0];
+      if (firstValid) return [firstValid];
       return [];
     });
   }, [localServers, selectedServer, sourceServerUrls, tab]);
@@ -777,10 +780,14 @@ export default function App() {
           if (existing?.servers.includes(target.url)) {
             setManualTransfers(prev => {
               const filtered = prev.filter(item => item.id !== transferId);
-              const next = [
-                ...filtered,
-                { ...baseTransfer, transferred: totalSize, total: totalSize, status: "success", message: "Already present" },
-              ];
+              const completedTransfer: TransferState = {
+                ...baseTransfer,
+                transferred: totalSize,
+                total: totalSize,
+                status: "success",
+                message: "Already present",
+              };
+              const next: TransferState[] = [...filtered, completedTransfer];
               return next.slice(-60);
             });
             continue;
@@ -788,7 +795,7 @@ export default function App() {
 
           setManualTransfers(prev => {
             const filtered = prev.filter(item => item.id !== transferId);
-            const next = [...filtered, baseTransfer];
+            const next: TransferState[] = [...filtered, baseTransfer];
             return next.slice(-60);
           });
 
