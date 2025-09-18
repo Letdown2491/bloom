@@ -34,7 +34,25 @@ pnpm dev
 ```bash
 pnpm build
 pnpm preview
+# open http://localhost:4173
 ```
+
+## Docker
+You can build and run the production bundle inside a container without installing pnpm locally.
+
+```bash
+docker build -t bloom-app .
+docker run --rm -p 3000:80 bloom-app
+# open http://localhost:3000
+```
+
+### Docker Compose
+```bash
+docker compose up --build
+# open http://localhost:3000
+```
+
+The Compose service mirrors the standalone Docker image and listens on port 3000 by default. Adjust the published port in `compose.yaml` if you need to run multiple instances side by side.
 
 ## What Could Come Next
 - Richer media previews, like playlists or video thumbnails.
