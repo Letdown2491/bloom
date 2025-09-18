@@ -315,7 +315,7 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({ servers, onUploaded, s
                   style={{ width: `${percent}%` }}
                 />
               </div>
-              <div className="text-slate-500">{serverName}</div>
+              <div className="text-slate-300">{serverName}</div>
             </div>
             );
           })}

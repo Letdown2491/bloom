@@ -1060,8 +1060,8 @@ export default function App() {
     transferBusy || transferTargets.length === 0 || selectedBlobItems.length === 0 || localServers.length <= 1;
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100">
-      <div className="max-w-7xl mx-auto px-6 py-8 space-y-6">
+    <div className="flex min-h-screen max-h-screen flex-col overflow-hidden bg-slate-950 text-slate-100">
+      <div className="mx-auto flex w-full flex-1 min-h-0 flex-col gap-6 overflow-hidden px-6 py-8 max-w-7xl">
         <header className="flex flex-wrap items-center gap-4">
           <div>
             <h1 className="text-2xl font-semibold">Bloom</h1>
@@ -1096,7 +1096,7 @@ export default function App() {
 
         {banner && <div className="rounded-xl border border-emerald-500 bg-emerald-500/10 px-4 py-2 text-sm">{banner}</div>}
 
-        <div className="rounded-2xl border border-slate-800 bg-slate-900/70">
+        <div className="flex flex-1 min-h-0 flex-col overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/70">
           <nav className="flex flex-wrap items-center gap-3 px-4 py-3 border-b border-slate-800">
             <div className="flex gap-3">
               {NAV_TABS.map(item => {
@@ -1160,9 +1160,9 @@ export default function App() {
             )}
           </nav>
 
-          <div className="p-4">
+          <div className={`flex flex-1 min-h-0 flex-col p-4 ${tab === "browse" ? "" : "overflow-y-auto"}`}>
             {tab === "browse" && (
-              <>
+              <div className="flex-1 min-h-0 overflow-y-auto pr-1">
                 {browsingAllServers ? (
                   <BlobList
                     blobs={aggregated.blobs}
@@ -1193,7 +1193,7 @@ export default function App() {
                 ) : (
                   <div className="text-sm text-slate-400">Select a server to browse its contents.</div>
                 )}
-              </>
+              </div>
             )}
 
             {tab === "upload" && (

@@ -236,7 +236,7 @@ export const ServerList: React.FC<ServerListProps> = ({
   const renderHealthCell = (server: ManagedServer, showPendingNote = false) => {
     const health = healthMap[server.url];
     if (!health) {
-      return <span className="text-xs text-slate-500">Not checked</span>;
+      return <span className="text-xs text-slate-300">Not checked</span>;
     }
 
     const styles = statusStyles[health.status];
@@ -251,7 +251,7 @@ export const ServerList: React.FC<ServerListProps> = ({
           {latency ? <span className="text-[11px] text-slate-400">{latency}</span> : null}
         </span>
         {showPendingNote ? (
-          <span className="text-[11px] text-slate-500">Will refresh after saving</span>
+          <span className="text-[11px] text-slate-300">Will refresh after saving</span>
         ) : null}
       </div>
     );
@@ -410,7 +410,7 @@ export const ServerList: React.FC<ServerListProps> = ({
 
       <div className="overflow-x-auto">
         <table className="min-w-full table-fixed text-sm text-slate-300">
-          <thead className="text-[11px] uppercase tracking-wide text-slate-500">
+          <thead className="text-[11px] uppercase tracking-wide text-slate-300">
             <tr>
               <th scope="col" className="py-2 px-3 text-left font-semibold">Server</th>
               <th scope="col" className="py-2 px-3 text-left font-semibold">URL</th>
@@ -466,7 +466,7 @@ export const ServerList: React.FC<ServerListProps> = ({
                     autoComplete="off"
                   />
                 </td>
-                <td className="py-3 px-3 text-xs text-slate-500">
+                <td className="py-3 px-3 text-xs text-slate-300">
                   Health check runs after saving
                 </td>
                 <td className="py-3 px-3">
@@ -705,7 +705,7 @@ export const ServerList: React.FC<ServerListProps> = ({
                     <span className="break-all">{server.url}</span>
                   </td>
                   <td className="py-3 px-3">{renderHealthCell(server)}</td>
-                  <td className="py-3 px-3 text-[11px] uppercase tracking-wide text-slate-500">
+                  <td className="py-3 px-3 text-[11px] uppercase tracking-wide text-slate-300">
                     {server.type}
                   </td>
                   <td className="py-3 px-3 text-center">

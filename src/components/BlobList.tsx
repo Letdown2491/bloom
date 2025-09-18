@@ -538,7 +538,7 @@ const GridLayout: React.FC<{
       );
     })}
     {blobs.length === 0 && (
-      <div className="col-span-full text-center text-sm text-slate-400 py-8">No content on this server yet.</div>
+      <div className="col-span-full text-center text-sm text-slate-300 py-8">No content on this server yet.</div>
     )}
   </div>
 );
@@ -726,7 +726,7 @@ const ListLayout: React.FC<{
     <div className="pb-1">
       <div className="overflow-x-auto">
         <table className="min-w-full table-fixed text-sm text-slate-300">
-          <thead className="text-[11px] uppercase tracking-wide text-slate-500">
+          <thead className="text-[11px] uppercase tracking-wide text-slate-300">
             <tr>
               <th scope="col" className="w-12 py-2 px-3">
                 <input
@@ -752,49 +752,77 @@ const ListLayout: React.FC<{
                   aria-label="Select all files"
                 />
               </th>
-              <th scope="col" className="py-2 px-3 text-left font-semibold" aria-sort={ariaSortFor("name")}>
-                <button
-                  type="button"
-                  className="flex items-center gap-1 text-left uppercase tracking-wide text-slate-500 hover:text-slate-200"
-                  onClick={() => onSort("name")}
-                  aria-pressed={sortConfig?.key === "name"}
-                >
+              <th
+                scope="col"
+                className="py-2 px-3 text-left font-semibold"
+                aria-sort={ariaSortFor("name")}
+                onClick={() => onSort("name")}
+                onKeyDown={event => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    onSort("name");
+                  }
+                }}
+                tabIndex={0}
+              >
+                <div className="flex items-center gap-1 text-left uppercase tracking-wide text-slate-300 hover:text-slate-200 cursor-pointer select-none">
                   <span>Name</span>
                   <span aria-hidden="true">{indicatorFor("name")}</span>
-                </button>
+                </div>
               </th>
-              <th scope="col" className="w-48 py-2 px-3 text-left font-semibold" aria-sort={ariaSortFor("type")}>
-                <button
-                  type="button"
-                  className="flex items-center gap-1 text-left uppercase tracking-wide text-slate-500 hover:text-slate-200"
-                  onClick={() => onSort("type")}
-                  aria-pressed={sortConfig?.key === "type"}
-                >
+              <th
+                scope="col"
+                className="w-48 py-2 px-3 text-left font-semibold"
+                aria-sort={ariaSortFor("type")}
+                onClick={() => onSort("type")}
+                onKeyDown={event => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    onSort("type");
+                  }
+                }}
+                tabIndex={0}
+              >
+                <div className="flex items-center gap-1 text-left uppercase tracking-wide text-slate-300 hover:text-slate-200 cursor-pointer select-none">
                   <span>Type</span>
                   <span aria-hidden="true">{indicatorFor("type")}</span>
-                </button>
+                </div>
               </th>
-              <th scope="col" className="w-24 py-2 px-3 text-left font-semibold" aria-sort={ariaSortFor("size")}>
-                <button
-                  type="button"
-                  className="flex items-center gap-1 text-left uppercase tracking-wide text-slate-500 hover:text-slate-200"
-                  onClick={() => onSort("size")}
-                  aria-pressed={sortConfig?.key === "size"}
-                >
+              <th
+                scope="col"
+                className="w-24 py-2 px-3 text-left font-semibold"
+                aria-sort={ariaSortFor("size")}
+                onClick={() => onSort("size")}
+                onKeyDown={event => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    onSort("size");
+                  }
+                }}
+                tabIndex={0}
+              >
+                <div className="flex items-center gap-1 text-left uppercase tracking-wide text-slate-300 hover:text-slate-200 cursor-pointer select-none">
                   <span>Size</span>
                   <span aria-hidden="true">{indicatorFor("size")}</span>
-                </button>
+                </div>
               </th>
-              <th scope="col" className="w-32 py-2 px-3 text-left font-semibold" aria-sort={ariaSortFor("uploaded")}>
-                <button
-                  type="button"
-                  className="flex items-center gap-1 text-left uppercase tracking-wide text-slate-500 hover:text-slate-200"
-                  onClick={() => onSort("uploaded")}
-                  aria-pressed={sortConfig?.key === "uploaded"}
-                >
+              <th
+                scope="col"
+                className="w-32 py-2 px-3 text-left font-semibold"
+                aria-sort={ariaSortFor("uploaded")}
+                onClick={() => onSort("uploaded")}
+                onKeyDown={event => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    onSort("uploaded");
+                  }
+                }}
+                tabIndex={0}
+              >
+                <div className="flex items-center gap-1 text-left uppercase tracking-wide text-slate-300 hover:text-slate-200 cursor-pointer select-none">
                   <span>Updated</span>
                   <span aria-hidden="true">{indicatorFor("uploaded")}</span>
-                </button>
+                </div>
               </th>
               <th scope="col" className="w-40 py-2 pl-3 pr-0 text-right font-semibold">Actions</th>
             </tr>
@@ -907,7 +935,7 @@ const ListLayout: React.FC<{
           })}
           {blobs.length === 0 && (
             <tr>
-              <td colSpan={6} className="py-6 px-3 text-sm text-center text-slate-400">
+              <td colSpan={6} className="py-6 px-3 text-sm text-center text-slate-300">
                 No content on this server yet.
               </td>
             </tr>
@@ -1052,9 +1080,9 @@ const BlobPreview: React.FC<{
           />
         )
       ) : loading ? (
-        <span className="text-xs text-slate-500">Loading preview…</span>
+        <span className="text-xs text-slate-300">Loading preview…</span>
       ) : (
-        <span className="text-xs text-slate-500">Preview unavailable</span>
+        <span className="text-xs text-slate-300">Preview unavailable</span>
       )}
     </div>
   );
