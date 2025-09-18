@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import type { ManagedServer } from "../hooks/useServers";
+import { deriveServerNameFromUrl } from "../utils/serverName";
 import { CancelIcon, EditIcon, FolderIcon, SaveIcon, TrashIcon } from "./icons";
 
 export type ServerListProps = {
@@ -24,8 +25,6 @@ type ServerDraft = {
   requiresAuth: boolean;
   sync: boolean;
 };
-
-const deriveNameFromUrl = (value: string) => value.replace(/^https?:\/\//, "").replace(/\/$/, "");
 
 const createEmptyDraft = (): ServerDraft => ({
   name: "",
@@ -308,7 +307,7 @@ export const ServerList: React.FC<ServerListProps> = ({
       setError("Server already added");
       return;
     }
-    const name = draft.name.trim() || deriveNameFromUrl(normalizedUrl);
+    const name = draft.name.trim() || deriveServerNameFromUrl(normalizedUrl);
     if (!name) {
       setError("Enter a server name");
       return;
@@ -344,7 +343,7 @@ export const ServerList: React.FC<ServerListProps> = ({
       setError("Server already added");
       return;
     }
-    const name = draft.name.trim() || deriveNameFromUrl(normalizedUrl);
+    const name = draft.name.trim() || deriveServerNameFromUrl(normalizedUrl);
     if (!name) {
       setError("Enter a server name");
       return;
@@ -450,9 +449,9 @@ export const ServerList: React.FC<ServerListProps> = ({
                       const value = event.target.value;
                       setDraft(prev => {
                         const next = { ...prev, url: value };
-                        const previousDerived = deriveNameFromUrl(prev.url.trim());
+                        const previousDerived = deriveServerNameFromUrl(prev.url.trim());
                         if (!prev.name || prev.name === previousDerived) {
-                          const derived = deriveNameFromUrl(value.trim());
+                          const derived = deriveServerNameFromUrl(value.trim());
                           if (derived) next.name = derived;
                         }
                         return next;
@@ -578,9 +577,9 @@ export const ServerList: React.FC<ServerListProps> = ({
                         const value = event.target.value;
                         setDraft(prev => {
                           const next = { ...prev, url: value };
-                          const previousDerived = deriveNameFromUrl(prev.url.trim());
+                          const previousDerived = deriveServerNameFromUrl(prev.url.trim());
                           if (!prev.name || prev.name === previousDerived) {
-                            const derived = deriveNameFromUrl(value.trim());
+                            const derived = deriveServerNameFromUrl(value.trim());
                             if (derived) next.name = derived;
                           }
                           return next;

@@ -12,6 +12,7 @@ import { buildNip98AuthHeader } from "./lib/nip98";
 import { useQueryClient } from "@tanstack/react-query";
 import type { BlossomBlob } from "./lib/blossomClient";
 import { prettyBytes } from "./utils/format";
+import { deriveServerNameFromUrl } from "./utils/serverName";
 import { BrowseIcon, GridIcon, ListIcon, ServersIcon, TransferIcon, UploadIcon } from "./components/icons";
 
 type TabId = "browse" | "upload" | "servers" | "transfer";
@@ -27,7 +28,8 @@ const ALL_SERVERS_VALUE = "__all__";
 const normalizeManagedServer = (server: ManagedServer): ManagedServer => {
   const trimmedUrl = (server.url || "").trim();
   const normalizedUrl = trimmedUrl.replace(/\/$/, "");
-  const fallbackName = normalizedUrl.replace(/^https?:\/\//, "");
+  const derivedName = deriveServerNameFromUrl(normalizedUrl);
+  const fallbackName = derivedName || normalizedUrl.replace(/^https?:\/\//, "");
   const name = (server.name || "").trim() || fallbackName;
 
   return {
