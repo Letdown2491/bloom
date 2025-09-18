@@ -15,9 +15,8 @@ export type ManagedServer = {
 };
 
 const DEFAULT_SERVERS: ManagedServer[] = [
-  { name: "Satellite Earth", url: "https://cdn.satellite.earth", type: "blossom", requiresAuth: true, sync: false },
-  { name: "Blossom Nostr Build", url: "https://blossom.nostr.build", type: "blossom", requiresAuth: true, sync: false },
   { name: "Nostrcheck", url: "https://nostrcheck.me", type: "nip96", requiresAuth: true, sync: false },
+  { name: "Primal", url: "https://blossom.primal.net", type: "blossom", requiresAuth: true, sync: false },
 ];
 
 function parseServerTags(event: NDKEvent): ManagedServer[] {
@@ -41,6 +40,10 @@ function parseServerTags(event: NDKEvent): ManagedServer[] {
   }
   return servers;
 }
+
+export const sortServersByName = (servers: ManagedServer[]): ManagedServer[] => {
+  return servers.slice().sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
+};
 
 export const useServers = () => {
   const { ndk } = useNdk();
@@ -104,7 +107,10 @@ export const useServers = () => {
     [isPending, mutateServersAsync]
   );
 
-  const servers = useMemo(() => query.data ?? DEFAULT_SERVERS, [query.data]);
+  const servers = useMemo(() => {
+    const list = query.data ?? DEFAULT_SERVERS;
+    return sortServersByName(list);
+  }, [query.data]);
 
   return {
     servers,

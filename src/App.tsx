@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNdk, useCurrentPubkey } from "./context/NdkContext";
-import { useServers, ManagedServer } from "./hooks/useServers";
+import { useServers, ManagedServer, sortServersByName } from "./hooks/useServers";
 import { useServerData } from "./hooks/useServerData";
 import { ServerList } from "./components/ServerList";
 import { BlobList } from "./components/BlobList";
@@ -633,7 +633,8 @@ export default function App() {
       if (prev.find(existing => existing.url === trimmedUrl)) {
         return prev;
       }
-      return [...prev, normalized];
+      const next = [...prev, normalized];
+      return sortServersByName(next);
     });
     setSelectedServer(trimmedUrl);
   };
@@ -647,7 +648,8 @@ export default function App() {
       if (prev.some(server => server.url !== originalUrl && server.url === normalizedUrl)) {
         return prev;
       }
-      return prev.map(server => (server.url === originalUrl ? normalized : server));
+      const updatedList = prev.map(server => (server.url === originalUrl ? normalized : server));
+      return sortServersByName(updatedList);
     });
 
     setSelectedServer(prev => {
@@ -688,7 +690,7 @@ export default function App() {
       setTimeout(() => setBanner(null), 3000);
       return;
     }
-    const normalized = localServers.map(normalizeManagedServer);
+    const normalized = sortServersByName(localServers.map(normalizeManagedServer));
     setLocalServers(normalized);
     try {
       await saveServers(normalized);
