@@ -1938,7 +1938,7 @@ function normalizeMime(value?: string | null) {
 function hasTextPreviewExtension(ref?: string | null) {
   if (!ref) return false;
   const lower = ref.toLowerCase();
-  const sanitized = lower.split(/[?#]/)[0];
+  const sanitized = lower.split(/[?#]/)[0] ?? "";
   const lastDot = sanitized.lastIndexOf(".");
   if (lastDot === -1 || lastDot === sanitized.length - 1) return false;
   const ext = sanitized.slice(lastDot + 1);
