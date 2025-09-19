@@ -123,10 +123,11 @@ export const CopyIcon = createIcon(
   </>
 );
 
-export const BrowseIcon = createIcon(
+export const HomeIcon = createIcon(
   <>
-    <circle cx="11" cy="11" r="6" />
-    <path d="m20 20-4.35-4.35" />
+    <path d="M4 11.5 12 5l8 6.5" />
+    <path d="M7.5 10v9.5A1.5 1.5 0 0 0 9 21h6a1.5 1.5 0 0 0 1.5-1.5V10" />
+    <path d="M10.5 21v-5h3v5" />
   </>
 );
 

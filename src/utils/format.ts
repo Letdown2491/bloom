@@ -7,6 +7,31 @@ export const prettyBytes = (size?: number) => {
 
 export const prettyDate = (timestamp?: number) => {
   if (!timestamp) return "";
-  return new Date(timestamp * 1000).toLocaleString();
-};
 
+  const date = new Date(timestamp * 1000);
+  const now = new Date();
+  const isToday =
+    date.getFullYear() === now.getFullYear() &&
+    date.getMonth() === now.getMonth() &&
+    date.getDate() === now.getDate();
+
+  const timeFormatter = new Intl.DateTimeFormat("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  });
+  const rawTime = timeFormatter.format(date).replace(/\u202f/g, " ");
+
+  if (isToday) {
+    const compactTime = rawTime.replace(/\s*(AM|PM)$/i, "$1");
+    return `Today, ${compactTime}`;
+  }
+
+  const dateFormatter = new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+
+  return `${dateFormatter.format(date)}, ${rawTime}`;
+};

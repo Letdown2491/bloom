@@ -8,11 +8,20 @@ export type Nip96ResolvedConfig = {
   raw: Record<string, any>;
 };
 
+type Nip96ListItem =
+  | Nip94Event
+  | {
+      nip94_event?: Nip94Event;
+      event?: Nip94Event;
+      tags?: string[][];
+      [key: string]: unknown;
+    };
+
 export type Nip96ListResponse = {
   count?: number;
   total?: number;
   page?: number;
-  files?: Nip94Event[];
+  files?: Nip96ListItem[];
 };
 
 type Nip94Event = {
@@ -119,6 +128,20 @@ function buildDefaultUrl(config: Nip96ResolvedConfig, sha256: string, extension?
   return `${normalized}${suffix}`;
 }
 
+function extractNip94Event(entry: Nip96ListItem | undefined): Nip94Event | null {
+  if (!entry || typeof entry !== "object") return null;
+  if (Array.isArray((entry as Nip94Event).tags)) {
+    return entry as Nip94Event;
+  }
+  const candidate = (entry as { nip94_event?: Nip94Event; event?: Nip94Event; nip94?: Nip94Event }).nip94_event ??
+    (entry as { event?: Nip94Event }).event ??
+    (entry as { nip94?: Nip94Event }).nip94;
+  if (candidate && Array.isArray(candidate.tags)) {
+    return candidate;
+  }
+  return null;
+}
+
 function nip94ToBlob(config: Nip96ResolvedConfig, serverUrl: string, event: Nip94Event, requiresAuth: boolean): BlossomBlob | null {
   const tags = tagsToMap(event.tags);
   const ox = tags.get("ox") || tags.get("x");
@@ -178,7 +201,9 @@ export async function listNip96Files(
   const files = Array.isArray(data?.files) ? data!.files! : [];
   const blobs: BlossomBlob[] = [];
   for (const file of files) {
-    const blob = nip94ToBlob(config, serverUrl, file, options.requiresAuth);
+    const event = extractNip94Event(file);
+    if (!event) continue;
+    const blob = nip94ToBlob(config, serverUrl, event, options.requiresAuth);
     if (blob) blobs.push(blob);
   }
   return blobs;

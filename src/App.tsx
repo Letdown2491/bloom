@@ -26,14 +26,14 @@ import { useQueryClient } from "@tanstack/react-query";
 import type { BlossomBlob } from "./lib/blossomClient";
 import { prettyBytes } from "./utils/format";
 import { deriveServerNameFromUrl } from "./utils/serverName";
-import { BrowseIcon, GridIcon, ListIcon, TransferIcon, UploadIcon } from "./components/icons";
+import { GridIcon, HomeIcon, ListIcon, TransferIcon, UploadIcon } from "./components/icons";
 
 type TabId = "browse" | "upload" | "servers" | "transfer";
 
 type StatusMessageTone = "success" | "info" | "error";
 
 const NAV_TABS = [
-  { id: "browse" as const, label: "Browse", icon: BrowseIcon },
+  { id: "browse" as const, label: "Home", icon: HomeIcon },
   { id: "upload" as const, label: "Upload", icon: UploadIcon },
 ];
 
@@ -1175,7 +1175,7 @@ export default function App() {
         <header className="flex flex-wrap items-center gap-4">
           <div>
             <h1 className="text-2xl font-semibold">Bloom</h1>
-            <p className="text-xs text-slate-400">
+            <p className="hidden sm:hidden text-xs text-slate-400">
               Manage your content, upload media, and mirror files across servers.
             </p>
           </div>
@@ -1253,11 +1253,13 @@ export default function App() {
                   const isActive = tab === item.id || (isUploadTab && isTransferView);
                   const IconComponent = showTransfer ? TransferIcon : item.icon;
                   const label = showTransfer ? "Transfer" : item.label;
+                  const hideLabelOnMobile = item.id === "browse" || isUploadTab;
                   return (
                     <button
                       key={item.id}
                       onClick={() => setTab(showTransfer ? "transfer" : item.id)}
                       disabled={showAuthPrompt}
+                      aria-label={label}
                       className={`px-3 py-2 text-sm rounded-xl border flex items-center gap-2 transition disabled:cursor-not-allowed disabled:opacity-60 ${
                         isActive
                           ? "border-emerald-500 bg-emerald-500/10 text-emerald-200"
@@ -1265,9 +1267,7 @@ export default function App() {
                       }`}
                     >
                       <IconComponent size={16} />
-                      <span className="flex items-center gap-2">
-                        {label}
-                      </span>
+                      <span className={hideLabelOnMobile ? "hidden sm:inline" : undefined}>{label}</span>
                     </button>
                   );
                 })}
@@ -1467,7 +1467,7 @@ export default function App() {
                           onClick={() => setTab("browse")}
                           className="px-4 py-2 rounded-xl border border-slate-800 bg-slate-900/60 text-sm text-slate-300 hover:border-slate-700"
                         >
-                          Back to Browse
+                          Go Back Home
                         </button>
                       </div>
                     </>

@@ -1097,10 +1097,6 @@ function ListRow({
       className={`border-b border-slate-800 transition-colors ${
         isSelected ? "bg-slate-800/50" : "hover:bg-slate-800/40"
       }`}
-      onClick={event => {
-        if (event.target instanceof HTMLInputElement || event.target instanceof HTMLButtonElement) return;
-        onToggle(blob.sha256);
-      }}
     >
       <td className="w-12 py-3 px-3 align-middle">
         <input
@@ -1128,11 +1124,11 @@ function ListRow({
           </div>
         </div>
       </td>
-      <td className="w-24 py-3 px-3 text-sm text-slate-400 whitespace-nowrap">
-        {prettyBytes(blob.size || 0)}
-      </td>
       <td className="w-32 py-3 px-3 text-sm text-slate-400 whitespace-nowrap">
         {blob.uploaded ? prettyDate(blob.uploaded) : "—"}
+      </td>
+      <td className="w-24 py-3 px-3 text-sm text-slate-400 whitespace-nowrap">
+        {prettyBytes(blob.size || 0)}
       </td>
       <td className="w-40 py-3 pl-3 pr-0">
         <div className="flex flex-wrap items-center justify-end gap-2">
@@ -1296,24 +1292,6 @@ const ListLayout: React.FC<{
               </th>
               <th
                 scope="col"
-                className="w-24 py-2 px-3 text-left font-semibold"
-                aria-sort={ariaSortFor("size")}
-                onClick={() => onSort("size")}
-                onKeyDown={event => {
-                  if (event.key === "Enter" || event.key === " ") {
-                    event.preventDefault();
-                    onSort("size");
-                  }
-                }}
-                tabIndex={0}
-              >
-                <div className="flex items-center gap-1 text-left uppercase tracking-wide text-slate-300 hover:text-slate-200 cursor-pointer select-none">
-                  <span>Size</span>
-                  <span aria-hidden="true">{indicatorFor("size")}</span>
-                </div>
-              </th>
-              <th
-                scope="col"
                 className="w-32 py-2 px-3 text-left font-semibold"
                 aria-sort={ariaSortFor("uploaded")}
                 onClick={() => onSort("uploaded")}
@@ -1328,6 +1306,24 @@ const ListLayout: React.FC<{
                 <div className="flex items-center gap-1 text-left uppercase tracking-wide text-slate-300 hover:text-slate-200 cursor-pointer select-none">
                   <span>Updated</span>
                   <span aria-hidden="true">{indicatorFor("uploaded")}</span>
+                </div>
+              </th>
+              <th
+                scope="col"
+                className="w-24 py-2 px-3 text-left font-semibold"
+                aria-sort={ariaSortFor("size")}
+                onClick={() => onSort("size")}
+                onKeyDown={event => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    onSort("size");
+                  }
+                }}
+                tabIndex={0}
+              >
+                <div className="flex items-center gap-1 text-left uppercase tracking-wide text-slate-300 hover:text-slate-200 cursor-pointer select-none">
+                  <span>Size</span>
+                  <span aria-hidden="true">{indicatorFor("size")}</span>
                 </div>
               </th>
               <th scope="col" className="w-40 py-2 pl-3 pr-0 text-right font-semibold">Actions</th>
