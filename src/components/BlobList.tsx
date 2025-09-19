@@ -273,9 +273,6 @@ export const BlobList: React.FC<BlobListProps> = ({
   }, [blobs, resolvedMeta, baseUrl, requiresAuth, serverType]);
 
   const sortedBlobs = useMemo(() => {
-    if (!sortConfig) return decoratedBlobs;
-    const { key, direction } = sortConfig;
-    const modifier = direction === "asc" ? 1 : -1;
     const deriveName = (blob: BlossomBlob) => {
       const explicit = blob.name?.trim();
       if (explicit) return explicit.toLowerCase();
@@ -285,6 +282,21 @@ export const BlobList: React.FC<BlobListProps> = ({
       }
       return blob.sha256.toLowerCase();
     };
+
+    if (!sortConfig) {
+      return [...decoratedBlobs].sort((a, b) => {
+        const aUploaded = typeof a.uploaded === "number" ? a.uploaded : 0;
+        const bUploaded = typeof b.uploaded === "number" ? b.uploaded : 0;
+        if (aUploaded !== bUploaded) {
+          return bUploaded - aUploaded;
+        }
+        return deriveName(a).localeCompare(deriveName(b));
+      });
+    }
+
+    const { key, direction } = sortConfig;
+    const modifier = direction === "asc" ? 1 : -1;
+
     return [...decoratedBlobs].sort((a, b) => {
       if (key === "size") {
         const aSize = typeof a.size === "number" ? a.size : -1;

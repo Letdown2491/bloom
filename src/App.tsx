@@ -17,6 +17,8 @@ import { BrowseIcon, GridIcon, ListIcon, ServersIcon, TransferIcon, UploadIcon }
 
 type TabId = "browse" | "upload" | "servers" | "transfer";
 
+type StatusMessageTone = "success" | "info" | "error";
+
 const NAV_TABS = [
   { id: "browse" as const, label: "Browse", icon: BrowseIcon },
   { id: "upload" as const, label: "Upload", icon: UploadIcon },
@@ -70,6 +72,7 @@ export default function App() {
   const [viewMode, setViewMode] = useState<"grid" | "list">("list");
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [statusMessageTone, setStatusMessageTone] = useState<StatusMessageTone>("info");
   const statusMessageTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
   const syncQueueRef = useRef<Set<string>>(new Set());
   const nextSyncAttemptRef = useRef<Map<string, number>>(new Map());
@@ -197,6 +200,25 @@ export default function App() {
       }
     };
   }, []);
+
+  const showStatusMessage = useCallback(
+    (message: string, tone: StatusMessageTone = "info", duration = 5000) => {
+      if (statusMessageTimeout.current) {
+        clearTimeout(statusMessageTimeout.current);
+        statusMessageTimeout.current = null;
+      }
+      setStatusMessage(message);
+      setStatusMessageTone(tone);
+      if (duration > 0) {
+        statusMessageTimeout.current = setTimeout(() => {
+          setStatusMessage(null);
+          setStatusMessageTone("info");
+          statusMessageTimeout.current = null;
+        }, duration);
+      }
+    },
+    []
+  );
 
   const fetchBlobAsFile = useCallback(
     async (sourceBlob: BlossomBlob, sourceServer: ManagedServer): Promise<File | null> => {
@@ -542,13 +564,7 @@ export default function App() {
             } else if (statusCode === 401) {
               unauthorizedSyncTargetsRef.current.add(target.url);
               nextSyncAttemptRef.current.set(key, Date.now() + 30 * 60 * 1000);
-              if (statusMessageTimeout.current) {
-                clearTimeout(statusMessageTimeout.current);
-              }
-              setStatusMessage("Sync auth failed – reconnect your signer.");
-              statusMessageTimeout.current = setTimeout(() => {
-                setStatusMessage(null);
-              }, 6000);
+              showStatusMessage("Sync auth failed – reconnect your signer.", "error", 6000);
             } else {
               nextSyncAttemptRef.current.set(key, Date.now() + 15 * 60 * 1000);
             }
@@ -962,15 +978,13 @@ export default function App() {
 
   const handleDeleteBlob = async (blob: BlossomBlob) => {
     if (!currentSnapshot) {
-      setBanner("Select a specific server to delete files.");
-      setTimeout(() => setBanner(null), 2000);
+      showStatusMessage("Select a specific server to delete files.", "error", 2000);
       return;
     }
     const confirmDelete = window.confirm(`Delete ${blob.sha256.slice(0, 10)}… from ${currentSnapshot.server.name}?`);
     if (!confirmDelete) return;
     if (currentSnapshot.server.requiresAuth && !signer) {
-      setBanner("Connect your signer to delete from this server.");
-      setTimeout(() => setBanner(null), 2000);
+      showStatusMessage("Connect your signer to delete from this server.", "error", 2000);
       return;
     }
     try {
@@ -998,15 +1012,14 @@ export default function App() {
       setBanner("Blob deleted");
       setTimeout(() => setBanner(null), 2000);
     } catch (error: any) {
-      setBanner(error?.message || "Delete failed");
+      showStatusMessage(error?.message || "Delete failed", "error", 5000);
     }
   };
 
   const handleCopyUrl = (blob: BlossomBlob) => {
     if (!blob.url) return;
     navigator.clipboard.writeText(blob.url).catch(() => undefined);
-    setBanner("URL copied to clipboard");
-    setTimeout(() => setBanner(null), 1500);
+    showStatusMessage("URL copied to clipboard", "success", 1500);
   };
 
   const handleUploadCompleted = (success: boolean) => {
@@ -1014,13 +1027,7 @@ export default function App() {
 
     servers.forEach(server => queryClient.invalidateQueries({ queryKey: ["server-blobs", server.url] }));
     setTab("browse");
-    if (statusMessageTimeout.current) {
-      clearTimeout(statusMessageTimeout.current);
-    }
-    setStatusMessage("All files uploaded successfully");
-    statusMessageTimeout.current = setTimeout(() => {
-      setStatusMessage(null);
-    }, 5000);
+    showStatusMessage("All files uploaded successfully", "success", 5000);
   };
 
   const handleStatusServerChange: React.ChangeEventHandler<HTMLSelectElement> = event => {
@@ -1057,7 +1064,11 @@ export default function App() {
   }, [syncEnabledServers.length, syncStatus]);
   const centerMessage = statusMessage ?? syncIndicator;
   const centerClass = statusMessage
-    ? "text-emerald-300"
+    ? statusMessageTone === "error"
+      ? "text-red-400"
+      : statusMessageTone === "success"
+      ? "text-emerald-300"
+      : "text-slate-400"
     : syncStatus.state === "syncing"
     ? "text-emerald-300"
     : syncStatus.state === "synced"
