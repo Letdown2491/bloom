@@ -33,7 +33,7 @@ type ResolvedMetaMap = Record<string, ResolvedMeta>;
 
 type FileKind = "image" | "video" | "pdf" | "doc" | "sheet" | "document";
 
-type SortKey = "name" | "type" | "size" | "uploaded";
+type SortKey = "name" | "size" | "uploaded";
 
 type SortConfig = { key: SortKey; direction: "asc" | "desc" };
 
@@ -1125,12 +1125,8 @@ function ListRow({
           />
           <div className="min-w-0 flex-1">
             <div className="font-medium text-slate-100 truncate">{displayName}</div>
-            <div className="text-xs text-slate-500 truncate">{blob.sha256}</div>
           </div>
         </div>
-      </td>
-      <td className="w-48 py-3 px-3 truncate text-sm text-slate-400">
-        {blob.type || "application/octet-stream"}
       </td>
       <td className="w-24 py-3 px-3 text-sm text-slate-400 whitespace-nowrap">
         {prettyBytes(blob.size || 0)}
@@ -1229,7 +1225,7 @@ const ListLayout: React.FC<{
   sortConfig,
   onSort,
 }) => {
-  const COLUMN_COUNT = 6;
+  const COLUMN_COUNT = 5;
   const selectAllRef = useRef<HTMLInputElement | null>(null);
   const allSelected = blobs.length > 0 && blobs.every(blob => selected.has(blob.sha256));
   const partiallySelected = !allSelected && blobs.some(blob => selected.has(blob.sha256));
@@ -1296,24 +1292,6 @@ const ListLayout: React.FC<{
                 <div className="flex items-center gap-1 text-left uppercase tracking-wide text-slate-300 hover:text-slate-200 cursor-pointer select-none">
                   <span>Name</span>
                   <span aria-hidden="true">{indicatorFor("name")}</span>
-                </div>
-              </th>
-              <th
-                scope="col"
-                className="w-48 py-2 px-3 text-left font-semibold"
-                aria-sort={ariaSortFor("type")}
-                onClick={() => onSort("type")}
-                onKeyDown={event => {
-                  if (event.key === "Enter" || event.key === " ") {
-                    event.preventDefault();
-                    onSort("type");
-                  }
-                }}
-                tabIndex={0}
-              >
-                <div className="flex items-center gap-1 text-left uppercase tracking-wide text-slate-300 hover:text-slate-200 cursor-pointer select-none">
-                  <span>Type</span>
-                  <span aria-hidden="true">{indicatorFor("type")}</span>
                 </div>
               </th>
               <th
