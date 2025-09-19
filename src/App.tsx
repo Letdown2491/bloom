@@ -1175,7 +1175,7 @@ export default function App() {
         <header className="flex flex-wrap items-center gap-4">
           <div>
             <h1 className="text-2xl font-semibold">Bloom</h1>
-            <p className="hidden sm:hidden text-xs text-slate-400">
+            <p className="hidden md:block text-xs text-slate-400">
               Manage your content, upload media, and mirror files across servers.
             </p>
           </div>
