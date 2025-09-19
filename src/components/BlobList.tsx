@@ -35,6 +35,16 @@ type SortKey = "name" | "type" | "size" | "uploaded";
 
 type SortConfig = { key: SortKey; direction: "asc" | "desc" };
 
+const deriveBlobSortName = (blob: BlossomBlob) => {
+  const explicit = blob.name?.trim();
+  if (explicit) return explicit.toLowerCase();
+  if (blob.url) {
+    const tail = blob.url.split("/").pop();
+    if (tail) return tail.toLowerCase();
+  }
+  return blob.sha256.toLowerCase();
+};
+
 export const BlobList: React.FC<BlobListProps> = ({
   blobs,
   baseUrl,
@@ -273,16 +283,6 @@ export const BlobList: React.FC<BlobListProps> = ({
   }, [blobs, resolvedMeta, baseUrl, requiresAuth, serverType]);
 
   const sortedBlobs = useMemo(() => {
-    const deriveName = (blob: BlossomBlob) => {
-      const explicit = blob.name?.trim();
-      if (explicit) return explicit.toLowerCase();
-      if (blob.url) {
-        const tail = blob.url.split("/").pop();
-        if (tail) return tail.toLowerCase();
-      }
-      return blob.sha256.toLowerCase();
-    };
-
     if (!sortConfig) {
       return [...decoratedBlobs].sort((a, b) => {
         const aUploaded = typeof a.uploaded === "number" ? a.uploaded : 0;
@@ -290,7 +290,7 @@ export const BlobList: React.FC<BlobListProps> = ({
         if (aUploaded !== bUploaded) {
           return bUploaded - aUploaded;
         }
-        return deriveName(a).localeCompare(deriveName(b));
+        return deriveBlobSortName(a).localeCompare(deriveBlobSortName(b));
       });
     }
 
@@ -309,15 +309,26 @@ export const BlobList: React.FC<BlobListProps> = ({
         const diff = aUploaded - bUploaded;
         if (diff !== 0) return diff * modifier;
       } else {
-        const aValue = key === "name" ? deriveName(a) : (a.type ?? "").toLowerCase();
-        const bValue = key === "name" ? deriveName(b) : (b.type ?? "").toLowerCase();
+        const aValue = key === "name" ? deriveBlobSortName(a) : (a.type ?? "").toLowerCase();
+        const bValue = key === "name" ? deriveBlobSortName(b) : (b.type ?? "").toLowerCase();
         const diff = aValue.localeCompare(bValue);
         if (diff !== 0) return diff * modifier;
       }
-      const fallback = deriveName(a).localeCompare(deriveName(b));
+      const fallback = deriveBlobSortName(a).localeCompare(deriveBlobSortName(b));
       return fallback * modifier;
     });
   }, [decoratedBlobs, sortConfig]);
+
+  const gridBlobs = useMemo(() => {
+    return [...decoratedBlobs].sort((a, b) => {
+      const aUploaded = typeof a.uploaded === "number" ? a.uploaded : 0;
+      const bUploaded = typeof b.uploaded === "number" ? b.uploaded : 0;
+      if (aUploaded !== bUploaded) {
+        return bUploaded - aUploaded;
+      }
+      return deriveBlobSortName(a).localeCompare(deriveBlobSortName(b));
+    });
+  }, [decoratedBlobs]);
 
   const handleSortToggle = useCallback((key: SortKey) => {
     setSortConfig(current => {
@@ -420,7 +431,7 @@ export const BlobList: React.FC<BlobListProps> = ({
         />
       ) : (
         <GridLayout
-          blobs={decoratedBlobs}
+          blobs={gridBlobs}
           baseUrl={baseUrl}
           requiresAuth={requiresAuth}
           signTemplate={signTemplate}
