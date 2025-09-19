@@ -15,7 +15,10 @@
     "noEmit": true,
     "jsx": "react-jsx",
     "noUncheckedIndexedAccess": true,
-    "strict": true
+    "strict": true,
+    "paths": {
+      "tseep": ["./src/lib/tseep"]
+    }
   },
   "include": [
     "src"
