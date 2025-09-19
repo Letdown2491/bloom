@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useSta
 import { prettyBytes, prettyDate } from "../utils/format";
 import { buildAuthorizationHeader, type BlossomBlob, type SignTemplate } from "../lib/blossomClient";
 import { buildNip98AuthHeader } from "../lib/nip98";
-import { CopyIcon, DownloadIcon, FileTypeIcon, TrashIcon } from "./icons";
+import { CopyIcon, DownloadIcon, FileTypeIcon, ShareIcon, TrashIcon } from "./icons";
 import { setStoredBlobMetadata } from "../utils/blobMetadataStore";
 import { cachePreviewBlob, getCachedPreviewBlob } from "../utils/blobPreviewCache";
 import { useInViewport } from "../hooks/useInViewport";
@@ -20,6 +20,7 @@ export type BlobListProps = {
   onDelete: (blob: BlossomBlob) => void;
   onCopy: (blob: BlossomBlob) => void;
   onPlay?: (blob: BlossomBlob) => void;
+  onShare?: (blob: BlossomBlob) => void;
 };
 
 type DetectedKindMap = Record<string, "image" | "video">;
@@ -63,6 +64,7 @@ export const BlobList: React.FC<BlobListProps> = ({
   onDelete,
   onCopy,
   onPlay,
+  onShare,
 }) => {
   const [detectedKinds, setDetectedKinds] = useState<DetectedKindMap>({});
   const [resolvedMeta, setResolvedMeta] = useState<ResolvedMetaMap>({});
@@ -484,6 +486,7 @@ export const BlobList: React.FC<BlobListProps> = ({
           onDownload={handleDownload}
           onCopy={onCopy}
           onPlay={onPlay}
+          onShare={onShare}
           detectedKinds={detectedKinds}
           onDetect={handleDetect}
           sortConfig={sortConfig}
@@ -502,6 +505,7 @@ export const BlobList: React.FC<BlobListProps> = ({
           onDownload={handleDownload}
           onCopy={onCopy}
           onPlay={onPlay}
+          onShare={onShare}
           detectedKinds={detectedKinds}
           onDetect={handleDetect}
         />
@@ -523,6 +527,7 @@ const GridLayout: React.FC<{
   onDownload: (blob: BlossomBlob) => void;
   onCopy: (blob: BlossomBlob) => void;
   onPlay?: (blob: BlossomBlob) => void;
+  onShare?: (blob: BlossomBlob) => void;
   detectedKinds: DetectedKindMap;
   onDetect: (sha: string, kind: "image" | "video") => void;
 }> = ({
@@ -538,6 +543,7 @@ const GridLayout: React.FC<{
   onDownload,
   onCopy,
   onPlay,
+  onShare,
   detectedKinds,
   onDetect,
 }) => {
@@ -660,6 +666,19 @@ const GridLayout: React.FC<{
                     className="flex flex-wrap items-center justify-center gap-2 border-t border-slate-800/80 bg-slate-950/90 px-4 py-3"
                     style={{ height: CARD_HEIGHT * 0.25 }}
                   >
+                    {blob.url && onShare && (
+                      <button
+                        className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200"
+                        onClick={event => {
+                          event.stopPropagation();
+                          onShare?.(blob);
+                        }}
+                        aria-label="Share blob"
+                        title="Share"
+                      >
+                        <ShareIcon size={16} />
+                      </button>
+                    )}
                     {blob.url && (
                       <button
                         className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200"
@@ -1070,6 +1089,7 @@ function ListRow({
   onDownload,
   onCopy,
   onPlay,
+  onShare,
   detectedKinds,
   onDetect,
 }: {
@@ -1084,6 +1104,7 @@ function ListRow({
   onDownload: (blob: BlossomBlob) => void;
   onCopy: (blob: BlossomBlob) => void;
   onPlay?: (blob: BlossomBlob) => void;
+  onShare?: (blob: BlossomBlob) => void;
   detectedKinds: DetectedKindMap;
   onDetect: (sha: string, kind: "image" | "video") => void;
 }) {
@@ -1130,8 +1151,21 @@ function ListRow({
       <td className="w-24 py-3 px-3 text-sm text-slate-400 whitespace-nowrap">
         {prettyBytes(blob.size || 0)}
       </td>
-      <td className="w-40 py-3 pl-3 pr-0">
+      <td className="w-56 py-3 pl-3 pr-0">
         <div className="flex flex-wrap items-center justify-end gap-2">
+          {blob.url && onShare && (
+            <button
+              className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200"
+              onClick={event => {
+                event.stopPropagation();
+                onShare?.(blob);
+              }}
+              aria-label="Share blob"
+              title="Share"
+            >
+              <ShareIcon size={16} />
+            </button>
+          )}
           {blob.url && (
             <button
               className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200"
@@ -1199,6 +1233,7 @@ const ListLayout: React.FC<{
   onDownload: (blob: BlossomBlob) => void;
   onCopy: (blob: BlossomBlob) => void;
   onPlay?: (blob: BlossomBlob) => void;
+  onShare?: (blob: BlossomBlob) => void;
   detectedKinds: DetectedKindMap;
   onDetect: (sha: string, kind: "image" | "video") => void;
   sortConfig: SortConfig | null;
@@ -1216,6 +1251,7 @@ const ListLayout: React.FC<{
   onDownload,
   onCopy,
   onPlay,
+  onShare,
   detectedKinds,
   onDetect,
   sortConfig,
@@ -1326,7 +1362,7 @@ const ListLayout: React.FC<{
                   <span aria-hidden="true">{indicatorFor("size")}</span>
                 </div>
               </th>
-              <th scope="col" className="w-40 py-2 pl-3 pr-0 text-right font-semibold">Actions</th>
+              <th scope="col" className="w-56 py-2 pl-3 pr-0 text-right font-semibold">Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -1344,6 +1380,7 @@ const ListLayout: React.FC<{
                 onDownload={onDownload}
                 onCopy={onCopy}
                 onPlay={onPlay}
+                onShare={onShare}
                 detectedKinds={detectedKinds}
                 onDetect={onDetect}
               />

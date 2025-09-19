@@ -123,6 +123,16 @@ export const CopyIcon = createIcon(
   </>
 );
 
+export const ShareIcon = createIcon(
+  <>
+    <circle cx="18" cy="5.5" r="2.5" />
+    <circle cx="6" cy="12" r="2.5" />
+    <circle cx="18" cy="18.5" r="2.5" />
+    <path d="M8.2 10.9 15 7.3" />
+    <path d="M8.2 13.1 15 16.7" />
+  </>
+);
+
 export const HomeIcon = createIcon(
   <>
     <path d="M4 11.5 12 5l8 6.5" />

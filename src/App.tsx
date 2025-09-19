@@ -3,6 +3,7 @@ import { useNdk, useCurrentPubkey } from "./context/NdkContext";
 import { useServers, ManagedServer, sortServersByName } from "./hooks/useServers";
 import { useServerData } from "./hooks/useServerData";
 import { BlobList } from "./components/BlobList";
+import { ShareComposer, type SharePayload } from "./components/ShareComposer";
 import type { TransferState } from "./components/UploadPanel";
 
 const UploadPanelLazy = React.lazy(() =>
@@ -28,7 +29,7 @@ import { prettyBytes } from "./utils/format";
 import { deriveServerNameFromUrl } from "./utils/serverName";
 import { GridIcon, HomeIcon, ListIcon, TransferIcon, UploadIcon } from "./components/icons";
 
-type TabId = "browse" | "upload" | "servers" | "transfer";
+type TabId = "browse" | "upload" | "servers" | "transfer" | "share";
 
 type StatusMessageTone = "success" | "info" | "error";
 
@@ -102,6 +103,10 @@ export default function App() {
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const userMenuRef = useRef<HTMLDivElement | null>(null);
   const mainWidgetRef = useRef<HTMLDivElement | null>(null);
+  const [shareState, setShareState] = useState<{ payload: SharePayload | null; shareKey: string | null }>({
+    payload: null,
+    shareKey: null,
+  });
 
   const syncEnabledServers = useMemo(() => localServers.filter(server => server.sync), [localServers]);
   const serverValidationError = useMemo(() => validateManagedServers(localServers), [localServers]);
@@ -177,6 +182,19 @@ export default function App() {
       return servers.some(server => server.url === prev) ? prev : servers[0]?.url ?? null;
     });
   }, [servers]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const key = params.get("share");
+    if (!key) return;
+    setShareState({ payload: null, shareKey: key });
+    setTab("share");
+    params.delete("share");
+    const nextSearch = params.toString();
+    const nextUrl = `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ""}${window.location.hash}`;
+    window.history.replaceState({}, "", nextUrl);
+  }, [setShareState, setTab]);
 
   // Auto-sync blobs across all servers marked for synchronization.
   useEffect(() => {
@@ -1112,6 +1130,24 @@ export default function App() {
     showStatusMessage("URL copied to clipboard", "success", 1500);
   };
 
+  const handleShareBlob = useCallback(
+    (blob: BlossomBlob) => {
+      if (!blob.url) {
+        showStatusMessage("This file does not have a shareable URL.", "error", 3000);
+        return;
+      }
+      const payload: SharePayload = {
+        url: blob.url,
+        name: blob.name ?? null,
+        sha256: blob.sha256,
+        serverUrl: blob.serverUrl ?? null,
+      };
+      setShareState({ payload, shareKey: null });
+      setTab("share");
+    },
+    [setShareState, setTab, showStatusMessage]
+  );
+
   const handleUploadCompleted = (success: boolean) => {
     if (!success) return;
 
@@ -1307,7 +1343,7 @@ export default function App() {
             </nav>
 
           <div
-            className={`flex flex-1 min-h-0 flex-col p-4 ${tab === "browse" ? "overflow-hidden" : "overflow-y-auto"}`}
+            className={`flex flex-1 min-h-0 flex-col p-4 ${tab === "browse" || tab === "share" ? "overflow-hidden" : "overflow-y-auto"}`}
           >
             {tab === "browse" && (
               <div
@@ -1323,6 +1359,7 @@ export default function App() {
                     onSelectMany={selectManyBlobs}
                     onDelete={handleDeleteBlob}
                     onCopy={handleCopyUrl}
+                    onShare={handleShareBlob}
                     onPlay={blob => blob.url && play({ url: blob.url, title: blob.name })}
                   />
                 ) : currentSnapshot ? (
@@ -1338,6 +1375,7 @@ export default function App() {
                     onSelectMany={selectManyBlobs}
                     onDelete={handleDeleteBlob}
                     onCopy={handleCopyUrl}
+                    onShare={handleShareBlob}
                     onPlay={blob => blob.url && play({ url: blob.url, title: blob.name })}
                   />
                 ) : (
@@ -1516,6 +1554,20 @@ export default function App() {
                     </div>
                   </div>
                 )}
+              </div>
+            )}
+
+            {tab === "share" && (
+              <div className="flex flex-1 min-h-0">
+                <ShareComposer
+                  embedded
+                  payload={shareState.payload}
+                  shareKey={shareState.shareKey}
+                  onClose={() => {
+                    setShareState({ payload: null, shareKey: null });
+                    setTab("browse");
+                  }}
+                />
               </div>
             )}
 
