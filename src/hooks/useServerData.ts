@@ -6,6 +6,9 @@ import { listUserBlobs, type BlossomBlob } from "../lib/blossomClient";
 import { listNip96Files } from "../lib/nip96Client";
 import { mergeBlobsWithStoredMetadata } from "../utils/blobMetadataStore";
 
+const filterHiddenBlobTypes = (blobs: BlossomBlob[]) =>
+  blobs.filter(blob => (blob.type?.toLowerCase() ?? "") !== "inode/x-empty");
+
 export type ServerSnapshot = {
   server: ManagedServer;
   blobs: BlossomBlob[];
@@ -33,14 +36,14 @@ export const useServerData = (servers: ManagedServer[]) => {
             pubkey,
             server.requiresAuth && signer ? { requiresAuth: true, signTemplate: signEventTemplate } : undefined
           );
-          return mergeBlobsWithStoredMetadata(server.url, blobs);
+          return filterHiddenBlobTypes(mergeBlobsWithStoredMetadata(server.url, blobs));
         }
         if (server.type === "nip96") {
           const blobs = await listNip96Files(server.url, {
             requiresAuth: Boolean(server.requiresAuth),
             signTemplate: server.requiresAuth ? signEventTemplate : undefined,
           });
-          return mergeBlobsWithStoredMetadata(server.url, blobs);
+          return filterHiddenBlobTypes(mergeBlobsWithStoredMetadata(server.url, blobs));
         }
         return [];
       },
