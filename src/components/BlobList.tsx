@@ -1,9 +1,11 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { prettyBytes, prettyDate } from "../utils/format";
 import { buildAuthorizationHeader, type BlossomBlob, type SignTemplate } from "../lib/blossomClient";
 import { buildNip98AuthHeader } from "../lib/nip98";
 import { CopyIcon, DownloadIcon, FileTypeIcon, TrashIcon } from "./icons";
 import { setStoredBlobMetadata } from "../utils/blobMetadataStore";
+import { cachePreviewBlob, getCachedPreviewBlob } from "../utils/blobPreviewCache";
+import { useInViewport } from "../hooks/useInViewport";
 
 export type BlobListProps = {
   blobs: BlossomBlob[];
@@ -66,6 +68,12 @@ export const BlobList: React.FC<BlobListProps> = ({
   const attemptedLookups = useRef(new Set<string>());
   const passiveDetectors = useRef(new Map<string, () => void>());
   const isMounted = useRef(true);
+  const metadataSchedulerRef = useRef<{ running: number; queue: Array<() => void>; generation: number }>({
+    running: 0,
+    queue: [],
+    generation: 0,
+  });
+  const metadataAbortControllers = useRef(new Map<string, AbortController>());
 
   useEffect(() => {
     return () => {
@@ -112,7 +120,35 @@ export const BlobList: React.FC<BlobListProps> = ({
   }, [blobs]);
 
   useEffect(() => {
+    const scheduler = metadataSchedulerRef.current;
+    scheduler.generation += 1;
+    scheduler.queue = [];
+    scheduler.running = 0;
+    const currentGeneration = scheduler.generation;
+
+    metadataAbortControllers.current.forEach(controller => controller.abort());
+    metadataAbortControllers.current.clear();
+
+    const schedule = (task: () => Promise<void>) => {
+      const execute = () => {
+        if (scheduler.generation !== currentGeneration) return;
+        scheduler.running += 1;
+        task()
+          .catch(() => undefined)
+          .finally(() => {
+            scheduler.running = Math.max(0, scheduler.running - 1);
+            if (scheduler.generation !== currentGeneration) return;
+            const next = scheduler.queue.shift();
+            if (next) next();
+          });
+      };
+      if (scheduler.running < 4) execute();
+      else scheduler.queue.push(execute);
+    };
+
     const resolveForBlob = async (blob: BlossomBlob, resourceUrl: string) => {
+      const controller = new AbortController();
+      metadataAbortControllers.current.set(blob.sha256, controller);
       pendingLookups.current.add(blob.sha256);
 
       try {
@@ -146,7 +182,12 @@ export const BlobList: React.FC<BlobListProps> = ({
           headers.Authorization = auth;
         }
 
-        let response = await fetch(resourceUrl, { method: "HEAD", headers, mode: "cors" });
+        let response = await fetch(resourceUrl, {
+          method: "HEAD",
+          headers,
+          mode: "cors",
+          signal: controller.signal,
+        });
         if (!response.ok) {
           if (response.status === 405 || response.status === 501) {
             const fallbackHeaders: Record<string, string> = { ...headers };
@@ -155,7 +196,12 @@ export const BlobList: React.FC<BlobListProps> = ({
               if (!auth) return;
               fallbackHeaders.Authorization = auth;
             }
-            response = await fetch(resourceUrl, { method: "GET", headers: fallbackHeaders, mode: "cors" });
+            response = await fetch(resourceUrl, {
+              method: "GET",
+              headers: fallbackHeaders,
+              mode: "cors",
+              signal: controller.signal,
+            });
             if (!response.ok) return;
             if (response.body) {
               try {
@@ -204,9 +250,12 @@ export const BlobList: React.FC<BlobListProps> = ({
           return { ...prev, [blob.sha256]: updated };
         });
       } catch (error) {
-        // Swallow errors; metadata resolution is a best-effort enhancement.
+        if (error instanceof DOMException && error.name === "AbortError") {
+          return;
+        }
       } finally {
         pendingLookups.current.delete(blob.sha256);
+        metadataAbortControllers.current.delete(blob.sha256);
       }
     };
 
@@ -260,9 +309,16 @@ export const BlobList: React.FC<BlobListProps> = ({
       if ((hasType && hasName) || alreadyAttempted || alreadyLoading) continue;
       if (requiresAuth && !signTemplate) continue;
       attemptedLookups.current.add(blob.sha256);
-      void resolveForBlob(blob, resourceUrl);
+      schedule(() => resolveForBlob(blob, resourceUrl));
     }
 
+    return () => {
+      scheduler.queue = [];
+      scheduler.running = 0;
+      scheduler.generation += 1;
+      metadataAbortControllers.current.forEach(controller => controller.abort());
+      metadataAbortControllers.current.clear();
+    };
   }, [blobs, baseUrl, requiresAuth, signTemplate, resolvedMeta, detectedKinds, handleDetect, serverType]);
 
   const decoratedBlobs = useMemo(() => {
@@ -410,7 +466,7 @@ export const BlobList: React.FC<BlobListProps> = ({
   const listBlobs = viewMode === "list" ? sortedBlobs : decoratedBlobs;
 
   return (
-    <div className="">
+    <div className="flex h-full flex-1 min-h-0 w-full flex-col overflow-hidden">
       {viewMode === "list" ? (
         <ListLayout
           blobs={listBlobs}
@@ -426,6 +482,7 @@ export const BlobList: React.FC<BlobListProps> = ({
           onCopy={onCopy}
           onPlay={onPlay}
           detectedKinds={detectedKinds}
+          onDetect={handleDetect}
           sortConfig={sortConfig}
           onSort={handleSortToggle}
         />
@@ -465,106 +522,186 @@ const GridLayout: React.FC<{
   onPlay?: (blob: BlossomBlob) => void;
   detectedKinds: DetectedKindMap;
   onDetect: (sha: string, kind: "image" | "video") => void;
-}> = ({ blobs, baseUrl, requiresAuth, signTemplate, serverType, selected, onToggle, onDelete, onDownload, onCopy, onPlay, detectedKinds, onDetect }) => (
-  <div className="grid gap-3 p-4 md:grid-cols-2 xl:grid-cols-3">
-    {blobs.map(blob => {
-      const isSelected = selected.has(blob.sha256);
-      const isAudio = blob.type?.startsWith("audio/");
-      const previewUrl = blob.url;
-      const previewRequiresAuth = blob.requiresAuth ?? requiresAuth;
-      const displayName = buildDisplayName(blob);
-      const toggleSelection = () => onToggle(blob.sha256);
-      const handleKeyDown: React.KeyboardEventHandler<HTMLDivElement> = event => {
-        if (event.key === "Enter" || event.key === " ") {
-          event.preventDefault();
-          toggleSelection();
-        }
-      };
-      return (
-        <div
-          key={blob.sha256}
-          role="button"
-          tabIndex={0}
-          aria-pressed={isSelected}
-          onClick={toggleSelection}
-          onKeyDown={handleKeyDown}
-          className={`rounded-xl border px-4 py-4 flex flex-col gap-3 focus:outline-none focus:ring-2 focus:ring-emerald-500/70 focus:ring-offset-2 focus:ring-offset-slate-900 cursor-pointer transition ${
-            isSelected ? "border-emerald-500 bg-emerald-500/10" : "border-slate-800 bg-slate-900/60"
-          }`}
-        >
-          {previewUrl && (
-            <BlobPreview
-              sha={blob.sha256}
-              url={previewUrl}
-              name={blob.name || blob.sha256}
-              type={blob.type}
-              requiresAuth={previewRequiresAuth}
-              signTemplate={previewRequiresAuth ? signTemplate : undefined}
-              serverType={blob.serverType ?? serverType}
-              onDetect={onDetect}
-            />
+}> = ({
+  blobs,
+  baseUrl,
+  requiresAuth,
+  signTemplate,
+  serverType,
+  selected,
+  onToggle,
+  onSelectMany,
+  onDelete,
+  onDownload,
+  onCopy,
+  onPlay,
+  detectedKinds,
+  onDetect,
+}) => {
+  const CARD_HEIGHT = 260;
+  const CARD_WIDTH = 220;
+  const GAP = 16;
+  const OVERSCAN_ROWS = 2;
+  const viewportRef = useRef<HTMLDivElement | null>(null);
+  const [viewport, setViewport] = useState({ height: 0, width: 0, scrollTop: 0 });
+
+  useLayoutEffect(() => {
+    const el = viewportRef.current;
+    if (!el) return;
+    let frame: number | null = null;
+    const updateSize = () => {
+      setViewport(prev => ({ height: el.clientHeight, width: el.clientWidth, scrollTop: prev.scrollTop }));
+    };
+    const handleScroll = () => {
+      if (frame) cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(() => {
+        setViewport(prev => ({ height: prev.height || el.clientHeight, width: prev.width || el.clientWidth, scrollTop: el.scrollTop }));
+      });
+    };
+    const resizeObserver = typeof ResizeObserver === "function" ? new ResizeObserver(() => updateSize()) : null;
+    updateSize();
+    el.addEventListener("scroll", handleScroll, { passive: true });
+    if (resizeObserver) resizeObserver.observe(el);
+    else window.addEventListener("resize", updateSize);
+    return () => {
+      if (frame) cancelAnimationFrame(frame);
+      el.removeEventListener("scroll", handleScroll);
+      if (resizeObserver) resizeObserver.disconnect();
+      else window.removeEventListener("resize", updateSize);
+    };
+  }, [blobs.length]);
+
+  const viewportHeight = viewport.height || 0;
+  const viewportWidth = viewport.width || 0;
+  const scrollTop = viewport.scrollTop;
+  const columnCount = Math.max(1, Math.floor((viewportWidth + GAP) / (CARD_WIDTH + GAP)));
+  const effectiveColumnWidth = Math.max(160, Math.floor((viewportWidth - GAP * (columnCount + 1)) / columnCount) || CARD_WIDTH);
+  const rowHeight = CARD_HEIGHT + GAP;
+  const rowCount = Math.ceil(blobs.length / columnCount);
+  const visibleRowCount = viewportHeight > 0 ? Math.ceil(viewportHeight / rowHeight) + OVERSCAN_ROWS * 2 : rowCount;
+  const startRow = Math.max(0, Math.floor(scrollTop / rowHeight) - OVERSCAN_ROWS);
+  const endRow = Math.min(rowCount, startRow + visibleRowCount);
+  const items: Array<{ blob: BlossomBlob; row: number; col: number }> = [];
+  for (let row = startRow; row < endRow; row += 1) {
+    for (let col = 0; col < columnCount; col += 1) {
+      const index = row * columnCount + col;
+      if (index >= blobs.length) break;
+      const blob = blobs[index];
+      if (!blob) continue;
+      items.push({ blob, row, col });
+    }
+  }
+  const containerHeight = rowCount * rowHeight + GAP;
+
+  return (
+    <div className="flex flex-1 min-h-0 w-full flex-col overflow-hidden">
+      <div ref={viewportRef} className="relative flex-1 min-h-0 w-full overflow-y-auto px-2">
+        <div style={{ position: "relative", height: containerHeight }}>
+          {items.map(({ blob, row, col }) => {
+            const isSelected = selected.has(blob.sha256);
+            const isAudio = blob.type?.startsWith("audio/");
+            const previewUrl = blob.url;
+            const previewRequiresAuth = blob.requiresAuth ?? requiresAuth;
+            const displayName = buildDisplayName(blob);
+            const top = GAP + row * rowHeight;
+            const left = GAP + col * (effectiveColumnWidth + GAP);
+            return (
+              <div
+                key={blob.sha256}
+                role="button"
+                tabIndex={0}
+                aria-pressed={isSelected}
+                onClick={() => onToggle(blob.sha256)}
+                onKeyDown={event => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    onToggle(blob.sha256);
+                  }
+                }}
+                className={`absolute flex flex-col gap-3 rounded-xl border px-4 py-4 focus:outline-none focus:ring-2 focus:ring-emerald-500/70 focus:ring-offset-2 focus:ring-offset-slate-900 cursor-pointer transition ${
+                  isSelected ? "border-emerald-500 bg-emerald-500/10" : "border-slate-800 bg-slate-900/60"
+                }`}
+                style={{ top, left, width: effectiveColumnWidth, height: CARD_HEIGHT }}
+              >
+                {previewUrl && (
+                  <BlobPreview
+                    sha={blob.sha256}
+                    url={previewUrl}
+                    name={blob.name || blob.sha256}
+                    type={blob.type}
+                    serverUrl={blob.serverUrl ?? baseUrl}
+                    requiresAuth={previewRequiresAuth}
+                    signTemplate={previewRequiresAuth ? signTemplate : undefined}
+                    serverType={blob.serverType ?? serverType}
+                    onDetect={onDetect}
+                  />
+                )}
+                <div className="text-sm font-medium text-slate-100 break-words">
+                  {displayName}
+                </div>
+                <div className="flex flex-wrap gap-2 mt-auto pt-1">
+                  {blob.url && (
+                    <button
+                      className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200"
+                      onClick={event => {
+                        event.stopPropagation();
+                        onCopy(blob);
+                      }}
+                      aria-label="Copy blob URL"
+                      title="Copy URL"
+                    >
+                      <CopyIcon size={16} />
+                    </button>
+                  )}
+                  {blob.url && (
+                    <button
+                      className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200"
+                      onClick={event => {
+                        event.stopPropagation();
+                        onDownload(blob);
+                      }}
+                      aria-label="Download blob"
+                      title="Download"
+                    >
+                      <DownloadIcon size={16} />
+                    </button>
+                  )}
+                  <button
+                    className="p-2 rounded-lg bg-red-900/80 hover:bg-red-800 text-slate-100"
+                    onClick={event => {
+                      event.stopPropagation();
+                      onDelete(blob);
+                    }}
+                    aria-label="Delete blob"
+                    title="Delete"
+                  >
+                    <TrashIcon size={16} />
+                  </button>
+                  {isAudio && onPlay && blob.url && (
+                    <button
+                      className="px-2 py-1 text-xs rounded-lg bg-emerald-700/70 hover:bg-emerald-600"
+                      onClick={event => {
+                        event.stopPropagation();
+                        onPlay?.(blob);
+                      }}
+                    >
+                      Play
+                    </button>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+          {blobs.length === 0 && (
+            <div className="absolute inset-0 flex items-center justify-center text-sm text-slate-300">
+              No content on this server yet.
+            </div>
           )}
-          <div className="text-sm font-medium text-slate-100 break-words">
-            {displayName}
-          </div>
-          <div className="flex flex-wrap gap-2 mt-auto pt-1">
-            {blob.url && (
-              <button
-                className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200"
-                onClick={event => {
-                  event.stopPropagation();
-                  onCopy(blob);
-                }}
-                aria-label="Copy blob URL"
-                title="Copy URL"
-              >
-                <CopyIcon size={16} />
-              </button>
-            )}
-            {blob.url && (
-              <button
-                className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200"
-                onClick={event => {
-                  event.stopPropagation();
-                  onDownload(blob);
-                }}
-                aria-label="Download blob"
-                title="Download"
-              >
-                <DownloadIcon size={16} />
-              </button>
-            )}
-            <button
-              className="p-2 rounded-lg bg-red-900/80 hover:bg-red-800 text-slate-100"
-              onClick={event => {
-                event.stopPropagation();
-                onDelete(blob);
-              }}
-              aria-label="Delete blob"
-              title="Delete"
-            >
-              <TrashIcon size={16} />
-            </button>
-            {isAudio && onPlay && blob.url && (
-              <button
-                className="px-2 py-1 text-xs rounded-lg bg-emerald-700/70 hover:bg-emerald-600"
-                onClick={event => {
-                  event.stopPropagation();
-                  onPlay?.(blob);
-                }}
-              >
-                Play
-              </button>
-            )}
-          </div>
         </div>
-      );
-    })}
-    {blobs.length === 0 && (
-      <div className="col-span-full text-center text-sm text-slate-300 py-8">No content on this server yet.</div>
-    )}
-  </div>
-);
+      </div>
+    </div>
+  );
+};
 
 const ListThumbnail: React.FC<{
   blob: BlossomBlob;
@@ -573,12 +710,18 @@ const ListThumbnail: React.FC<{
   requiresAuth: boolean;
   signTemplate?: SignTemplate;
   serverType?: "blossom" | "nip96";
-}> = ({ blob, kind, baseUrl, requiresAuth, signTemplate, serverType = "blossom" }) => {
+  onDetect?: (sha: string, kind: "image" | "video") => void;
+}> = ({ blob, kind, baseUrl, requiresAuth, signTemplate, serverType = "blossom", onDetect }) => {
   const [failed, setFailed] = useState(false);
   const [src, setSrc] = useState<string | null>(null);
+  const [isLoaded, setIsLoaded] = useState(false);
   const objectUrlRef = useRef<string | null>(null);
+  const lastLoadedKeyRef = useRef<string | null>(null);
+  const lastFailureKeyRef = useRef<string | null>(null);
+  const activeRequestRef = useRef<{ key: string; controller: AbortController } | null>(null);
+  const [observeTarget, isVisible] = useInViewport<HTMLDivElement>({ rootMargin: "200px" });
 
-  const containerClass = "flex h-12 w-12 flex-shrink-0 overflow-hidden rounded-lg border border-slate-800 bg-slate-950/80";
+  const containerClass = "flex h-12 w-12 flex-shrink-0 overflow-hidden rounded-lg border border-slate-800 bg-slate-950/80 relative";
   const effectiveRequiresAuth = blob.requiresAuth ?? requiresAuth;
   const effectiveServerType = blob.serverType ?? serverType;
   const previewUrl = blob.url || (() => {
@@ -586,44 +729,155 @@ const ListThumbnail: React.FC<{
     if (!fallback) return undefined;
     return `${fallback.replace(/\/$/, "")}/${blob.sha256}`;
   })();
-  const shouldPreview = kind === "image" && Boolean(previewUrl);
+  const previewKey = previewUrl ? `${blob.sha256}|${previewUrl}|${effectiveRequiresAuth ? "auth" : "anon"}` : null;
 
   useEffect(() => {
+    return () => {
+      if (objectUrlRef.current) {
+        URL.revokeObjectURL(objectUrlRef.current);
+        objectUrlRef.current = null;
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!previewKey) {
+      if (objectUrlRef.current) {
+        URL.revokeObjectURL(objectUrlRef.current);
+        objectUrlRef.current = null;
+      }
+      lastLoadedKeyRef.current = null;
+      lastFailureKeyRef.current = null;
+      setSrc(null);
+      setIsLoaded(false);
+      setFailed(false);
+      return;
+    }
+
+    const hasLoadedCurrent = lastLoadedKeyRef.current === previewKey;
+    if (hasLoadedCurrent) {
+      return;
+    }
+
+    if (lastFailureKeyRef.current === previewKey) {
+      return;
+    }
+
+    if (effectiveRequiresAuth && !signTemplate) {
+      lastFailureKeyRef.current = previewKey;
+      setFailed(true);
+      return;
+    }
+
+    if (!previewUrl) {
+      return;
+    }
+
+    const resolvedPreviewUrl = previewUrl;
+
+    const existingRequest = activeRequestRef.current;
+    if (existingRequest) {
+      if (existingRequest.key === previewKey) {
+        return;
+      }
+      existingRequest.controller.abort();
+      activeRequestRef.current = null;
+    }
+
+    const controller = new AbortController();
+    activeRequestRef.current = { key: previewKey, controller };
+    let cancelled = false;
+
+    lastFailureKeyRef.current = null;
     setFailed(false);
+    setIsLoaded(false);
     setSrc(null);
+
     if (objectUrlRef.current) {
       URL.revokeObjectURL(objectUrlRef.current);
       objectUrlRef.current = null;
     }
 
-    if (!shouldPreview || !previewUrl) return;
+    const finalizeRequest = () => {
+      if (activeRequestRef.current?.controller === controller) {
+        activeRequestRef.current = null;
+      }
+    };
 
-    if (!effectiveRequiresAuth) {
-      setSrc(previewUrl);
-      return;
-    }
+    const assignObjectUrl = (blobData: Blob) => {
+      if (cancelled) return;
+      if (objectUrlRef.current) {
+        URL.revokeObjectURL(objectUrlRef.current);
+        objectUrlRef.current = null;
+      }
+      const objectUrl = URL.createObjectURL(blobData);
+      objectUrlRef.current = objectUrl;
+      lastLoadedKeyRef.current = previewKey;
+      lastFailureKeyRef.current = null;
+      setSrc(objectUrl);
+    };
 
-    if (!signTemplate) {
-      setFailed(true);
-      return;
-    }
-
-    let cancelled = false;
-    const match = previewUrl.match(/[0-9a-f]{64}/i);
+    const useDirectUrl = () => {
+      if (cancelled) return;
+      if (objectUrlRef.current) {
+        URL.revokeObjectURL(objectUrlRef.current);
+        objectUrlRef.current = null;
+      }
+      lastLoadedKeyRef.current = previewKey;
+      lastFailureKeyRef.current = null;
+      setSrc(resolvedPreviewUrl);
+    };
 
     const load = async () => {
       try {
+        const cached = await getCachedPreviewBlob(blob.serverUrl ?? baseUrl, blob.sha256);
+        if (cancelled) return;
+        if (cached) {
+          assignObjectUrl(cached);
+          return;
+        }
+
+        const match = resolvedPreviewUrl.match(/[0-9a-f]{64}/i);
+
+        if (!effectiveRequiresAuth) {
+          try {
+            const response = await fetch(resolvedPreviewUrl, { mode: "cors", signal: controller.signal });
+            if (!response.ok || response.type === "opaqueredirect" || response.type === "opaque") {
+              throw new Error(`Preview fetch failed (${response.status})`);
+            }
+            const blobData = await response.blob();
+            if (cancelled) return;
+            assignObjectUrl(blobData);
+            await cachePreviewBlob(blob.serverUrl ?? baseUrl, blob.sha256, blobData);
+            return;
+          } catch (error) {
+            if (cancelled) return;
+            if (error instanceof DOMException && error.name === "AbortError") {
+              return;
+            }
+            useDirectUrl();
+            return;
+          }
+        }
+
+        if (!signTemplate) {
+          if (!cancelled) {
+            setFailed(true);
+          }
+          return;
+        }
+
         const headers: Record<string, string> = {};
         if (effectiveRequiresAuth) {
           if (effectiveServerType === "nip96") {
             headers.Authorization = await buildNip98AuthHeader(signTemplate, {
-              url: previewUrl,
+              url: resolvedPreviewUrl,
               method: "GET",
             });
           } else {
             let resource: URL | undefined;
             try {
-              resource = new URL(previewUrl);
+              resource = new URL(resolvedPreviewUrl);
             } catch (error) {
               resource = undefined;
             }
@@ -635,62 +889,224 @@ const ListThumbnail: React.FC<{
           }
         }
 
-        const response = await fetch(previewUrl, { headers });
+        const response = await fetch(resolvedPreviewUrl, { headers, signal: controller.signal });
         if (!response.ok || response.type === "opaqueredirect" || response.type === "opaque") {
           throw new Error(`Preview fetch failed (${response.status})`);
         }
 
         const blobData = await response.blob();
         if (cancelled) return;
-        const objectUrl = URL.createObjectURL(blobData);
-        objectUrlRef.current = objectUrl;
-        setSrc(objectUrl);
+        assignObjectUrl(blobData);
+        await cachePreviewBlob(blob.serverUrl ?? baseUrl, blob.sha256, blobData);
       } catch (error) {
-        if (!cancelled) {
-          setFailed(true);
+        if (cancelled) return;
+        if (error instanceof DOMException && error.name === "AbortError") {
+          return;
         }
+        setFailed(true);
+        lastLoadedKeyRef.current = null;
+        lastFailureKeyRef.current = previewKey;
       }
     };
 
-    load();
+    void load().finally(finalizeRequest);
 
     return () => {
       cancelled = true;
-      if (objectUrlRef.current) {
-        URL.revokeObjectURL(objectUrlRef.current);
-        objectUrlRef.current = null;
-      }
+      controller.abort();
+      finalizeRequest();
     };
-  }, [shouldPreview, previewUrl, effectiveRequiresAuth, signTemplate, effectiveServerType, blob.sha256]);
+  }, [previewKey, isVisible, previewUrl, blob.serverUrl, baseUrl, effectiveRequiresAuth, effectiveServerType, signTemplate, blob.sha256]);
 
-  if (!shouldPreview || !src || failed) {
-    return (
-      <div className={`${containerClass} items-center justify-center`}>
-        <FileTypeIcon kind={kind} size={20} className="text-slate-300" />
-      </div>
-    );
-  }
+  useEffect(() => {
+    if (!previewKey) return;
+    if (!isVisible && lastFailureKeyRef.current === previewKey) {
+      lastFailureKeyRef.current = null;
+    }
+  }, [isVisible, previewKey]);
+
+  useEffect(() => {
+    if (!previewKey) return;
+    if (effectiveRequiresAuth && signTemplate && lastFailureKeyRef.current === previewKey) {
+      lastFailureKeyRef.current = null;
+    }
+  }, [previewKey, effectiveRequiresAuth, signTemplate]);
 
   const altText = blob.name || previewUrl?.split("/").pop() || blob.sha256;
+  const showMedia = Boolean(src) && !failed && Boolean(previewUrl);
+  const showOverlay = !showMedia || !isLoaded;
 
   return (
-    <div className={containerClass}>
-      <img
-        src={src}
-        alt={altText}
-        className="h-full w-full object-cover"
-        loading="lazy"
-        onError={() => {
-          if (objectUrlRef.current) {
-            URL.revokeObjectURL(objectUrlRef.current);
-            objectUrlRef.current = null;
-          }
-          setFailed(true);
-        }}
-      />
+    <div ref={observeTarget} className={containerClass}>
+      {showMedia && (
+        <img
+          src={src!}
+          alt={altText}
+          className={`h-full w-full object-cover transition-opacity duration-150 ${isLoaded ? "opacity-100" : "opacity-0"}`}
+          loading="lazy"
+          onLoad={() => {
+            setIsLoaded(true);
+            onDetect?.(blob.sha256, "image");
+          }}
+          onError={() => {
+            if (objectUrlRef.current) {
+              URL.revokeObjectURL(objectUrlRef.current);
+              objectUrlRef.current = null;
+            }
+            lastLoadedKeyRef.current = null;
+            if (previewKey) {
+              lastFailureKeyRef.current = previewKey;
+            }
+            setSrc(null);
+            setIsLoaded(false);
+            setFailed(true);
+          }}
+        />
+      )}
+      {showOverlay && (
+        <div className="absolute inset-0 flex items-center justify-center bg-slate-950/70 pointer-events-none">
+          <FileTypeIcon kind={kind} size={20} className="text-slate-300" />
+        </div>
+      )}
     </div>
   );
 };
+
+function ListRow({
+  blob,
+  baseUrl,
+  requiresAuth,
+  signTemplate,
+  serverType,
+  selected,
+  onToggle,
+  onDelete,
+  onDownload,
+  onCopy,
+  onPlay,
+  detectedKinds,
+  onDetect,
+}: {
+  blob: BlossomBlob;
+  baseUrl?: string;
+  requiresAuth: boolean;
+  signTemplate?: SignTemplate;
+  serverType?: "blossom" | "nip96";
+  selected: Set<string>;
+  onToggle: (sha: string) => void;
+  onDelete: (blob: BlossomBlob) => void;
+  onDownload: (blob: BlossomBlob) => void;
+  onCopy: (blob: BlossomBlob) => void;
+  onPlay?: (blob: BlossomBlob) => void;
+  detectedKinds: DetectedKindMap;
+  onDetect: (sha: string, kind: "image" | "video") => void;
+}) {
+  const kind = decideFileKind(blob, detectedKinds[blob.sha256]);
+  const isAudio = blob.type?.startsWith("audio/");
+  const displayName = buildDisplayName(blob);
+  const isSelected = selected.has(blob.sha256);
+
+  return (
+    <tr
+      className={`border-b border-slate-800 transition-colors ${
+        isSelected ? "bg-slate-800/50" : "hover:bg-slate-800/40"
+      }`}
+      onClick={event => {
+        if (event.target instanceof HTMLInputElement || event.target instanceof HTMLButtonElement) return;
+        onToggle(blob.sha256);
+      }}
+    >
+      <td className="w-12 py-3 px-3 align-middle">
+        <input
+          type="checkbox"
+          className="h-4 w-4 rounded border-slate-700 bg-slate-900 text-emerald-400 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+          checked={isSelected}
+          onChange={() => onToggle(blob.sha256)}
+          aria-label={`Select ${displayName}`}
+          onClick={event => event.stopPropagation()}
+        />
+      </td>
+      <td className="py-3 px-3">
+        <div className="flex items-center gap-3">
+          <ListThumbnail
+            blob={blob}
+            kind={kind}
+            baseUrl={baseUrl}
+            requiresAuth={requiresAuth}
+            signTemplate={signTemplate}
+            serverType={serverType}
+            onDetect={(sha, detectedKind) => onDetect(sha, detectedKind)}
+          />
+          <div className="min-w-0 flex-1">
+            <div className="font-medium text-slate-100 truncate">{displayName}</div>
+            <div className="text-xs text-slate-500 truncate">{blob.sha256}</div>
+          </div>
+        </div>
+      </td>
+      <td className="w-48 py-3 px-3 truncate text-sm text-slate-400">
+        {blob.type || "application/octet-stream"}
+      </td>
+      <td className="w-24 py-3 px-3 text-sm text-slate-400 whitespace-nowrap">
+        {prettyBytes(blob.size || 0)}
+      </td>
+      <td className="w-32 py-3 px-3 text-sm text-slate-400 whitespace-nowrap">
+        {blob.uploaded ? prettyDate(blob.uploaded) : "—"}
+      </td>
+      <td className="w-40 py-3 pl-3 pr-0">
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          {blob.url && (
+            <button
+              className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200"
+              onClick={event => {
+                event.stopPropagation();
+                onCopy(blob);
+              }}
+              aria-label="Copy blob URL"
+              title="Copy URL"
+            >
+              <CopyIcon size={16} />
+            </button>
+          )}
+          {blob.url && (
+            <button
+              className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200"
+              onClick={event => {
+                event.stopPropagation();
+                onDownload(blob);
+              }}
+              aria-label="Download blob"
+              title="Download"
+            >
+              <DownloadIcon size={16} />
+            </button>
+          )}
+          <button
+            className="p-2 rounded-lg bg-red-900/80 hover:bg-red-800 text-slate-100"
+            onClick={event => {
+              event.stopPropagation();
+              onDelete(blob);
+            }}
+            aria-label="Delete blob"
+            title="Delete"
+          >
+            <TrashIcon size={16} />
+          </button>
+          {isAudio && onPlay && blob.url && (
+            <button
+              className="px-2 py-1 text-xs rounded-lg bg-emerald-700/70 hover:bg-emerald-600"
+              onClick={event => {
+                event.stopPropagation();
+                onPlay(blob);
+              }}
+            >
+              Play
+            </button>
+          )}
+        </div>
+      </td>
+    </tr>
+  );
+}
 
 const ListLayout: React.FC<{
   blobs: BlossomBlob[];
@@ -706,6 +1122,7 @@ const ListLayout: React.FC<{
   onCopy: (blob: BlossomBlob) => void;
   onPlay?: (blob: BlossomBlob) => void;
   detectedKinds: DetectedKindMap;
+  onDetect: (sha: string, kind: "image" | "video") => void;
   sortConfig: SortConfig | null;
   onSort: (key: SortKey) => void;
 }> = ({
@@ -722,9 +1139,11 @@ const ListLayout: React.FC<{
   onCopy,
   onPlay,
   detectedKinds,
+  onDetect,
   sortConfig,
   onSort,
 }) => {
+  const COLUMN_COUNT = 6;
   const selectAllRef = useRef<HTMLInputElement | null>(null);
   const allSelected = blobs.length > 0 && blobs.every(blob => selected.has(blob.sha256));
   const partiallySelected = !allSelected && blobs.some(blob => selected.has(blob.sha256));
@@ -746,8 +1165,8 @@ const ListLayout: React.FC<{
   };
 
   return (
-    <div className="pb-1">
-      <div className="overflow-x-auto">
+    <div className="flex flex-1 min-h-0 w-full flex-col overflow-hidden pb-1">
+      <div className="flex-1 min-h-0 overflow-auto">
         <table className="min-w-full table-fixed text-sm text-slate-300">
           <thead className="text-[11px] uppercase tracking-wide text-slate-300">
             <tr>
@@ -851,123 +1270,36 @@ const ListLayout: React.FC<{
             </tr>
           </thead>
           <tbody>
-            {blobs.map(blob => {
-              const kind = decideFileKind(blob, detectedKinds[blob.sha256]);
-              const isAudio = blob.type?.startsWith("audio/");
-              const displayName = buildDisplayName(blob);
-              const isSelected = selected.has(blob.sha256);
-              return (
-              <tr
+            {blobs.map(blob => (
+              <ListRow
                 key={blob.sha256}
-                className={`border-t border-slate-800 first:border-t-0 transition-colors ${
-                  isSelected ? "bg-slate-800/50" : "hover:bg-slate-800/40"
-                }`}
-                onClick={event => {
-                  if (event.target instanceof HTMLInputElement) return;
-                  onToggle(blob.sha256);
-                }}
-              >
-                <td className="w-12 py-3 px-3 align-middle">
-                  <input
-                    type="checkbox"
-                    className="h-4 w-4 rounded border-slate-700 bg-slate-900 text-emerald-400 focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                    checked={isSelected}
-                    onChange={() => onToggle(blob.sha256)}
-                    aria-label={`Select ${displayName}`}
-                    onClick={event => event.stopPropagation()}
-                  />
-                </td>
-                <td className="py-3 px-3">
-                  <div className="flex items-center gap-3">
-                    <ListThumbnail
-                      blob={blob}
-                      kind={kind}
-                      baseUrl={baseUrl}
-                      requiresAuth={requiresAuth}
-                      signTemplate={signTemplate}
-                      serverType={serverType}
-                    />
-                    <div className="min-w-0 flex-1">
-                      <div className="font-medium text-slate-100 truncate">{displayName}</div>
-                    </div>
-                  </div>
-                </td>
-                <td className="w-48 py-3 px-3 truncate">
-                  {blob.type || "application/octet-stream"}
-                </td>
-                <td className="w-24 py-3 px-3 text-left whitespace-nowrap">
-                  {prettyBytes(blob.size)}
-                </td>
-                <td className="w-32 py-3 px-3 text-left whitespace-nowrap">
-                  {prettyDate(blob.uploaded)}
-                </td>
-                <td className="w-40 py-3 pl-3 pr-0">
-                  <div className="flex flex-wrap items-center justify-end gap-2">
-                    {blob.url && (
-                      <button
-                        className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200"
-                        onClick={event => {
-                          event.stopPropagation();
-                          onCopy(blob);
-                        }}
-                        aria-label="Copy blob URL"
-                        title="Copy URL"
-                      >
-                        <CopyIcon size={16} />
-                      </button>
-                    )}
-                    {blob.url && (
-                      <button
-                        className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200"
-                        onClick={event => {
-                          event.stopPropagation();
-                          onDownload(blob);
-                        }}
-                        aria-label="Download blob"
-                        title="Download"
-                      >
-                        <DownloadIcon size={16} />
-                      </button>
-                    )}
-                    <button
-                      className="p-2 rounded-lg bg-red-900/80 hover:bg-red-800 text-slate-100"
-                      onClick={event => {
-                        event.stopPropagation();
-                        onDelete(blob);
-                      }}
-                      aria-label="Delete blob"
-                      title="Delete"
-                    >
-                      <TrashIcon size={16} />
-                    </button>
-                    {isAudio && onPlay && blob.url && (
-                      <button
-                        className="px-2 py-1 text-xs rounded-lg bg-emerald-700/70 hover:bg-emerald-600"
-                        onClick={event => {
-                          event.stopPropagation();
-                          onPlay?.(blob);
-                        }}
-                      >
-                        Play
-                      </button>
-                    )}
-                  </div>
+                blob={blob}
+                baseUrl={baseUrl}
+                requiresAuth={requiresAuth}
+                signTemplate={signTemplate}
+                serverType={serverType}
+                selected={selected}
+                onToggle={onToggle}
+                onDelete={onDelete}
+                onDownload={onDownload}
+                onCopy={onCopy}
+                onPlay={onPlay}
+                detectedKinds={detectedKinds}
+                onDetect={onDetect}
+              />
+            ))}
+            {blobs.length === 0 && (
+              <tr>
+                <td colSpan={COLUMN_COUNT} className="py-6 px-3 text-sm text-center text-slate-300">
+                  No content on this server yet.
                 </td>
               </tr>
-            );
-          })}
-          {blobs.length === 0 && (
-            <tr>
-              <td colSpan={6} className="py-6 px-3 text-sm text-center text-slate-300">
-                No content on this server yet.
-              </td>
-            </tr>
-          )}
-        </tbody>
-      </table>
+            )}
+          </tbody>
+        </table>
+      </div>
     </div>
-  </div>
-);
+  );
 };
 
 const BlobPreview: React.FC<{
@@ -975,137 +1307,294 @@ const BlobPreview: React.FC<{
   url: string;
   name: string;
   type?: string;
+  serverUrl?: string;
   requiresAuth?: boolean;
   signTemplate?: SignTemplate;
   serverType?: "blossom" | "nip96";
   onDetect: (sha: string, kind: "image" | "video") => void;
-}> = ({ sha, url, name, type, requiresAuth = false, signTemplate, serverType = "blossom", onDetect }) => {
+}> = ({
+  sha,
+  url,
+  name,
+  type,
+  serverUrl,
+  requiresAuth = false,
+  signTemplate,
+  serverType = "blossom",
+  onDetect,
+}) => {
   const [src, setSrc] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
   const [loading, setLoading] = useState(false);
   const [previewType, setPreviewType] = useState<"image" | "video" | "unknown">(() => inferKind(type, url) ?? "unknown");
+  const [isReady, setIsReady] = useState(false);
+  const objectUrlRef = useRef<string | null>(null);
+  const lastLoadedKeyRef = useRef<string | null>(null);
+  const lastFailureKeyRef = useRef<string | null>(null);
+  const activeRequestRef = useRef<{ key: string; controller: AbortController } | null>(null);
+  const [observeTarget, isVisible] = useInViewport<HTMLDivElement>({ rootMargin: "400px" });
+
+  const releaseObjectUrl = useCallback(() => {
+    if (objectUrlRef.current) {
+      URL.revokeObjectURL(objectUrlRef.current);
+      objectUrlRef.current = null;
+    }
+  }, []);
+
+  const cacheServerHint = useMemo(() => {
+    if (serverUrl) return serverUrl.replace(/\/+$/, "");
+    try {
+      const parsed = new URL(url);
+      return `${parsed.protocol}//${parsed.host}`;
+    } catch (error) {
+      return undefined;
+    }
+  }, [serverUrl, url]);
+
+  const previewKey = `${sha}|${requiresAuth ? "auth" : "anon"}|${url}`;
 
   useEffect(() => {
-    let cancelled = false;
-    let objectUrl: string | null = null;
-    const match = url.match(/[0-9a-f]{64}/i);
+    setPreviewType(inferKind(type, url) ?? "unknown");
+  }, [type, url]);
 
-    if (!requiresAuth) {
-      const inferred = inferKind(type, url);
-      if (inferred) {
-        setPreviewType(inferred);
-        onDetect(sha, inferred);
-      }
-      setSrc(url);
-      setLoading(false);
-      setFailed(false);
-      return () => {
-        if (objectUrl) URL.revokeObjectURL(objectUrl);
-      };
+  useEffect(() => {
+    return () => {
+      releaseObjectUrl();
+    };
+  }, [releaseObjectUrl]);
+
+  useEffect(() => {
+    if (lastLoadedKeyRef.current === previewKey) {
+      return;
     }
 
+    if (lastFailureKeyRef.current === previewKey) {
+      return;
+    }
+
+    if (requiresAuth && !signTemplate) {
+      lastFailureKeyRef.current = previewKey;
+      setFailed(true);
+      setLoading(false);
+      return;
+    }
+
+    const existingRequest = activeRequestRef.current;
+    if (existingRequest) {
+      if (existingRequest.key === previewKey) {
+        return;
+      }
+      existingRequest.controller.abort();
+      activeRequestRef.current = null;
+    }
+
+    const controller = new AbortController();
+    activeRequestRef.current = { key: previewKey, controller };
+    let cancelled = false;
+
+    lastFailureKeyRef.current = null;
+    setFailed(false);
+    setLoading(true);
+    setIsReady(false);
+    setSrc(null);
+    releaseObjectUrl();
+
+    const existingKind = inferKind(type, url);
+    if (!requiresAuth && existingKind) {
+      setPreviewType(existingKind);
+      onDetect(sha, existingKind);
+    }
+
+    const finalizeRequest = () => {
+      if (activeRequestRef.current?.controller === controller) {
+        activeRequestRef.current = null;
+      }
+    };
+
+    const assignObjectUrl = (blobData: Blob) => {
+      if (cancelled) return;
+      releaseObjectUrl();
+      const objectUrl = URL.createObjectURL(blobData);
+      objectUrlRef.current = objectUrl;
+      lastLoadedKeyRef.current = previewKey;
+      lastFailureKeyRef.current = null;
+      setSrc(objectUrl);
+    };
+
+    const useDirectUrl = () => {
+      if (cancelled) return;
+      releaseObjectUrl();
+      lastLoadedKeyRef.current = previewKey;
+      lastFailureKeyRef.current = null;
+      setSrc(url);
+    };
+
     const load = async () => {
-      setLoading(true);
-      setFailed(false);
       try {
-        const headers: Record<string, string> = {};
-        if (requiresAuth) {
-          if (!signTemplate) throw new Error("Auth required but no signer available");
-          if (serverType === "nip96") {
-            headers.Authorization = await buildNip98AuthHeader(signTemplate, {
-              url,
-              method: "GET",
-            });
-          } else {
-            let resource: URL | undefined;
-            try {
-              resource = new URL(url);
-            } catch (error) {
-              resource = undefined;
-            }
-            headers.Authorization = await buildAuthorizationHeader(signTemplate, "get", {
-              hash: match ? match[0] : undefined,
-              serverUrl: resource ? `${resource.protocol}//${resource.host}` : undefined,
-              urlPath: resource ? resource.pathname + (resource.search || "") : undefined,
-            });
-          }
+        const cached = await getCachedPreviewBlob(cacheServerHint, sha);
+        if (cancelled) return;
+        if (cached) {
+          assignObjectUrl(cached);
+          return;
         }
-        const response = await fetch(url, { headers });
+
+        const match = url.match(/[0-9a-f]{64}/i);
+
+        if (!requiresAuth) {
+          try {
+            const response = await fetch(url, { mode: "cors", signal: controller.signal });
+            if (!response.ok || response.type === "opaqueredirect" || response.type === "opaque") {
+              throw new Error(`Preview fetch failed (${response.status})`);
+            }
+            const blobData = await response.blob();
+            if (cancelled) return;
+            assignObjectUrl(blobData);
+            await cachePreviewBlob(cacheServerHint, sha, blobData);
+          } catch (error) {
+            if (cancelled) return;
+            if (error instanceof DOMException && error.name === "AbortError") {
+              return;
+            }
+            useDirectUrl();
+          }
+          return;
+        }
+
+        const headers: Record<string, string> = {};
+        if (serverType === "nip96") {
+          headers.Authorization = await buildNip98AuthHeader(signTemplate!, {
+            url,
+            method: "GET",
+          });
+        } else {
+          let resource: URL | undefined;
+          try {
+            resource = new URL(url);
+          } catch (error) {
+            resource = undefined;
+          }
+          headers.Authorization = await buildAuthorizationHeader(signTemplate!, "get", {
+            hash: match ? match[0] : undefined,
+            serverUrl: resource ? `${resource.protocol}//${resource.host}` : undefined,
+            urlPath: resource ? resource.pathname + (resource.search || "") : undefined,
+          });
+        }
+
+        const response = await fetch(url, { headers, signal: controller.signal });
         if (!response.ok || response.type === "opaqueredirect" || response.type === "opaque") {
           throw new Error(`Preview fetch failed (${response.status})`);
         }
+
         const blobData = await response.blob();
+        if (cancelled) return;
         const mime = response.headers.get("content-type") || blobData.type || type || "";
         const detectedType = mime.startsWith("video/") ? "video" : mime.startsWith("image/") ? "image" : previewType;
-        objectUrl = URL.createObjectURL(blobData);
-        if (!cancelled) {
-          setSrc(objectUrl);
-          setPreviewType(detectedType);
-          if (detectedType === "image" || detectedType === "video") {
-            onDetect(sha, detectedType);
-          }
-          setLoading(false);
-        } else if (objectUrl) {
-          URL.revokeObjectURL(objectUrl);
+        setPreviewType(detectedType);
+        if (detectedType === "image" || detectedType === "video") {
+          onDetect(sha, detectedType);
         }
+        assignObjectUrl(blobData);
+        await cachePreviewBlob(cacheServerHint, sha, blobData);
       } catch (error) {
-        if (!cancelled) {
-          setFailed(true);
-          setSrc(null);
-          setLoading(false);
+        if (cancelled) return;
+        if (error instanceof DOMException && error.name === "AbortError") {
+          return;
         }
+        lastLoadedKeyRef.current = null;
+        lastFailureKeyRef.current = previewKey;
+        setFailed(true);
+        setLoading(false);
       }
     };
 
-    if (requiresAuth && !signTemplate) {
-      setFailed(true);
-      setLoading(false);
-      setSrc(null);
-      return () => undefined;
-    }
-
-    load();
+    void load().finally(finalizeRequest);
 
     return () => {
       cancelled = true;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      controller.abort();
+      finalizeRequest();
     };
-  }, [sha, url, type, requiresAuth, signTemplate, serverType, onDetect, previewType]);
+  }, [previewKey, isVisible, requiresAuth, signTemplate, releaseObjectUrl, cacheServerHint, sha, type, url, serverType, onDetect]);
+
+  useEffect(() => {
+    if (!isVisible && lastFailureKeyRef.current === previewKey) {
+      lastFailureKeyRef.current = null;
+    }
+  }, [isVisible, previewKey]);
+
+  useEffect(() => {
+    if (requiresAuth && signTemplate && lastFailureKeyRef.current === previewKey) {
+      lastFailureKeyRef.current = null;
+    }
+  }, [requiresAuth, signTemplate, previewKey]);
+
+  const handlePreviewError = () => {
+    releaseObjectUrl();
+    lastLoadedKeyRef.current = null;
+    lastFailureKeyRef.current = previewKey;
+    setSrc(null);
+    setIsReady(false);
+    setLoading(false);
+    setFailed(true);
+  };
+
+  const showMedia = Boolean(src) && !failed;
+  const isVideo = showMedia && previewType === "video";
+  const isImage = showMedia && !isVideo;
+  const showLoading = loading || (showMedia && !isReady);
+  const showUnavailable = !loading && failed;
 
   return (
-    <div className="h-40 w-full overflow-hidden rounded-lg border border-slate-800 bg-slate-950/80 flex items-center justify-center">
-      {src && !failed ? (
-        previewType === "video" ? (
-          <video
-            src={src}
-            className="max-h-full max-w-full"
-            controls={false}
-            autoPlay
-            muted
-            loop
-            playsInline
-            onLoadedData={() => {
-              setPreviewType("video");
-              onDetect(sha, "video");
-            }}
-          />
-        ) : (
-          <img
-            src={src}
-            alt={name}
-            className="max-h-full max-w-full object-contain"
-            loading="lazy"
-            onLoad={() => {
-              setPreviewType("image");
-              onDetect(sha, "image");
-            }}
-            onError={() => setFailed(true)}
-          />
-        )
-      ) : loading ? (
-        <span className="text-xs text-slate-300">Loading preview…</span>
-      ) : (
-        <span className="text-xs text-slate-300">Preview unavailable</span>
+    <div
+      ref={observeTarget}
+      className="relative flex h-40 w-full items-center justify-center overflow-hidden rounded-lg border border-slate-800 bg-slate-950/80"
+    >
+      {isVideo && (
+        <video
+          src={src!}
+          className={`max-h-full max-w-full transition-opacity duration-200 ${
+            isReady ? "opacity-100" : "opacity-0"
+          }`}
+          controls={false}
+          autoPlay
+          muted
+          loop
+          playsInline
+          onLoadedData={() => {
+            setPreviewType("video");
+            setIsReady(true);
+            setLoading(false);
+            onDetect(sha, "video");
+          }}
+          onError={handlePreviewError}
+        />
+      )}
+      {isImage && (
+        <img
+          src={src!}
+          alt={name}
+          className={`max-h-full max-w-full object-contain transition-opacity duration-200 ${
+            isReady ? "opacity-100" : "opacity-0"
+          }`}
+          loading="lazy"
+          onLoad={() => {
+            setPreviewType("image");
+            setIsReady(true);
+            setLoading(false);
+            onDetect(sha, "image");
+          }}
+          onError={handlePreviewError}
+        />
+      )}
+      {showLoading && (
+        <div className="absolute inset-0 flex items-center justify-center bg-slate-950/70 text-xs text-slate-300 pointer-events-none">
+          Loading preview…
+        </div>
+      )}
+      {showUnavailable && (
+        <div className="absolute inset-0 flex items-center justify-center bg-slate-950/60 text-xs text-slate-300 pointer-events-none">
+          Preview unavailable
+        </div>
       )}
     </div>
   );

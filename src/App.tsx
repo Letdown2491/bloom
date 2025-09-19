@@ -1,12 +1,25 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNdk, useCurrentPubkey } from "./context/NdkContext";
 import { useServers, ManagedServer, sortServersByName } from "./hooks/useServers";
 import { useServerData } from "./hooks/useServerData";
-import { ServerList } from "./components/ServerList";
 import { BlobList } from "./components/BlobList";
-import { UploadPanel, type TransferState } from "./components/UploadPanel";
+import type { TransferState } from "./components/UploadPanel";
+
+const UploadPanelLazy = React.lazy(() =>
+  import("./components/UploadPanel").then(module => ({ default: module.UploadPanel }))
+);
+
+const ServerListLazy = React.lazy(() =>
+  import("./components/ServerList").then(module => ({ default: module.ServerList }))
+);
 import { useAudio } from "./context/AudioContext";
-import { deleteUserBlob, mirrorBlobToServer, buildAuthorizationHeader, uploadBlobToServer } from "./lib/blossomClient";
+import {
+  deleteUserBlob,
+  mirrorBlobToServer,
+  buildAuthorizationHeader,
+  uploadBlobToServer,
+  type UploadStreamSource,
+} from "./lib/blossomClient";
 import { deleteNip96File, uploadBlobToNip96 } from "./lib/nip96Client";
 import { buildNip98AuthHeader } from "./lib/nip98";
 import { useQueryClient } from "@tanstack/react-query";
@@ -234,28 +247,30 @@ export default function App() {
       const validTargetUrls = localServers.map(server => server.url);
       const filtered = prev.filter(url => validTargetUrls.includes(url));
 
+      let next: string[] = [];
+
       if (localServers.length <= 1) {
-        return [];
-      }
-
-      if (localServers.length === 2) {
+        next = [];
+      } else if (localServers.length === 2) {
         const fallback = localServers.find(server => server.url !== selectedServer) ?? localServers[0];
-        const fallbackUrl = fallback?.url;
-        return fallbackUrl ? [fallbackUrl] : [];
+        next = fallback?.url ? [fallback.url] : [];
+      } else if (filtered.length > 0) {
+        next = filtered;
+      } else {
+        const preferred = localServers.filter(server => !sourceServerUrls.has(server.url));
+        const firstPreferred = preferred[0];
+        if (firstPreferred?.url) {
+          next = [firstPreferred.url];
+        } else if (validTargetUrls[0]) {
+          next = [validTargetUrls[0]];
+        } else {
+          next = [];
+        }
       }
 
-      if (filtered.length > 0) {
-        const sameLength = filtered.length === prev.length;
-        const sameOrder = sameLength && filtered.every((url, index) => url === prev[index]);
-        return sameOrder ? prev : filtered;
-      }
-
-      const preferred = localServers.filter(server => !sourceServerUrls.has(server.url));
-      const firstPreferred = preferred[0];
-      if (firstPreferred?.url) return [firstPreferred.url];
-      const firstValid = validTargetUrls[0];
-      if (firstValid) return [firstValid];
-      return [];
+      const sameLength = next.length === prev.length;
+      const sameOrder = sameLength && next.every((url, index) => url === prev[index]);
+      return sameOrder ? prev : next;
     });
   }, [localServers, selectedServer, sourceServerUrls, tab]);
 
@@ -293,11 +308,10 @@ export default function App() {
     []
   );
 
-  const fetchBlobAsFile = useCallback(
-    async (sourceBlob: BlossomBlob, sourceServer: ManagedServer): Promise<File | null> => {
+  const createBlobStreamSource = useCallback(
+    (sourceBlob: BlossomBlob, sourceServer: ManagedServer): UploadStreamSource | null => {
       if (!sourceBlob.url) return null;
-      const template = signEventTemplate;
-      if (sourceServer.requiresAuth && !template) return null;
+      if (sourceServer.requiresAuth && !signEventTemplate) return null;
 
       const inferExtensionFromType = (type?: string) => {
         if (!type) return undefined;
@@ -354,7 +368,7 @@ export default function App() {
         }
         derived = derived.replace(/[?#].*$/, "");
         if (!/\.[a-zA-Z0-9]{1,8}$/.test(derived)) {
-          const urlExt = extractExtensionFromPath(sourceUrl);
+          const urlExt = extractExtensionFromPath(sourceBlob.url!);
           const typeExt = inferExtensionFromType(sourceBlob.type);
           const extension = urlExt || typeExt;
           if (extension) {
@@ -364,38 +378,57 @@ export default function App() {
         return derived.replace(/[\\/]/g, "_");
       };
 
-      const headers: Record<string, string> = {};
-      try {
-        const sourceUrl = sourceBlob.url!;
+      const template = signEventTemplate;
+      const preferredType = sourceBlob.type || "application/octet-stream";
+      const size = typeof sourceBlob.size === "number" && Number.isFinite(sourceBlob.size)
+        ? Math.max(0, Math.round(sourceBlob.size))
+        : undefined;
+      const sourceUrl = sourceBlob.url;
+
+      const buildHeaders = async () => {
+        const headers: Record<string, string> = {};
         if (sourceServer.requiresAuth && template) {
           if (sourceServer.type === "blossom") {
-            const url = new URL(sourceUrl);
+            let url: URL | null = null;
+            try {
+              url = new URL(sourceUrl);
+            } catch (error) {
+              url = null;
+            }
             const auth = await buildAuthorizationHeader(template, "get", {
               hash: sourceBlob.sha256,
               serverUrl: sourceServer.url,
-              urlPath: url.pathname || `/${sourceBlob.sha256}`,
+              urlPath: url ? url.pathname + (url.search || "") : undefined,
+              expiresInSeconds: 300,
             });
             headers.Authorization = auth;
           } else if (sourceServer.type === "nip96") {
-            const auth = await buildNip98AuthHeader(template, {
+            headers.Authorization = await buildNip98AuthHeader(template, {
               url: sourceUrl,
               method: "GET",
             });
-            headers.Authorization = auth;
           }
         }
-        const response = await fetch(sourceUrl, { headers });
-        if (!response.ok) {
-          return null;
-        }
-        const blobData = await response.blob();
-        const preferredType = sourceBlob.type || blobData.type || "application/octet-stream";
-        const fileName = buildFileName(sourceBlob.sha256);
-        return new File([blobData], fileName, { type: preferredType });
-      } catch (error) {
-        console.error("Failed to fetch blob for sync", error);
-        return null;
-      }
+        return headers;
+      };
+
+      return {
+        kind: "stream",
+        fileName: buildFileName(sourceBlob.sha256),
+        contentType: preferredType,
+        size,
+        async createStream() {
+          const headers = await buildHeaders();
+          const response = await fetch(sourceUrl, { headers, mode: "cors" });
+          if (!response.ok) {
+            throw new Error(`Unable to fetch blob from source (${response.status})`);
+          }
+          if (!response.body) {
+            throw new Error("Source response does not support streaming");
+          }
+          return response.body;
+        },
+      };
     },
     [signEventTemplate]
   );
@@ -510,23 +543,15 @@ export default function App() {
             let completed = false;
             const mirrorUnsupported = unsupportedMirrorTargetsRef.current.has(target.url);
             const uploadDirectlyToBlossom = async () => {
-              const file = await fetchBlobAsFile(sourceBlob, sourceSnapshot.server);
-              if (!file) {
+              const streamSource = createBlobStreamSource(sourceBlob, sourceSnapshot.server);
+              if (!streamSource) {
                 nextSyncAttemptRef.current.set(key, Date.now() + 30 * 60 * 1000);
                 throw new Error("Unable to fetch blob content for sync");
               }
-              const fallbackTotal = file.size > 0 ? file.size : totalSize;
-              const sourceSizeRaw = sourceBlob.size;
-              const parsedSourceSize =
-                sourceSizeRaw === undefined || sourceSizeRaw === null ? undefined : Number(sourceSizeRaw);
-              const sourceSize =
-                typeof parsedSourceSize === "number" && Number.isFinite(parsedSourceSize)
-                  ? Math.round(parsedSourceSize)
-                  : undefined;
-              const shouldSkipSizeTag = typeof sourceSize === "number" && sourceSize > 0 && sourceSize !== file.size;
+              const fallbackTotal = streamSource.size && streamSource.size > 0 ? streamSource.size : totalSize;
               await uploadBlobToServer(
                 target.url,
-                file,
+                streamSource,
                 target.requiresAuth ? signEventTemplate : undefined,
                 Boolean(target.requiresAuth),
                 progress => {
@@ -544,8 +569,7 @@ export default function App() {
                         : item
                     )
                   );
-                },
-                shouldSkipSizeTag ? { skipSizeTag: true } : undefined
+                }
               );
               return fallbackTotal;
             };
@@ -578,18 +602,19 @@ export default function App() {
                 completed = true;
               }
             } else {
-              const file = await fetchBlobAsFile(sourceBlob, sourceSnapshot.server);
-              if (!file) {
+              const streamSource = createBlobStreamSource(sourceBlob, sourceSnapshot.server);
+              if (!streamSource) {
                 nextSyncAttemptRef.current.set(key, Date.now() + 15 * 60 * 1000);
                 throw new Error("Unable to fetch blob content for sync");
               }
               await uploadBlobToNip96(
                 target.url,
-                file,
+                streamSource,
                 target.requiresAuth ? signEventTemplate : undefined,
                 Boolean(target.requiresAuth),
                 progress => {
-                  const totalProgress = progress.total && progress.total > 0 ? progress.total : totalSize;
+                  const fallbackTotal = streamSource.size && streamSource.size > 0 ? streamSource.size : totalSize;
+                  const totalProgress = progress.total && progress.total > 0 ? progress.total : fallbackTotal;
                   const loadedRaw = typeof progress.loaded === "number" ? progress.loaded : 0;
                   const loaded = Math.min(totalProgress, loadedRaw);
                   setSyncTransfers(prev =>
@@ -671,7 +696,7 @@ export default function App() {
     };
   }, [
     distribution,
-    fetchBlobAsFile,
+    createBlobStreamSource,
     pubkey,
     queryClient,
     signEventTemplate,
@@ -922,24 +947,16 @@ export default function App() {
               }
 
               if (!completed) {
-                const file = await fetchBlobAsFile(blob, sourceServer);
-                if (!file) {
+                const streamSource = createBlobStreamSource(blob, sourceServer);
+                if (!streamSource) {
                   throw new Error(
                     `Unable to fetch ${fileName} from ${serverNameByUrl.get(sourceServer.url) || sourceServer.url}`
                   );
                 }
-                const fallbackTotal = file.size > 0 ? file.size : totalSize;
-                const sourceSizeRaw = blob.size;
-                const parsedSourceSize =
-                  sourceSizeRaw === undefined || sourceSizeRaw === null ? undefined : Number(sourceSizeRaw);
-                const sourceSize =
-                  typeof parsedSourceSize === "number" && Number.isFinite(parsedSourceSize)
-                    ? Math.round(parsedSourceSize)
-                    : undefined;
-                const shouldSkipSizeTag = typeof sourceSize === "number" && sourceSize > 0 && sourceSize !== file.size;
+                const fallbackTotal = streamSource.size && streamSource.size > 0 ? streamSource.size : totalSize;
                 await uploadBlobToServer(
                   target.url,
-                  file,
+                  streamSource,
                   target.requiresAuth ? signEventTemplate : undefined,
                   Boolean(target.requiresAuth),
                   progress => {
@@ -957,25 +974,25 @@ export default function App() {
                           : item
                       )
                     );
-                  },
-                  shouldSkipSizeTag ? { skipSizeTag: true } : undefined
+                  }
                 );
                 completed = true;
               }
             } else {
-              const file = await fetchBlobAsFile(blob, sourceServer);
-              if (!file) {
+              const streamSource = createBlobStreamSource(blob, sourceServer);
+              if (!streamSource) {
                 throw new Error(
                   `Unable to fetch ${fileName} from ${serverNameByUrl.get(sourceServer.url) || sourceServer.url}`
                 );
               }
               await uploadBlobToNip96(
                 target.url,
-                file,
+                streamSource,
                 target.requiresAuth ? signEventTemplate : undefined,
                 Boolean(target.requiresAuth),
                 progress => {
-                  const totalProgress = progress.total && progress.total > 0 ? progress.total : file.size || totalSize;
+                  const fallbackTotal = streamSource.size && streamSource.size > 0 ? streamSource.size : totalSize;
+                  const totalProgress = progress.total && progress.total > 0 ? progress.total : fallbackTotal;
                   const loadedRaw = typeof progress.loaded === "number" ? progress.loaded : 0;
                   const loaded = Math.min(totalProgress, loadedRaw);
                   setManualTransfers(prev =>
@@ -1289,9 +1306,11 @@ export default function App() {
               </div>
             </nav>
 
-          <div className={`flex flex-1 min-h-0 flex-col p-4 ${tab === "browse" ? "" : "overflow-y-auto"}`}>
+          <div
+            className={`flex flex-1 min-h-0 flex-col p-4 ${tab === "browse" ? "overflow-hidden" : "overflow-y-auto"}`}
+          >
             {tab === "browse" && (
-              <div className="flex-1 min-h-0 overflow-y-auto pr-1">
+              <div className="flex flex-1 min-h-0 flex-col overflow-hidden pr-1">
                 {browsingAllServers ? (
                   <BlobList
                     blobs={aggregated.blobs}
@@ -1326,11 +1345,19 @@ export default function App() {
             )}
 
             {tab === "upload" && (
-              <UploadPanel
-                servers={servers}
-                onUploaded={handleUploadCompleted}
-                syncTransfers={syncTransfers}
-              />
+              <Suspense
+                fallback={
+                  <div className="flex flex-1 items-center justify-center text-sm text-slate-400">
+                    Loading uploader…
+                  </div>
+                }
+              >
+                <UploadPanelLazy
+                  servers={servers}
+                  onUploaded={handleUploadCompleted}
+                  syncTransfers={syncTransfers}
+                />
+              </Suspense>
             )}
 
             {tab === "transfer" && (
@@ -1491,20 +1518,28 @@ export default function App() {
             )}
 
             {tab === "servers" && (
-              <ServerList
-                servers={localServers}
-                selected={selectedServer}
-                onSelect={setSelectedServer}
-                onAdd={handleAddServer}
-                onUpdate={handleUpdateServer}
-                onSave={handleSaveServers}
-                saving={saving}
-                disabled={!signer}
-                onRemove={handleRemoveServer}
-                onToggleAuth={handleToggleRequiresAuth}
-                onToggleSync={handleToggleSync}
-                validationError={serverValidationError}
-              />
+              <Suspense
+                fallback={
+                  <div className="flex flex-1 items-center justify-center text-sm text-slate-400">
+                    Loading servers…
+                  </div>
+                }
+              >
+                <ServerListLazy
+                  servers={localServers}
+                  selected={selectedServer}
+                  onSelect={setSelectedServer}
+                  onAdd={handleAddServer}
+                  onUpdate={handleUpdateServer}
+                  onSave={handleSaveServers}
+                  saving={saving}
+                  disabled={!signer}
+                  onRemove={handleRemoveServer}
+                  onToggleAuth={handleToggleRequiresAuth}
+                  onToggleSync={handleToggleSync}
+                  validationError={serverValidationError}
+                />
+              </Suspense>
             )}
 
           </div>

@@ -1,4 +1,5 @@
-import axios, { AxiosProgressEvent } from "axios";
+import type { AxiosProgressEvent } from "axios";
+import { createMultipartStream } from "./multipartStream";
 
 export type BlossomBlob = {
   sha256: string;
@@ -33,6 +34,9 @@ type AuthKind = "list" | "upload" | "delete" | "mirror" | "get";
 
 type AuthData = {
   file?: File;
+  fileName?: string;
+  fileType?: string;
+  fileSize?: number;
   hash?: string;
   sourceUrl?: string;
   serverUrl?: string;
@@ -40,6 +44,24 @@ type AuthData = {
   expiresInSeconds?: number;
   sizeOverride?: number;
   skipSizeTag?: boolean;
+};
+
+export type UploadStreamSource = {
+  kind: "stream";
+  fileName: string;
+  contentType?: string;
+  size?: number;
+  createStream: () => Promise<ReadableStream<Uint8Array>>;
+};
+
+export type UploadSource = File | UploadStreamSource;
+
+const isStreamSource = (value: UploadSource): value is UploadStreamSource =>
+  typeof value === "object" && value !== null && (value as UploadStreamSource).kind === "stream";
+
+const sanitizeFileName = (value: string | undefined) => {
+  if (!value) return undefined;
+  return value.replace(/[\\/]/g, "_");
 };
 
 async function createAuthEvent(signTemplate: SignTemplate, kind: AuthKind, data?: AuthData) {
@@ -52,16 +74,28 @@ async function createAuthEvent(signTemplate: SignTemplate, kind: AuthKind, data?
   if (data?.urlPath) {
     tags.push(["url", data.urlPath]);
   }
-  if (kind === "upload" && data?.file) {
-    tags.push(["name", data.file.name]);
-    if (data.skipSizeTag !== true) {
-      const rawSize = typeof data.sizeOverride === "number" ? data.sizeOverride : data.file.size;
-      const normalizedSize = Number.isFinite(rawSize) ? Math.max(0, Math.round(rawSize)) : undefined;
+  if (kind === "upload") {
+    const fileName = sanitizeFileName(data?.file?.name ?? data?.fileName);
+    if (fileName) {
+      tags.push(["name", fileName]);
+    }
+    if (data?.skipSizeTag !== true) {
+      const rawSize =
+        typeof data?.sizeOverride === "number"
+          ? data.sizeOverride
+          : typeof data?.fileSize === "number"
+          ? data.fileSize
+          : data?.file?.size;
+      const normalizedSize =
+        typeof rawSize === "number" && Number.isFinite(rawSize) ? Math.max(0, Math.round(rawSize)) : undefined;
       if (typeof normalizedSize === "number") {
         tags.push(["size", String(normalizedSize)]);
       }
     }
-    if (data.file.type) tags.push(["type", data.file.type]);
+    const fileType = data?.file?.type ?? data?.fileType;
+    if (fileType) {
+      tags.push(["type", fileType]);
+    }
   }
   if ((kind === "delete" || kind === "get") && data?.hash) {
     tags.push(["x", data.hash]);
@@ -88,6 +122,37 @@ function encodeAuthHeader(event: SignedEvent) {
 export async function buildAuthorizationHeader(signTemplate: SignTemplate, kind: AuthKind, data?: AuthData) {
   const event = await createAuthEvent(signTemplate, kind, data);
   return encodeAuthHeader(event);
+}
+
+type ResolvedUploadSource = {
+  fileName: string;
+  contentType: string;
+  size?: number;
+  stream: ReadableStream<Uint8Array>;
+  originalFile?: File;
+};
+
+export async function resolveUploadSource(file: UploadSource): Promise<ResolvedUploadSource> {
+  if (isStreamSource(file)) {
+    const stream = await file.createStream();
+    if (!stream) {
+      throw new Error("Source stream unavailable");
+    }
+    return {
+      fileName: sanitizeFileName(file.fileName) || "upload.bin",
+      contentType: file.contentType || "application/octet-stream",
+      size: typeof file.size === "number" ? file.size : undefined,
+      stream,
+    };
+  }
+  const stream = file.stream();
+  return {
+    fileName: sanitizeFileName(file.name) || "upload.bin",
+    contentType: file.type || "application/octet-stream",
+    size: file.size,
+    stream,
+    originalFile: file,
+  };
 }
 
 export async function listUserBlobs(
@@ -133,7 +198,7 @@ type UploadOptions = {
 
 export async function uploadBlobToServer(
   serverUrl: string,
-  file: File,
+  file: UploadSource,
   signTemplate: SignTemplate | undefined,
   requiresAuth: boolean,
   onProgress?: (event: AxiosProgressEvent) => void,
@@ -143,55 +208,95 @@ export async function uploadBlobToServer(
   const normalizedServer = serverUrl.replace(/\/$/, "");
 
   const attempt = async (skipSizeTag: boolean): Promise<BlossomBlob> => {
-    const form = new FormData();
-    form.append("file", file);
+    const source = await resolveUploadSource(file);
     const headers: Record<string, string> = { Accept: "application/json" };
+
+    let authEvent: SignedEvent | undefined;
     if (requiresAuth) {
       if (!signTemplate) throw new Error("Server requires auth. Connect your signer first.");
-      const authEvent = await createAuthEvent(signTemplate, "upload", {
-        file,
+      authEvent = await createAuthEvent(signTemplate, "upload", {
+        file: source.originalFile,
+        fileName: source.fileName,
+        fileType: source.contentType,
+        fileSize: source.size,
         serverUrl,
         urlPath: "/upload",
         sizeOverride: options?.sizeOverride,
         skipSizeTag,
       });
-      form.append("event", JSON.stringify(authEvent));
       headers.Authorization = encodeAuthHeader(authEvent);
     }
+
+    const { boundary, stream, contentLength } = createMultipartStream({
+      file: {
+        field: "file",
+        fileName: source.fileName,
+        contentType: source.contentType,
+        size: source.size,
+        stream: source.stream,
+      },
+      fields: authEvent ? [{ name: "event", value: JSON.stringify(authEvent) }] : undefined,
+      onProgress: (loaded, total) => {
+        if (onProgress) {
+          const totalHint = total ?? source.size ?? options?.sizeOverride;
+          onProgress({ loaded, total: typeof totalHint === "number" ? totalHint : undefined } as AxiosProgressEvent);
+        }
+      },
+    });
+
+    const requestHeaders: Record<string, string> = {
+      ...headers,
+      "Content-Type": `multipart/form-data; boundary=${boundary}`,
+    };
+    if (typeof contentLength === "number") {
+      requestHeaders["Content-Length"] = String(contentLength);
+    }
+
     try {
-      const response = await axios.put<BlossomBlob>(url, form, {
-        headers,
-        onUploadProgress: onProgress,
+      const response = await fetch(url, {
+        method: "PUT",
+        headers: requestHeaders,
+        body: stream,
       });
-      const rawSize = (response.data as any)?.size;
+
+      if (!response.ok) {
+        let serverMessage: string | undefined;
+        try {
+          const data = await response.json();
+          serverMessage = typeof data === "string" ? data : data?.error || data?.message;
+        } catch (error) {
+          serverMessage = undefined;
+        }
+        const normalizedMessage = serverMessage || `Upload failed with status ${response.status}`;
+        const uploadError = new Error(normalizedMessage) as Error & { status?: number };
+        uploadError.status = response.status;
+        throw uploadError;
+      }
+
+      const data = await response.json();
+      const rawSize = (data as any)?.size;
       const size = rawSize === undefined || rawSize === null ? undefined : Number(rawSize);
       return {
-        ...response.data,
+        ...data,
         size: Number.isFinite(size) ? size : undefined,
-        url: response.data.url || `${normalizedServer}/${response.data.sha256}`,
+        url: data.url || `${normalizedServer}/${data.sha256}`,
         serverUrl: normalizedServer,
         requiresAuth: Boolean(requiresAuth),
         serverType: "blossom",
-      };
+      } as BlossomBlob;
     } catch (error) {
-      if (axios.isAxiosError(error)) {
-        if (!error.response) {
-          if (error.request) {
-            throw new Error("Upload failed before the server responded. This often happens when CORS is misconfigured or the server blocks large uploads.");
-          }
-          throw error;
-        }
-        const status = error.response.status;
-        if (status === 413) {
-          throw new Error("Upload rejected: the server responded with 413 (payload too large). Reduce the file size or ask the server admin to raise the limit.");
-        }
-        const data = error.response.data;
-        const serverMessage = typeof data === "string" ? data : (data && typeof data === "object" ? (data.error || data.message) : undefined);
-        const normalizedMessage = serverMessage || `Upload failed with status ${status}`;
-        if (requiresAuth && !skipSizeTag && normalizedMessage.toLowerCase().includes("size tag")) {
+      if (error instanceof Error) {
+        const message = error.message || "Upload failed";
+        if (requiresAuth && !skipSizeTag && message.toLowerCase().includes("size tag")) {
           return attempt(true);
         }
-        throw new Error(normalizedMessage);
+        const status = (error as any)?.status;
+        if (status === 413) {
+          throw new Error(
+            "Upload rejected: the server responded with 413 (payload too large). Reduce the file size or ask the server admin to raise the limit."
+          );
+        }
+        throw error;
       }
       throw error;
     }

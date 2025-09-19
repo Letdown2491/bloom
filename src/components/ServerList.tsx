@@ -86,18 +86,45 @@ export const ServerList: React.FC<ServerListProps> = ({
   }, [isAdding, editingUrl]);
 
   useEffect(() => {
-    let active = true;
+    if (typeof window === "undefined") return;
+
+    let cancelled = false;
     const controllers = new Map<string, AbortController>();
+    const queue = servers.map(server => server);
+    const generation = Symbol("server-health");
+    let activeWorkers = 0;
+
+    const setEntry = (url: string, entry: ServerHealth) => {
+      if (cancelled) return;
+      setHealthMap(prev => {
+        const current = prev[url];
+        if (
+          current &&
+          current.status === entry.status &&
+          current.httpStatus === entry.httpStatus &&
+          current.latencyMs === entry.latencyMs &&
+          current.error === entry.error
+        ) {
+          return prev;
+        }
+        return {
+          ...prev,
+          [url]: entry,
+        };
+      });
+    };
 
     setHealthMap(prev => {
       const next: Record<string, ServerHealth> = {};
-      servers.forEach(server => {
+      queue.forEach(server => {
         next[server.url] = prev[server.url] ?? { status: "checking" };
       });
       return next;
     });
 
-    const checkServer = async (server: ManagedServer) => {
+    const workerLimit = Math.min(4, Math.max(1, typeof navigator !== "undefined" && navigator.hardwareConcurrency ? Math.ceil(navigator.hardwareConcurrency / 3) : 3));
+
+    const checkServer = async (server: ManagedServer, token: symbol) => {
       const normalizedUrl = server.url.replace(/\/$/, "");
       const targetUrl = `${normalizedUrl}/`;
       const controller = new AbortController();
@@ -108,19 +135,11 @@ export const ServerList: React.FC<ServerListProps> = ({
         controller.abort();
       }, 8000);
 
-      if (active) {
-        setHealthMap(prev => ({
-          ...prev,
-          [server.url]: { ...prev[server.url], status: "checking" },
-        }));
-      }
+    setEntry(server.url, { status: "checking" });
 
-      const finalize = (entry: ServerHealth) => {
-        if (!active) return;
-        setHealthMap(prev => ({
-          ...prev,
-          [server.url]: entry,
-        }));
+      const commit = (entry: ServerHealth) => {
+        if (cancelled || token !== generation) return;
+        setEntry(server.url, entry);
       };
 
       const start = performance.now();
@@ -146,9 +165,8 @@ export const ServerList: React.FC<ServerListProps> = ({
           }
         } catch (error) {
           if (error instanceof DOMException && error.name === "AbortError") {
-            if (!active) return;
-            if (timedOut) {
-              finalize({ status: "offline", checkedAt: Date.now(), error: "Timed out" });
+            if (timedOut && token === generation) {
+              commit({ status: "offline", checkedAt: Date.now(), error: "Timed out" });
             }
             return;
           }
@@ -162,15 +180,14 @@ export const ServerList: React.FC<ServerListProps> = ({
             });
           } catch (fallbackError) {
             if (fallbackError instanceof DOMException && fallbackError.name === "AbortError") {
-              if (!active) return;
-              if (timedOut) {
-                finalize({ status: "offline", checkedAt: Date.now(), error: "Timed out" });
+              if (timedOut && token === generation) {
+                commit({ status: "offline", checkedAt: Date.now(), error: "Timed out" });
               }
               return;
             }
 
             const message = fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
-            finalize({ status: "offline", checkedAt: Date.now(), error: message });
+            commit({ status: "offline", checkedAt: Date.now(), error: message });
             return;
           }
         }
@@ -181,7 +198,7 @@ export const ServerList: React.FC<ServerListProps> = ({
         const checkedAt = Date.now();
 
         if (response.type === "opaque") {
-          finalize({ status: "online", checkedAt, latencyMs: duration });
+          commit({ status: "online", checkedAt, latencyMs: duration });
           return;
         }
 
@@ -190,19 +207,35 @@ export const ServerList: React.FC<ServerListProps> = ({
         const reachable = response.ok || requiresAuth;
         const status: ServerHealthStatus = requiresAuth ? "auth" : reachable ? "online" : "offline";
 
-        finalize({ status, checkedAt, httpStatus, latencyMs: duration, error: reachable ? undefined : response.statusText });
+        commit({ status, checkedAt, httpStatus, latencyMs: duration, error: reachable ? undefined : response.statusText });
       } finally {
         clearTimeout(timeoutId);
         controllers.delete(server.url);
       }
     };
 
-    servers.forEach(server => {
-      checkServer(server);
-    });
+    const runQueue = (token: symbol) => {
+      if (cancelled || token !== generation) return;
+      while (activeWorkers < workerLimit && queue.length > 0) {
+        const server = queue.shift();
+        if (!server) break;
+        activeWorkers += 1;
+        checkServer(server, token)
+          .catch(() => undefined)
+          .finally(() => {
+            activeWorkers = Math.max(0, activeWorkers - 1);
+            runQueue(token);
+          });
+      }
+    };
+
+    const timer = window.setTimeout(() => {
+      runQueue(generation);
+    }, 250);
 
     return () => {
-      active = false;
+      cancelled = true;
+      window.clearTimeout(timer);
       controllers.forEach(controller => controller.abort());
     };
   }, [servers]);
