@@ -73,7 +73,7 @@ export const DocumentIcon = createIcon(
   </>
 );
 
-export type FileKind = "folder" | "image" | "video" | "document";
+export type FileKind = "folder" | "image" | "video" | "document" | "pdf" | "doc" | "sheet";
 
 export const DownloadIcon = createIcon(
   <>
@@ -164,7 +164,106 @@ export const FileTypeIcon: React.FC<{ kind: FileKind; size?: number; className?:
       return <ImageIcon size={size} className={className} />;
     case "video":
       return <VideoIcon size={size} className={className} />;
+    case "pdf":
+      return <PdfIcon size={size} className={className} />;
+    case "doc":
+      return <DocIcon size={size} className={className} />;
+    case "sheet":
+      return <SheetIcon size={size} className={className} />;
     default:
       return <DocumentIcon size={size} className={className} />;
   }
 };
+
+const PdfIcon: React.FC<IconProps> = ({ size = 20, className = "", ...props }) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 48 48"
+    xmlns="http://www.w3.org/2000/svg"
+    fill="none"
+    role="img"
+    aria-hidden="true"
+    className={className}
+    {...props}
+  >
+    <path
+      d="M30 4H14c-2.2 0-4 1.8-4 4v32c0 2.2 1.8 4 4 4h20c2.2 0 4-1.8 4-4V12L30 4Z"
+      fill="white"
+      fillOpacity={0.08}
+      stroke="white"
+      strokeWidth={2}
+    />
+    <path d="M30 4v8h8" stroke="white" strokeWidth={2} />
+    <rect x={10} y={24} width={28} height={12} rx={2} fill="#dc2626" />
+    <g fill="white">
+      <path d="M15 33v-6h3.2c1.8 0 2.8.9 2.8 2.3 0 1.5-1.1 2.3-2.8 2.3H17v1.4h-2Zm2-3h1.1c.7 0 1.1-.3 1.1-1s-.4-1-1.1-1H17v2Z" />
+      <path d="M22 33v-6h3c2.1 0 3.6 1.3 3.6 3s-1.5 3-3.6 3h-3Zm2-2h1c.9 0 1.6-.6 1.6-1.6 0-.9-.7-1.4-1.6-1.4h-1V31Z" />
+      <path d="M31 33v-6h5v1.8h-3v.9h2.6V31H33v2h-2Z" />
+    </g>
+  </svg>
+);
+
+const DocIcon: React.FC<IconProps> = ({ size = 20, className = "", ...props }) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 48 48"
+    xmlns="http://www.w3.org/2000/svg"
+    fill="none"
+    role="img"
+    aria-hidden="true"
+    className={className}
+    {...props}
+  >
+    <path
+      d="M30 4H14c-2.2 0-4 1.8-4 4v32c0 2.2 1.8 4 4 4h20c2.2 0 4-1.8 4-4V12L30 4Z"
+      fill="white"
+      fillOpacity={0.08}
+      stroke="white"
+      strokeWidth={2}
+    />
+    <path d="M30 4v8h8" stroke="white" strokeWidth={2} />
+    <rect x={10} y={24} width={28} height={12} rx={2} fill="blue" />
+    <g fill="white">
+      <path d="M15 33v-6h2.8c1.9 0 3.2 1.2 3.2 3s-1.3 3-3.2 3H15Zm2-2h.7c.9 0 1.5-.6 1.5-1.5 0-.9-.6-1.5-1.5-1.5H17v3Z" />
+      <path d="M23 33c-1.9 0-3.3-1.3-3.3-3s1.4-3 3.3-3c1.8 0 3.3 1.3 3.3 3s-1.5 3-3.3 3Zm0-2c.9 0 1.4-.6 1.4-1.5s-.5-1.5-1.4-1.5c-.9 0-1.4.6-1.4 1.5s.5 1.5 1.4 1.5Z" />
+      <path d="M29.5 33c-1.6 0-3-1.3-3-3s1.4-3 3-3c1 0 1.7.4 2.3 1l-1.2 1c-.3-.3-.6-.5-1.1-.5-.7 0-1.3.6-1.3 1.5s.6 1.5 1.3 1.5c.5 0 .8-.2 1.1-.5l1.2 1c-.6.6-1.3 1-2.3 1Z" />
+    </g>
+  </svg>
+);
+
+const SheetIcon: React.FC<IconProps> = ({ size = 20, className = "", ...props }) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 48 48"
+    xmlns="http://www.w3.org/2000/svg"
+    fill="none"
+    role="img"
+    aria-hidden="true"
+    className={className}
+    {...props}
+  >
+    <path
+      d="M30 4H14c-2.2 0-4 1.8-4 4v32c0 2.2 1.8 4 4 4h20c2.2 0 4-1.8 4-4V12L30 4Z"
+      fill="white"
+      fillOpacity={0.08}
+      stroke="white"
+      strokeWidth={2}
+    />
+    <path d="M30 4v8h8" stroke="white" strokeWidth={2} />
+    <rect x={10} y={24} width={28} height={12} rx={2} fill="green" />
+    <text
+      x={24}
+      y={34}
+      textAnchor="middle"
+      fontFamily="system-ui, sans-serif"
+      fontWeight={700}
+      fontSize={10}
+      fill="white"
+    >
+      XLS
+    </text>
+  </svg>
+);

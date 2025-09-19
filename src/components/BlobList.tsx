@@ -31,11 +31,14 @@ type ResolvedMeta = {
 
 type ResolvedMetaMap = Record<string, ResolvedMeta>;
 
-type FileKind = "image" | "video" | "document";
+type FileKind = "image" | "video" | "pdf" | "doc" | "sheet" | "document";
 
 type SortKey = "name" | "type" | "size" | "uploaded";
 
 type SortConfig = { key: SortKey; direction: "asc" | "desc" };
+
+const CARD_HEIGHT = 260;
+const LIST_THUMBNAIL_SIZE = 48;
 
 const deriveBlobSortName = (blob: BlossomBlob) => {
   const explicit = blob.name?.trim();
@@ -538,7 +541,6 @@ const GridLayout: React.FC<{
   detectedKinds,
   onDetect,
 }) => {
-  const CARD_HEIGHT = 260;
   const CARD_WIDTH = 220;
   const GAP = 16;
   const OVERSCAN_ROWS = 2;
@@ -600,97 +602,117 @@ const GridLayout: React.FC<{
           {items.map(({ blob, row, col }) => {
             const isSelected = selected.has(blob.sha256);
             const isAudio = blob.type?.startsWith("audio/");
-            const previewUrl = blob.url;
-            const previewRequiresAuth = blob.requiresAuth ?? requiresAuth;
             const displayName = buildDisplayName(blob);
+            const previewRequiresAuth = blob.requiresAuth ?? requiresAuth;
+            const kind = decideFileKind(blob, detectedKinds[blob.sha256]);
+            const disablePreview = kind === "doc" || kind === "sheet" || kind === "pdf";
+            const previewUrl = disablePreview ? null : blob.url;
             const top = GAP + row * rowHeight;
             const left = GAP + col * (effectiveColumnWidth + GAP);
             return (
-              <div
-                key={blob.sha256}
-                role="button"
-                tabIndex={0}
-                aria-pressed={isSelected}
-                onClick={() => onToggle(blob.sha256)}
-                onKeyDown={event => {
-                  if (event.key === "Enter" || event.key === " ") {
-                    event.preventDefault();
-                    onToggle(blob.sha256);
-                  }
-                }}
-                className={`absolute flex flex-col gap-3 rounded-xl border px-4 py-4 focus:outline-none focus:ring-2 focus:ring-emerald-500/70 focus:ring-offset-2 focus:ring-offset-slate-900 cursor-pointer transition ${
-                  isSelected ? "border-emerald-500 bg-emerald-500/10" : "border-slate-800 bg-slate-900/60"
-                }`}
-                style={{ top, left, width: effectiveColumnWidth, height: CARD_HEIGHT }}
-              >
-                {previewUrl && (
-                  <BlobPreview
-                    sha={blob.sha256}
-                    url={previewUrl}
-                    name={blob.name || blob.sha256}
-                    type={blob.type}
-                    serverUrl={blob.serverUrl ?? baseUrl}
-                    requiresAuth={previewRequiresAuth}
-                    signTemplate={previewRequiresAuth ? signTemplate : undefined}
-                    serverType={blob.serverType ?? serverType}
-                    onDetect={onDetect}
-                  />
-                )}
-                <div className="text-sm font-medium text-slate-100 break-words">
-                  {displayName}
-                </div>
-                <div className="flex flex-wrap gap-2 mt-auto pt-1">
-                  {blob.url && (
-                    <button
-                      className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200"
-                      onClick={event => {
-                        event.stopPropagation();
-                        onCopy(blob);
-                      }}
-                      aria-label="Copy blob URL"
-                      title="Copy URL"
-                    >
-                      <CopyIcon size={16} />
-                    </button>
-                  )}
-                  {blob.url && (
-                    <button
-                      className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200"
-                      onClick={event => {
-                        event.stopPropagation();
-                        onDownload(blob);
-                      }}
-                      aria-label="Download blob"
-                      title="Download"
-                    >
-                      <DownloadIcon size={16} />
-                    </button>
-                  )}
-                  <button
-                    className="p-2 rounded-lg bg-red-900/80 hover:bg-red-800 text-slate-100"
-                    onClick={event => {
-                      event.stopPropagation();
-                      onDelete(blob);
-                    }}
-                    aria-label="Delete blob"
-                    title="Delete"
+              <React.Fragment key={blob.sha256}>
+                <div
+                  role="button"
+                  tabIndex={0}
+                  aria-pressed={isSelected}
+                  onClick={() => onToggle(blob.sha256)}
+                  onKeyDown={event => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      onToggle(blob.sha256);
+                    }
+                  }}
+                  className={`absolute flex flex-col overflow-hidden rounded-xl border focus:outline-none focus:ring-2 focus:ring-emerald-500/70 focus:ring-offset-2 focus:ring-offset-slate-900 cursor-pointer transition ${
+                    isSelected ? "border-emerald-500 bg-emerald-500/10" : "border-slate-800 bg-slate-900/60"
+                  }`}
+                  style={{ top, left, width: effectiveColumnWidth, height: CARD_HEIGHT }}
+                >
+                  <div className="relative flex-1" style={{ height: CARD_HEIGHT * 0.75 }}>
+                    {previewUrl ? (
+                      <BlobPreview
+                        sha={blob.sha256}
+                        url={previewUrl}
+                        name={blob.name || blob.sha256}
+                        type={blob.type}
+                        serverUrl={blob.serverUrl ?? baseUrl}
+                        requiresAuth={previewRequiresAuth}
+                        signTemplate={previewRequiresAuth ? signTemplate : undefined}
+                        serverType={blob.serverType ?? serverType}
+                        onDetect={onDetect}
+                        fallbackIconSize={Math.round(CARD_HEIGHT * 0.5)}
+                        className="h-full rounded-none border-0 bg-transparent"
+                      />
+                    ) : (
+                      <div className="flex h-full w-full items-center justify-center bg-slate-950/80">
+                        <FileTypeIcon kind={kind} size={Math.round(CARD_HEIGHT * 0.5)} className="text-slate-300" />
+                      </div>
+                    )}
+                    <div className="pointer-events-none absolute inset-x-0 bottom-0 px-3 pb-2">
+                      <div
+                        className="w-full truncate rounded-md bg-slate-950/75 px-2 py-1 text-xs font-medium text-slate-100 text-center"
+                        title={displayName}
+                      >
+                        {displayName}
+                      </div>
+                    </div>
+                  </div>
+                  <div
+                    className="flex flex-wrap items-center justify-center gap-2 border-t border-slate-800/80 bg-slate-950/90 px-4 py-3"
+                    style={{ height: CARD_HEIGHT * 0.25 }}
                   >
-                    <TrashIcon size={16} />
-                  </button>
-                  {isAudio && onPlay && blob.url && (
+                    {blob.url && (
+                      <button
+                        className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200"
+                        onClick={event => {
+                          event.stopPropagation();
+                          onCopy(blob);
+                        }}
+                        aria-label="Copy blob URL"
+                        title="Copy URL"
+                      >
+                        <CopyIcon size={16} />
+                      </button>
+                    )}
+                    {blob.url && (
+                      <button
+                        className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200"
+                        onClick={event => {
+                          event.stopPropagation();
+                          onDownload(blob);
+                        }}
+                        aria-label="Download blob"
+                        title="Download"
+                      >
+                        <DownloadIcon size={16} />
+                      </button>
+                    )}
                     <button
-                      className="px-2 py-1 text-xs rounded-lg bg-emerald-700/70 hover:bg-emerald-600"
+                      className="p-2 rounded-lg bg-red-900/80 hover:bg-red-800 text-slate-100"
                       onClick={event => {
                         event.stopPropagation();
-                        onPlay?.(blob);
+                        onDelete(blob);
                       }}
+                      aria-label="Delete blob"
+                      title="Delete"
                     >
-                      Play
+                      <TrashIcon size={16} />
                     </button>
-                  )}
+                    {isAudio && onPlay && blob.url && (
+                      <button
+                        className="px-2 py-1 text-xs rounded-lg bg-emerald-700/70 hover:bg-emerald-600"
+                        onClick={event => {
+                          event.stopPropagation();
+                          onPlay?.(blob);
+                        }}
+                      >
+                        Play
+                      </button>
+                    )}
+                  </div>
                 </div>
-              </div>
+              </React.Fragment>
             );
+
           })}
           {blobs.length === 0 && (
             <div className="absolute inset-0 flex items-center justify-center text-sm text-slate-300">
@@ -715,6 +737,7 @@ const ListThumbnail: React.FC<{
   const [failed, setFailed] = useState(false);
   const [src, setSrc] = useState<string | null>(null);
   const [isLoaded, setIsLoaded] = useState(false);
+  const [textPreview, setTextPreview] = useState<{ content: string; truncated: boolean } | null>(null);
   const objectUrlRef = useRef<string | null>(null);
   const lastLoadedKeyRef = useRef<string | null>(null);
   const lastFailureKeyRef = useRef<string | null>(null);
@@ -724,12 +747,20 @@ const ListThumbnail: React.FC<{
   const containerClass = "flex h-12 w-12 flex-shrink-0 overflow-hidden rounded-lg border border-slate-800 bg-slate-950/80 relative";
   const effectiveRequiresAuth = blob.requiresAuth ?? requiresAuth;
   const effectiveServerType = blob.serverType ?? serverType;
-  const previewUrl = blob.url || (() => {
+  const disablePreview = kind === "doc" || kind === "sheet" || kind === "pdf";
+  const previewUrl = disablePreview
+    ? undefined
+    : blob.url || (() => {
     const fallback = blob.serverUrl ?? baseUrl;
     if (!fallback) return undefined;
     return `${fallback.replace(/\/$/, "")}/${blob.sha256}`;
   })();
   const previewKey = previewUrl ? `${blob.sha256}|${previewUrl}|${effectiveRequiresAuth ? "auth" : "anon"}` : null;
+
+  const metaSuggestsText = useMemo(
+    () => !disablePreview && isPreviewableTextType({ mime: blob.type, name: blob.name, url: previewUrl }),
+    [disablePreview, blob.type, blob.name, previewUrl]
+  );
 
   useEffect(() => {
     return () => {
@@ -751,6 +782,7 @@ const ListThumbnail: React.FC<{
       setSrc(null);
       setIsLoaded(false);
       setFailed(false);
+      setTextPreview(null);
       return;
     }
 
@@ -792,6 +824,7 @@ const ListThumbnail: React.FC<{
     setFailed(false);
     setIsLoaded(false);
     setSrc(null);
+    setTextPreview(null);
 
     if (objectUrlRef.current) {
       URL.revokeObjectURL(objectUrlRef.current);
@@ -810,6 +843,7 @@ const ListThumbnail: React.FC<{
         URL.revokeObjectURL(objectUrlRef.current);
         objectUrlRef.current = null;
       }
+      setTextPreview(null);
       const objectUrl = URL.createObjectURL(blobData);
       objectUrlRef.current = objectUrl;
       lastLoadedKeyRef.current = previewKey;
@@ -823,14 +857,43 @@ const ListThumbnail: React.FC<{
         URL.revokeObjectURL(objectUrlRef.current);
         objectUrlRef.current = null;
       }
+      setTextPreview(null);
       lastLoadedKeyRef.current = previewKey;
       lastFailureKeyRef.current = null;
       setSrc(resolvedPreviewUrl);
     };
 
+    const showTextPreview = async (blobData: Blob, mimeHint?: string | null) => {
+      const normalizedMime = mimeHint ?? blobData.type ?? blob.type;
+      const shouldRenderText =
+        isPreviewableTextType({ mime: normalizedMime, name: blob.name, url: resolvedPreviewUrl }) ||
+        (!normalizedMime && isPreviewableTextType({ name: blob.name, url: resolvedPreviewUrl })) ||
+        metaSuggestsText;
+      if (!shouldRenderText) return false;
+      try {
+        const preview = await buildTextPreview(blobData);
+        if (cancelled) return true;
+        if (objectUrlRef.current) {
+          URL.revokeObjectURL(objectUrlRef.current);
+          objectUrlRef.current = null;
+        }
+        setSrc(null);
+        setTextPreview(preview);
+        setIsLoaded(true);
+        setFailed(false);
+        lastLoadedKeyRef.current = previewKey;
+        lastFailureKeyRef.current = null;
+        return true;
+      } catch (error) {
+        return false;
+      }
+    };
+
     const load = async () => {
       try {
-        const cached = await getCachedPreviewBlob(blob.serverUrl ?? baseUrl, blob.sha256);
+        const cached = metaSuggestsText
+          ? null
+          : await getCachedPreviewBlob(blob.serverUrl ?? baseUrl, blob.sha256);
         if (cancelled) return;
         if (cached) {
           assignObjectUrl(cached);
@@ -847,6 +910,9 @@ const ListThumbnail: React.FC<{
             }
             const blobData = await response.blob();
             if (cancelled) return;
+            const mime = response.headers.get("content-type") || blobData.type || blob.type || undefined;
+            const handled = await showTextPreview(blobData, mime);
+            if (handled) return;
             assignObjectUrl(blobData);
             await cachePreviewBlob(blob.serverUrl ?? baseUrl, blob.sha256, blobData);
             return;
@@ -855,7 +921,15 @@ const ListThumbnail: React.FC<{
             if (error instanceof DOMException && error.name === "AbortError") {
               return;
             }
-            useDirectUrl();
+            if (!metaSuggestsText) {
+              useDirectUrl();
+            } else {
+              lastLoadedKeyRef.current = null;
+              if (previewKey) {
+                lastFailureKeyRef.current = previewKey;
+              }
+              setFailed(true);
+            }
             return;
           }
         }
@@ -896,6 +970,9 @@ const ListThumbnail: React.FC<{
 
         const blobData = await response.blob();
         if (cancelled) return;
+        const mime = response.headers.get("content-type") || blobData.type || blob.type || undefined;
+        const handled = await showTextPreview(blobData, mime);
+        if (handled) return;
         assignObjectUrl(blobData);
         await cachePreviewBlob(blob.serverUrl ?? baseUrl, blob.sha256, blobData);
       } catch (error) {
@@ -933,11 +1010,20 @@ const ListThumbnail: React.FC<{
   }, [previewKey, effectiveRequiresAuth, signTemplate]);
 
   const altText = blob.name || previewUrl?.split("/").pop() || blob.sha256;
+  const showText = Boolean(textPreview) && !failed;
   const showMedia = Boolean(src) && !failed && Boolean(previewUrl);
-  const showOverlay = !showMedia || !isLoaded;
+  const showOverlay = (!showMedia && !showText) || (showMedia && !isLoaded);
+  const fallbackIconSize = Math.round(LIST_THUMBNAIL_SIZE * 0.6);
 
   return (
     <div ref={observeTarget} className={containerClass}>
+      {showText && textPreview && (
+        <div className="absolute inset-0 flex h-full w-full flex-col overflow-hidden bg-slate-950/85 px-2 py-1">
+          <pre className="flex-1 overflow-hidden whitespace-pre-wrap break-words font-mono text-[9px] leading-tight text-slate-200" title={textPreview.content}>
+            {textPreview.content}
+          </pre>
+        </div>
+      )}
       {showMedia && (
         <img
           src={src!}
@@ -965,7 +1051,7 @@ const ListThumbnail: React.FC<{
       )}
       {showOverlay && (
         <div className="absolute inset-0 flex items-center justify-center bg-slate-950/70 pointer-events-none">
-          <FileTypeIcon kind={kind} size={20} className="text-slate-300" />
+          <FileTypeIcon kind={kind} size={fallbackIconSize} className="text-slate-300" />
         </div>
       )}
     </div>
@@ -1312,6 +1398,8 @@ const BlobPreview: React.FC<{
   signTemplate?: SignTemplate;
   serverType?: "blossom" | "nip96";
   onDetect: (sha: string, kind: "image" | "video") => void;
+  className?: string;
+  fallbackIconSize?: number;
 }> = ({
   sha,
   url,
@@ -1322,17 +1410,32 @@ const BlobPreview: React.FC<{
   signTemplate,
   serverType = "blossom",
   onDetect,
+  className,
+  fallbackIconSize,
 }) => {
   const [src, setSrc] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [previewType, setPreviewType] = useState<"image" | "video" | "unknown">(() => inferKind(type, url) ?? "unknown");
+  const [previewType, setPreviewType] = useState<"image" | "video" | "text" | "unknown">(() => {
+    if (isPreviewableTextType({ mime: type, name, url })) return "text";
+    return inferKind(type, url) ?? "unknown";
+  });
   const [isReady, setIsReady] = useState(false);
+  const [textPreview, setTextPreview] = useState<{ content: string; truncated: boolean } | null>(null);
   const objectUrlRef = useRef<string | null>(null);
   const lastLoadedKeyRef = useRef<string | null>(null);
   const lastFailureKeyRef = useRef<string | null>(null);
   const activeRequestRef = useRef<{ key: string; controller: AbortController } | null>(null);
   const [observeTarget, isVisible] = useInViewport<HTMLDivElement>({ rootMargin: "400px" });
+
+  const fallbackIconKind = useMemo<FileKind>(() => {
+    if (previewType === "image" || previewType === "video") return previewType;
+    if (isSheetType(type, name || url)) return "sheet";
+    if (isDocType(type, name || url)) return "doc";
+    if (isPdfType(type, name || url)) return "pdf";
+    if (isPreviewableTextType({ mime: type, name, url })) return "document";
+    return "document";
+  }, [previewType, type, name, url]);
 
   const releaseObjectUrl = useCallback(() => {
     if (objectUrlRef.current) {
@@ -1351,11 +1454,17 @@ const BlobPreview: React.FC<{
     }
   }, [serverUrl, url]);
 
+  const metaSuggestsText = useMemo(() => isPreviewableTextType({ mime: type, name, url }), [type, name, url]);
+
   const previewKey = `${sha}|${requiresAuth ? "auth" : "anon"}|${url}`;
 
   useEffect(() => {
-    setPreviewType(inferKind(type, url) ?? "unknown");
-  }, [type, url]);
+    if (isPreviewableTextType({ mime: type, name, url })) {
+      setPreviewType("text");
+    } else {
+      setPreviewType(inferKind(type, url) ?? "unknown");
+    }
+  }, [type, url, name]);
 
   useEffect(() => {
     return () => {
@@ -1397,6 +1506,7 @@ const BlobPreview: React.FC<{
     setLoading(true);
     setIsReady(false);
     setSrc(null);
+    setTextPreview(null);
     releaseObjectUrl();
 
     const existingKind = inferKind(type, url);
@@ -1414,24 +1524,57 @@ const BlobPreview: React.FC<{
     const assignObjectUrl = (blobData: Blob) => {
       if (cancelled) return;
       releaseObjectUrl();
+      setTextPreview(null);
+      setIsReady(false);
       const objectUrl = URL.createObjectURL(blobData);
       objectUrlRef.current = objectUrl;
       lastLoadedKeyRef.current = previewKey;
       lastFailureKeyRef.current = null;
       setSrc(objectUrl);
+      setLoading(false);
     };
 
     const useDirectUrl = () => {
       if (cancelled) return;
       releaseObjectUrl();
+      setTextPreview(null);
+      setIsReady(false);
       lastLoadedKeyRef.current = previewKey;
       lastFailureKeyRef.current = null;
       setSrc(url);
+      setLoading(false);
+    };
+
+    const showTextPreview = async (blobData: Blob, mimeHint?: string | null) => {
+      const normalizedMime = mimeHint ?? blobData.type ?? type;
+      const shouldRenderText =
+        isPreviewableTextType({ mime: normalizedMime, name, url }) ||
+        (!normalizedMime && isPreviewableTextType({ name, url })) ||
+        metaSuggestsText;
+      if (!shouldRenderText) return false;
+
+      let preview: { content: string; truncated: boolean };
+      try {
+        preview = await buildTextPreview(blobData);
+      } catch (error) {
+        return false;
+      }
+      if (cancelled) return true;
+      releaseObjectUrl();
+      setSrc(null);
+      setPreviewType("text");
+      setTextPreview(preview);
+      setIsReady(true);
+      setLoading(false);
+      setFailed(false);
+      lastLoadedKeyRef.current = previewKey;
+      lastFailureKeyRef.current = null;
+      return true;
     };
 
     const load = async () => {
       try {
-        const cached = await getCachedPreviewBlob(cacheServerHint, sha);
+        const cached = metaSuggestsText ? null : await getCachedPreviewBlob(cacheServerHint, sha);
         if (cancelled) return;
         if (cached) {
           assignObjectUrl(cached);
@@ -1448,6 +1591,9 @@ const BlobPreview: React.FC<{
             }
             const blobData = await response.blob();
             if (cancelled) return;
+            const mime = response.headers.get("content-type") || blobData.type || type || "";
+            const handled = await showTextPreview(blobData, mime);
+            if (handled) return;
             assignObjectUrl(blobData);
             await cachePreviewBlob(cacheServerHint, sha, blobData);
           } catch (error) {
@@ -1455,7 +1601,14 @@ const BlobPreview: React.FC<{
             if (error instanceof DOMException && error.name === "AbortError") {
               return;
             }
-            useDirectUrl();
+            if (!metaSuggestsText) {
+              useDirectUrl();
+            } else {
+              lastLoadedKeyRef.current = null;
+              lastFailureKeyRef.current = previewKey;
+              setFailed(true);
+              setLoading(false);
+            }
           }
           return;
         }
@@ -1488,6 +1641,8 @@ const BlobPreview: React.FC<{
         const blobData = await response.blob();
         if (cancelled) return;
         const mime = response.headers.get("content-type") || blobData.type || type || "";
+        const handled = await showTextPreview(blobData, mime);
+        if (handled) return;
         const detectedType = mime.startsWith("video/") ? "video" : mime.startsWith("image/") ? "image" : previewType;
         setPreviewType(detectedType);
         if (detectedType === "image" || detectedType === "video") {
@@ -1533,22 +1688,31 @@ const BlobPreview: React.FC<{
     lastLoadedKeyRef.current = null;
     lastFailureKeyRef.current = previewKey;
     setSrc(null);
+    setTextPreview(null);
     setIsReady(false);
     setLoading(false);
     setFailed(true);
   };
 
+  const showText = Boolean(textPreview) && !failed;
   const showMedia = Boolean(src) && !failed;
   const isVideo = showMedia && previewType === "video";
-  const isImage = showMedia && !isVideo;
+  const isImage = showMedia && previewType !== "video";
   const showLoading = loading || (showMedia && !isReady);
-  const showUnavailable = !loading && failed;
+  const showUnavailable = !loading && !showText && !showMedia && failed;
+
+  const containerClass =
+    "relative flex w-full items-center justify-center overflow-hidden rounded-lg border border-slate-800 bg-slate-950/80";
 
   return (
-    <div
-      ref={observeTarget}
-      className="relative flex h-40 w-full items-center justify-center overflow-hidden rounded-lg border border-slate-800 bg-slate-950/80"
-    >
+    <div ref={observeTarget} className={`${containerClass} ${className ?? "h-40"}`}>
+      {showText && textPreview && (
+        <div className="absolute inset-0 flex h-full w-full flex-col overflow-hidden bg-slate-950/85 px-3 py-2">
+          <pre className="flex-1 overflow-hidden whitespace-pre-wrap break-words font-mono text-[11px] leading-snug text-slate-200" title={textPreview.content}>
+            {textPreview.content}
+          </pre>
+        </div>
+      )}
       {isVideo && (
         <video
           src={src!}
@@ -1592,8 +1756,12 @@ const BlobPreview: React.FC<{
         </div>
       )}
       {showUnavailable && (
-        <div className="absolute inset-0 flex items-center justify-center bg-slate-950/60 text-xs text-slate-300 pointer-events-none">
-          Preview unavailable
+        <div className="absolute inset-0 flex items-center justify-center bg-slate-950/70">
+          <FileTypeIcon
+            kind={fallbackIconKind}
+            size={fallbackIconSize ?? 96}
+            className="text-slate-300"
+          />
         </div>
       )}
     </div>
@@ -1627,6 +1795,9 @@ function isSameOrigin(url: string) {
 
 function decideFileKind(blob: BlossomBlob, detected?: "image" | "video"): FileKind {
   if (detected) return detected;
+  if (isSheetType(blob.type, blob.name || blob.url)) return "sheet";
+  if (isDocType(blob.type, blob.name || blob.url)) return "doc";
+  if (isPdfType(blob.type, blob.name || blob.url)) return "pdf";
   const inferred = inferKind(blob.type, blob.name || blob.url);
   if (inferred) return inferred;
   return "document";
@@ -1638,6 +1809,140 @@ function inferKind(type?: string, ref?: string | null): "image" | "video" | unde
   if (mime.startsWith("image/") || /\.(png|jpe?g|gif|webp|bmp|svg|heic)$/.test(name)) return "image";
   if (mime.startsWith("video/") || /\.(mp4|mov|webm|mkv|avi|hevc)$/.test(name)) return "video";
   return undefined;
+}
+
+function isPdfType(type?: string, ref?: string | null) {
+  const mime = type?.toLowerCase() ?? "";
+  const name = ref?.toLowerCase() ?? "";
+  if (mime === "application/pdf") return true;
+  return name.endsWith(".pdf");
+}
+
+function isDocType(type?: string, ref?: string | null) {
+  const mime = type?.toLowerCase() ?? "";
+  const name = ref?.toLowerCase() ?? "";
+  if (
+    mime === "application/msword" ||
+    mime === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
+    mime === "application/vnd.oasis.opendocument.text" ||
+    mime === "application/vnd.apple.pages"
+  ) {
+    return true;
+  }
+  return /\.(docx?|docm|dotx|dotm|odt|pages)$/i.test(name);
+}
+
+function isSheetType(type?: string, ref?: string | null) {
+  const mime = type?.toLowerCase() ?? "";
+  const name = ref?.toLowerCase() ?? "";
+  if (
+    mime === "application/vnd.ms-excel" ||
+    mime === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" ||
+    mime === "application/vnd.oasis.opendocument.spreadsheet" ||
+    mime === "application/vnd.apple.numbers"
+  ) {
+    return true;
+  }
+  return /\.(xlsx?|ods|numbers)$/i.test(name);
+}
+
+const TEXT_PREVIEW_MIME_ALLOWLIST = new Set(
+  [
+    "text/plain",
+    "text/log",
+    "text/csv",
+    "text/markdown",
+    "text/x-markdown",
+    "text/css",
+    "text/javascript",
+    "application/json",
+    "application/xml",
+    "text/xml",
+  ].map(value => value.toLowerCase())
+);
+
+const TEXT_PREVIEW_EXTENSION_ALLOWLIST = new Set([
+  "txt",
+  "log",
+  "csv",
+  "md",
+  "markdown",
+  "css",
+  "js",
+  "mjs",
+  "cjs",
+  "json",
+  "xml",
+]);
+
+const TEXT_PREVIEW_MAX_BYTES = 32 * 1024;
+const TEXT_PREVIEW_MAX_LINES = 40;
+const TEXT_PREVIEW_MAX_CHARS = 2000;
+
+type TextPreviewMeta = {
+  mime?: string | null;
+  name?: string | null;
+  url?: string | null;
+};
+
+function isPreviewableTextType(meta: TextPreviewMeta): boolean {
+  const mime = normalizeMime(meta.mime);
+  if (mime) {
+    if (TEXT_PREVIEW_MIME_ALLOWLIST.has(mime)) return true;
+    // Explicitly avoid treating other text types as previews unless they match the allow list.
+  }
+
+  if (hasTextPreviewExtension(meta.name)) return true;
+  if (hasTextPreviewExtension(meta.url)) return true;
+
+  return false;
+}
+
+async function buildTextPreview(blob: Blob): Promise<{ content: string; truncated: boolean }> {
+  const limitedBlob = blob.size > TEXT_PREVIEW_MAX_BYTES ? blob.slice(0, TEXT_PREVIEW_MAX_BYTES) : blob;
+  const raw = await limitedBlob.text();
+  let truncated = blob.size > TEXT_PREVIEW_MAX_BYTES;
+
+  const sanitized = raw.replace(/\u0000/g, "\uFFFD").replace(/\r\n/g, "\n");
+  let content = sanitized;
+
+  const lines = content.split("\n");
+  if (lines.length > TEXT_PREVIEW_MAX_LINES) {
+    content = lines.slice(0, TEXT_PREVIEW_MAX_LINES).join("\n");
+    truncated = true;
+  }
+
+  if (content.length > TEXT_PREVIEW_MAX_CHARS) {
+    content = content.slice(0, TEXT_PREVIEW_MAX_CHARS);
+    truncated = true;
+  }
+
+  content = content.trimEnd();
+  if (!content) {
+    return { content: "(empty file)", truncated };
+  }
+
+  if (truncated) {
+    content = `${content}\n…`;
+  }
+
+  return { content, truncated };
+}
+
+function normalizeMime(value?: string | null) {
+  if (!value) return undefined;
+  const [primary] = value.split(";");
+  return primary?.trim().toLowerCase() || undefined;
+}
+
+function hasTextPreviewExtension(ref?: string | null) {
+  if (!ref) return false;
+  const lower = ref.toLowerCase();
+  const sanitized = lower.split(/[?#]/)[0];
+  const lastDot = sanitized.lastIndexOf(".");
+  if (lastDot === -1 || lastDot === sanitized.length - 1) return false;
+  const ext = sanitized.slice(lastDot + 1);
+  return TEXT_PREVIEW_EXTENSION_ALLOWLIST.has(ext);
 }
 
 function sanitizeFilename(value: string) {
@@ -1665,6 +1970,14 @@ function inferExtensionFromType(type?: string) {
     "audio/wav": "wav",
     "audio/ogg": "ogg",
     "application/pdf": "pdf",
+    "application/msword": "doc",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
+    "application/vnd.oasis.opendocument.text": "odt",
+    "application/vnd.apple.pages": "pages",
+    "application/vnd.ms-excel": "xls",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
+    "application/vnd.oasis.opendocument.spreadsheet": "ods",
+    "application/vnd.apple.numbers": "numbers",
     "text/plain": "txt",
   };
   if (!mime) return undefined;
