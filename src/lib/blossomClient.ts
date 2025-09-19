@@ -1,5 +1,4 @@
-import type { AxiosProgressEvent } from "axios";
-import { createMultipartStream } from "./multipartStream";
+import axios, { type AxiosProgressEvent } from "axios";
 
 export type BlossomBlob = {
   sha256: string;
@@ -196,6 +195,14 @@ type UploadOptions = {
   sizeOverride?: number;
 };
 
+async function ensureUploadFile(source: ResolvedUploadSource): Promise<File> {
+  if (source.originalFile instanceof File) {
+    return source.originalFile;
+  }
+  const blob = await new Response(source.stream).blob();
+  return new File([blob], source.fileName, { type: source.contentType });
+}
+
 export async function uploadBlobToServer(
   serverUrl: string,
   file: UploadSource,
@@ -207,18 +214,22 @@ export async function uploadBlobToServer(
   const url = new URL(`/upload`, serverUrl).toString();
   const normalizedServer = serverUrl.replace(/\/$/, "");
 
-  const attempt = async (skipSizeTag: boolean): Promise<BlossomBlob> => {
-    const source = await resolveUploadSource(file);
-    const headers: Record<string, string> = { Accept: "application/json" };
+  const source = await resolveUploadSource(file);
+  const uploadFile = await ensureUploadFile(source);
 
-    let authEvent: SignedEvent | undefined;
+  const attempt = async (skipSizeTag: boolean): Promise<BlossomBlob> => {
+    const headers: Record<string, string> = {
+      Accept: "application/json",
+      "Content-Type": uploadFile.type || source.contentType || "application/octet-stream",
+    };
+
     if (requiresAuth) {
       if (!signTemplate) throw new Error("Server requires auth. Connect your signer first.");
-      authEvent = await createAuthEvent(signTemplate, "upload", {
-        file: source.originalFile,
-        fileName: source.fileName,
-        fileType: source.contentType,
-        fileSize: source.size,
+      const authEvent = await createAuthEvent(signTemplate, "upload", {
+        file: uploadFile,
+        fileName: uploadFile.name,
+        fileType: uploadFile.type,
+        fileSize: uploadFile.size,
         serverUrl,
         urlPath: "/upload",
         sizeOverride: options?.sizeOverride,
@@ -227,76 +238,42 @@ export async function uploadBlobToServer(
       headers.Authorization = encodeAuthHeader(authEvent);
     }
 
-    const { boundary, stream, contentLength } = createMultipartStream({
-      file: {
-        field: "file",
-        fileName: source.fileName,
-        contentType: source.contentType,
-        size: source.size,
-        stream: source.stream,
-      },
-      fields: authEvent ? [{ name: "event", value: JSON.stringify(authEvent) }] : undefined,
-      onProgress: (loaded, total) => {
-        if (onProgress) {
-          const totalHint = total ?? source.size ?? options?.sizeOverride;
-          onProgress({ loaded, total: typeof totalHint === "number" ? totalHint : undefined } as AxiosProgressEvent);
-        }
-      },
-    });
-
-    const requestHeaders: Record<string, string> = {
-      ...headers,
-      "Content-Type": `multipart/form-data; boundary=${boundary}`,
-    };
-    if (typeof contentLength === "number") {
-      requestHeaders["Content-Length"] = String(contentLength);
-    }
-
     try {
-      const response = await fetch(url, {
-        method: "PUT",
-        headers: requestHeaders,
-        body: stream,
+      const response = await axios.put(url, uploadFile, {
+        headers,
+        onUploadProgress: progressEvent => {
+          if (onProgress) onProgress(progressEvent as AxiosProgressEvent);
+        },
       });
 
-      if (!response.ok) {
-        let serverMessage: string | undefined;
-        try {
-          const data = await response.json();
-          serverMessage = typeof data === "string" ? data : data?.error || data?.message;
-        } catch (error) {
-          serverMessage = undefined;
-        }
-        const normalizedMessage = serverMessage || `Upload failed with status ${response.status}`;
-        const uploadError = new Error(normalizedMessage) as Error & { status?: number };
-        uploadError.status = response.status;
-        throw uploadError;
-      }
-
-      const data = await response.json();
+      const data = response.data || {};
       const rawSize = (data as any)?.size;
       const size = rawSize === undefined || rawSize === null ? undefined : Number(rawSize);
       return {
         ...data,
-        size: Number.isFinite(size) ? size : undefined,
+        size: Number.isFinite(size) ? size : uploadFile.size,
         url: data.url || `${normalizedServer}/${data.sha256}`,
         serverUrl: normalizedServer,
         requiresAuth: Boolean(requiresAuth),
         serverType: "blossom",
       } as BlossomBlob;
     } catch (error) {
-      if (error instanceof Error) {
-        const message = error.message || "Upload failed";
-        if (requiresAuth && !skipSizeTag && message.toLowerCase().includes("size tag")) {
+      if (axios.isAxiosError(error)) {
+        const status = error.response?.status;
+        const serverMessage = (error.response?.data as any)?.message || error.message;
+        if (requiresAuth && !skipSizeTag && (serverMessage || "").toLowerCase().includes("size tag")) {
           return attempt(true);
         }
-        const status = (error as any)?.status;
         if (status === 413) {
           throw new Error(
             "Upload rejected: the server responded with 413 (payload too large). Reduce the file size or ask the server admin to raise the limit."
           );
         }
-        throw error;
+        const uploadError = new Error(serverMessage || `Upload failed with status ${status ?? "unknown"}`) as Error & {
+          status?: number;
+        };
+        uploadError.status = status;
+        throw uploadError;
       }
       throw error;
     }

@@ -1,5 +1,4 @@
-import type { AxiosProgressEvent } from "axios";
-import { createMultipartStream } from "./multipartStream";
+import axios, { type AxiosProgressEvent } from "axios";
 import { buildNip98AuthHeader } from "./nip98";
 import { resolveUploadSource, type BlossomBlob, type SignTemplate, type UploadSource } from "./blossomClient";
 
@@ -105,6 +104,14 @@ function tagsToMap(tags: string[][] = []) {
   return map;
 }
 
+async function ensureUploadFile(source: Awaited<ReturnType<typeof resolveUploadSource>>): Promise<File> {
+  if (source.originalFile instanceof File) {
+    return source.originalFile;
+  }
+  const blob = await new Response(source.stream).blob();
+  return new File([blob], source.fileName, { type: source.contentType });
+}
+
 function buildDefaultUrl(config: Nip96ResolvedConfig, sha256: string, extension?: string) {
   const base = config.downloadUrl || config.apiUrl;
   const normalized = ensureTrailingSlash(base);
@@ -195,66 +202,38 @@ export async function uploadBlobToNip96(
     });
   }
   const source = await resolveUploadSource(file);
-  const fields = [] as { name: string; value: string }[];
-  if (typeof source.size === "number") {
-    fields.push({ name: "size", value: String(source.size) });
-  }
-  if (source.contentType) {
-    fields.push({ name: "content_type", value: source.contentType });
-  }
-  fields.push({ name: "caption", value: source.fileName });
+  const uploadFile = await ensureUploadFile(source);
 
-  const { boundary, stream, contentLength } = createMultipartStream({
-    file: {
-      field: "file",
-      fileName: source.fileName,
-      contentType: source.contentType,
-      size: source.size,
-      stream: source.stream,
-    },
-    fields,
-    onProgress: (loaded, total) => {
-      if (onProgress) {
-        const totalHint = total ?? source.size;
-        onProgress({ loaded, total: typeof totalHint === "number" ? totalHint : undefined } as AxiosProgressEvent);
-      }
+  const formData = new FormData();
+  formData.append("file", uploadFile, source.fileName);
+  formData.append("caption", source.fileName);
+  formData.append("alt", source.fileName);
+  if (uploadFile.size) {
+    formData.append("size", String(uploadFile.size));
+  }
+  if (uploadFile.type) {
+    formData.append("content_type", uploadFile.type);
+  }
+  formData.append("no_transform", "true");
+
+  const response = await axios.post(url, formData, {
+    headers,
+    onUploadProgress: progressEvent => {
+      if (onProgress) onProgress(progressEvent as AxiosProgressEvent);
     },
   });
 
-  const requestHeaders: Record<string, string> = {
-    ...headers,
-    "Content-Type": `multipart/form-data; boundary=${boundary}`,
-  };
-  if (typeof contentLength === "number") {
-    requestHeaders["Content-Length"] = String(contentLength);
-  }
-
-  const response = await fetch(url, {
-    method: "POST",
-    headers: requestHeaders,
-    body: stream,
-  });
-
-  let payload: Nip96UploadResponse | undefined;
-  try {
-    payload = (await response.json()) as Nip96UploadResponse;
-  } catch (error) {
-    payload = undefined;
-  }
-
-  if (!response.ok) {
-    const message = payload?.message || payload?.status || `Upload failed with status ${response.status}`;
-    throw new Error(message);
-  }
+  const payload = response.data as Nip96UploadResponse | undefined;
 
   if (!payload || payload.status !== "success" || !payload.nip94_event) {
-    throw new Error(payload?.message || "Upload failed");
+    const message = payload?.message || payload?.status || "Upload failed";
+    throw new Error(message);
   }
 
   const blob = nip94ToBlob(config, serverUrl, payload.nip94_event, requiresAuth);
   if (!blob) throw new Error("Upload succeeded but response missing file metadata");
   if (!blob.name) blob.name = source.fileName;
-  if (!blob.type) blob.type = source.contentType;
+  if (!blob.type) blob.type = uploadFile.type || source.contentType;
   return blob;
 }
 
