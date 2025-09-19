@@ -13,7 +13,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import type { BlossomBlob } from "./lib/blossomClient";
 import { prettyBytes } from "./utils/format";
 import { deriveServerNameFromUrl } from "./utils/serverName";
-import { BrowseIcon, GridIcon, ListIcon, ServersIcon, TransferIcon, UploadIcon } from "./components/icons";
+import { BrowseIcon, GridIcon, ListIcon, TransferIcon, UploadIcon } from "./components/icons";
 
 type TabId = "browse" | "upload" | "servers" | "transfer";
 
@@ -22,7 +22,6 @@ type StatusMessageTone = "success" | "info" | "error";
 const NAV_TABS = [
   { id: "browse" as const, label: "Browse", icon: BrowseIcon },
   { id: "upload" as const, label: "Upload", icon: UploadIcon },
-  { id: "servers" as const, label: "Servers", icon: ServersIcon },
 ];
 
 const ALL_SERVERS_VALUE = "__all__";
@@ -87,6 +86,8 @@ export default function App() {
   const [transferTargets, setTransferTargets] = useState<string[]>([]);
   const [transferBusy, setTransferBusy] = useState(false);
   const [transferFeedback, setTransferFeedback] = useState<string | null>(null);
+  const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
+  const userMenuRef = useRef<HTMLDivElement | null>(null);
 
   const syncEnabledServers = useMemo(() => localServers.filter(server => server.sync), [localServers]);
   const serverValidationError = useMemo(() => validateManagedServers(localServers), [localServers]);
@@ -135,6 +136,25 @@ export default function App() {
     return "text-emerald-300";
   }, [transferFeedback]);
   const transferActivity = useMemo(() => manualTransfers.slice().reverse(), [manualTransfers]);
+  const userInitials = useMemo(() => {
+    const npub = user?.npub;
+    if (!npub) return "??";
+    return npub.slice(0, 2).toUpperCase();
+  }, [user]);
+
+  const toggleUserMenu = useCallback(() => {
+    setIsUserMenuOpen(prev => !prev);
+  }, [setIsUserMenuOpen]);
+
+  const handleSelectServers = useCallback(() => {
+    setTab("servers");
+    setIsUserMenuOpen(false);
+  }, [setIsUserMenuOpen, setTab]);
+
+  const handleDisconnectClick = useCallback(() => {
+    setIsUserMenuOpen(false);
+    disconnect();
+  }, [disconnect, setIsUserMenuOpen]);
 
   useEffect(() => {
     setLocalServers(servers);
@@ -150,10 +170,45 @@ export default function App() {
   }, [selectedServer]);
 
   useEffect(() => {
+    if (!isUserMenuOpen) return;
+    const handlePointerDown = (event: PointerEvent) => {
+      if (!userMenuRef.current || userMenuRef.current.contains(event.target as Node)) {
+        return;
+      }
+      setIsUserMenuOpen(false);
+    };
+    const handleFocusIn = (event: FocusEvent) => {
+      if (!userMenuRef.current || userMenuRef.current.contains(event.target as Node)) {
+        return;
+      }
+      setIsUserMenuOpen(false);
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setIsUserMenuOpen(false);
+      }
+    };
+    document.addEventListener("pointerdown", handlePointerDown, true);
+    document.addEventListener("focusin", handleFocusIn);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown, true);
+      document.removeEventListener("focusin", handleFocusIn);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isUserMenuOpen]);
+
+  useEffect(() => {
     if (tab === "transfer" && selectedBlobs.size === 0) {
       setTab("upload");
     }
   }, [selectedBlobs.size, tab]);
+
+  useEffect(() => {
+    if (!user) {
+      setIsUserMenuOpen(false);
+    }
+  }, [setIsUserMenuOpen, user]);
 
   useEffect(() => {
     if (tab !== "transfer") return;
@@ -1089,25 +1144,58 @@ export default function App() {
               Manage your content, upload media, and mirror files across servers.
             </p>
           </div>
-          <div className="ml-auto flex flex-wrap items-center gap-1 text-sm">
+          <div className="ml-auto flex flex-wrap items-center gap-2 text-sm">
             {user ? (
-              <>
-                <div className="flex items-center px-2 py-2 rounded-xl">
+              <div className="relative" ref={userMenuRef}>
+                <button
+                  type="button"
+                  onClick={toggleUserMenu}
+                  className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-full border border-slate-800 bg-slate-900/70 p-0 text-xs text-slate-200 transition hover:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                  aria-haspopup="menu"
+                  aria-expanded={isUserMenuOpen}
+                >
                   {avatarUrl ? (
                     <img
                       src={avatarUrl}
                       alt="User avatar"
-                      className="h-8 w-8 rounded-full object-cover"
+                      className="block h-full w-full object-cover"
                       onError={() => setAvatarUrl(null)}
                     />
                   ) : (
-                    <div className="h-8 w-8 rounded-full bg-slate-700 flex items-center justify-center text-xs text-slate-200">
-                      {user.npub?.slice(0, 2).toUpperCase()}
-                    </div>
+                    <span className="font-semibold">{userInitials}</span>
                   )}
-                </div>
-                <button onClick={disconnect} className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700">Disconnect</button>
-              </>
+                </button>
+                {isUserMenuOpen && (
+                  <div className="absolute right-0 z-10 mt-2 min-w-[8rem] rounded-md bg-slate-900 px-2 py-1 text-sm shadow-lg">
+                    <ul className="flex flex-col gap-1 text-slate-200">
+                      <li>
+                        <a
+                          href="#"
+                          onClick={event => {
+                            event.preventDefault();
+                            handleSelectServers();
+                          }}
+                          className="block px-1 py-1 hover:text-emerald-300"
+                        >
+                          Servers
+                        </a>
+                      </li>
+                      <li>
+                        <a
+                          href="#"
+                          onClick={event => {
+                            event.preventDefault();
+                            handleDisconnectClick();
+                          }}
+                          className="block px-1 py-1 hover:text-emerald-300"
+                        >
+                          Disconnect
+                        </a>
+                      </li>
+                    </ul>
+                  </div>
+                )}
+              </div>
             ) : (
               <button onClick={connect} className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500">Connect (NIP-07)</button>
             )}
@@ -1140,44 +1228,41 @@ export default function App() {
                     <IconComponent size={16} />
                     <span className="flex items-center gap-2">
                       {label}
-                      {item.id === "servers" && (
-                        <span className="rounded-full bg-slate-800 px-2 py-0.5 text-[10px] font-medium text-slate-200">
-                          {servers.length}
-                        </span>
-                      )}
                     </span>
                   </button>
                 );
               })}
             </div>
-            {tab === "browse" && (
-              <div className="ml-auto flex gap-2">
-                <button
-                  onClick={() => setViewMode("grid")}
-                  className={`rounded-xl border px-3 py-2 text-sm flex items-center gap-2 ${
-                    viewMode === "grid"
-                      ? "border-emerald-500 bg-emerald-500/10 text-emerald-200"
-                      : "border-slate-800 bg-slate-900/70 text-slate-300 hover:border-slate-700"
-                  }`}
-                  title="Icon view"
-                >
-                  <GridIcon size={18} />
-                  <span className="hidden sm:inline">Icons</span>
-                </button>
-                <button
-                  onClick={() => setViewMode("list")}
-                  className={`rounded-xl border px-3 py-2 text-sm flex items-center gap-2 ${
-                    viewMode === "list"
-                      ? "border-emerald-500 bg-emerald-500/10 text-emerald-200"
-                      : "border-slate-800 bg-slate-900/70 text-slate-300 hover:border-slate-700"
-                  }`}
-                  title="List view"
-                >
-                  <ListIcon size={18} />
-                  <span className="hidden sm:inline">List</span>
-                </button>
-              </div>
-            )}
+            <div className="ml-auto flex items-center gap-2">
+              {tab === "browse" && (
+                <>
+                  <button
+                    onClick={() => setViewMode("grid")}
+                    className={`rounded-xl border px-3 py-2 text-sm flex items-center gap-2 ${
+                      viewMode === "grid"
+                        ? "border-emerald-500 bg-emerald-500/10 text-emerald-200"
+                        : "border-slate-800 bg-slate-900/70 text-slate-300 hover:border-slate-700"
+                    }`}
+                    title="Icon view"
+                  >
+                    <GridIcon size={18} />
+                    <span className="hidden sm:inline">Icons</span>
+                  </button>
+                  <button
+                    onClick={() => setViewMode("list")}
+                    className={`rounded-xl border px-3 py-2 text-sm flex items-center gap-2 ${
+                      viewMode === "list"
+                        ? "border-emerald-500 bg-emerald-500/10 text-emerald-200"
+                        : "border-slate-800 bg-slate-900/70 text-slate-300 hover:border-slate-700"
+                    }`}
+                    title="List view"
+                  >
+                    <ListIcon size={18} />
+                    <span className="hidden sm:inline">List</span>
+                  </button>
+                </>
+              )}
+            </div>
           </nav>
 
           <div className={`flex flex-1 min-h-0 flex-col p-4 ${tab === "browse" ? "" : "overflow-y-auto"}`}>
