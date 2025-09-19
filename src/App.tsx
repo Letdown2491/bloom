@@ -88,6 +88,7 @@ export default function App() {
   const [transferFeedback, setTransferFeedback] = useState<string | null>(null);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const userMenuRef = useRef<HTMLDivElement | null>(null);
+  const mainWidgetRef = useRef<HTMLDivElement | null>(null);
 
   const syncEnabledServers = useMemo(() => localServers.filter(server => server.sync), [localServers]);
   const serverValidationError = useMemo(() => validateManagedServers(localServers), [localServers]);
@@ -209,6 +210,23 @@ export default function App() {
       setIsUserMenuOpen(false);
     }
   }, [setIsUserMenuOpen, user]);
+
+  const showAuthPrompt = !user;
+
+  useEffect(() => {
+    const element = mainWidgetRef.current;
+    if (!element) return;
+    if (showAuthPrompt) {
+      element.setAttribute("inert", "");
+      return () => {
+        element.removeAttribute("inert");
+      };
+    }
+    element.removeAttribute("inert");
+    return () => {
+      element.removeAttribute("inert");
+    };
+  }, [showAuthPrompt]);
 
   useEffect(() => {
     if (tab !== "transfer") return;
@@ -1145,7 +1163,7 @@ export default function App() {
             </p>
           </div>
           <div className="ml-auto flex flex-wrap items-center gap-2 text-sm">
-            {user ? (
+            {user && (
               <div className="relative" ref={userMenuRef}>
                 <button
                   type="button"
@@ -1196,74 +1214,80 @@ export default function App() {
                   </div>
                 )}
               </div>
-            ) : (
-              <button onClick={connect} className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500">Connect (NIP-07)</button>
             )}
           </div>
         </header>
 
         {banner && <div className="rounded-xl border border-emerald-500 bg-emerald-500/10 px-4 py-2 text-sm">{banner}</div>}
 
-        <div className="flex flex-1 min-h-0 flex-col overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/70">
-          <nav className="flex flex-wrap items-center gap-3 px-4 py-3 border-b border-slate-800">
-            <div className="flex gap-3">
-              {NAV_TABS.map(item => {
-                const selectedCount = selectedBlobs.size;
-                const isUploadTab = item.id === "upload";
-                const isTransferView = tab === "transfer";
-                const showTransfer = isUploadTab && selectedCount > 0;
-                const isActive = tab === item.id || (isUploadTab && isTransferView);
-                const IconComponent = showTransfer ? TransferIcon : item.icon;
-                const label = showTransfer ? "Transfer" : item.label;
-                return (
-                  <button
-                    key={item.id}
-                    onClick={() => setTab(showTransfer ? "transfer" : item.id)}
-                    className={`px-3 py-2 text-sm rounded-xl border flex items-center gap-2 transition ${
-                      isActive
-                        ? "border-emerald-500 bg-emerald-500/10 text-emerald-200"
-                        : "border-slate-800 bg-slate-900/70 text-slate-300 hover:border-slate-700"
-                    }`}
-                  >
-                    <IconComponent size={16} />
-                    <span className="flex items-center gap-2">
-                      {label}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-            <div className="ml-auto flex items-center gap-2">
-              {tab === "browse" && (
-                <>
-                  <button
-                    onClick={() => setViewMode("grid")}
-                    className={`rounded-xl border px-3 py-2 text-sm flex items-center gap-2 ${
-                      viewMode === "grid"
-                        ? "border-emerald-500 bg-emerald-500/10 text-emerald-200"
-                        : "border-slate-800 bg-slate-900/70 text-slate-300 hover:border-slate-700"
-                    }`}
-                    title="Icon view"
-                  >
-                    <GridIcon size={18} />
-                    <span className="hidden sm:inline">Icons</span>
-                  </button>
-                  <button
-                    onClick={() => setViewMode("list")}
-                    className={`rounded-xl border px-3 py-2 text-sm flex items-center gap-2 ${
-                      viewMode === "list"
-                        ? "border-emerald-500 bg-emerald-500/10 text-emerald-200"
-                        : "border-slate-800 bg-slate-900/70 text-slate-300 hover:border-slate-700"
-                    }`}
-                    title="List view"
-                  >
-                    <ListIcon size={18} />
-                    <span className="hidden sm:inline">List</span>
-                  </button>
-                </>
-              )}
-            </div>
-          </nav>
+        <div className="relative flex flex-1 min-h-0 flex-col overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/70">
+          <div
+            ref={mainWidgetRef}
+            className={`flex flex-1 min-h-0 flex-col ${showAuthPrompt ? "pointer-events-none opacity-40" : ""}`}
+            aria-hidden={showAuthPrompt || undefined}
+          >
+            <nav className="flex flex-wrap items-center gap-3 px-4 py-3 border-b border-slate-800">
+              <div className="flex gap-3">
+                {NAV_TABS.map(item => {
+                  const selectedCount = selectedBlobs.size;
+                  const isUploadTab = item.id === "upload";
+                  const isTransferView = tab === "transfer";
+                  const showTransfer = isUploadTab && selectedCount > 0;
+                  const isActive = tab === item.id || (isUploadTab && isTransferView);
+                  const IconComponent = showTransfer ? TransferIcon : item.icon;
+                  const label = showTransfer ? "Transfer" : item.label;
+                  return (
+                    <button
+                      key={item.id}
+                      onClick={() => setTab(showTransfer ? "transfer" : item.id)}
+                      disabled={showAuthPrompt}
+                      className={`px-3 py-2 text-sm rounded-xl border flex items-center gap-2 transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                        isActive
+                          ? "border-emerald-500 bg-emerald-500/10 text-emerald-200"
+                          : "border-slate-800 bg-slate-900/70 text-slate-300 hover:border-slate-700"
+                      }`}
+                    >
+                      <IconComponent size={16} />
+                      <span className="flex items-center gap-2">
+                        {label}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="ml-auto flex items-center gap-2">
+                {tab === "browse" && (
+                  <>
+                    <button
+                      onClick={() => setViewMode("grid")}
+                      disabled={showAuthPrompt}
+                      className={`rounded-xl border px-3 py-2 text-sm flex items-center gap-2 disabled:cursor-not-allowed disabled:opacity-60 ${
+                        viewMode === "grid"
+                          ? "border-emerald-500 bg-emerald-500/10 text-emerald-200"
+                          : "border-slate-800 bg-slate-900/70 text-slate-300 hover:border-slate-700"
+                      }`}
+                      title="Icon view"
+                    >
+                      <GridIcon size={18} />
+                      <span className="hidden sm:inline">Icons</span>
+                    </button>
+                    <button
+                      onClick={() => setViewMode("list")}
+                      disabled={showAuthPrompt}
+                      className={`rounded-xl border px-3 py-2 text-sm flex items-center gap-2 disabled:cursor-not-allowed disabled:opacity-60 ${
+                        viewMode === "list"
+                          ? "border-emerald-500 bg-emerald-500/10 text-emerald-200"
+                          : "border-slate-800 bg-slate-900/70 text-slate-300 hover:border-slate-700"
+                      }`}
+                      title="List view"
+                    >
+                      <ListIcon size={18} />
+                      <span className="hidden sm:inline">List</span>
+                    </button>
+                  </>
+                )}
+              </div>
+            </nav>
 
           <div className={`flex flex-1 min-h-0 flex-col p-4 ${tab === "browse" ? "" : "overflow-y-auto"}`}>
             {tab === "browse" && (
@@ -1484,7 +1508,6 @@ export default function App() {
             )}
 
           </div>
-
           <footer className="border-t border-slate-800 bg-slate-900/70 px-4 py-3 text-xs text-slate-300 flex flex-wrap items-center gap-4">
             <div className="flex items-center gap-2">
               <label htmlFor="status-server" className="text-[11px] uppercase tracking-wide text-slate-500">
@@ -1510,6 +1533,19 @@ export default function App() {
               <span>{prettyBytes(statusSize)}</span>
             </div>
           </footer>
+          </div>
+
+          {showAuthPrompt && (
+            <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-4 bg-slate-950/80 px-6 text-center backdrop-blur-sm">
+              <p className="text-sm text-slate-200">Connect your Nostr account to use Bloom.</p>
+              <button
+                onClick={connect}
+                className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-slate-900"
+              >
+                Connect (NIP-07)
+              </button>
+            </div>
+          )}
         </div>
 
         {audio.current && (
