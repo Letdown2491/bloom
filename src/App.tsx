@@ -1310,7 +1310,9 @@ export default function App() {
             className={`flex flex-1 min-h-0 flex-col p-4 ${tab === "browse" ? "overflow-hidden" : "overflow-y-auto"}`}
           >
             {tab === "browse" && (
-              <div className="flex flex-1 min-h-0 flex-col overflow-hidden pr-1">
+              <div
+                className={`flex flex-1 min-h-0 flex-col overflow-hidden ${viewMode === "grid" ? "pr-1" : ""}`}
+              >
                 {browsingAllServers ? (
                   <BlobList
                     blobs={aggregated.blobs}

@@ -1245,8 +1245,8 @@ const ListLayout: React.FC<{
   return (
     <div className="flex flex-1 min-h-0 w-full flex-col overflow-hidden pb-1">
       <div className="flex-1 min-h-0 overflow-auto">
-        <table className="min-w-full table-fixed text-sm text-slate-300">
-          <thead className="text-[11px] uppercase tracking-wide text-slate-300">
+        <table className="min-w-full top-0 table-fixed border-collapse text-sm text-slate-300">
+          <thead className="sticky top-0 z-10 text-[10px] uppercase tracking-wide text-slate-300">
             <tr>
               <th scope="col" className="w-12 py-2 px-3">
                 <input
