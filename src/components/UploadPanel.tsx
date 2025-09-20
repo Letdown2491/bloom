@@ -31,6 +31,7 @@ export type TransferState = {
 
 export type UploadPanelProps = {
   servers: ManagedServer[];
+  selectedServerUrl?: string | null;
   onUploaded: (success: boolean) => void;
   syncTransfers?: TransferState[];
 };
@@ -45,8 +46,19 @@ const buildFileEvent = (blob: BlossomBlob, blurhash?: { hash: string; width: num
   return { kind: 1063, content: blob.name || "", tags };
 };
 
-export const UploadPanel: React.FC<UploadPanelProps> = ({ servers, onUploaded, syncTransfers = [] }) => {
-  const [selectedServers, setSelectedServers] = useState<string[]>(() => servers.slice(0, 1).map(s => s.url));
+export const UploadPanel: React.FC<UploadPanelProps> = ({
+  servers,
+  selectedServerUrl,
+  onUploaded,
+  syncTransfers = [],
+}) => {
+  const [selectedServers, setSelectedServers] = useState<string[]>(() => {
+    if (selectedServerUrl) {
+      const match = servers.find(server => server.url === selectedServerUrl);
+      if (match) return [match.url];
+    }
+    return servers.slice(0, 1).map(s => s.url);
+  });
   const [files, setFiles] = useState<File[]>([]);
   const [cleanMetadata, setCleanMetadata] = useState(true);
   const [resizeOption, setResizeOption] = useState(0);
@@ -68,15 +80,22 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({ servers, onUploaded, s
 
   React.useEffect(() => {
     setSelectedServers(prev => {
-      const urls = servers.map(server => server.url);
-      const filtered = prev.filter(url => urls.includes(url));
-      if (filtered.length === 0) {
-        const firstUrl = urls[0];
-        if (firstUrl) return [firstUrl];
+      const available = servers.map(server => server.url);
+      const filtered = prev.filter(url => available.includes(url));
+
+      if (selectedServerUrl && available.includes(selectedServerUrl)) {
+        if (filtered.length === 1 && filtered[0] === selectedServerUrl) {
+          return filtered;
+        }
+        return [selectedServerUrl];
       }
-      return filtered;
+
+      if (filtered.length > 0) return filtered;
+
+      const fallback = available[0];
+      return fallback ? [fallback] : [];
     });
-  }, [servers]);
+  }, [servers, selectedServerUrl]);
 
   const toggleServer = (url: string) => {
     setSelectedServers(prev => (prev.includes(url) ? prev.filter(item => item !== url) : [...prev, url]));

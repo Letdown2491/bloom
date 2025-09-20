@@ -1394,6 +1394,7 @@ export default function App() {
               >
                 <UploadPanelLazy
                   servers={servers}
+                  selectedServerUrl={selectedServer}
                   onUploaded={handleUploadCompleted}
                   syncTransfers={syncTransfers}
                 />
