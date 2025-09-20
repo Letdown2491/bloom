@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useSta
 import { prettyBytes, prettyDate } from "../utils/format";
 import { buildAuthorizationHeader, type BlossomBlob, type SignTemplate } from "../lib/blossomClient";
 import { buildNip98AuthHeader } from "../lib/nip98";
-import { CopyIcon, DownloadIcon, FileTypeIcon, ShareIcon, TrashIcon } from "./icons";
+import { CopyIcon, DownloadIcon, FileTypeIcon, PauseIcon, PlayIcon, ShareIcon, TrashIcon } from "./icons";
 import {
   getStoredBlobMetadata,
   isMetadataFresh,
@@ -26,6 +26,8 @@ export type BlobListProps = {
   onCopy: (blob: BlossomBlob) => void;
   onPlay?: (blob: BlossomBlob) => void;
   onShare?: (blob: BlossomBlob) => void;
+  currentTrackUrl?: string;
+  currentTrackStatus?: "idle" | "playing" | "paused";
 };
 
 type DetectedKindMap = Record<string, "image" | "video">;
@@ -71,6 +73,8 @@ export const BlobList: React.FC<BlobListProps> = ({
   onCopy,
   onPlay,
   onShare,
+  currentTrackUrl,
+  currentTrackStatus,
 }) => {
   const [detectedKinds, setDetectedKinds] = useState<DetectedKindMap>({});
   const [resolvedMeta, setResolvedMeta] = useState<ResolvedMetaMap>({});
@@ -509,6 +513,8 @@ export const BlobList: React.FC<BlobListProps> = ({
           onCopy={onCopy}
           onPlay={onPlay}
           onShare={onShare}
+          currentTrackUrl={currentTrackUrl}
+          currentTrackStatus={currentTrackStatus}
           detectedKinds={detectedKinds}
           onDetect={handleDetect}
           sortConfig={sortConfig}
@@ -528,6 +534,8 @@ export const BlobList: React.FC<BlobListProps> = ({
           onCopy={onCopy}
           onPlay={onPlay}
           onShare={onShare}
+          currentTrackUrl={currentTrackUrl}
+          currentTrackStatus={currentTrackStatus}
           detectedKinds={detectedKinds}
           onDetect={handleDetect}
         />
@@ -550,6 +558,8 @@ const GridLayout: React.FC<{
   onCopy: (blob: BlossomBlob) => void;
   onPlay?: (blob: BlossomBlob) => void;
   onShare?: (blob: BlossomBlob) => void;
+  currentTrackUrl?: string;
+  currentTrackStatus?: "idle" | "playing" | "paused";
   detectedKinds: DetectedKindMap;
   onDetect: (sha: string, kind: "image" | "video") => void;
 }> = ({
@@ -566,6 +576,8 @@ const GridLayout: React.FC<{
   onCopy,
   onPlay,
   onShare,
+  currentTrackUrl,
+  currentTrackStatus,
   detectedKinds,
   onDetect,
 }) => {
@@ -630,6 +642,16 @@ const GridLayout: React.FC<{
           {items.map(({ blob, row, col }) => {
             const isSelected = selected.has(blob.sha256);
             const isAudio = blob.type?.startsWith("audio/");
+            const isActiveTrack = Boolean(currentTrackUrl && blob.url && currentTrackUrl === blob.url);
+            const isActivePlaying = isActiveTrack && currentTrackStatus === "playing";
+            const playButtonLabel = isActivePlaying ? "Pause" : "Play";
+            const playButtonAria = isActivePlaying ? "Pause audio" : "Play audio";
+            const playButtonClass = `p-2 rounded-lg flex items-center justify-center transition focus:outline-none focus:ring-1 focus:ring-emerald-400 ${
+              isActivePlaying
+                ? "bg-emerald-500/80 text-slate-900 hover:bg-emerald-400"
+                : "bg-emerald-700/70 text-slate-100 hover:bg-emerald-600"
+            }`;
+            const playPauseIcon = isActivePlaying ? <PauseIcon size={16} /> : <PlayIcon size={16} />;
             const displayName = buildDisplayName(blob);
             const previewRequiresAuth = blob.requiresAuth ?? requiresAuth;
             const kind = decideFileKind(blob, detectedKinds[blob.sha256]);
@@ -688,6 +710,20 @@ const GridLayout: React.FC<{
                     className="flex flex-wrap items-center justify-center gap-2 border-t border-slate-800/80 bg-slate-950/90 px-4 py-3"
                     style={{ height: CARD_HEIGHT * 0.25 }}
                   >
+                    {isAudio && onPlay && blob.url && (
+                      <button
+                        className={playButtonClass}
+                        onClick={event => {
+                          event.stopPropagation();
+                          onPlay?.(blob);
+                        }}
+                        aria-label={playButtonAria}
+                        aria-pressed={isActivePlaying}
+                        title={playButtonLabel}
+                      >
+                        {playPauseIcon}
+                      </button>
+                    )}
                     {blob.url && onShare && (
                       <button
                         className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200"
@@ -738,17 +774,6 @@ const GridLayout: React.FC<{
                     >
                       <TrashIcon size={16} />
                     </button>
-                    {isAudio && onPlay && blob.url && (
-                      <button
-                        className="px-2 py-1 text-xs rounded-lg bg-emerald-700/70 hover:bg-emerald-600"
-                        onClick={event => {
-                          event.stopPropagation();
-                          onPlay?.(blob);
-                        }}
-                      >
-                        Play
-                      </button>
-                    )}
                   </div>
                 </div>
               </React.Fragment>
@@ -1112,6 +1137,8 @@ function ListRow({
   onCopy,
   onPlay,
   onShare,
+  currentTrackUrl,
+  currentTrackStatus,
   detectedKinds,
   onDetect,
 }: {
@@ -1127,11 +1154,23 @@ function ListRow({
   onCopy: (blob: BlossomBlob) => void;
   onPlay?: (blob: BlossomBlob) => void;
   onShare?: (blob: BlossomBlob) => void;
+  currentTrackUrl?: string;
+  currentTrackStatus?: "idle" | "playing" | "paused";
   detectedKinds: DetectedKindMap;
   onDetect: (sha: string, kind: "image" | "video") => void;
 }) {
   const kind = decideFileKind(blob, detectedKinds[blob.sha256]);
   const isAudio = blob.type?.startsWith("audio/");
+  const isActiveTrack = Boolean(currentTrackUrl && blob.url && currentTrackUrl === blob.url);
+  const isActivePlaying = isActiveTrack && currentTrackStatus === "playing";
+  const playButtonLabel = isActivePlaying ? "Pause" : "Play";
+  const playButtonAria = isActivePlaying ? "Pause audio" : "Play audio";
+  const playButtonClass = `p-2 rounded-lg flex items-center justify-center transition focus:outline-none focus:ring-1 focus:ring-emerald-400 ${
+    isActivePlaying
+      ? "bg-emerald-500/80 text-slate-900 hover:bg-emerald-400"
+      : "bg-emerald-700/70 text-slate-100 hover:bg-emerald-600"
+  }`;
+  const playPauseIcon = isActivePlaying ? <PauseIcon size={16} /> : <PlayIcon size={16} />;
   const displayName = buildDisplayName(blob);
   const isSelected = selected.has(blob.sha256);
 
@@ -1175,6 +1214,20 @@ function ListRow({
       </td>
       <td className="w-56 py-3 pl-3 pr-0">
         <div className="flex flex-wrap items-center justify-end gap-2">
+          {isAudio && onPlay && blob.url && (
+            <button
+              className={playButtonClass}
+              onClick={event => {
+                event.stopPropagation();
+                onPlay?.(blob);
+              }}
+              aria-label={playButtonAria}
+              aria-pressed={isActivePlaying}
+              title={playButtonLabel}
+            >
+              {playPauseIcon}
+            </button>
+          )}
           {blob.url && onShare && (
             <button
               className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200"
@@ -1225,17 +1278,6 @@ function ListRow({
           >
             <TrashIcon size={16} />
           </button>
-          {isAudio && onPlay && blob.url && (
-            <button
-              className="px-2 py-1 text-xs rounded-lg bg-emerald-700/70 hover:bg-emerald-600"
-              onClick={event => {
-                event.stopPropagation();
-                onPlay(blob);
-              }}
-            >
-              Play
-            </button>
-          )}
         </div>
       </td>
     </tr>
@@ -1256,6 +1298,8 @@ const ListLayout: React.FC<{
   onCopy: (blob: BlossomBlob) => void;
   onPlay?: (blob: BlossomBlob) => void;
   onShare?: (blob: BlossomBlob) => void;
+  currentTrackUrl?: string;
+  currentTrackStatus?: "idle" | "playing" | "paused";
   detectedKinds: DetectedKindMap;
   onDetect: (sha: string, kind: "image" | "video") => void;
   sortConfig: SortConfig | null;
@@ -1274,6 +1318,8 @@ const ListLayout: React.FC<{
   onCopy,
   onPlay,
   onShare,
+  currentTrackUrl,
+  currentTrackStatus,
   detectedKinds,
   onDetect,
   sortConfig,
@@ -1403,6 +1449,8 @@ const ListLayout: React.FC<{
                 onCopy={onCopy}
                 onPlay={onPlay}
                 onShare={onShare}
+                currentTrackUrl={currentTrackUrl}
+                currentTrackStatus={currentTrackStatus}
                 detectedKinds={detectedKinds}
                 onDetect={onDetect}
               />

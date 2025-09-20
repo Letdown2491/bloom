@@ -28,7 +28,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import type { BlossomBlob } from "./lib/blossomClient";
 import { prettyBytes } from "./utils/format";
 import { deriveServerNameFromUrl } from "./utils/serverName";
-import { GridIcon, HomeIcon, ListIcon, TransferIcon, UploadIcon } from "./components/icons";
+import { GridIcon, HomeIcon, ListIcon, MusicIcon, TransferIcon, UploadIcon } from "./components/icons";
 
 type TabId = "browse" | "upload" | "servers" | "transfer" | "share";
 
@@ -73,6 +73,34 @@ const validateManagedServers = (servers: ManagedServer[]): string | null => {
   return null;
 };
 
+const MUSIC_EXTENSION_REGEX =
+  /\.(mp3|wav|ogg|oga|flac|aac|m4a|weba|webm|alac|aiff|aif|wma|mid|midi|amr|opus)(?:\?|#|$)/;
+
+const ADDITIONAL_AUDIO_MIME_TYPES = new Set([
+  "application/ogg",
+  "application/x-ogg",
+  "application/flac",
+  "application/x-flac",
+]);
+
+const isMusicBlob = (blob: BlossomBlob) => {
+  const rawType = blob.type ? blob.type.split(";")[0].trim().toLowerCase() : "";
+  if (rawType) {
+    if (rawType.startsWith("audio/")) return true;
+    if (ADDITIONAL_AUDIO_MIME_TYPES.has(rawType)) return true;
+  }
+
+  const matchesExtension = (value?: string) => {
+    if (!value) return false;
+    return MUSIC_EXTENSION_REGEX.test(value.toLowerCase());
+  };
+
+  if (matchesExtension(blob.name)) return true;
+  if (matchesExtension(blob.url)) return true;
+
+  return false;
+};
+
 export default function App() {
   const { connect, disconnect, user, signer, signEventTemplate, ndk } = useNdk();
   const pubkey = useCurrentPubkey();
@@ -85,10 +113,12 @@ export default function App() {
   const [banner, setBanner] = useState<string | null>(null);
   const [selectedBlobs, setSelectedBlobs] = useState<Set<string>>(new Set());
   const [viewMode, setViewMode] = useState<"grid" | "list">("list");
+  const [musicOnly, setMusicOnly] = useState(false);
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [statusMessageTone, setStatusMessageTone] = useState<StatusMessageTone>("info");
   const statusMessageTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const previousViewModeRef = useRef<"grid" | "list">("list");
   const syncQueueRef = useRef<Set<string>>(new Set());
   const nextSyncAttemptRef = useRef<Map<string, number>>(new Map());
   const unsupportedMirrorTargetsRef = useRef<Set<string>>(new Set());
@@ -166,6 +196,19 @@ export default function App() {
   const toggleUserMenu = useCallback(() => {
     setIsUserMenuOpen(prev => !prev);
   }, [setIsUserMenuOpen]);
+
+  const handleToggleMusicView = useCallback(() => {
+    setMusicOnly(prev => {
+      const next = !prev;
+      if (next) {
+        previousViewModeRef.current = viewMode;
+        setViewMode("list");
+      } else {
+        setViewMode(previousViewModeRef.current);
+      }
+      return next;
+    });
+  }, [setMusicOnly, setViewMode, viewMode]);
 
   const handleSelectServers = useCallback(() => {
     setTab("servers");
@@ -763,8 +806,23 @@ export default function App() {
   const currentSnapshot = useMemo(() => snapshots.find(snapshot => snapshot.server.url === selectedServer), [snapshots, selectedServer]);
   const browsingAllServers = selectedServer === null;
 
+  const visibleAggregatedBlobs = useMemo(() => {
+    const blobs = aggregated.blobs;
+    return musicOnly ? blobs.filter(isMusicBlob) : blobs;
+  }, [aggregated.blobs, musicOnly]);
+
+  const currentVisibleBlobs = useMemo(() => {
+    if (!currentSnapshot) return undefined;
+    return musicOnly ? currentSnapshot.blobs.filter(isMusicBlob) : currentSnapshot.blobs;
+  }, [currentSnapshot, musicOnly]);
+
+  const aggregatedVisibleSize = useMemo(
+    () => visibleAggregatedBlobs.reduce((total, blob) => total + (blob.size || 0), 0),
+    [visibleAggregatedBlobs]
+  );
+
   const audio = useAudio();
-  const { play } = audio;
+  const { toggle: toggleAudioTrack } = audio;
 
   useEffect(() => {
     let ignore = false;
@@ -1249,12 +1307,12 @@ export default function App() {
   };
 
   const currentSize = useMemo(() => {
-    if (!currentSnapshot) return 0;
-    return currentSnapshot.blobs.reduce((acc, blob) => acc + (blob.size || 0), 0);
-  }, [currentSnapshot]);
+    if (!currentVisibleBlobs) return 0;
+    return currentVisibleBlobs.reduce((acc, blob) => acc + (blob.size || 0), 0);
+  }, [currentVisibleBlobs]);
 
-  const statusCount = currentSnapshot?.blobs.length ?? aggregated.count;
-  const statusSize = currentSnapshot ? currentSize : aggregated.size;
+  const statusCount = currentVisibleBlobs ? currentVisibleBlobs.length : visibleAggregatedBlobs.length;
+  const statusSize = currentSnapshot ? currentSize : aggregatedVisibleSize;
   const statusSelectValue = selectedServer ?? ALL_SERVERS_VALUE;
   const syncIndicator = useMemo(() => {
     if (syncEnabledServers.length < 2) return null;
@@ -1395,7 +1453,7 @@ export default function App() {
                   <>
                     <button
                       onClick={() => setViewMode("grid")}
-                      disabled={showAuthPrompt}
+                      disabled={showAuthPrompt || musicOnly}
                       className={`rounded-xl border px-3 py-2 text-sm flex items-center gap-2 disabled:cursor-not-allowed disabled:opacity-60 ${
                         viewMode === "grid"
                           ? "border-emerald-500 bg-emerald-500/10 text-emerald-200"
@@ -1419,6 +1477,20 @@ export default function App() {
                       <ListIcon size={18} />
                       <span className="hidden sm:inline">List</span>
                     </button>
+                    <button
+                      onClick={handleToggleMusicView}
+                      disabled={showAuthPrompt}
+                      className={`rounded-xl border px-3 py-2 text-sm flex items-center gap-2 disabled:cursor-not-allowed disabled:opacity-60 ${
+                        musicOnly
+                          ? "border-emerald-500 bg-emerald-500/10 text-emerald-200"
+                          : "border-slate-800 bg-slate-900/70 text-slate-300 hover:border-slate-700"
+                      }`}
+                      title="Music view"
+                      aria-pressed={musicOnly}
+                    >
+                      <MusicIcon size={18} />
+                      <span className="hidden sm:inline">Music</span>
+                    </button>
                   </>
                 )}
               </div>
@@ -1433,7 +1505,7 @@ export default function App() {
               >
                 {browsingAllServers ? (
                   <BlobList
-                    blobs={aggregated.blobs}
+                    blobs={visibleAggregatedBlobs}
                     signTemplate={signEventTemplate}
                     selected={selectedBlobs}
                     viewMode={viewMode}
@@ -1442,11 +1514,16 @@ export default function App() {
                     onDelete={handleDeleteBlob}
                     onCopy={handleCopyUrl}
                     onShare={handleShareBlob}
-                    onPlay={blob => blob.url && play({ url: blob.url, title: blob.name })}
+                    onPlay={blob => {
+                      if (!blob.url) return;
+                      toggleAudioTrack({ url: blob.url, title: blob.name });
+                    }}
+                    currentTrackUrl={audio.current?.url}
+                    currentTrackStatus={audio.status}
                   />
                 ) : currentSnapshot ? (
                   <BlobList
-                    blobs={currentSnapshot.blobs}
+                    blobs={currentVisibleBlobs ?? currentSnapshot.blobs}
                     baseUrl={currentSnapshot.server.url}
                     requiresAuth={currentSnapshot.server.requiresAuth}
                     signTemplate={currentSnapshot.server.requiresAuth ? signEventTemplate : undefined}
@@ -1458,7 +1535,12 @@ export default function App() {
                     onDelete={handleDeleteBlob}
                     onCopy={handleCopyUrl}
                     onShare={handleShareBlob}
-                    onPlay={blob => blob.url && play({ url: blob.url, title: blob.name })}
+                    onPlay={blob => {
+                      if (!blob.url) return;
+                      toggleAudioTrack({ url: blob.url, title: blob.name });
+                    }}
+                    currentTrackUrl={audio.current?.url}
+                    currentTrackStatus={audio.status}
                   />
                 ) : (
                   <div className="text-sm text-slate-400">Select a server to browse its contents.</div>

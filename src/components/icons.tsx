@@ -43,6 +43,28 @@ export const ListIcon = createIcon(
   </>
 );
 
+export const MusicIcon = createIcon(
+  <>
+    <path d="M10 17V7.5l8-2V15" />
+    <circle cx="10" cy="18.5" r="2.5" />
+    <circle cx="18" cy="16.5" r="2.5" />
+  </>
+);
+
+export const PlayIcon = createIcon(
+  <>
+    <path d="M9 6.5v11l9-5.5Z" fill="currentColor" stroke="none" />
+    <path d="M9 6.5v11l9-5.5Z" />
+  </>
+);
+
+export const PauseIcon = createIcon(
+  <>
+    <rect x="7.5" y="6" width="3" height="12" rx="1" />
+    <rect x="13.5" y="6" width="3" height="12" rx="1" />
+  </>
+);
+
 export const FolderIcon = createIcon(
   <>
     <path d="M3.5 7.5v9a1.5 1.5 0 0 0 1.5 1.5h14a1.5 1.5 0 0 0 1.5-1.5v-7a1.5 1.5 0 0 0-1.5-1.5h-6l-1.5-2h-6c-.828 0-1.5.672-1.5 1.5Z" />
