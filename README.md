@@ -56,5 +56,4 @@ The Compose service mirrors the standalone Docker image and listens on port 3000
 
 ## What Could Come Next
 - Richer media previews, like playlists or video thumbnails.
-- Health checks so you know when a server is running out of space.
 - Drag-and-drop desktop helper for big batches of files.
