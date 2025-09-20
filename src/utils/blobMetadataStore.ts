@@ -1,8 +1,15 @@
 import type { BlossomBlob } from "../lib/blossomClient";
 
-type StoredMetadata = Pick<BlossomBlob, "name" | "type">;
+const METADATA_STORAGE_VERSION = "v2";
 
-const STORAGE_KEY = "bloom:blob-metadata:v1";
+type StoredMetadata = {
+  name?: string;
+  type?: string;
+  updatedAt?: number;
+  lastCheckedAt?: number;
+};
+
+const STORAGE_KEY = `bloom:blob-metadata:${METADATA_STORAGE_VERSION}`;
 
 let cache: Record<string, Record<string, StoredMetadata>> | null = null;
 
@@ -61,10 +68,16 @@ export function setStoredBlobMetadata(
   const next: StoredMetadata = {
     name: metadata.name ?? current.name,
     type: metadata.type ?? current.type,
+    updatedAt: metadata.updatedAt ?? (metadata.name || metadata.type ? Date.now() : current.updatedAt),
+    lastCheckedAt: metadata.lastCheckedAt ?? current.lastCheckedAt,
   };
   if (!next.name) delete next.name;
   if (!next.type) delete next.type;
-  if (!next.name && !next.type) {
+  if (!next.updatedAt && (current.name || current.type)) {
+    next.updatedAt = current.updatedAt;
+  }
+  if (!next.lastCheckedAt) delete next.lastCheckedAt;
+  if (!next.name && !next.type && !next.lastCheckedAt) {
     if (serverStore[sha256]) {
       delete serverStore[sha256];
       if (Object.keys(serverStore).length === 0) {
@@ -74,7 +87,14 @@ export function setStoredBlobMetadata(
     }
     return;
   }
-  if (current.name === next.name && current.type === next.type) return;
+  if (
+    current.name === next.name &&
+    current.type === next.type &&
+    current.updatedAt === next.updatedAt &&
+    current.lastCheckedAt === next.lastCheckedAt
+  ) {
+    return;
+  }
   serverStore[sha256] = next;
   persist();
 }
@@ -107,4 +127,28 @@ export function rememberBlobMetadata(serverUrl: string | undefined, blob: Blosso
     name: blob.name,
     type: blob.type,
   });
+}
+
+export function markBlobMetadataChecked(serverUrl: string | undefined, sha256: string, checkedAt = Date.now()) {
+  if (!sha256) return;
+  const serverKey = normalizeServerKey(serverUrl);
+  if (!serverKey) return;
+  const store = readCache();
+  const serverStore = store[serverKey] ?? (store[serverKey] = {});
+  const current = serverStore[sha256] ?? {};
+  const next: StoredMetadata = {
+    ...current,
+    lastCheckedAt: checkedAt,
+  };
+  serverStore[sha256] = next;
+  persist();
+}
+
+export function isMetadataFresh(stored: StoredMetadata | undefined, ttlMs: number) {
+  if (!stored) return false;
+  if (stored.name && stored.type) return true;
+  if (typeof stored.lastCheckedAt === "number") {
+    return Date.now() - stored.lastCheckedAt < ttlMs;
+  }
+  return false;
 }

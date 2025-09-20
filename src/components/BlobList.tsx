@@ -3,7 +3,12 @@ import { prettyBytes, prettyDate } from "../utils/format";
 import { buildAuthorizationHeader, type BlossomBlob, type SignTemplate } from "../lib/blossomClient";
 import { buildNip98AuthHeader } from "../lib/nip98";
 import { CopyIcon, DownloadIcon, FileTypeIcon, ShareIcon, TrashIcon } from "./icons";
-import { setStoredBlobMetadata } from "../utils/blobMetadataStore";
+import {
+  getStoredBlobMetadata,
+  isMetadataFresh,
+  markBlobMetadataChecked,
+  setStoredBlobMetadata,
+} from "../utils/blobMetadataStore";
 import { cachePreviewBlob, getCachedPreviewBlob } from "../utils/blobPreviewCache";
 import { useInViewport } from "../hooks/useInViewport";
 
@@ -40,6 +45,7 @@ type SortConfig = { key: SortKey; direction: "asc" | "desc" };
 
 const CARD_HEIGHT = 260;
 const LIST_THUMBNAIL_SIZE = 48;
+const METADATA_CHECK_TTL_MS = 12 * 60 * 60 * 1000; // 12 hours
 
 const deriveBlobSortName = (blob: BlossomBlob) => {
   const explicit = blob.name?.trim();
@@ -231,6 +237,7 @@ export const BlobList: React.FC<BlobListProps> = ({
           setStoredBlobMetadata(storageServer, blob.sha256, {
             name: nextName,
             type: nextType,
+            lastCheckedAt: Date.now(),
           });
         }
 
@@ -242,7 +249,10 @@ export const BlobList: React.FC<BlobListProps> = ({
           }
         }
 
-        if (!nextType && !nextName) return;
+        if (!nextType && !nextName) {
+          markBlobMetadataChecked(blob.serverUrl ?? baseUrl, blob.sha256);
+          return;
+        }
         if (!isMounted.current) return;
 
         setResolvedMeta(prev => {
@@ -254,10 +264,12 @@ export const BlobList: React.FC<BlobListProps> = ({
           if (current.type === updated.type && current.name === updated.name) return prev;
           return { ...prev, [blob.sha256]: updated };
         });
+        markBlobMetadataChecked(blob.serverUrl ?? baseUrl, blob.sha256);
       } catch (error) {
         if (error instanceof DOMException && error.name === "AbortError") {
           return;
         }
+        markBlobMetadataChecked(blob.serverUrl ?? baseUrl, blob.sha256);
       } finally {
         pendingLookups.current.delete(blob.sha256);
         metadataAbortControllers.current.delete(blob.sha256);
@@ -303,8 +315,14 @@ export const BlobList: React.FC<BlobListProps> = ({
       const alreadyAttempted = attemptedLookups.current.has(blob.sha256);
       const alreadyLoading = pendingLookups.current.has(blob.sha256);
       const canFetch = requiresAuth || sameOrigin;
+      const storageServer = blob.serverUrl ?? baseUrl;
+      const storedMetadata = getStoredBlobMetadata(storageServer, blob.sha256);
+      const skipDueToFreshAttempt = isMetadataFresh(storedMetadata, METADATA_CHECK_TTL_MS);
 
       if (!hasType || !hasName) {
+        if (skipDueToFreshAttempt) {
+          continue;
+        }
         if (!canFetch) {
           ensurePassiveProbe(blob, resourceUrl);
           continue;
