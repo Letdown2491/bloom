@@ -1,9 +1,11 @@
 import React, { useMemo, useRef, useState } from "react";
 import pLimit from "p-limit";
+import type { AxiosProgressEvent } from "axios";
 import type { ManagedServer } from "../hooks/useServers";
 import { useCurrentPubkey, useNdk } from "../context/NdkContext";
 import { uploadBlobToServer, type BlossomBlob } from "../lib/blossomClient";
 import { uploadBlobToNip96 } from "../lib/nip96Client";
+import { uploadBlobToSatellite } from "../lib/satelliteClient";
 import { resizeImage, stripImageMetadata } from "../utils/image";
 import { computeBlurhash } from "../utils/blurhash";
 import { prettyBytes } from "../utils/format";
@@ -72,7 +74,12 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
   const serverMap = useMemo(() => new Map(servers.map(server => [server.url, server])), [servers]);
 
   const requiresAuthSelected = useMemo(
-    () => selectedServers.some(url => serverMap.get(url)?.requiresAuth),
+    () =>
+      selectedServers.some(url => {
+        const server = serverMap.get(url);
+        if (!server) return false;
+        return server.type === "satellite" || Boolean(server.requiresAuth);
+      }),
     [selectedServers, serverMap]
   );
 
@@ -170,26 +177,47 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
                 if (!blurhashCache.has(file.name)) {
                   blurhashCache.set(file.name, blurHash);
                 }
-                const uploader = server.type === "nip96" ? uploadBlobToNip96 : uploadBlobToServer;
-                const uploaded = await uploader(
-                  server.url,
-                  file,
-                  server.requiresAuth ? signEventTemplate : undefined,
-                  Boolean(server.requiresAuth),
-                  progress => {
-                    setTransfers(prev =>
-                      prev.map(item =>
-                        item.id === transferKey
-                          ? {
-                              ...item,
-                              transferred: progress.loaded,
-                              total: progress.total || file.size,
-                            }
-                          : item
-                      )
-                    );
-                  }
-                );
+                const requiresAuthForServer = server.type === "satellite" || Boolean(server.requiresAuth);
+                const handleProgress = (progress: AxiosProgressEvent) => {
+                  setTransfers(prev =>
+                    prev.map(item =>
+                      item.id === transferKey
+                        ? {
+                            ...item,
+                            transferred: progress.loaded,
+                            total: progress.total || file.size,
+                          }
+                        : item
+                    )
+                  );
+                };
+
+                let uploaded: BlossomBlob;
+                if (server.type === "nip96") {
+                  uploaded = await uploadBlobToNip96(
+                    server.url,
+                    file,
+                    requiresAuthForServer ? signEventTemplate : undefined,
+                    requiresAuthForServer,
+                    handleProgress
+                  );
+                } else if (server.type === "satellite") {
+                  uploaded = await uploadBlobToSatellite(
+                    server.url,
+                    file,
+                    signEventTemplate,
+                    true,
+                    handleProgress
+                  );
+                } else {
+                  uploaded = await uploadBlobToServer(
+                    server.url,
+                    file,
+                    requiresAuthForServer ? signEventTemplate : undefined,
+                    requiresAuthForServer,
+                    handleProgress
+                  );
+                }
                 const blob: BlossomBlob = {
                   ...uploaded,
                   name: uploaded.name || file.name,

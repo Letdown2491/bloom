@@ -541,7 +541,12 @@ export const ServerList: React.FC<ServerListProps> = ({
                   <select
                     value={draft.type}
                     onChange={event => {
-                      setDraft(prev => ({ ...prev, type: event.target.value as ManagedServer["type"] }));
+                      const nextType = event.target.value as ManagedServer["type"];
+                      setDraft(prev => ({
+                        ...prev,
+                        type: nextType,
+                        requiresAuth: nextType === "satellite" ? true : prev.requiresAuth,
+                      }));
                       if (error) setError(null);
                     }}
                     className="w-full min-w-[8rem] rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-200 focus:border-emerald-500 focus:outline-none"
@@ -551,21 +556,23 @@ export const ServerList: React.FC<ServerListProps> = ({
                   >
                     <option value="blossom">Blossom</option>
                     <option value="nip96">NIP-96</option>
+                    <option value="satellite">Satellite</option>
                   </select>
                 </td>
                 <td className="py-3 px-3 text-center">
                   <div className="flex justify-center">
                     <input
                       type="checkbox"
-                      checked={draft.requiresAuth}
+                      checked={draft.type === "satellite" ? true : draft.requiresAuth}
                       onChange={event => {
+                        if (draft.type === "satellite") return;
                         setDraft(prev => ({ ...prev, requiresAuth: event.target.checked }));
                         if (error) setError(null);
                       }}
                       aria-label="Requires auth"
                       onClick={event => event.stopPropagation()}
                       onKeyDown={handleDraftKeyDown}
-                      disabled={saving}
+                      disabled={saving || draft.type === "satellite"}
                     />
                   </div>
                 </td>
@@ -667,9 +674,14 @@ export const ServerList: React.FC<ServerListProps> = ({
                     <select
                       value={draft.type}
                       onChange={event => {
-                          setDraft(prev => ({ ...prev, type: event.target.value as ManagedServer["type"] }));
-                          if (error) setError(null);
-                        }}
+                        const nextType = event.target.value as ManagedServer["type"];
+                        setDraft(prev => ({
+                          ...prev,
+                          type: nextType,
+                          requiresAuth: nextType === "satellite" ? true : prev.requiresAuth,
+                        }));
+                        if (error) setError(null);
+                      }}
                         className="w-full min-w-[8rem] rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-200 focus:border-emerald-500 focus:outline-none"
                         aria-label="Server type"
                         onClick={event => event.stopPropagation()}
@@ -677,21 +689,23 @@ export const ServerList: React.FC<ServerListProps> = ({
                       >
                         <option value="blossom">Blossom</option>
                         <option value="nip96">NIP-96</option>
+                        <option value="satellite">Satellite</option>
                       </select>
                     </td>
                     <td className="py-3 px-3 text-center">
                       <div className="flex justify-center">
                     <input
                       type="checkbox"
-                      checked={draft.requiresAuth}
+                      checked={draft.type === "satellite" ? true : draft.requiresAuth}
                       onChange={event => {
+                        if (draft.type === "satellite") return;
                         setDraft(prev => ({ ...prev, requiresAuth: event.target.checked }));
                         if (error) setError(null);
                       }}
                       aria-label="Requires auth"
                       onClick={event => event.stopPropagation()}
                       onKeyDown={handleDraftKeyDown}
-                      disabled={saving}
+                      disabled={saving || draft.type === "satellite"}
                     />
                   </div>
                 </td>

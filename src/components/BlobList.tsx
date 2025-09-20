@@ -17,7 +17,7 @@ export type BlobListProps = {
   baseUrl?: string;
   requiresAuth?: boolean;
   signTemplate?: SignTemplate;
-  serverType?: "blossom" | "nip96";
+  serverType?: "blossom" | "nip96" | "satellite";
   selected: Set<string>;
   viewMode: "grid" | "list";
   onToggle: (sha: string) => void;
@@ -165,8 +165,9 @@ export const BlobList: React.FC<BlobListProps> = ({
       try {
         const headers: Record<string, string> = {};
         const effectiveType = blob.serverType ?? serverType;
+        const needsAuthHeader = requiresAuth && effectiveType !== "satellite";
         const buildAuth = async (method: "HEAD" | "GET") => {
-          if (!requiresAuth || !signTemplate) return undefined;
+          if (!needsAuthHeader || !signTemplate) return undefined;
           if (effectiveType === "nip96") {
             return buildNip98AuthHeader(signTemplate, {
               url: resourceUrl,
@@ -187,7 +188,7 @@ export const BlobList: React.FC<BlobListProps> = ({
           });
         };
 
-        if (requiresAuth) {
+        if (needsAuthHeader) {
           const auth = await buildAuth("HEAD");
           if (!auth) return;
           headers.Authorization = auth;
@@ -202,7 +203,7 @@ export const BlobList: React.FC<BlobListProps> = ({
         if (!response.ok) {
           if (response.status === 405 || response.status === 501) {
             const fallbackHeaders: Record<string, string> = { ...headers };
-            if (requiresAuth) {
+            if (needsAuthHeader) {
               const auth = await buildAuth("GET");
               if (!auth) return;
               fallbackHeaders.Authorization = auth;
@@ -428,14 +429,17 @@ export const BlobList: React.FC<BlobListProps> = ({
       try {
         const headers: Record<string, string> = {};
         if (blob.requiresAuth) {
-          if (!signTemplate) throw new Error("Signer required to authorize this download.");
           const kind = blob.serverType ?? serverType;
           if (kind === "nip96") {
+            if (!signTemplate) throw new Error("Signer required to authorize this download.");
             headers.Authorization = await buildNip98AuthHeader(signTemplate, {
               url: blob.url,
               method: "GET",
             });
+          } else if (kind === "satellite") {
+            // Satellite CDN URLs are globally accessible; no auth header required.
           } else {
+            if (!signTemplate) throw new Error("Signer required to authorize this download.");
             let resource: URL | null = null;
             try {
               resource = new URL(blob.url);
@@ -537,7 +541,7 @@ const GridLayout: React.FC<{
   baseUrl?: string;
   requiresAuth: boolean;
   signTemplate?: SignTemplate;
-  serverType?: "blossom" | "nip96";
+  serverType?: "blossom" | "nip96" | "satellite";
   selected: Set<string>;
   onToggle: (sha: string) => void;
   onSelectMany?: (shas: string[], value: boolean) => void;
@@ -768,7 +772,7 @@ const ListThumbnail: React.FC<{
   baseUrl?: string;
   requiresAuth: boolean;
   signTemplate?: SignTemplate;
-  serverType?: "blossom" | "nip96";
+  serverType?: "blossom" | "nip96" | "satellite";
   onDetect?: (sha: string, kind: "image" | "video") => void;
 }> = ({ blob, kind, baseUrl, requiresAuth, signTemplate, serverType = "blossom", onDetect }) => {
   const [failed, setFailed] = useState(false);
@@ -782,8 +786,8 @@ const ListThumbnail: React.FC<{
   const [observeTarget, isVisible] = useInViewport<HTMLDivElement>({ rootMargin: "200px" });
 
   const containerClass = "flex h-12 w-12 flex-shrink-0 overflow-hidden rounded-lg border border-slate-800 bg-slate-950/80 relative";
-  const effectiveRequiresAuth = blob.requiresAuth ?? requiresAuth;
   const effectiveServerType = blob.serverType ?? serverType;
+  const effectiveRequiresAuth = effectiveServerType === "satellite" ? false : blob.requiresAuth ?? requiresAuth;
   const disablePreview = kind === "doc" || kind === "sheet" || kind === "pdf";
   const previewUrl = disablePreview
     ? undefined
@@ -1115,7 +1119,7 @@ function ListRow({
   baseUrl?: string;
   requiresAuth: boolean;
   signTemplate?: SignTemplate;
-  serverType?: "blossom" | "nip96";
+  serverType?: "blossom" | "nip96" | "satellite";
   selected: Set<string>;
   onToggle: (sha: string) => void;
   onDelete: (blob: BlossomBlob) => void;
@@ -1243,7 +1247,7 @@ const ListLayout: React.FC<{
   baseUrl?: string;
   requiresAuth: boolean;
   signTemplate?: SignTemplate;
-  serverType?: "blossom" | "nip96";
+  serverType?: "blossom" | "nip96" | "satellite";
   selected: Set<string>;
   onToggle: (sha: string) => void;
   onSelectMany?: (shas: string[], value: boolean) => void;
@@ -1425,7 +1429,7 @@ const BlobPreview: React.FC<{
   serverUrl?: string;
   requiresAuth?: boolean;
   signTemplate?: SignTemplate;
-  serverType?: "blossom" | "nip96";
+  serverType?: "blossom" | "nip96" | "satellite";
   onDetect: (sha: string, kind: "image" | "video") => void;
   className?: string;
   fallbackIconSize?: number;
@@ -1648,6 +1652,8 @@ const BlobPreview: React.FC<{
             url,
             method: "GET",
           });
+        } else if (serverType === "satellite") {
+          // Satellite previews do not need authorization headers.
         } else {
           let resource: URL | undefined;
           try {

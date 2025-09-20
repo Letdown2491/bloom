@@ -8,7 +8,7 @@ import { deriveServerNameFromUrl } from "../utils/serverName";
 export type ManagedServer = {
   name: string;
   url: string;
-  type: "blossom" | "nip96";
+  type: "blossom" | "nip96" | "satellite";
   requiresAuth?: boolean;
   note?: string;
   sync?: boolean;
@@ -17,6 +17,7 @@ export type ManagedServer = {
 const DEFAULT_SERVERS: ManagedServer[] = [
   { name: "Nostrcheck", url: "https://nostrcheck.me", type: "nip96", requiresAuth: true, sync: false },
   { name: "Primal", url: "https://blossom.primal.net", type: "blossom", requiresAuth: true, sync: false },
+  { name: "Satellite Earth", url: "https://cdn.satellite.earth", type: "blossom", requiresAuth: true, sync: false },
 ];
 
 function parseServerTags(event: NDKEvent): ManagedServer[] {
@@ -29,14 +30,15 @@ function parseServerTags(event: NDKEvent): ManagedServer[] {
     const url = rawUrl.replace(/\/$/, "");
     if (seen.has(url)) continue;
     seen.add(url);
-    const type = (tag[2] as ManagedServer["type"]) || "blossom";
+    const rawType = (tag[2] as ManagedServer["type"]) || "blossom";
+    const type: ManagedServer["type"] = rawType === "nip96" || rawType === "satellite" ? rawType : "blossom";
     const flag = tag[3] || "";
     const note = tag[4];
-    const requiresAuth = flag.includes("auth");
+    const requiresAuth = type === "satellite" ? true : flag.includes("auth");
     const sync = flag.includes("sync");
     const derivedName = deriveServerNameFromUrl(url);
     const name = derivedName || url.replace(/^https?:\/\//, "");
-    servers.push({ url, name, type: type === "nip96" ? "nip96" : "blossom", requiresAuth, note, sync });
+    servers.push({ url, name, type, requiresAuth, note, sync });
   }
   return servers;
 }

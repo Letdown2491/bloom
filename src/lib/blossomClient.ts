@@ -9,7 +9,11 @@ export type BlossomBlob = {
   name?: string;
   serverUrl?: string;
   requiresAuth?: boolean;
-  serverType?: "blossom" | "nip96";
+  serverType?: "blossom" | "nip96" | "satellite";
+  label?: string;
+  infohash?: string;
+  magnet?: string;
+  nip94?: string[][];
 };
 
 export type EventTemplate = {

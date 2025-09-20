@@ -4,6 +4,7 @@ import { useCurrentPubkey, useNdk } from "../context/NdkContext";
 import type { ManagedServer } from "./useServers";
 import { listUserBlobs, type BlossomBlob } from "../lib/blossomClient";
 import { listNip96Files } from "../lib/nip96Client";
+import { listSatelliteFiles } from "../lib/satelliteClient";
 import { mergeBlobsWithStoredMetadata } from "../utils/blobMetadataStore";
 
 const filterHiddenBlobTypes = (blobs: BlossomBlob[]) =>
@@ -27,7 +28,7 @@ export const useServerData = (servers: ManagedServer[]) => {
   const queries = useQueries({
     queries: servers.map(server => ({
       queryKey: ["server-blobs", server.url, pubkey, server.type],
-      enabled: !!pubkey && (!server.requiresAuth || !!signer),
+      enabled: !!pubkey && (!(server.type === "satellite" || server.requiresAuth) || !!signer),
       queryFn: async (): Promise<BlossomBlob[]> => {
         if (!pubkey) return [];
         if (server.type === "blossom") {
@@ -42,6 +43,13 @@ export const useServerData = (servers: ManagedServer[]) => {
           const blobs = await listNip96Files(server.url, {
             requiresAuth: Boolean(server.requiresAuth),
             signTemplate: server.requiresAuth ? signEventTemplate : undefined,
+          });
+          return filterHiddenBlobTypes(mergeBlobsWithStoredMetadata(server.url, blobs));
+        }
+        if (server.type === "satellite") {
+          if (!signEventTemplate) throw new Error("Satellite servers require a connected signer.");
+          const blobs = await listSatelliteFiles(server.url, {
+            signTemplate: signEventTemplate,
           });
           return filterHiddenBlobTypes(mergeBlobsWithStoredMetadata(server.url, blobs));
         }

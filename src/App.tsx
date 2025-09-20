@@ -22,6 +22,7 @@ import {
   type UploadStreamSource,
 } from "./lib/blossomClient";
 import { deleteNip96File, uploadBlobToNip96 } from "./lib/nip96Client";
+import { deleteSatelliteFile, uploadBlobToSatellite } from "./lib/satelliteClient";
 import { buildNip98AuthHeader } from "./lib/nip98";
 import { useQueryClient } from "@tanstack/react-query";
 import type { BlossomBlob } from "./lib/blossomClient";
@@ -47,11 +48,12 @@ const normalizeManagedServer = (server: ManagedServer): ManagedServer => {
   const fallbackName = derivedName || normalizedUrl.replace(/^https?:\/\//, "");
   const name = (server.name || "").trim() || fallbackName;
 
+  const requiresAuth = server.type === "satellite" ? true : Boolean(server.requiresAuth);
   return {
     ...server,
     url: normalizedUrl,
     name,
-    requiresAuth: Boolean(server.requiresAuth),
+    requiresAuth,
     sync: Boolean(server.sync),
   };
 };
@@ -329,7 +331,8 @@ export default function App() {
   const createBlobStreamSource = useCallback(
     (sourceBlob: BlossomBlob, sourceServer: ManagedServer): UploadStreamSource | null => {
       if (!sourceBlob.url) return null;
-      if (sourceServer.requiresAuth && !signEventTemplate) return null;
+      const sourceRequiresAuth = sourceServer.type === "satellite" ? false : Boolean(sourceServer.requiresAuth);
+      if (sourceRequiresAuth && !signEventTemplate) return null;
 
       const inferExtensionFromType = (type?: string) => {
         if (!type) return undefined;
@@ -405,7 +408,7 @@ export default function App() {
 
       const buildHeaders = async () => {
         const headers: Record<string, string> = {};
-        if (sourceServer.requiresAuth && template) {
+        if (sourceRequiresAuth && template) {
           if (sourceServer.type === "blossom") {
             let url: URL | null = null;
             try {
@@ -521,10 +524,11 @@ export default function App() {
           const sourceBlob = sourceSnapshot.blobs.find(blob => blob.sha256 === sha);
           if (!sourceBlob || !sourceBlob.url) continue;
 
-          if (target.requiresAuth && !signer) continue;
-          if (target.requiresAuth && !signEventTemplate) continue;
+          const targetNeedsSigner = target.type === "satellite" || Boolean(target.requiresAuth);
+          if (targetNeedsSigner && !signer) continue;
+          if (targetNeedsSigner && !signEventTemplate) continue;
 
-          if (target.type !== "blossom" && target.type !== "nip96") continue;
+          if (target.type !== "blossom" && target.type !== "nip96" && target.type !== "satellite") continue;
 
           const transferId = `sync-${target.url}-${sha}`;
           const fileName = sourceBlob.name || sha;
@@ -559,6 +563,7 @@ export default function App() {
           });
           try {
             let completed = false;
+            const targetRequiresAuth = target.type === "satellite" || Boolean(target.requiresAuth);
             const mirrorUnsupported = unsupportedMirrorTargetsRef.current.has(target.url);
             const uploadDirectlyToBlossom = async () => {
               const streamSource = createBlobStreamSource(sourceBlob, sourceSnapshot.server);
@@ -570,8 +575,8 @@ export default function App() {
               await uploadBlobToServer(
                 target.url,
                 streamSource,
-                target.requiresAuth ? signEventTemplate : undefined,
-                Boolean(target.requiresAuth),
+                targetRequiresAuth ? signEventTemplate : undefined,
+                targetRequiresAuth,
                 progress => {
                   const totalProgress = progress.total && progress.total > 0 ? progress.total : fallbackTotal;
                   const loadedRaw = typeof progress.loaded === "number" ? progress.loaded : 0;
@@ -597,8 +602,8 @@ export default function App() {
                   await mirrorBlobToServer(
                     target.url,
                     sourceBlob.url,
-                    target.requiresAuth ? signEventTemplate : undefined,
-                    Boolean(target.requiresAuth)
+                    targetRequiresAuth ? signEventTemplate : undefined,
+                    targetRequiresAuth
                   );
                   completed = true;
                 } catch (error) {
@@ -619,7 +624,7 @@ export default function App() {
                 await uploadDirectlyToBlossom();
                 completed = true;
               }
-            } else {
+            } else if (target.type === "nip96") {
               const streamSource = createBlobStreamSource(sourceBlob, sourceSnapshot.server);
               if (!streamSource) {
                 nextSyncAttemptRef.current.set(key, Date.now() + 15 * 60 * 1000);
@@ -628,8 +633,8 @@ export default function App() {
               await uploadBlobToNip96(
                 target.url,
                 streamSource,
-                target.requiresAuth ? signEventTemplate : undefined,
-                Boolean(target.requiresAuth),
+                targetRequiresAuth ? signEventTemplate : undefined,
+                targetRequiresAuth,
                 progress => {
                   const fallbackTotal = streamSource.size && streamSource.size > 0 ? streamSource.size : totalSize;
                   const totalProgress = progress.total && progress.total > 0 ? progress.total : fallbackTotal;
@@ -649,6 +654,38 @@ export default function App() {
                 }
               );
               completed = true;
+            } else if (target.type === "satellite") {
+              const streamSource = createBlobStreamSource(sourceBlob, sourceSnapshot.server);
+              if (!streamSource) {
+                nextSyncAttemptRef.current.set(key, Date.now() + 15 * 60 * 1000);
+                throw new Error("Unable to fetch blob content for sync");
+              }
+              await uploadBlobToSatellite(
+                target.url,
+                streamSource,
+                targetRequiresAuth ? signEventTemplate : undefined,
+                targetRequiresAuth,
+                progress => {
+                  const fallbackTotal = streamSource.size && streamSource.size > 0 ? streamSource.size : totalSize;
+                  const totalProgress = progress.total && progress.total > 0 ? progress.total : fallbackTotal;
+                  const loadedRaw = typeof progress.loaded === "number" ? progress.loaded : 0;
+                  const loaded = Math.min(totalProgress, loadedRaw);
+                  setSyncTransfers(prev =>
+                    prev.map(item =>
+                      item.id === transferId
+                        ? {
+                            ...item,
+                            transferred: loaded,
+                            total: totalProgress,
+                          }
+                        : item
+                    )
+                  );
+                }
+              );
+              completed = true;
+            } else {
+              throw new Error(`Unsupported target type: ${target.type}`);
             }
             if (!completed) {
               throw new Error("Unknown sync completion state");
@@ -874,11 +911,14 @@ export default function App() {
       setTransferFeedback("Choose at least one destination server.");
       return;
     }
-    if (selectedBlobItems.some(item => item.server.requiresAuth) && !signEventTemplate) {
+    if (
+      selectedBlobItems.some(item => item.server.type !== "satellite" && item.server.requiresAuth) &&
+      !signEventTemplate
+    ) {
       setTransferFeedback("Connect your signer to read from the selected servers.");
       return;
     }
-    if (targets.some(server => server.requiresAuth) && (!signer || !signEventTemplate)) {
+    if (targets.some(server => server.type === "satellite" || server.requiresAuth) && (!signer || !signEventTemplate)) {
       setTransferFeedback("Connect your signer to upload to servers that require authorization.");
       return;
     }
@@ -935,6 +975,7 @@ export default function App() {
 
           try {
             let completed = false;
+            const targetRequiresAuth = target.type === "satellite" || Boolean(target.requiresAuth);
             if (target.type === "blossom") {
               const mirrorUnsupported = unsupportedMirrorTargetsRef.current.has(target.url);
               if (!mirrorUnsupported) {
@@ -945,8 +986,8 @@ export default function App() {
                   await mirrorBlobToServer(
                     target.url,
                     blob.url,
-                    target.requiresAuth ? signEventTemplate : undefined,
-                    Boolean(target.requiresAuth)
+                    targetRequiresAuth ? signEventTemplate : undefined,
+                    targetRequiresAuth
                   );
                   completed = true;
                 } catch (error) {
@@ -975,8 +1016,8 @@ export default function App() {
                 await uploadBlobToServer(
                   target.url,
                   streamSource,
-                  target.requiresAuth ? signEventTemplate : undefined,
-                  Boolean(target.requiresAuth),
+                  targetRequiresAuth ? signEventTemplate : undefined,
+                  targetRequiresAuth,
                   progress => {
                     const totalProgress = progress.total && progress.total > 0 ? progress.total : fallbackTotal;
                     const loadedRaw = typeof progress.loaded === "number" ? progress.loaded : 0;
@@ -996,7 +1037,7 @@ export default function App() {
                 );
                 completed = true;
               }
-            } else {
+            } else if (target.type === "nip96") {
               const streamSource = createBlobStreamSource(blob, sourceServer);
               if (!streamSource) {
                 throw new Error(
@@ -1006,8 +1047,8 @@ export default function App() {
               await uploadBlobToNip96(
                 target.url,
                 streamSource,
-                target.requiresAuth ? signEventTemplate : undefined,
-                Boolean(target.requiresAuth),
+                targetRequiresAuth ? signEventTemplate : undefined,
+                targetRequiresAuth,
                 progress => {
                   const fallbackTotal = streamSource.size && streamSource.size > 0 ? streamSource.size : totalSize;
                   const totalProgress = progress.total && progress.total > 0 ? progress.total : fallbackTotal;
@@ -1027,6 +1068,39 @@ export default function App() {
                 }
               );
               completed = true;
+            } else if (target.type === "satellite") {
+              const streamSource = createBlobStreamSource(blob, sourceServer);
+              if (!streamSource) {
+                throw new Error(
+                  `Unable to fetch ${fileName} from ${serverNameByUrl.get(sourceServer.url) || sourceServer.url}`
+                );
+              }
+              await uploadBlobToSatellite(
+                target.url,
+                streamSource,
+                targetRequiresAuth ? signEventTemplate : undefined,
+                targetRequiresAuth,
+                progress => {
+                  const fallbackTotal = streamSource.size && streamSource.size > 0 ? streamSource.size : totalSize;
+                  const totalProgress = progress.total && progress.total > 0 ? progress.total : fallbackTotal;
+                  const loadedRaw = typeof progress.loaded === "number" ? progress.loaded : 0;
+                  const loaded = Math.min(totalProgress, loadedRaw);
+                  setManualTransfers(prev =>
+                    prev.map(item =>
+                      item.id === transferId
+                        ? {
+                            ...item,
+                            transferred: loaded,
+                            total: totalProgress,
+                          }
+                        : item
+                    )
+                  );
+                }
+              );
+              completed = true;
+            } else {
+              throw new Error(`Unsupported target type: ${target.type}`);
             }
 
             if (!completed) {
@@ -1091,7 +1165,8 @@ export default function App() {
     }
     const confirmDelete = window.confirm(`Delete ${blob.sha256.slice(0, 10)}… from ${currentSnapshot.server.name}?`);
     if (!confirmDelete) return;
-    if (currentSnapshot.server.requiresAuth && !signer) {
+    const requiresSigner = currentSnapshot.server.type === "satellite" || Boolean(currentSnapshot.server.requiresAuth);
+    if (requiresSigner && !signer) {
       showStatusMessage("Connect your signer to delete from this server.", "error", 2000);
       return;
     }
@@ -1100,15 +1175,22 @@ export default function App() {
         await deleteNip96File(
           currentSnapshot.server.url,
           blob.sha256,
-          currentSnapshot.server.requiresAuth ? signEventTemplate : undefined,
-          Boolean(currentSnapshot.server.requiresAuth)
+          requiresSigner ? signEventTemplate : undefined,
+          requiresSigner
+        );
+      } else if (currentSnapshot.server.type === "satellite") {
+        await deleteSatelliteFile(
+          currentSnapshot.server.url,
+          blob.sha256,
+          requiresSigner ? signEventTemplate : undefined,
+          requiresSigner
         );
       } else {
         await deleteUserBlob(
           currentSnapshot.server.url,
           blob.sha256,
-          currentSnapshot.server.requiresAuth ? signEventTemplate : undefined,
-          Boolean(currentSnapshot.server.requiresAuth)
+          requiresSigner ? signEventTemplate : undefined,
+          requiresSigner
         );
       }
       queryClient.invalidateQueries({ queryKey: ["server-blobs", currentSnapshot.server.url, pubkey, currentSnapshot.server.type] });
