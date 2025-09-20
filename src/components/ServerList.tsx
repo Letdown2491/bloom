@@ -44,6 +44,10 @@ type ServerHealth = {
   error?: string;
 };
 
+const HEALTH_CHECK_TIMEOUT_MS = 8000;
+const HEALTH_RECHECK_TTL_MS = 5 * 60 * 1000;
+const HEALTH_PENDING_GRACE_MS = 12 * 1000;
+
 export const ServerList: React.FC<ServerListProps> = ({
   servers,
   selected,
@@ -66,6 +70,7 @@ export const ServerList: React.FC<ServerListProps> = ({
   const [healthMap, setHealthMap] = useState<Record<string, ServerHealth>>({});
   const previousUrlsRef = useRef<string[]>([]);
   const activeControllersRef = useRef<Map<string, AbortController>>(new Map());
+  const pendingStartRef = useRef<Set<string>>(new Set());
   const controlsDisabled = Boolean(disabled || saving);
   const saveButtonDisabled = Boolean(saving || disabled || validationError);
   const saveButtonLabel = saving ? "Saving…" : disabled ? "Save (connect signer)" : "Save";
@@ -92,6 +97,9 @@ export const ServerList: React.FC<ServerListProps> = ({
       if (typeof window === "undefined") return;
       const key = server.url;
       if (activeControllersRef.current.has(key)) return;
+      if (pendingStartRef.current.has(key)) return;
+
+      pendingStartRef.current.add(key);
 
       setHealthMap(prev => {
         const current = prev[key];
@@ -105,7 +113,7 @@ export const ServerList: React.FC<ServerListProps> = ({
       const timeoutId = window.setTimeout(() => {
         timedOut = true;
         controller.abort();
-      }, 8000);
+      }, HEALTH_CHECK_TIMEOUT_MS);
 
       const commit = (entry: ServerHealth) => {
         setHealthMap(prev => {
@@ -194,6 +202,7 @@ export const ServerList: React.FC<ServerListProps> = ({
           commit({ status, checkedAt, httpStatus, latencyMs: duration, error: reachable ? undefined : response.statusText });
         } finally {
           clearTimeout(timeoutId);
+          pendingStartRef.current.delete(key);
           activeControllersRef.current.delete(key);
         }
       })().catch(() => {
@@ -234,13 +243,35 @@ export const ServerList: React.FC<ServerListProps> = ({
 
     addedServers.forEach(server => startHealthCheck(server));
 
+    const now = Date.now();
+    const staleServers = servers.filter(server => {
+      const key = server.url;
+      if (activeControllersRef.current.has(key)) {
+        return false;
+      }
+      if (pendingStartRef.current.has(key)) {
+        return false;
+      }
+      const health = healthMap[key];
+      if (!health) return true;
+      if (health.status === "checking") {
+        const lastAttempt = health.checkedAt ?? 0;
+        return now - lastAttempt > HEALTH_PENDING_GRACE_MS;
+      }
+      if (!health.checkedAt) return true;
+      return now - health.checkedAt > HEALTH_RECHECK_TTL_MS;
+    });
+
+    staleServers.forEach(server => startHealthCheck(server));
+
     previousUrlsRef.current = currentUrls;
-  }, [servers, startHealthCheck]);
+  }, [servers, startHealthCheck, healthMap]);
 
   useEffect(() => {
     return () => {
       activeControllersRef.current.forEach(controller => controller.abort());
       activeControllersRef.current.clear();
+      pendingStartRef.current.clear();
     };
   }, []);
 
