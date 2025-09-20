@@ -14,9 +14,11 @@ export type NdkContextValue = {
 const NdkContext = createContext<NdkContextValue | undefined>(undefined);
 
 const DEFAULT_RELAYS = [
-  "wss://purplepag.es",
-  "wss://relay.damus.io",
   "wss://nos.lol",
+  "wss://nostrelites.org",
+  "wss://relay.damus.io",
+  "wss://relay.nos.social",
+  "wss://relay.primal.net",
 ];
 
 export const NdkProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
