@@ -50,25 +50,26 @@ export const useServers = () => {
   const pubkey = useCurrentPubkey();
   const queryClient = useQueryClient();
 
+  const canFetchUserServers = Boolean(ndk && pubkey);
+
   const query = useQuery({
     queryKey: ["servers", pubkey],
-    enabled: !!pubkey,
+    enabled: canFetchUserServers,
     staleTime: 1000 * 60,
     queryFn: async (): Promise<ManagedServer[]> => {
       if (!ndk || !pubkey) {
-        return DEFAULT_SERVERS;
+        throw new Error("Nostr context unavailable");
       }
+      await ndk.connect().catch(() => undefined);
       const events = await ndk.fetchEvents({
         authors: [pubkey],
         kinds: [USER_BLOSSOM_SERVER_LIST_KIND],
       });
-      if (events.size === 0) return DEFAULT_SERVERS;
+      if (events.size === 0) return [];
       const newest = Array.from(events).sort((a, b) => (b.created_at || 0) - (a.created_at || 0))[0];
-      if (!newest) return DEFAULT_SERVERS;
-      const servers = parseServerTags(newest);
-      return servers.length ? servers : DEFAULT_SERVERS;
+      if (!newest) return [];
+      return parseServerTags(newest);
     },
-    initialData: DEFAULT_SERVERS,
   });
 
   const saveMutation = useMutation({
@@ -108,9 +109,15 @@ export const useServers = () => {
   );
 
   const servers = useMemo(() => {
-    const list = query.data ?? DEFAULT_SERVERS;
+    if (!pubkey) {
+      return sortServersByName(DEFAULT_SERVERS);
+    }
+    if (query.isError) {
+      return sortServersByName(DEFAULT_SERVERS);
+    }
+    const list = query.data ?? [];
     return sortServersByName(list);
-  }, [query.data]);
+  }, [pubkey, query.isError, query.data]);
 
   return {
     servers,
