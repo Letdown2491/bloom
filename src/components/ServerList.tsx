@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ManagedServer } from "../hooks/useServers";
 import { deriveServerNameFromUrl } from "../utils/serverName";
 import { CancelIcon, EditIcon, FolderIcon, SaveIcon, TrashIcon } from "./icons";
@@ -64,6 +64,8 @@ export const ServerList: React.FC<ServerListProps> = ({
   const [error, setError] = useState<string | null>(null);
   const urlInputRef = useRef<HTMLInputElement | null>(null);
   const [healthMap, setHealthMap] = useState<Record<string, ServerHealth>>({});
+  const previousUrlsRef = useRef<string[]>([]);
+  const activeControllersRef = useRef<Map<string, AbortController>>(new Map());
   const controlsDisabled = Boolean(disabled || saving);
   const saveButtonDisabled = Boolean(saving || disabled || validationError);
   const saveButtonLabel = saving ? "Saving…" : disabled ? "Save (connect signer)" : "Save";
@@ -85,160 +87,162 @@ export const ServerList: React.FC<ServerListProps> = ({
     }
   }, [isAdding, editingUrl]);
 
-  useEffect(() => {
-    if (typeof window === "undefined") return;
+  const startHealthCheck = useCallback(
+    (server: ManagedServer) => {
+      if (typeof window === "undefined") return;
+      const key = server.url;
+      if (activeControllersRef.current.has(key)) return;
 
-    let cancelled = false;
-    const controllers = new Map<string, AbortController>();
-    const queue = servers.map(server => server);
-    const generation = Symbol("server-health");
-    let activeWorkers = 0;
-
-    const setEntry = (url: string, entry: ServerHealth) => {
-      if (cancelled) return;
       setHealthMap(prev => {
-        const current = prev[url];
-        if (
-          current &&
-          current.status === entry.status &&
-          current.httpStatus === entry.httpStatus &&
-          current.latencyMs === entry.latencyMs &&
-          current.error === entry.error
-        ) {
-          return prev;
-        }
-        return {
-          ...prev,
-          [url]: entry,
-        };
+        const current = prev[key];
+        if (current?.status === "checking") return prev;
+        return { ...prev, [key]: { status: "checking" } };
       });
-    };
 
-    setHealthMap(prev => {
-      const next: Record<string, ServerHealth> = {};
-      queue.forEach(server => {
-        next[server.url] = prev[server.url] ?? { status: "checking" };
-      });
-      return next;
-    });
-
-    const workerLimit = Math.min(4, Math.max(1, typeof navigator !== "undefined" && navigator.hardwareConcurrency ? Math.ceil(navigator.hardwareConcurrency / 3) : 3));
-
-    const checkServer = async (server: ManagedServer, token: symbol) => {
-      const normalizedUrl = server.url.replace(/\/$/, "");
-      const targetUrl = `${normalizedUrl}/`;
       const controller = new AbortController();
-      controllers.set(server.url, controller);
+      activeControllersRef.current.set(key, controller);
       let timedOut = false;
       const timeoutId = window.setTimeout(() => {
         timedOut = true;
         controller.abort();
       }, 8000);
 
-    setEntry(server.url, { status: "checking" });
-
       const commit = (entry: ServerHealth) => {
-        if (cancelled || token !== generation) return;
-        setEntry(server.url, entry);
+        setHealthMap(prev => {
+          const current = prev[key];
+          if (
+            current &&
+            current.status === entry.status &&
+            current.httpStatus === entry.httpStatus &&
+            current.latencyMs === entry.latencyMs &&
+            current.error === entry.error
+          ) {
+            return prev;
+          }
+          return { ...prev, [key]: entry };
+        });
       };
 
+      const normalizedUrl = server.url.replace(/\/$/, "");
+      const targetUrl = `${normalizedUrl}/`;
       const start = performance.now();
 
-      try {
-        let response: Response | null = null;
-
+      (async () => {
         try {
-          response = await fetch(targetUrl, {
-            method: "HEAD",
-            mode: "cors",
-            cache: "no-store",
-            signal: controller.signal,
-          });
+          let response: Response | null = null;
 
-          if (response.status === 405 || response.status === 501) {
+          try {
             response = await fetch(targetUrl, {
-              method: "GET",
+              method: "HEAD",
               mode: "cors",
               cache: "no-store",
               signal: controller.signal,
             });
-          }
-        } catch (error) {
-          if (error instanceof DOMException && error.name === "AbortError") {
-            if (timedOut && token === generation) {
-              commit({ status: "offline", checkedAt: Date.now(), error: "Timed out" });
-            }
-            return;
-          }
 
-          try {
-            response = await fetch(targetUrl, {
-              method: "GET",
-              mode: "no-cors",
-              cache: "no-store",
-              signal: controller.signal,
-            });
-          } catch (fallbackError) {
-            if (fallbackError instanceof DOMException && fallbackError.name === "AbortError") {
-              if (timedOut && token === generation) {
+            if (response.status === 405 || response.status === 501) {
+              response = await fetch(targetUrl, {
+                method: "GET",
+                mode: "cors",
+                cache: "no-store",
+                signal: controller.signal,
+              });
+            }
+          } catch (error) {
+            if (error instanceof DOMException && error.name === "AbortError") {
+              if (timedOut) {
                 commit({ status: "offline", checkedAt: Date.now(), error: "Timed out" });
               }
               return;
             }
 
-            const message = fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
-            commit({ status: "offline", checkedAt: Date.now(), error: message });
+            try {
+              response = await fetch(targetUrl, {
+                method: "GET",
+                mode: "no-cors",
+                cache: "no-store",
+                signal: controller.signal,
+              });
+            } catch (fallbackError) {
+              if (fallbackError instanceof DOMException && fallbackError.name === "AbortError") {
+                if (timedOut) {
+                  commit({ status: "offline", checkedAt: Date.now(), error: "Timed out" });
+                }
+                return;
+              }
+
+              const message = fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
+              commit({ status: "offline", checkedAt: Date.now(), error: message });
+              return;
+            }
+          }
+
+          if (!response) return;
+
+          const duration = Math.max(0, Math.round(performance.now() - start));
+          const checkedAt = Date.now();
+
+          if (response.type === "opaque") {
+            commit({ status: "online", checkedAt, latencyMs: duration });
             return;
           }
+
+          const httpStatus = response.status;
+          const requiresAuth = httpStatus === 401 || httpStatus === 403;
+          const reachable = response.ok || requiresAuth;
+          const status: ServerHealthStatus = requiresAuth ? "auth" : reachable ? "online" : "offline";
+
+          commit({ status, checkedAt, httpStatus, latencyMs: duration, error: reachable ? undefined : response.statusText });
+        } finally {
+          clearTimeout(timeoutId);
+          activeControllersRef.current.delete(key);
         }
+      })().catch(() => {
+        // Swallow errors; commit handles error reporting.
+      });
+    },
+    [setHealthMap]
+  );
 
-        if (!response) return;
+  useEffect(() => {
+    const currentUrls = servers.map(server => server.url);
+    const previousUrls = previousUrlsRef.current;
+    const previousSet = new Set(previousUrls);
 
-        const duration = Math.max(0, Math.round(performance.now() - start));
-        const checkedAt = Date.now();
+    const addedServers = servers.filter(server => !previousSet.has(server.url));
+    const removedUrls = previousUrls.filter(url => !currentUrls.includes(url));
 
-        if (response.type === "opaque") {
-          commit({ status: "online", checkedAt, latencyMs: duration });
-          return;
+    if (removedUrls.length > 0) {
+      setHealthMap(prev => {
+        let changed = false;
+        const next = { ...prev };
+        removedUrls.forEach(url => {
+          if (next[url]) {
+            delete next[url];
+            changed = true;
+          }
+        });
+        return changed ? next : prev;
+      });
+      removedUrls.forEach(url => {
+        const controller = activeControllersRef.current.get(url);
+        if (controller) {
+          controller.abort();
+          activeControllersRef.current.delete(url);
         }
+      });
+    }
 
-        const httpStatus = response.status;
-        const requiresAuth = httpStatus === 401 || httpStatus === 403;
-        const reachable = response.ok || requiresAuth;
-        const status: ServerHealthStatus = requiresAuth ? "auth" : reachable ? "online" : "offline";
+    addedServers.forEach(server => startHealthCheck(server));
 
-        commit({ status, checkedAt, httpStatus, latencyMs: duration, error: reachable ? undefined : response.statusText });
-      } finally {
-        clearTimeout(timeoutId);
-        controllers.delete(server.url);
-      }
-    };
+    previousUrlsRef.current = currentUrls;
+  }, [servers, startHealthCheck]);
 
-    const runQueue = (token: symbol) => {
-      if (cancelled || token !== generation) return;
-      while (activeWorkers < workerLimit && queue.length > 0) {
-        const server = queue.shift();
-        if (!server) break;
-        activeWorkers += 1;
-        checkServer(server, token)
-          .catch(() => undefined)
-          .finally(() => {
-            activeWorkers = Math.max(0, activeWorkers - 1);
-            runQueue(token);
-          });
-      }
-    };
-
-    const timer = window.setTimeout(() => {
-      runQueue(generation);
-    }, 250);
-
+  useEffect(() => {
     return () => {
-      cancelled = true;
-      window.clearTimeout(timer);
-      controllers.forEach(controller => controller.abort());
+      activeControllersRef.current.forEach(controller => controller.abort());
+      activeControllersRef.current.clear();
     };
-  }, [servers]);
+  }, []);
 
   const statusStyles = useMemo<Record<ServerHealthStatus, { label: string; dot: string; text: string }>>(
     () => ({
