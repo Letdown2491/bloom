@@ -7,6 +7,7 @@ Bloom is a simple to use and intuitive file manager utilizing Blossom and NIP-96
 - **Stay organized:** See everything stored on each server at a glance.
 - **Keep files safe:** Make backup copies on other servers with just a few clicks.
 - **Share easily:** Grab ready-to-use links without digging through menus or share directly to Nostr by creating a note with embedded media.
+- **Media support:** Play your music right from Bloom.
 
 ## Before You Start
 - Use a browser that supports Nostr extensions (for example, Alby)
