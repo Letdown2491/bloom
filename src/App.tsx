@@ -1682,7 +1682,7 @@ export default function App() {
           </div>
           <footer className="border-t border-slate-800 bg-slate-900/70 px-4 py-3 text-xs text-slate-300 flex flex-wrap items-center gap-4">
             <div className="flex items-center gap-2">
-              <label htmlFor="status-server" className="text-[11px] uppercase tracking-wide text-slate-500">
+              <label htmlFor="status-server" className="text-[11px] uppercase tracking-wide text-slate-300">
                 Server
               </label>
               <select
