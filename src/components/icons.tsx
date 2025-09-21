@@ -51,6 +51,12 @@ export const MusicIcon = createIcon(
   </>
 );
 
+export const FilterIcon = createIcon(
+  <>
+    <path d="M4 5h16l-6.5 8v6.5L10.5 21v-8L4 5Z" />
+  </>
+);
+
 export const PlayIcon = createIcon(
   <>
     <path d="M9 6.5v11l9-5.5Z" fill="currentColor" stroke="none" />

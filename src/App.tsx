@@ -29,8 +29,11 @@ import type { BlossomBlob } from "./lib/blossomClient";
 import { prettyBytes } from "./utils/format";
 import { deriveServerNameFromUrl } from "./utils/serverName";
 import {
+  DocumentIcon,
+  FilterIcon,
   GridIcon,
   HomeIcon,
+  ImageIcon,
   ListIcon,
   MusicIcon,
   NextIcon,
@@ -42,6 +45,7 @@ import {
   StopIcon,
   TransferIcon,
   UploadIcon,
+  VideoIcon,
 } from "./components/icons";
 import { AudioVisualizer } from "./components/AudioVisualizer";
 
@@ -49,10 +53,34 @@ type TabId = "browse" | "upload" | "servers" | "transfer" | "share";
 
 type StatusMessageTone = "success" | "info" | "error";
 
+type FilterMode = "all" | "music" | "documents" | "images" | "pdfs" | "videos";
+
+type FilterOption = {
+  id: Exclude<FilterMode, "all">;
+  label: string;
+  icon: React.ComponentType<{ size?: number; className?: string }>;
+};
+
 const NAV_TABS = [
   { id: "browse" as const, label: "Home", icon: HomeIcon },
   { id: "upload" as const, label: "Upload", icon: UploadIcon },
 ];
+
+const FILTER_OPTIONS: FilterOption[] = [
+  { id: "music", label: "Music", icon: MusicIcon },
+  { id: "documents", label: "Documents", icon: DocumentIcon },
+  { id: "images", label: "Images", icon: ImageIcon },
+  { id: "pdfs", label: "PDFs", icon: DocumentIcon },
+  { id: "videos", label: "Videos", icon: VideoIcon },
+];
+
+const FILTER_OPTION_MAP = FILTER_OPTIONS.reduce(
+  (acc, option) => {
+    acc[option.id] = option;
+    return acc;
+  },
+  {} as Record<Exclude<FilterMode, "all">, FilterOption>
+);
 
 const ALL_SERVERS_VALUE = "__all__";
 
@@ -98,22 +126,78 @@ const ADDITIONAL_AUDIO_MIME_TYPES = new Set([
   "application/x-flac",
 ]);
 
+const IMAGE_EXTENSION_REGEX = /\.(png|jpe?g|gif|webp|bmp|svg|heic|heif|avif)(?:\?|#|$)/;
+const VIDEO_EXTENSION_REGEX = /\.(mp4|mov|webm|mkv|avi|hevc|m4v|mpg|mpeg)(?:\?|#|$)/;
+const PDF_EXTENSION_REGEX = /\.pdf(?:\?|#|$)/;
+
+const ADDITIONAL_VIDEO_MIME_TYPES = new Set([
+  "application/x-matroska",
+  "video/x-matroska",
+  "application/vnd.apple.mpegurl",
+  "application/dash+xml",
+]);
+
+const normalizeMime = (value?: string) => value?.split(";")[0]?.trim().toLowerCase() ?? "";
+
+const matchesExtension = (value: string | undefined, regex: RegExp) => {
+  if (!value) return false;
+  return regex.test(value.toLowerCase());
+};
+
+const isImageBlob = (blob: BlossomBlob) => {
+  const rawType = normalizeMime(blob.type);
+  if (rawType.startsWith("image/")) return true;
+  if (matchesExtension(blob.name, IMAGE_EXTENSION_REGEX)) return true;
+  if (matchesExtension(blob.url, IMAGE_EXTENSION_REGEX)) return true;
+  return false;
+};
+
+const isVideoBlob = (blob: BlossomBlob) => {
+  const rawType = normalizeMime(blob.type);
+  if (rawType.startsWith("video/")) return true;
+  if (ADDITIONAL_VIDEO_MIME_TYPES.has(rawType)) return true;
+  if (matchesExtension(blob.name, VIDEO_EXTENSION_REGEX)) return true;
+  if (matchesExtension(blob.url, VIDEO_EXTENSION_REGEX)) return true;
+  return false;
+};
+
+const isPdfBlob = (blob: BlossomBlob) => {
+  const rawType = normalizeMime(blob.type);
+  if (rawType === "application/pdf") return true;
+  if (matchesExtension(blob.name, PDF_EXTENSION_REGEX)) return true;
+  if (matchesExtension(blob.url, PDF_EXTENSION_REGEX)) return true;
+  return false;
+};
+
 const isMusicBlob = (blob: BlossomBlob) => {
-  const rawType = blob.type?.split(";")[0]?.trim().toLowerCase() ?? "";
+  const rawType = normalizeMime(blob.type);
   if (rawType) {
     if (rawType.startsWith("audio/")) return true;
     if (ADDITIONAL_AUDIO_MIME_TYPES.has(rawType)) return true;
   }
 
-  const matchesExtension = (value?: string) => {
-    if (!value) return false;
-    return MUSIC_EXTENSION_REGEX.test(value.toLowerCase());
-  };
-
-  if (matchesExtension(blob.name)) return true;
-  if (matchesExtension(blob.url)) return true;
+  if (matchesExtension(blob.name, MUSIC_EXTENSION_REGEX)) return true;
+  if (matchesExtension(blob.url, MUSIC_EXTENSION_REGEX)) return true;
 
   return false;
+};
+
+const matchesFilter = (blob: BlossomBlob, filter: FilterMode) => {
+  switch (filter) {
+    case "music":
+      return isMusicBlob(blob);
+    case "images":
+      return isImageBlob(blob);
+    case "videos":
+      return isVideoBlob(blob);
+    case "pdfs":
+      return isPdfBlob(blob);
+    case "documents":
+      return !isMusicBlob(blob) && !isImageBlob(blob) && !isVideoBlob(blob) && !isPdfBlob(blob);
+    case "all":
+    default:
+      return true;
+  }
 };
 
 const deriveTrackTitle = (blob: BlossomBlob) => {
@@ -163,7 +247,7 @@ export default function App() {
   const [banner, setBanner] = useState<string | null>(null);
   const [selectedBlobs, setSelectedBlobs] = useState<Set<string>>(new Set());
   const [viewMode, setViewMode] = useState<"grid" | "list">("list");
-  const [musicOnly, setMusicOnly] = useState(false);
+  const [filterMode, setFilterMode] = useState<FilterMode>("all");
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [statusMessageTone, setStatusMessageTone] = useState<StatusMessageTone>("info");
@@ -182,8 +266,10 @@ export default function App() {
   const [transferTargets, setTransferTargets] = useState<string[]>([]);
   const [transferBusy, setTransferBusy] = useState(false);
   const [transferFeedback, setTransferFeedback] = useState<string | null>(null);
+  const [isFilterMenuOpen, setIsFilterMenuOpen] = useState(false);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const userMenuRef = useRef<HTMLDivElement | null>(null);
+  const filterMenuRef = useRef<HTMLDivElement | null>(null);
   const mainWidgetRef = useRef<HTMLDivElement | null>(null);
   const [shareState, setShareState] = useState<{ payload: SharePayload | null; shareKey: string | null }>({
     payload: null,
@@ -247,18 +333,26 @@ export default function App() {
     setIsUserMenuOpen(prev => !prev);
   }, [setIsUserMenuOpen]);
 
-  const handleToggleMusicView = useCallback(() => {
-    setMusicOnly(prev => {
-      const next = !prev;
-      if (next) {
-        previousViewModeRef.current = viewMode;
-        setViewMode("list");
-      } else {
-        setViewMode(previousViewModeRef.current);
-      }
-      return next;
-    });
-  }, [setMusicOnly, setViewMode, viewMode]);
+  const toggleFilterMenu = useCallback(() => {
+    setIsFilterMenuOpen(prev => !prev);
+  }, []);
+
+  const handleSelectFilter = useCallback(
+    (next: FilterMode) => {
+      setFilterMode(prev => {
+        const nextValue = prev === next ? "all" : next;
+        if (nextValue === "music" && prev !== "music") {
+          previousViewModeRef.current = viewMode;
+          setViewMode("list");
+        } else if (prev === "music" && nextValue !== "music") {
+          setViewMode(previousViewModeRef.current);
+        }
+        return nextValue;
+      });
+      setIsFilterMenuOpen(false);
+    },
+    [setViewMode, viewMode]
+  );
 
   const handleSelectServers = useCallback(() => {
     setTab("servers");
@@ -324,6 +418,41 @@ export default function App() {
       document.removeEventListener("keydown", handleKeyDown);
     };
   }, [isUserMenuOpen]);
+
+  useEffect(() => {
+    if (!isFilterMenuOpen) return;
+    const handlePointerDown = (event: PointerEvent) => {
+      if (!filterMenuRef.current || filterMenuRef.current.contains(event.target as Node)) {
+        return;
+      }
+      setIsFilterMenuOpen(false);
+    };
+    const handleFocusIn = (event: FocusEvent) => {
+      if (!filterMenuRef.current || filterMenuRef.current.contains(event.target as Node)) {
+        return;
+      }
+      setIsFilterMenuOpen(false);
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setIsFilterMenuOpen(false);
+      }
+    };
+    document.addEventListener("pointerdown", handlePointerDown, true);
+    document.addEventListener("focusin", handleFocusIn);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown, true);
+      document.removeEventListener("focusin", handleFocusIn);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isFilterMenuOpen]);
+
+  useEffect(() => {
+    if (tab !== "browse") {
+      setIsFilterMenuOpen(false);
+    }
+  }, [tab]);
 
   useEffect(() => {
     if (tab === "transfer" && selectedBlobs.size === 0) {
@@ -857,14 +986,15 @@ export default function App() {
   const browsingAllServers = selectedServer === null;
 
   const visibleAggregatedBlobs = useMemo(() => {
-    const blobs = aggregated.blobs;
-    return musicOnly ? blobs.filter(isMusicBlob) : blobs;
-  }, [aggregated.blobs, musicOnly]);
+    if (filterMode === "all") return aggregated.blobs;
+    return aggregated.blobs.filter(blob => matchesFilter(blob, filterMode));
+  }, [aggregated.blobs, filterMode]);
 
   const currentVisibleBlobs = useMemo(() => {
     if (!currentSnapshot) return undefined;
-    return musicOnly ? currentSnapshot.blobs.filter(isMusicBlob) : currentSnapshot.blobs;
-  }, [currentSnapshot, musicOnly]);
+    if (filterMode === "all") return currentSnapshot.blobs;
+    return currentSnapshot.blobs.filter(blob => matchesFilter(blob, filterMode));
+  }, [currentSnapshot, filterMode]);
 
   const aggregatedVisibleSize = useMemo(
     () => visibleAggregatedBlobs.reduce((total, blob) => total + (blob.size || 0), 0),
@@ -1410,6 +1540,11 @@ export default function App() {
     : "text-slate-500";
   const disableTransferAction =
     transferBusy || transferTargets.length === 0 || selectedBlobItems.length === 0 || localServers.length <= 1;
+  const activeFilterOption = filterMode === "all" ? null : FILTER_OPTION_MAP[filterMode];
+  const filterButtonLabel = activeFilterOption ? activeFilterOption.label : "Filter";
+  const filterButtonAriaLabel = activeFilterOption ? `Filter: ${activeFilterOption.label}` : "Filter files";
+  const filterButtonActive = filterMode !== "all" || isFilterMenuOpen;
+  const isMusicFilterActive = filterMode === "music";
 
   return (
     <div className="flex min-h-screen max-h-screen flex-col overflow-hidden bg-slate-950 text-slate-100">
@@ -1519,7 +1654,7 @@ export default function App() {
                   <>
                     <button
                       onClick={() => setViewMode("grid")}
-                      disabled={showAuthPrompt || musicOnly}
+                      disabled={showAuthPrompt || isMusicFilterActive}
                       className={`rounded-xl border px-3 py-2 text-sm flex items-center gap-2 disabled:cursor-not-allowed disabled:opacity-60 ${
                         viewMode === "grid"
                           ? "border-emerald-500 bg-emerald-500/10 text-emerald-200"
@@ -1543,20 +1678,75 @@ export default function App() {
                       <ListIcon size={18} />
                       <span className="hidden sm:inline">List</span>
                     </button>
-                    <button
-                      onClick={handleToggleMusicView}
-                      disabled={showAuthPrompt}
-                      className={`rounded-xl border px-3 py-2 text-sm flex items-center gap-2 disabled:cursor-not-allowed disabled:opacity-60 ${
-                        musicOnly
-                          ? "border-emerald-500 bg-emerald-500/10 text-emerald-200"
-                          : "border-slate-800 bg-slate-900/70 text-slate-300 hover:border-slate-700"
-                      }`}
-                      title="Music view"
-                      aria-pressed={musicOnly}
-                    >
-                      <MusicIcon size={18} />
-                      <span className="hidden sm:inline">Music</span>
-                    </button>
+                    <div className="relative" ref={filterMenuRef}>
+                      <button
+                        type="button"
+                        onClick={toggleFilterMenu}
+                        disabled={showAuthPrompt}
+                        className={`rounded-xl border px-3 py-2 text-sm flex items-center gap-2 disabled:cursor-not-allowed disabled:opacity-60 ${
+                          filterButtonActive
+                            ? "border-emerald-500 bg-emerald-500/10 text-emerald-200"
+                            : "border-slate-800 bg-slate-900/70 text-slate-300 hover:border-slate-700"
+                        }`}
+                        aria-haspopup="menu"
+                        aria-expanded={isFilterMenuOpen}
+                        title={filterButtonAriaLabel}
+                        aria-label={filterButtonAriaLabel}
+                      >
+                        <FilterIcon size={18} />
+                        <span className="hidden sm:inline">{filterButtonLabel}</span>
+                      </button>
+                      {isFilterMenuOpen && (
+                        <div
+                          role="menu"
+                          className="absolute right-0 z-20 mt-2 w-48 rounded-xl border border-slate-800 bg-slate-950/95 p-1 shadow-lg backdrop-blur"
+                        >
+                          {FILTER_OPTIONS.map(option => {
+                            const isActive = filterMode === option.id;
+                            return (
+                              <a
+                                key={option.id}
+                                href="#"
+                                onClick={event => {
+                                  event.preventDefault();
+                                  handleSelectFilter(option.id);
+                                }}
+                                role="menuitemradio"
+                                aria-checked={isActive}
+                                className={`flex w-full items-center gap-2 px-2 py-2 text-left text-sm transition focus:outline-none ${
+                                  isActive
+                                    ? "text-emerald-200"
+                                    : "text-slate-100 hover:text-emerald-300"
+                                }`}
+                              >
+                                <option.icon size={16} />
+                                <span>{option.label}</span>
+                              </a>
+                            );
+                          })}
+                          <div className="mt-1 border-t border-slate-800 pt-1">
+                            <a
+                              href="#"
+                              onClick={event => {
+                                event.preventDefault();
+                                if (filterMode === "all") return;
+                                handleSelectFilter("all");
+                              }}
+                              role="menuitem"
+                              aria-disabled={filterMode === "all"}
+                              className={`w-full px-2 py-2 text-left text-sm transition focus:outline-none ${
+                                filterMode === "all"
+                                  ? "cursor-default text-slate-500"
+                                  : "text-slate-100 hover:text-emerald-300"
+                              }`}
+                              tabIndex={filterMode === "all" ? -1 : 0}
+                            >
+                              Clear Filters
+                            </a>
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   </>
                 )}
               </div>
