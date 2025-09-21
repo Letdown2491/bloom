@@ -8,9 +8,11 @@ import {
   EditIcon,
   FileTypeIcon,
   PauseIcon,
+  PreviewIcon,
   PlayIcon,
   ShareIcon,
   TrashIcon,
+  CancelIcon,
 } from "./icons";
 import {
   getStoredBlobMetadata,
@@ -55,6 +57,18 @@ type SortKey = "name" | "size" | "uploaded";
 
 type SortConfig = { key: SortKey; direction: "asc" | "desc" };
 
+type PreviewTarget = {
+  blob: BlossomBlob;
+  displayName: string;
+  previewUrl: string | null;
+  requiresAuth: boolean;
+  signTemplate?: SignTemplate;
+  serverType: "blossom" | "nip96" | "satellite";
+  kind: FileKind;
+  disablePreview: boolean;
+  baseUrl?: string;
+};
+
 const CARD_HEIGHT = 260;
 const LIST_THUMBNAIL_SIZE = 48;
 const METADATA_CHECK_TTL_MS = 12 * 60 * 60 * 1000; // 12 hours
@@ -90,6 +104,7 @@ export const BlobList: React.FC<BlobListProps> = ({
   const [detectedKinds, setDetectedKinds] = useState<DetectedKindMap>({});
   const [resolvedMeta, setResolvedMeta] = useState<ResolvedMetaMap>({});
   const [sortConfig, setSortConfig] = useState<SortConfig | null>(null);
+  const [previewTarget, setPreviewTarget] = useState<PreviewTarget | null>(null);
   const pendingLookups = useRef(new Set<string>());
   const attemptedLookups = useRef(new Set<string>());
   const passiveDetectors = useRef(new Map<string, () => void>());
@@ -437,6 +452,37 @@ export const BlobList: React.FC<BlobListProps> = ({
     });
   }, []);
 
+  const handleClosePreview = useCallback(() => {
+    setPreviewTarget(null);
+  }, []);
+
+  const handlePreview = useCallback(
+    (blob: BlossomBlob) => {
+      const detectedKind = detectedKinds[blob.sha256];
+      const kind = decideFileKind(blob, detectedKind);
+      const displayName = buildDisplayName(blob);
+      const effectiveServerType = blob.serverType ?? serverType;
+      const fallbackBaseUrl = blob.serverUrl ?? baseUrl;
+      const effectiveRequiresAuth =
+        effectiveServerType === "satellite" ? false : blob.requiresAuth ?? requiresAuth;
+      const previewUrl = buildPreviewUrl(blob, kind, fallbackBaseUrl);
+      const disablePreview = shouldDisablePreview(kind);
+
+      setPreviewTarget({
+        blob,
+        displayName,
+        previewUrl,
+        requiresAuth: effectiveRequiresAuth,
+        signTemplate: effectiveRequiresAuth ? signTemplate : undefined,
+        serverType: effectiveServerType,
+        kind,
+        disablePreview,
+        baseUrl: fallbackBaseUrl,
+      });
+    },
+    [baseUrl, requiresAuth, signTemplate, serverType, detectedKinds]
+  );
+
   const handleDownload = useCallback(
     async (blob: BlossomBlob) => {
       if (!blob.url) return;
@@ -522,6 +568,7 @@ export const BlobList: React.FC<BlobListProps> = ({
           onDelete={onDelete}
           onDownload={handleDownload}
           onCopy={onCopy}
+          onPreview={handlePreview}
           onPlay={onPlay}
           onShare={onShare}
           onRename={onRename}
@@ -544,6 +591,7 @@ export const BlobList: React.FC<BlobListProps> = ({
           onDelete={onDelete}
           onDownload={handleDownload}
           onCopy={onCopy}
+          onPreview={handlePreview}
           onPlay={onPlay}
           onShare={onShare}
           onRename={onRename}
@@ -552,6 +600,9 @@ export const BlobList: React.FC<BlobListProps> = ({
           detectedKinds={detectedKinds}
           onDetect={handleDetect}
         />
+      )}
+      {previewTarget && (
+        <PreviewDialog target={previewTarget} onClose={handleClosePreview} onDetect={handleDetect} />
       )}
     </div>
   );
@@ -569,6 +620,7 @@ const GridLayout: React.FC<{
   onDelete: (blob: BlossomBlob) => void;
   onDownload: (blob: BlossomBlob) => void;
   onCopy: (blob: BlossomBlob) => void;
+  onPreview: (blob: BlossomBlob) => void;
   onPlay?: (blob: BlossomBlob) => void;
   onShare?: (blob: BlossomBlob) => void;
   onRename?: (blob: BlossomBlob) => void;
@@ -588,6 +640,7 @@ const GridLayout: React.FC<{
   onDelete,
   onDownload,
   onCopy,
+  onPreview,
   onPlay,
   onShare,
   onRename,
@@ -668,10 +721,11 @@ const GridLayout: React.FC<{
             }`;
             const playPauseIcon = isActivePlaying ? <PauseIcon size={16} /> : <PlayIcon size={16} />;
             const displayName = buildDisplayName(blob);
-            const previewRequiresAuth = blob.requiresAuth ?? requiresAuth;
+            const effectiveServerType = blob.serverType ?? serverType;
+            const previewRequiresAuth =
+              effectiveServerType === "satellite" ? false : blob.requiresAuth ?? requiresAuth;
             const kind = decideFileKind(blob, detectedKinds[blob.sha256]);
-            const disablePreview = kind === "doc" || kind === "sheet" || kind === "pdf";
-            const previewUrl = disablePreview ? null : blob.url;
+            const previewUrl = buildPreviewUrl(blob, kind, baseUrl);
             const top = GAP + row * rowHeight;
             const left = GAP + col * (effectiveColumnWidth + GAP);
             return (
@@ -725,6 +779,19 @@ const GridLayout: React.FC<{
                     className="flex flex-wrap items-center justify-center gap-2 border-t border-slate-800/80 bg-slate-950/90 px-4 py-3"
                     style={{ height: CARD_HEIGHT * 0.25 }}
                   >
+                    {!isAudio && (
+                      <button
+                        className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200"
+                        onClick={event => {
+                          event.stopPropagation();
+                          onPreview(blob);
+                        }}
+                        aria-label="Preview blob"
+                        title="Preview"
+                      >
+                        <PreviewIcon size={16} />
+                      </button>
+                    )}
                     {isAudio && onPlay && blob.url && (
                       <button
                         className={playButtonClass}
@@ -812,6 +879,129 @@ const GridLayout: React.FC<{
             <div className="absolute inset-0 flex items-center justify-center text-sm text-slate-300">
               No content on this server yet.
             </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const PreviewDialog: React.FC<{
+  target: PreviewTarget;
+  onClose: () => void;
+  onDetect: (sha: string, kind: "image" | "video") => void;
+}> = ({ target, onClose, onDetect }) => {
+  const { blob, displayName, previewUrl, requiresAuth, signTemplate, serverType, kind, disablePreview } = target;
+  const sizeLabel = typeof blob.size === "number" ? prettyBytes(blob.size) : null;
+  const uploadedLabel = typeof blob.uploaded === "number" ? prettyDate(blob.uploaded) : null;
+  const typeLabel = blob.type || "Unknown";
+  const originLabel = target.baseUrl ?? blob.serverUrl ?? null;
+  const previewUnavailable = disablePreview || !previewUrl;
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const handleKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onClose();
+      }
+    };
+    window.addEventListener("keydown", handleKey);
+    return () => {
+      window.removeEventListener("keydown", handleKey);
+    };
+  }, [onClose]);
+
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    const { body } = document;
+    if (!body) return;
+    const previous = body.style.overflow;
+    body.style.overflow = "hidden";
+    return () => {
+      body.style.overflow = previous;
+    };
+  }, []);
+
+  const handleBackdropClick: React.MouseEventHandler<HTMLDivElement> = event => {
+    if (event.target === event.currentTarget) {
+      onClose();
+    }
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4"
+      onClick={handleBackdropClick}
+      role="presentation"
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={`Preview ${displayName}`}
+        className="relative flex w-full max-w-4xl flex-col gap-4 rounded-2xl border border-slate-800 bg-slate-900/95 p-6 shadow-2xl"
+        onClick={event => event.stopPropagation()}
+      >
+        <button
+          type="button"
+          className="absolute right-4 top-4 rounded-full p-2 text-slate-300 transition hover:bg-slate-800 hover:text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-400"
+          onClick={onClose}
+          aria-label="Close preview"
+        >
+          <CancelIcon size={18} />
+        </button>
+        <div>
+          <h2 className="text-lg font-semibold text-slate-100">{displayName}</h2>
+          <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-400">
+            {sizeLabel && (
+              <span>
+                <span className="text-slate-300">Size:</span> {sizeLabel}
+              </span>
+            )}
+            {uploadedLabel && (
+              <span>
+                <span className="text-slate-300">Uploaded:</span> {uploadedLabel}
+              </span>
+            )}
+            <span>
+              <span className="text-slate-300">Type:</span> {typeLabel}
+            </span>
+            {originLabel && (
+              <span className="truncate">
+                <span className="text-slate-300">Server:</span> {originLabel}
+              </span>
+            )}
+          </div>
+        </div>
+        <div className="relative flex min-h-[22rem] flex-1 items-center justify-center overflow-hidden rounded-xl border border-slate-800 bg-slate-950/60">
+          {previewUnavailable ? (
+            <div className="flex h-full w-full flex-col items-center justify-center gap-4 p-6 text-sm text-slate-400">
+              <FileTypeIcon kind={kind} size={112} className="text-slate-500" />
+              <p className="max-w-sm text-center">Preview not available for this file type.</p>
+            </div>
+          ) : (
+            <BlobPreview
+              sha={blob.sha256}
+              url={previewUrl}
+              name={blob.name || blob.sha256}
+              type={blob.type}
+              serverUrl={target.baseUrl ?? blob.serverUrl}
+              requiresAuth={requiresAuth}
+              signTemplate={requiresAuth ? signTemplate : undefined}
+              serverType={serverType}
+              onDetect={onDetect}
+              fallbackIconSize={160}
+              className="h-[28rem] w-full max-w-full"
+              variant="dialog"
+            />
+          )}
+        </div>
+        <div className="flex flex-wrap gap-4 text-[11px] text-slate-500">
+          <span className="font-mono break-all text-slate-400">Hash: {blob.sha256}</span>
+          {blob.url && (
+            <span className="truncate">
+              <span className="text-slate-300">Direct URL:</span> {blob.url}
+            </span>
           )}
         </div>
       </div>
@@ -1163,6 +1353,7 @@ function ListRow({
   onDelete,
   onDownload,
   onCopy,
+  onPreview,
   onPlay,
   onShare,
   onRename,
@@ -1181,6 +1372,7 @@ function ListRow({
   onDelete: (blob: BlossomBlob) => void;
   onDownload: (blob: BlossomBlob) => void;
   onCopy: (blob: BlossomBlob) => void;
+  onPreview: (blob: BlossomBlob) => void;
   onPlay?: (blob: BlossomBlob) => void;
   onShare?: (blob: BlossomBlob) => void;
   onRename?: (blob: BlossomBlob) => void;
@@ -1203,6 +1395,7 @@ function ListRow({
   const playPauseIcon = isActivePlaying ? <PauseIcon size={16} /> : <PlayIcon size={16} />;
   const displayName = buildDisplayName(blob);
   const isSelected = selected.has(blob.sha256);
+  const disablePreview = shouldDisablePreview(kind);
 
   return (
     <tr
@@ -1244,6 +1437,19 @@ function ListRow({
       </td>
       <td className="w-64 py-3 pl-3 pr-0">
         <div className="flex flex-wrap items-center justify-end gap-2">
+          {!isAudio && (
+            <button
+              className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200"
+              onClick={event => {
+                event.stopPropagation();
+                onPreview(blob);
+              }}
+              aria-label={disablePreview ? "Preview unavailable" : "Preview blob"}
+              title={disablePreview ? "Preview unavailable" : "Preview"}
+            >
+              <PreviewIcon size={16} />
+            </button>
+          )}
           {isAudio && onPlay && blob.url && (
             <button
               className={playButtonClass}
@@ -1339,6 +1545,7 @@ const ListLayout: React.FC<{
   onDelete: (blob: BlossomBlob) => void;
   onDownload: (blob: BlossomBlob) => void;
   onCopy: (blob: BlossomBlob) => void;
+  onPreview: (blob: BlossomBlob) => void;
   onPlay?: (blob: BlossomBlob) => void;
   onShare?: (blob: BlossomBlob) => void;
   onRename?: (blob: BlossomBlob) => void;
@@ -1360,6 +1567,7 @@ const ListLayout: React.FC<{
   onDelete,
   onDownload,
   onCopy,
+  onPreview,
   onPlay,
   onShare,
   onRename,
@@ -1492,6 +1700,7 @@ const ListLayout: React.FC<{
                 onDelete={onDelete}
                 onDownload={onDownload}
                 onCopy={onCopy}
+                onPreview={onPreview}
                 onPlay={onPlay}
                 onShare={onShare}
                 onRename={onRename}
@@ -1527,6 +1736,7 @@ const BlobPreview: React.FC<{
   onDetect: (sha: string, kind: "image" | "video") => void;
   className?: string;
   fallbackIconSize?: number;
+  variant?: "inline" | "dialog";
 }> = ({
   sha,
   url,
@@ -1539,6 +1749,7 @@ const BlobPreview: React.FC<{
   onDetect,
   className,
   fallbackIconSize,
+  variant = "inline",
 }) => {
   const [src, setSrc] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
@@ -1833,6 +2044,11 @@ const BlobPreview: React.FC<{
   const containerClass =
     "relative flex w-full items-center justify-center overflow-hidden rounded-lg border border-slate-800 bg-slate-950/80";
 
+  const videoControls = variant === "dialog";
+  const videoAutoPlay = variant === "inline";
+  const videoLoop = variant === "inline";
+  const videoMuted = variant === "inline";
+
   return (
     <div ref={observeTarget} className={`${containerClass} ${className ?? "h-40"}`}>
       {showText && textPreview && (
@@ -1848,10 +2064,10 @@ const BlobPreview: React.FC<{
           className={`max-h-full max-w-full transition-opacity duration-200 ${
             isReady ? "opacity-100" : "opacity-0"
           }`}
-          controls={false}
-          autoPlay
-          muted
-          loop
+          controls={videoControls}
+          autoPlay={videoAutoPlay}
+          muted={videoMuted}
+          loop={videoLoop}
           playsInline
           onLoadedData={() => {
             setPreviewType("video");
@@ -1920,6 +2136,18 @@ function isSameOrigin(url: string) {
   } catch (error) {
     return false;
   }
+}
+
+function shouldDisablePreview(kind: FileKind) {
+  return kind === "doc" || kind === "sheet" || kind === "pdf";
+}
+
+function buildPreviewUrl(blob: BlossomBlob, kind: FileKind, baseUrl?: string | null) {
+  if (shouldDisablePreview(kind)) return null;
+  if (blob.url) return blob.url;
+  const fallback = blob.serverUrl ?? baseUrl;
+  if (!fallback) return null;
+  return `${fallback.replace(/\/$/, "")}/${blob.sha256}`;
 }
 
 function decideFileKind(blob: BlossomBlob, detected?: "image" | "video"): FileKind {

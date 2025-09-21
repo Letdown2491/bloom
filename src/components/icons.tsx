@@ -201,6 +201,13 @@ export const ShareIcon = createIcon(
   </>
 );
 
+export const PreviewIcon = createIcon(
+  <>
+    <path d="M3 12s3.6-6 9-6 9 6 9 6-3.6 6-9 6-9-6-9-6Z" />
+    <circle cx="12" cy="12" r="3" />
+  </>
+);
+
 export const HomeIcon = createIcon(
   <>
     <path d="M4 11.5 12 5l8 6.5" />
