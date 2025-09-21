@@ -3,7 +3,6 @@ import { prettyBytes, prettyDate } from "../utils/format";
 import { buildAuthorizationHeader, type BlossomBlob, type SignTemplate } from "../lib/blossomClient";
 import { buildNip98AuthHeader } from "../lib/nip98";
 import {
-  CopyIcon,
   DownloadIcon,
   EditIcon,
   FileTypeIcon,
@@ -72,6 +71,10 @@ type PreviewTarget = {
 const CARD_HEIGHT = 260;
 const LIST_THUMBNAIL_SIZE = 48;
 const METADATA_CHECK_TTL_MS = 12 * 60 * 60 * 1000; // 12 hours
+const GRID_ACTION_BUTTON_CLASS =
+  "flex aspect-square w-full items-center justify-center rounded-lg bg-slate-800 text-slate-200 transition focus:outline-none focus:ring-1 focus:ring-emerald-400 focus:ring-offset-1 focus:ring-offset-slate-900 hover:bg-slate-700";
+const GRID_DELETE_BUTTON_CLASS =
+  "flex aspect-square w-full items-center justify-center rounded-lg bg-red-900/80 text-slate-100 transition focus:outline-none focus:ring-1 focus:ring-red-400 focus:ring-offset-1 focus:ring-offset-slate-900 hover:bg-red-800";
 
 const deriveBlobSortName = (blob: BlossomBlob) => {
   const explicit = blob.name?.trim();
@@ -567,7 +570,6 @@ export const BlobList: React.FC<BlobListProps> = ({
           onSelectMany={onSelectMany}
           onDelete={onDelete}
           onDownload={handleDownload}
-          onCopy={onCopy}
           onPreview={handlePreview}
           onPlay={onPlay}
           onShare={onShare}
@@ -590,7 +592,6 @@ export const BlobList: React.FC<BlobListProps> = ({
           onToggle={onToggle}
           onDelete={onDelete}
           onDownload={handleDownload}
-          onCopy={onCopy}
           onPreview={handlePreview}
           onPlay={onPlay}
           onShare={onShare}
@@ -602,7 +603,7 @@ export const BlobList: React.FC<BlobListProps> = ({
         />
       )}
       {previewTarget && (
-        <PreviewDialog target={previewTarget} onClose={handleClosePreview} onDetect={handleDetect} />
+        <PreviewDialog target={previewTarget} onClose={handleClosePreview} onDetect={handleDetect} onCopy={onCopy} />
       )}
     </div>
   );
@@ -619,7 +620,6 @@ const GridLayout: React.FC<{
   onSelectMany?: (shas: string[], value: boolean) => void;
   onDelete: (blob: BlossomBlob) => void;
   onDownload: (blob: BlossomBlob) => void;
-  onCopy: (blob: BlossomBlob) => void;
   onPreview: (blob: BlossomBlob) => void;
   onPlay?: (blob: BlossomBlob) => void;
   onShare?: (blob: BlossomBlob) => void;
@@ -639,7 +639,6 @@ const GridLayout: React.FC<{
   onSelectMany,
   onDelete,
   onDownload,
-  onCopy,
   onPreview,
   onPlay,
   onShare,
@@ -776,12 +775,12 @@ const GridLayout: React.FC<{
                     </div>
                   </div>
                   <div
-                    className="flex flex-wrap items-center justify-center gap-2 border-t border-slate-800/80 bg-slate-950/90 px-4 py-3"
+                    className="grid grid-cols-5 items-center gap-1 border-t border-slate-800/80 bg-slate-950/90 px-2 py-3"
                     style={{ height: CARD_HEIGHT * 0.25 }}
                   >
                     {!isAudio && (
                       <button
-                        className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200"
+                        className={GRID_ACTION_BUTTON_CLASS}
                         onClick={event => {
                           event.stopPropagation();
                           onPreview(blob);
@@ -794,7 +793,7 @@ const GridLayout: React.FC<{
                     )}
                     {isAudio && onPlay && blob.url && (
                       <button
-                        className={playButtonClass}
+                        className={`${playButtonClass} aspect-square w-full`}
                         onClick={event => {
                           event.stopPropagation();
                           onPlay?.(blob);
@@ -808,7 +807,7 @@ const GridLayout: React.FC<{
                     )}
                     {blob.url && onShare && (
                       <button
-                        className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200"
+                        className={GRID_ACTION_BUTTON_CLASS}
                         onClick={event => {
                           event.stopPropagation();
                           onShare?.(blob);
@@ -821,20 +820,7 @@ const GridLayout: React.FC<{
                     )}
                     {blob.url && (
                       <button
-                        className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200"
-                        onClick={event => {
-                          event.stopPropagation();
-                          onCopy(blob);
-                        }}
-                        aria-label="Copy blob URL"
-                        title="Copy URL"
-                      >
-                        <CopyIcon size={16} />
-                      </button>
-                    )}
-                    {blob.url && (
-                      <button
-                        className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200"
+                        className={GRID_ACTION_BUTTON_CLASS}
                         onClick={event => {
                           event.stopPropagation();
                           onDownload(blob);
@@ -847,7 +833,7 @@ const GridLayout: React.FC<{
                     )}
                     {onRename && (
                       <button
-                        className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200"
+                        className={GRID_ACTION_BUTTON_CLASS}
                         onClick={event => {
                           event.stopPropagation();
                           onRename(blob);
@@ -859,7 +845,7 @@ const GridLayout: React.FC<{
                       </button>
                     )}
                     <button
-                      className="p-2 rounded-lg bg-red-900/80 hover:bg-red-800 text-slate-100"
+                      className={GRID_DELETE_BUTTON_CLASS}
                       onClick={event => {
                         event.stopPropagation();
                         onDelete(blob);
@@ -890,13 +876,19 @@ const PreviewDialog: React.FC<{
   target: PreviewTarget;
   onClose: () => void;
   onDetect: (sha: string, kind: "image" | "video") => void;
-}> = ({ target, onClose, onDetect }) => {
+  onCopy: (blob: BlossomBlob) => void;
+}> = ({ target, onClose, onDetect, onCopy }) => {
   const { blob, displayName, previewUrl, requiresAuth, signTemplate, serverType, kind, disablePreview } = target;
   const sizeLabel = typeof blob.size === "number" ? prettyBytes(blob.size) : null;
   const uploadedLabel = typeof blob.uploaded === "number" ? prettyDate(blob.uploaded) : null;
   const typeLabel = blob.type || "Unknown";
   const originLabel = target.baseUrl ?? blob.serverUrl ?? null;
   const previewUnavailable = disablePreview || !previewUrl;
+
+  const handleDirectUrlCopy = useCallback(() => {
+    if (!blob.url) return;
+    onCopy(blob);
+  }, [blob, onCopy]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -999,9 +991,20 @@ const PreviewDialog: React.FC<{
         <div className="flex flex-wrap gap-4 text-[11px] text-slate-500">
           <span className="font-mono break-all text-slate-400">Hash: {blob.sha256}</span>
           {blob.url && (
-            <span className="truncate">
-              <span className="text-slate-300">Direct URL:</span> {blob.url}
-            </span>
+            <button
+              type="button"
+              onClick={event => {
+                event.preventDefault();
+                event.stopPropagation();
+                handleDirectUrlCopy();
+              }}
+              className="flex max-w-full items-center gap-1 rounded px-1 text-left text-[11px] text-emerald-300 underline decoration-dotted underline-offset-2 hover:text-emerald-200 focus:outline-none focus:ring-2 focus:ring-emerald-400 focus:ring-offset-2 focus:ring-offset-slate-900"
+              title="Copy direct URL"
+              aria-label="Copy direct URL"
+            >
+              <span className="text-slate-300">Direct URL:</span>
+              <span className="truncate font-mono">{blob.url}</span>
+            </button>
           )}
         </div>
       </div>
@@ -1352,7 +1355,6 @@ function ListRow({
   onToggle,
   onDelete,
   onDownload,
-  onCopy,
   onPreview,
   onPlay,
   onShare,
@@ -1371,7 +1373,6 @@ function ListRow({
   onToggle: (sha: string) => void;
   onDelete: (blob: BlossomBlob) => void;
   onDownload: (blob: BlossomBlob) => void;
-  onCopy: (blob: BlossomBlob) => void;
   onPreview: (blob: BlossomBlob) => void;
   onPlay?: (blob: BlossomBlob) => void;
   onShare?: (blob: BlossomBlob) => void;
@@ -1482,19 +1483,6 @@ function ListRow({
               className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200"
               onClick={event => {
                 event.stopPropagation();
-                onCopy(blob);
-              }}
-              aria-label="Copy blob URL"
-              title="Copy URL"
-            >
-              <CopyIcon size={16} />
-            </button>
-          )}
-          {blob.url && (
-            <button
-              className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200"
-              onClick={event => {
-                event.stopPropagation();
                 onDownload(blob);
               }}
               aria-label="Download blob"
@@ -1544,7 +1532,6 @@ const ListLayout: React.FC<{
   onSelectMany?: (shas: string[], value: boolean) => void;
   onDelete: (blob: BlossomBlob) => void;
   onDownload: (blob: BlossomBlob) => void;
-  onCopy: (blob: BlossomBlob) => void;
   onPreview: (blob: BlossomBlob) => void;
   onPlay?: (blob: BlossomBlob) => void;
   onShare?: (blob: BlossomBlob) => void;
@@ -1566,7 +1553,6 @@ const ListLayout: React.FC<{
   onSelectMany,
   onDelete,
   onDownload,
-  onCopy,
   onPreview,
   onPlay,
   onShare,
@@ -1699,7 +1685,6 @@ const ListLayout: React.FC<{
                 onToggle={onToggle}
                 onDelete={onDelete}
                 onDownload={onDownload}
-                onCopy={onCopy}
                 onPreview={onPreview}
                 onPlay={onPlay}
                 onShare={onShare}
