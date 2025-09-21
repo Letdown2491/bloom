@@ -1430,13 +1430,13 @@ function ListRow({
           </div>
         </div>
       </td>
-      <td className="w-32 py-3 px-3 text-sm text-slate-400 whitespace-nowrap">
+      <td className="hidden py-3 px-3 text-sm text-slate-400 whitespace-nowrap md:table-cell md:w-32">
         {blob.uploaded ? prettyDate(blob.uploaded) : "—"}
       </td>
       <td className="w-24 py-3 px-3 text-sm text-slate-400 whitespace-nowrap">
         {prettyBytes(blob.size || 0)}
       </td>
-      <td className="w-64 py-3 pl-3 pr-0">
+      <td className="py-3 pl-3 pr-0 md:w-64">
         <div className="flex flex-wrap items-center justify-end gap-2">
           {!isAudio && (
             <button
@@ -1635,7 +1635,7 @@ const ListLayout: React.FC<{
               </th>
               <th
                 scope="col"
-                className="w-32 py-2 px-3 text-left font-semibold"
+                className="hidden py-2 px-3 text-left font-semibold md:table-cell md:w-32"
                 aria-sort={ariaSortFor("uploaded")}
                 onClick={() => onSort("uploaded")}
                 onKeyDown={event => {
@@ -1669,7 +1669,7 @@ const ListLayout: React.FC<{
                   <span aria-hidden="true">{indicatorFor("size")}</span>
                 </div>
               </th>
-              <th scope="col" className="w-64 py-2 pl-3 pr-0 text-right font-semibold">Actions</th>
+              <th scope="col" className="py-2 pl-3 pr-0 text-right font-semibold md:w-64">Actions</th>
             </tr>
           </thead>
           <tbody>

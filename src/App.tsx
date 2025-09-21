@@ -1828,11 +1828,14 @@ export default function App() {
     <div className="flex min-h-screen max-h-screen flex-col overflow-hidden bg-slate-950 text-slate-100">
       <div className="mx-auto flex w-full flex-1 min-h-0 flex-col gap-6 overflow-hidden px-6 py-8 max-w-7xl">
         <header className="flex flex-wrap items-center gap-4">
-          <div>
-            <h1 className="text-2xl font-semibold">Bloom</h1>
-            <p className="hidden md:block text-xs text-slate-400">
-              Manage your content, upload media, and mirror files across servers.
-            </p>
+          <div className="flex items-center gap-3">
+            <img src="/bloom.png" alt="Bloom logo" className="h-10 w-10 rounded-xl object-cover" />
+            <div>
+              <h1 className="text-2xl font-semibold">Bloom</h1>
+              <p className="hidden md:block text-xs text-slate-400">
+                Manage your content, upload media, and mirror files across servers.
+              </p>
+            </div>
           </div>
           <div className="ml-auto flex flex-wrap items-center gap-2 text-sm">
             {user && (
@@ -2329,6 +2332,7 @@ export default function App() {
 
           {showAuthPrompt && (
             <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-4 bg-slate-950/80 px-6 text-center backdrop-blur-sm">
+              <img src="/bloom.png" alt="Bloom logo" className="w-24 md:w-32 rounded-xl" />
               <p className="text-sm text-slate-200">Connect your Nostr account to use Bloom.</p>
               <button
                 onClick={connect}
