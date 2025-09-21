@@ -1647,7 +1647,7 @@ const ListLayout: React.FC<{
                 tabIndex={0}
               >
                 <div className="flex items-center gap-1 text-left uppercase tracking-wide text-slate-300 hover:text-slate-200 cursor-pointer select-none">
-                  <span>Updated</span>
+                  <span>Uploaded</span>
                   <span aria-hidden="true">{indicatorFor("uploaded")}</span>
                 </div>
               </th>

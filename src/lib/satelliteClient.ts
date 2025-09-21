@@ -131,11 +131,26 @@ async function createSatelliteAuthEvent(
 
 const encodeAuthParam = (event: SignedEvent) => encodeURIComponent(JSON.stringify(event));
 
+const normalizeEpochSeconds = (value: number): number | undefined => {
+  if (!Number.isFinite(value)) return undefined;
+  const normalized = value > 1_000_000_000_000 ? Math.floor(value / 1000) : Math.floor(value);
+  return normalized >= 0 ? normalized : undefined;
+};
+
 const coerceNumber = (value: unknown): number | undefined => {
-  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return normalizeEpochSeconds(value);
+  }
   if (typeof value === "string" && value.trim()) {
-    const parsed = Number(value);
-    if (Number.isFinite(parsed)) return parsed;
+    const raw = value.trim();
+    const numeric = Number(raw);
+    if (Number.isFinite(numeric)) {
+      return normalizeEpochSeconds(numeric);
+    }
+    const parsedMs = Date.parse(raw);
+    if (!Number.isNaN(parsedMs)) {
+      return Math.floor(parsedMs / 1000);
+    }
   }
   return undefined;
 };
