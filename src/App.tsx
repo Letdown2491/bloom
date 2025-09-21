@@ -43,6 +43,7 @@ import {
   TransferIcon,
   UploadIcon,
 } from "./components/icons";
+import { AudioVisualizer } from "./components/AudioVisualizer";
 
 type TabId = "browse" | "upload" | "servers" | "transfer" | "share";
 
@@ -98,7 +99,7 @@ const ADDITIONAL_AUDIO_MIME_TYPES = new Set([
 ]);
 
 const isMusicBlob = (blob: BlossomBlob) => {
-  const rawType = blob.type ? blob.type.split(";")[0].trim().toLowerCase() : "";
+  const rawType = blob.type?.split(";")[0]?.trim().toLowerCase() ?? "";
   if (rawType) {
     if (rawType.startsWith("audio/")) return true;
     if (ADDITIONAL_AUDIO_MIME_TYPES.has(rawType)) return true;
@@ -1898,6 +1899,11 @@ export default function App() {
                     {audio.duration > 0 ? formatTime(audio.duration) : "--:--"}
                   </span>
                 </div>
+                {audio.status === "playing" && audio.visualizerAvailable && (
+                  <div className="h-16 rounded-lg border border-slate-800 bg-slate-900/60 px-1 py-2">
+                    <AudioVisualizer className="h-full w-full" />
+                  </div>
+                )}
                 <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
                   <button

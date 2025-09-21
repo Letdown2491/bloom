@@ -27,6 +27,8 @@ type AudioContextValue = {
   previous: () => void;
   toggleRepeatMode: () => void;
   seek: (time: number) => void;
+  getFrequencyData: () => Uint8Array | null;
+  visualizerAvailable: boolean;
 };
 
 const AudioCtx = createContext<AudioContextValue | undefined>(undefined);
@@ -62,22 +64,95 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [repeatMode, setRepeatMode] = useState<RepeatMode>("all");
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const mediaSourceRef = useRef<MediaElementAudioSourceNode | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const analyserDataRef = useRef<Uint8Array | null>(null);
+  const graphConnectedRef = useRef(false);
+  const visualizerEnabledRef = useRef(true);
 
   const ensureAudio = useCallback(() => {
     if (!audioRef.current) {
       const audio = new Audio();
       audio.controls = false;
+      audio.crossOrigin = "anonymous";
+      audio.preload = "metadata";
       audioRef.current = audio;
+    }
+    if (audioRef.current) {
+      audioRef.current.crossOrigin = "anonymous";
     }
     return audioRef.current;
   }, []);
+
+  const ensureAudioGraph = useCallback(() => {
+    if (!visualizerEnabledRef.current) return;
+    if (typeof window === "undefined") return;
+    const audio = ensureAudio();
+    const AudioContextCtor = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!AudioContextCtor) return;
+
+    let audioCtx = audioContextRef.current;
+    if (!audioCtx) {
+      audioCtx = new AudioContextCtor();
+      audioContextRef.current = audioCtx;
+    }
+
+    if (!mediaSourceRef.current) {
+      try {
+        mediaSourceRef.current = audioCtx.createMediaElementSource(audio);
+      } catch (error) {
+        console.warn("Visualizer disabled: media source unavailable", error);
+        visualizerEnabledRef.current = false;
+        analyserRef.current = null;
+        analyserDataRef.current = null;
+        graphConnectedRef.current = false;
+        try {
+          audioContextRef.current?.close();
+        } catch {
+          // ignore close errors
+        }
+        audioContextRef.current = null;
+        return;
+      }
+    }
+
+    if (!analyserRef.current) {
+      const analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 256;
+      analyser.smoothingTimeConstant = 0.8;
+      analyserRef.current = analyser;
+      analyserDataRef.current = new Uint8Array(analyser.frequencyBinCount);
+      graphConnectedRef.current = false;
+    }
+
+    if (!graphConnectedRef.current && mediaSourceRef.current && analyserRef.current) {
+      try {
+        mediaSourceRef.current.disconnect();
+      } catch {
+        // ignore if already disconnected
+      }
+      mediaSourceRef.current.connect(analyserRef.current);
+      try {
+        analyserRef.current.connect(audioCtx.destination);
+      } catch {
+        // destination connection may already exist
+      }
+      graphConnectedRef.current = true;
+    }
+  }, [ensureAudio]);
 
   const playTrackAtIndex = useCallback(
     (queueToUse: Track[], indexToUse: number, updateQueueState: boolean) => {
       if (!queueToUse.length || indexToUse < 0 || indexToUse >= queueToUse.length) return;
       const target = queueToUse[indexToUse];
-      if (!target.url) return;
+      if (!target || !target.url) return;
       const audio = ensureAudio();
+      ensureAudioGraph();
+      const audioCtx = audioContextRef.current;
+      if (audioCtx?.state === "suspended") {
+        audioCtx.resume().catch(() => undefined);
+      }
       if (updateQueueState) {
         setQueue(queueToUse);
       }
@@ -91,7 +166,7 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       audio.play().catch(() => undefined);
       setStatus("playing");
     },
-    [ensureAudio]
+    [ensureAudio, ensureAudioGraph]
   );
 
   useEffect(() => {
@@ -99,12 +174,21 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
     const handlePlay = () => {
       setStatus("playing");
+      if (visualizerEnabledRef.current) {
+        const audioCtx = audioContextRef.current;
+        if (audioCtx?.state === "suspended") {
+          audioCtx.resume().catch(() => undefined);
+        }
+      }
     };
 
     const handlePause = () => {
       if (audio.ended) return;
       if (audio.currentTime > 0) setStatus("paused");
       else setStatus("idle");
+      if (visualizerEnabledRef.current && audioContextRef.current?.state === "running") {
+        audioContextRef.current.suspend().catch(() => undefined);
+      }
     };
 
     const handleEnded = () => {
@@ -119,6 +203,9 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         setStatus("idle");
         setCurrentTime(0);
         setDuration(0);
+        if (visualizerEnabledRef.current && audioContextRef.current?.state === "running") {
+          audioContextRef.current.suspend().catch(() => undefined);
+        }
         return;
       }
       const idx = currentIndex ?? -1;
@@ -128,6 +215,9 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         setCurrentIndex(null);
         setCurrentTime(0);
         setDuration(0);
+        if (visualizerEnabledRef.current && audioContextRef.current?.state === "running") {
+          audioContextRef.current.suspend().catch(() => undefined);
+        }
         return;
       }
       const nextIndex = idx + 1;
@@ -182,6 +272,9 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     audio.pause();
     if (audio.currentTime > 0) setStatus("paused");
     else setStatus("idle");
+    if (visualizerEnabledRef.current && audioContextRef.current?.state === "running") {
+      audioContextRef.current.suspend().catch(() => undefined);
+    }
   }, [ensureAudio]);
 
   const toggle = useCallback(
@@ -234,6 +327,12 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setCurrentIndex(null);
     setCurrentTime(0);
     setDuration(0);
+    if (visualizerEnabledRef.current) {
+      const audioCtx = audioContextRef.current;
+      if (audioCtx?.state === "running") {
+        audioCtx.suspend().catch(() => undefined);
+      }
+    }
   }, [ensureAudio]);
 
   const toggleRepeatMode = useCallback(() => {
@@ -251,8 +350,26 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     [ensureAudio, duration]
   );
 
+  const getFrequencyData = useCallback(() => {
+    if (!visualizerEnabledRef.current) return null;
+    const analyser = analyserRef.current;
+    if (!analyser) return null;
+    let data = analyserDataRef.current;
+    if (!data || data.length !== analyser.frequencyBinCount) {
+      data = new Uint8Array(analyser.frequencyBinCount);
+      analyserDataRef.current = data;
+    }
+    const buffer = new Uint8Array(analyser.frequencyBinCount);
+    buffer.set(data);
+    analyser.getByteFrequencyData(buffer);
+    analyserDataRef.current = buffer;
+    return buffer;
+  }, []);
+
   const hasNext = currentIndex !== null && currentIndex < queue.length - 1;
   const hasPrevious = currentIndex !== null && currentIndex > 0;
+
+  const visualizerAvailable = visualizerEnabledRef.current && Boolean(analyserRef.current);
 
   const value = useMemo<AudioContextValue>(
     () => ({
@@ -272,6 +389,8 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       previous,
       toggleRepeatMode,
       seek,
+      getFrequencyData,
+      visualizerAvailable,
     }),
     [
       current,
@@ -290,6 +409,8 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       previous,
       toggleRepeatMode,
       seek,
+      getFrequencyData,
+      visualizerAvailable,
     ]
   );
 
