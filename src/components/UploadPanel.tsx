@@ -125,6 +125,7 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
   );
 
   const canUpload = requiresAuthSelected ? Boolean(ndk?.signer) : true;
+  const hasImageEntries = useMemo(() => entries.some(entry => entry.kind === "image"), [entries]);
 
   React.useEffect(() => {
     setSelectedServers(prev => {
@@ -503,22 +504,24 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
             })}
           </div>
         )}
-        <div className="flex flex-wrap gap-4 text-sm text-slate-300">
-          <label className="flex items-center gap-2">
-            <input type="checkbox" checked={cleanMetadata} onChange={e => setCleanMetadata(e.target.checked)} />
-            Remove metadata from images
-          </label>
-          <label className="flex items-center gap-2">
-            <span>Resize:</span>
-            <select value={resizeOption} onChange={e => setResizeOption(Number(e.target.value))} className="bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-sm">
-              {RESIZE_OPTIONS.map(opt => (
-                <option key={opt.id} value={opt.id}>
-                  {opt.label}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
+        {hasImageEntries && (
+          <div className="flex flex-wrap gap-4 text-sm text-slate-300">
+            <label className="flex items-center gap-2">
+              <input type="checkbox" checked={cleanMetadata} onChange={e => setCleanMetadata(e.target.checked)} />
+              Remove EXIF metadata from images
+            </label>
+            <label className="flex items-center gap-2">
+              <span>Resize:</span>
+              <select value={resizeOption} onChange={e => setResizeOption(Number(e.target.value))} className="bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-sm">
+                {RESIZE_OPTIONS.map(opt => (
+                  <option key={opt.id} value={opt.id}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+        )}
         <div className="space-y-2">
           <span className="text-sm text-slate-300">Upload to</span>
           <div className="flex flex-wrap gap-3">
