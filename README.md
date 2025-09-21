@@ -8,6 +8,7 @@ Bloom is a simple to use and intuitive file manager utilizing Blossom and NIP-96
 - **Keep files safe:** Make backup copies on other servers with just a few clicks.
 - **Share easily:** Grab ready-to-use links without digging through menus or share directly to Nostr by creating a note with embedded media.
 - **Media support:** Play your music right from Bloom.
+- **Metadata support:** Bloom fully supports editing blob metadata both at time of upload and at any point after. This is done through Nostr NIP-94 support. This allows users to "rename" blob hashes to human-readable names.
 
 ## Before You Start
 - Use a browser that supports Nostr extensions (for example, Alby)
