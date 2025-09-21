@@ -65,6 +65,46 @@ export const PauseIcon = createIcon(
   </>
 );
 
+export const PreviousIcon = createIcon(
+  <>
+    <path d="M7 5v14" />
+    <path d="M17 5 9 12l8 7Z" />
+  </>
+);
+
+export const NextIcon = createIcon(
+  <>
+    <path d="M17 5v14" />
+    <path d="M7 5l8 7-8 7Z" />
+  </>
+);
+
+export const RepeatIcon = createIcon(
+  <>
+    <path d="M7 4h8a4 4 0 0 1 4 4v1" />
+    <path d="m15 5 4 4-4 4" />
+    <path d="M17 20H9a4 4 0 0 1-4-4v-1" />
+    <path d="m9 19-4-4 4-4" />
+  </>
+);
+
+export const RepeatOneIcon = createIcon(
+  <>
+    <path d="M7 4h8a4 4 0 0 1 4 4v1" />
+    <path d="m15 5 4 4-4 4" />
+    <path d="M17 20H9a4 4 0 0 1-4-4v-1" />
+    <path d="m9 19-4-4 4-4" />
+    <path d="M12 11v5" />
+    <path d="m10.5 12.5 1.5-1.5 1.5 1.5" />
+  </>
+);
+
+export const StopIcon = createIcon(
+  <>
+    <rect x="7" y="7" width="10" height="10" rx="1.5" />
+  </>
+);
+
 export const FolderIcon = createIcon(
   <>
     <path d="M3.5 7.5v9a1.5 1.5 0 0 0 1.5 1.5h14a1.5 1.5 0 0 0 1.5-1.5v-7a1.5 1.5 0 0 0-1.5-1.5h-6l-1.5-2h-6c-.828 0-1.5.672-1.5 1.5Z" />

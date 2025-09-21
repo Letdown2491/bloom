@@ -13,7 +13,7 @@ const UploadPanelLazy = React.lazy(() =>
 const ServerListLazy = React.lazy(() =>
   import("./components/ServerList").then(module => ({ default: module.ServerList }))
 );
-import { useAudio } from "./context/AudioContext";
+import { useAudio, type Track as AudioTrack } from "./context/AudioContext";
 import {
   deleteUserBlob,
   mirrorBlobToServer,
@@ -28,7 +28,21 @@ import { useQueryClient } from "@tanstack/react-query";
 import type { BlossomBlob } from "./lib/blossomClient";
 import { prettyBytes } from "./utils/format";
 import { deriveServerNameFromUrl } from "./utils/serverName";
-import { GridIcon, HomeIcon, ListIcon, MusicIcon, TransferIcon, UploadIcon } from "./components/icons";
+import {
+  GridIcon,
+  HomeIcon,
+  ListIcon,
+  MusicIcon,
+  NextIcon,
+  PauseIcon,
+  PlayIcon,
+  PreviousIcon,
+  RepeatIcon,
+  RepeatOneIcon,
+  StopIcon,
+  TransferIcon,
+  UploadIcon,
+} from "./components/icons";
 
 type TabId = "browse" | "upload" | "servers" | "transfer" | "share";
 
@@ -99,6 +113,41 @@ const isMusicBlob = (blob: BlossomBlob) => {
   if (matchesExtension(blob.url)) return true;
 
   return false;
+};
+
+const deriveTrackTitle = (blob: BlossomBlob) => {
+  const explicit = blob.name?.trim();
+  if (explicit) return explicit;
+  if (blob.url) {
+    const segments = blob.url.split("/");
+    const tail = segments[segments.length - 1];
+    if (tail) {
+      try {
+        const decoded = decodeURIComponent(tail);
+        if (decoded) return decoded;
+      } catch {
+        return tail;
+      }
+      return tail;
+    }
+  }
+  return `${blob.sha256.slice(0, 12)}…`;
+};
+
+const buildAudioTrack = (blob: BlossomBlob): AudioTrack | null => {
+  if (!blob.url) return null;
+  return {
+    id: blob.sha256,
+    url: blob.url,
+    title: deriveTrackTitle(blob),
+  };
+};
+
+const formatTime = (value: number) => {
+  const total = Math.max(0, Math.floor(value || 0));
+  const minutes = Math.floor(total / 60);
+  const seconds = total % 60;
+  return `${minutes}:${seconds.toString().padStart(2, "0")}`;
 };
 
 export default function App() {
@@ -821,8 +870,24 @@ export default function App() {
     [visibleAggregatedBlobs]
   );
 
+  const musicQueueTracks = useMemo(() => {
+    return aggregated.blobs
+      .filter(isMusicBlob)
+      .map(buildAudioTrack)
+      .filter((track): track is AudioTrack => Boolean(track));
+  }, [aggregated.blobs]);
+
   const audio = useAudio();
   const { toggle: toggleAudioTrack } = audio;
+  const scrubberMax = audio.duration > 0 ? audio.duration : Math.max(audio.currentTime || 0, 1);
+  const scrubberValue = Math.min(audio.currentTime || 0, scrubberMax);
+  const scrubberDisabled = !audio.current || audio.duration <= 0;
+
+  const handleScrub: React.ChangeEventHandler<HTMLInputElement> = event => {
+    const next = Number(event.target.value);
+    if (!Number.isFinite(next)) return;
+    audio.seek(next);
+  };
 
   useEffect(() => {
     let ignore = false;
@@ -1515,8 +1580,9 @@ export default function App() {
                     onCopy={handleCopyUrl}
                     onShare={handleShareBlob}
                     onPlay={blob => {
-                      if (!blob.url) return;
-                      toggleAudioTrack({ url: blob.url, title: blob.name });
+                      const track = buildAudioTrack(blob);
+                      if (!track) return;
+                      toggleAudioTrack(track, musicQueueTracks);
                     }}
                     currentTrackUrl={audio.current?.url}
                     currentTrackStatus={audio.status}
@@ -1536,8 +1602,9 @@ export default function App() {
                     onCopy={handleCopyUrl}
                     onShare={handleShareBlob}
                     onPlay={blob => {
-                      if (!blob.url) return;
-                      toggleAudioTrack({ url: blob.url, title: blob.name });
+                      const track = buildAudioTrack(blob);
+                      if (!track) return;
+                      toggleAudioTrack(track, musicQueueTracks);
                     }}
                     currentTrackUrl={audio.current?.url}
                     currentTrackStatus={audio.status}
@@ -1803,11 +1870,106 @@ export default function App() {
         </div>
 
         {audio.current && (
-          <div className="fixed bottom-4 right-4 bg-slate-900/80 border border-slate-800 rounded-xl px-4 py-3 text-sm text-slate-200 shadow-lg">
-            <div className="font-medium">Now playing</div>
-            <div className="text-xs text-slate-400">{audio.current.title || audio.current.url}</div>
-            <div className="flex gap-2 mt-2">
-              <button onClick={audio.stop} className="px-3 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs">Stop</button>
+          <div className="fixed bottom-4 right-4 w-full max-w-sm rounded-xl border border-slate-800 bg-slate-900/85 px-4 py-3 text-sm text-slate-200 shadow-lg">
+              <div className="flex flex-col gap-3">
+                <div className="min-w-0">
+                  <div className="text-[11px] uppercase tracking-wide text-slate-400">Now playing</div>
+                  <div className="text-sm font-medium text-slate-100 truncate">
+                    {audio.current.title || audio.current.url}
+                  </div>
+                </div>
+                <div className="flex items-center gap-3">
+                  <span className="text-xs tabular-nums text-slate-400 w-10">
+                    {formatTime(audio.currentTime)}
+                  </span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={scrubberMax}
+                    step={0.1}
+                    value={scrubberValue}
+                    onChange={handleScrub}
+                    disabled={scrubberDisabled}
+                    aria-label="Seek through current track"
+                    aria-valuetext={formatTime(scrubberValue)}
+                    className="flex-1 h-1.5 cursor-pointer appearance-none rounded-full bg-slate-800 accent-emerald-500"
+                  />
+                  <span className="text-xs tabular-nums text-slate-400 w-10 text-right">
+                    {audio.duration > 0 ? formatTime(audio.duration) : "--:--"}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={audio.previous}
+                    disabled={!audio.hasPrevious}
+                    className={`p-2 rounded-lg flex items-center justify-center transition focus:outline-none focus:ring-1 focus:ring-emerald-400 ${
+                      audio.hasPrevious
+                        ? "bg-slate-800 hover:bg-slate-700 text-slate-200"
+                        : "bg-slate-800/50 text-slate-500 cursor-not-allowed"
+                    }`}
+                    aria-label="Play previous track"
+                  >
+                    <PreviousIcon size={18} />
+                    <span className="sr-only">Previous</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => audio.toggle(audio.current!, audio.queue)}
+                    className={`p-2 rounded-lg flex items-center justify-center transition focus:outline-none focus:ring-1 focus:ring-emerald-400 ${
+                      audio.status === "playing"
+                        ? "bg-emerald-500 text-slate-900 hover:bg-emerald-400"
+                        : "bg-slate-800 hover:bg-slate-700 text-slate-200"
+                    }`}
+                    aria-label={audio.status === "playing" ? "Pause track" : "Play track"}
+                  >
+                    {audio.status === "playing" ? <PauseIcon size={18} /> : <PlayIcon size={18} />}
+                    <span className="sr-only">{audio.status === "playing" ? "Pause" : "Play"}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={audio.next}
+                    disabled={!audio.hasNext}
+                    className={`p-2 rounded-lg flex items-center justify-center transition focus:outline-none focus:ring-1 focus:ring-emerald-400 ${
+                      audio.hasNext
+                        ? "bg-slate-800 hover:bg-slate-700 text-slate-200"
+                        : "bg-slate-800/50 text-slate-500 cursor-not-allowed"
+                    }`}
+                    aria-label="Play next track"
+                  >
+                    <NextIcon size={18} />
+                    <span className="sr-only">Next</span>
+                  </button>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={audio.toggleRepeatMode}
+                    aria-label="Toggle repeat mode"
+                    aria-pressed={audio.repeatMode === "track"}
+                    className={`p-2 rounded-lg flex items-center justify-center transition focus:outline-none focus:ring-1 focus:ring-emerald-400 ${
+                      audio.repeatMode === "track"
+                        ? "bg-emerald-700 text-slate-100 hover:bg-emerald-600"
+                        : "bg-slate-800 hover:bg-slate-700 text-slate-200"
+                    }`}
+                  >
+                    {audio.repeatMode === "track" ? <RepeatOneIcon size={18} /> : <RepeatIcon size={18} />}
+                    <span className="sr-only">
+                      {audio.repeatMode === "track" ? "Repeat current track" : "Repeat entire queue"}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={audio.stop}
+                    className="p-2 rounded-lg flex items-center justify-center transition bg-red-900/80 text-slate-100 hover:bg-red-800 focus:outline-none focus:ring-1 focus:ring-red-400"
+                    aria-label="Stop playback"
+                  >
+                    <StopIcon size={18} />
+                    <span className="sr-only">Stop</span>
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         )}
