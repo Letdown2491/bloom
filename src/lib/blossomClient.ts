@@ -67,9 +67,43 @@ const sanitizeFileName = (value: string | undefined) => {
   return value.replace(/[\\/]/g, "_");
 };
 
+const toHex = (bytes: ArrayLike<number>) =>
+  Array.from(bytes)
+    .map(b => b.toString(16).padStart(2, "0"))
+    .join("");
+
+const HEX_256_REGEX = /^[0-9a-fA-F]{64}$/;
+
+const extractSha256FromUrl = (value: string): string | undefined => {
+  try {
+    const parsed = new URL(value);
+    const segments = parsed.pathname.split("/").filter(Boolean);
+    const last = segments.pop();
+    if (!last) return undefined;
+    const candidate = last.split(".")[0];
+    if (candidate && HEX_256_REGEX.test(candidate)) {
+      return candidate.toLowerCase();
+    }
+  } catch (error) {
+    // Ignore URL parse errors; caller will handle missing hash.
+  }
+  return undefined;
+};
+
+async function computeBlobSha256Hex(blob: Blob): Promise<string> {
+  const arrayBuffer = await blob.arrayBuffer();
+  const crypto = globalThis.crypto;
+  if (!crypto?.subtle) {
+    throw new Error("SHA-256 hashing unavailable in this environment");
+  }
+  const hashBuffer = await crypto.subtle.digest("SHA-256", arrayBuffer);
+  return toHex(new Uint8Array(hashBuffer));
+}
+
 async function createAuthEvent(signTemplate: SignTemplate, kind: AuthKind, data?: AuthData) {
   const expiration = Math.floor(Date.now() / 1000) + (data?.expiresInSeconds ?? 300);
-  const tags: string[][] = [["t", kind], ["expiration", String(expiration)]];
+  const authAction = kind === "mirror" ? "upload" : kind;
+  const tags: string[][] = [["t", authAction], ["expiration", String(expiration)]];
   if (data?.serverUrl) {
     const normalized = data.serverUrl.replace(/\/$/, "");
     tags.push(["server", normalized]);
@@ -100,12 +134,13 @@ async function createAuthEvent(signTemplate: SignTemplate, kind: AuthKind, data?
       tags.push(["type", fileType]);
     }
   }
-  if ((kind === "delete" || kind === "get") && data?.hash) {
-    tags.push(["x", data.hash]);
-  }
   if (kind === "mirror" && data?.sourceUrl) {
     tags.push(["source", data.sourceUrl]);
     tags.push(["url", data.sourceUrl]);
+  }
+  const shouldIncludeHash = Boolean(data?.hash) && (kind === "delete" || kind === "get" || kind === "upload" || kind === "mirror");
+  if (shouldIncludeHash && data?.hash) {
+    tags.push(["x", data.hash]);
   }
   const template: EventTemplate = {
     kind: BLOSSOM_KIND_AUTH,
@@ -220,12 +255,17 @@ export async function uploadBlobToServer(
 
   const source = await resolveUploadSource(file);
   const uploadFile = await ensureUploadFile(source);
+  const fileSha256Hex = await computeBlobSha256Hex(uploadFile);
 
   const attempt = async (skipSizeTag: boolean): Promise<BlossomBlob> => {
     const headers: Record<string, string> = {
       Accept: "application/json",
       "Content-Type": uploadFile.type || source.contentType || "application/octet-stream",
     };
+
+    if (fileSha256Hex) {
+      headers["X-SHA-256"] = fileSha256Hex;
+    }
 
     if (requiresAuth) {
       if (!signTemplate) throw new Error("Server requires auth. Connect your signer first.");
@@ -238,6 +278,7 @@ export async function uploadBlobToServer(
         urlPath: "/upload",
         sizeOverride: options?.sizeOverride,
         skipSizeTag,
+        hash: fileSha256Hex,
       });
       headers.Authorization = encodeAuthHeader(authEvent);
     }
@@ -325,17 +366,26 @@ export async function mirrorBlobToServer(
   serverUrl: string,
   sourceUrl: string,
   signTemplate: SignTemplate | undefined,
-  requiresAuth: boolean
+  requiresAuth: boolean,
+  sourceSha256?: string
 ): Promise<BlossomBlob> {
   const url = new URL(`/mirror`, serverUrl).toString();
   const headers: Record<string, string> = { "content-type": "application/json" };
   let body: any = JSON.stringify({ url: sourceUrl });
+  const resolvedSha256 = sourceSha256?.toLowerCase() ?? extractSha256FromUrl(sourceUrl);
+  if (resolvedSha256) {
+    headers["X-SHA-256"] = resolvedSha256;
+  }
   if (requiresAuth) {
     if (!signTemplate) throw new Error("Server requires auth. Connect your signer first.");
+    if (!resolvedSha256) {
+      throw new Error("Unable to determine blob hash for mirror authorization.");
+    }
     const authEvent = await createAuthEvent(signTemplate, "mirror", {
       sourceUrl,
       serverUrl,
       urlPath: "/mirror",
+      hash: resolvedSha256,
     });
     headers.Authorization = encodeAuthHeader(authEvent);
     body = JSON.stringify({ url: sourceUrl, event: authEvent });

@@ -1103,7 +1103,8 @@ export default function App() {
                     target.url,
                     sourceBlob.url,
                     targetRequiresAuth ? signEventTemplate : undefined,
-                    targetRequiresAuth
+                    targetRequiresAuth,
+                    sourceBlob.sha256
                   );
                   completed = true;
                 } catch (error) {
@@ -1519,7 +1520,8 @@ export default function App() {
                     target.url,
                     blob.url,
                     targetRequiresAuth ? signEventTemplate : undefined,
-                    targetRequiresAuth
+                    targetRequiresAuth,
+                    blob.sha256
                   );
                   completed = true;
                 } catch (error) {
