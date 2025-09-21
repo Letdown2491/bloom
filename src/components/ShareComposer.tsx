@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { NDKEvent, NDKPublishError, NDKRelaySet, NDKRelayStatus, normalizeRelayUrl } from "@nostr-dev-kit/ndk";
 import { useCurrentPubkey, useNdk } from "../context/NdkContext";
+import { DEFAULT_PUBLIC_RELAYS, extractPreferredRelays, sanitizeRelayUrl } from "../utils/relays";
 
 export type SharePayload = {
   url: string;
@@ -48,7 +49,7 @@ type ProfileInfo = {
   picture: string | null;
 };
 
-const DEFAULT_RELAYS = ["wss://relay.primal.net", "wss://relay.damus.io", "wss://nos.lol"] as const;
+const DEFAULT_RELAYS = DEFAULT_PUBLIC_RELAYS;
 
 const CONNECTION_VARIANT_STYLES: Record<ConnectionVariant, { label: string; dotClass: string }> = {
   "connected": {
@@ -141,64 +142,6 @@ function describeConnectionState(state?: RelayConnectionState): { label: string;
   const base = CONNECTION_VARIANT_STYLES[state.variant] ?? CONNECTION_VARIANT_STYLES.unknown;
   return { label: base.label, dotClass: base.dotClass };
 }
-
-const sanitizeRelayUrl = (value: unknown): string | null => {
-  if (typeof value !== "string") return null;
-  const trimmed = value.trim();
-  if (!trimmed) return null;
-  const normalized = trimmed.replace(/\/$/, "");
-  if (!/^wss?:\/\//i.test(normalized)) return null;
-  return normalized;
-};
-
-const extractPreferredRelays = (metadata: unknown): string[] => {
-  if (!metadata || typeof metadata !== "object") return [];
-  const urls = new Set<string>();
-  const record = metadata as Record<string, unknown>;
-
-  const relaysField = record.relays;
-  if (relaysField && typeof relaysField === "object") {
-    Object.entries(relaysField as Record<string, unknown>).forEach(([rawUrl, config]) => {
-      const url = sanitizeRelayUrl(rawUrl);
-      if (!url) return;
-      if (config === true || config === undefined || config === null) {
-        urls.add(url);
-        return;
-      }
-      if (typeof config === "object" && config) {
-        const writeFlag = (config as Record<string, unknown>).write;
-        if (writeFlag === false) return;
-        urls.add(url);
-        return;
-      }
-      if (config === "write") {
-        urls.add(url);
-      }
-    });
-  }
-
-  const candidateArrays: unknown[] = [
-    record.writeRelays,
-    record.preferredRelays,
-    record.preferred_relays,
-    record.write_relays,
-  ];
-  candidateArrays.forEach(entry => {
-    if (!Array.isArray(entry)) return;
-    entry.forEach(item => {
-      const url = sanitizeRelayUrl(item);
-      if (url) urls.add(url);
-    });
-  });
-
-  const candidateStrings: unknown[] = [record.relay, record.relay_url, record.preferredRelay];
-  candidateStrings.forEach(entry => {
-    const url = sanitizeRelayUrl(entry);
-    if (url) urls.add(url);
-  });
-
-  return Array.from(urls);
-};
 
 const emptyProfileInfo = (): ProfileInfo => ({ displayName: null, username: null, nip05: null, picture: null });
 

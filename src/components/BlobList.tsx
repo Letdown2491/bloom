@@ -2,7 +2,16 @@ import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useSta
 import { prettyBytes, prettyDate } from "../utils/format";
 import { buildAuthorizationHeader, type BlossomBlob, type SignTemplate } from "../lib/blossomClient";
 import { buildNip98AuthHeader } from "../lib/nip98";
-import { CopyIcon, DownloadIcon, FileTypeIcon, PauseIcon, PlayIcon, ShareIcon, TrashIcon } from "./icons";
+import {
+  CopyIcon,
+  DownloadIcon,
+  EditIcon,
+  FileTypeIcon,
+  PauseIcon,
+  PlayIcon,
+  ShareIcon,
+  TrashIcon,
+} from "./icons";
 import {
   getStoredBlobMetadata,
   isMetadataFresh,
@@ -26,6 +35,7 @@ export type BlobListProps = {
   onCopy: (blob: BlossomBlob) => void;
   onPlay?: (blob: BlossomBlob) => void;
   onShare?: (blob: BlossomBlob) => void;
+  onRename?: (blob: BlossomBlob) => void;
   currentTrackUrl?: string;
   currentTrackStatus?: "idle" | "playing" | "paused";
 };
@@ -73,6 +83,7 @@ export const BlobList: React.FC<BlobListProps> = ({
   onCopy,
   onPlay,
   onShare,
+  onRename,
   currentTrackUrl,
   currentTrackStatus,
 }) => {
@@ -513,6 +524,7 @@ export const BlobList: React.FC<BlobListProps> = ({
           onCopy={onCopy}
           onPlay={onPlay}
           onShare={onShare}
+          onRename={onRename}
           currentTrackUrl={currentTrackUrl}
           currentTrackStatus={currentTrackStatus}
           detectedKinds={detectedKinds}
@@ -534,6 +546,7 @@ export const BlobList: React.FC<BlobListProps> = ({
           onCopy={onCopy}
           onPlay={onPlay}
           onShare={onShare}
+          onRename={onRename}
           currentTrackUrl={currentTrackUrl}
           currentTrackStatus={currentTrackStatus}
           detectedKinds={detectedKinds}
@@ -558,6 +571,7 @@ const GridLayout: React.FC<{
   onCopy: (blob: BlossomBlob) => void;
   onPlay?: (blob: BlossomBlob) => void;
   onShare?: (blob: BlossomBlob) => void;
+  onRename?: (blob: BlossomBlob) => void;
   currentTrackUrl?: string;
   currentTrackStatus?: "idle" | "playing" | "paused";
   detectedKinds: DetectedKindMap;
@@ -576,6 +590,7 @@ const GridLayout: React.FC<{
   onCopy,
   onPlay,
   onShare,
+  onRename,
   currentTrackUrl,
   currentTrackStatus,
   detectedKinds,
@@ -761,6 +776,19 @@ const GridLayout: React.FC<{
                         title="Download"
                       >
                         <DownloadIcon size={16} />
+                      </button>
+                    )}
+                    {onRename && (
+                      <button
+                        className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200"
+                        onClick={event => {
+                          event.stopPropagation();
+                          onRename(blob);
+                        }}
+                        aria-label="Edit file details"
+                        title="Edit details"
+                      >
+                        <EditIcon size={16} />
                       </button>
                     )}
                     <button
@@ -1137,6 +1165,7 @@ function ListRow({
   onCopy,
   onPlay,
   onShare,
+  onRename,
   currentTrackUrl,
   currentTrackStatus,
   detectedKinds,
@@ -1154,6 +1183,7 @@ function ListRow({
   onCopy: (blob: BlossomBlob) => void;
   onPlay?: (blob: BlossomBlob) => void;
   onShare?: (blob: BlossomBlob) => void;
+  onRename?: (blob: BlossomBlob) => void;
   currentTrackUrl?: string;
   currentTrackStatus?: "idle" | "playing" | "paused";
   detectedKinds: DetectedKindMap;
@@ -1212,7 +1242,7 @@ function ListRow({
       <td className="w-24 py-3 px-3 text-sm text-slate-400 whitespace-nowrap">
         {prettyBytes(blob.size || 0)}
       </td>
-      <td className="w-56 py-3 pl-3 pr-0">
+      <td className="w-64 py-3 pl-3 pr-0">
         <div className="flex flex-wrap items-center justify-end gap-2">
           {isAudio && onPlay && blob.url && (
             <button
@@ -1267,6 +1297,19 @@ function ListRow({
               <DownloadIcon size={16} />
             </button>
           )}
+          {onRename && (
+            <button
+              className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200"
+              onClick={event => {
+                event.stopPropagation();
+                onRename(blob);
+              }}
+              aria-label="Edit file details"
+              title="Edit details"
+            >
+              <EditIcon size={16} />
+            </button>
+          )}
           <button
             className="p-2 rounded-lg bg-red-900/80 hover:bg-red-800 text-slate-100"
             onClick={event => {
@@ -1298,6 +1341,7 @@ const ListLayout: React.FC<{
   onCopy: (blob: BlossomBlob) => void;
   onPlay?: (blob: BlossomBlob) => void;
   onShare?: (blob: BlossomBlob) => void;
+  onRename?: (blob: BlossomBlob) => void;
   currentTrackUrl?: string;
   currentTrackStatus?: "idle" | "playing" | "paused";
   detectedKinds: DetectedKindMap;
@@ -1318,6 +1362,7 @@ const ListLayout: React.FC<{
   onCopy,
   onPlay,
   onShare,
+  onRename,
   currentTrackUrl,
   currentTrackStatus,
   detectedKinds,
@@ -1430,7 +1475,7 @@ const ListLayout: React.FC<{
                   <span aria-hidden="true">{indicatorFor("size")}</span>
                 </div>
               </th>
-              <th scope="col" className="w-56 py-2 pl-3 pr-0 text-right font-semibold">Actions</th>
+              <th scope="col" className="w-64 py-2 pl-3 pr-0 text-right font-semibold">Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -1449,6 +1494,7 @@ const ListLayout: React.FC<{
                 onCopy={onCopy}
                 onPlay={onPlay}
                 onShare={onShare}
+                onRename={onRename}
                 currentTrackUrl={currentTrackUrl}
                 currentTrackStatus={currentTrackStatus}
                 detectedKinds={detectedKinds}
@@ -2079,8 +2125,11 @@ function buildDisplayName(blob: BlossomBlob) {
   const sanitized = sanitizeFilename(raw);
   const { baseName, extension: existingExtension } = splitNameAndExtension(sanitized);
   const inferredExtension = existingExtension || inferExtensionFromType(blob.type);
-  const truncatedBase = truncateMiddle(baseName, 12, 12);
-  return inferredExtension ? `${truncatedBase}.${inferredExtension}` : truncatedBase;
+
+  const shouldKeepFullName = blob.type?.startsWith("audio/") && typeof blob.name === "string" && blob.name.trim().length > 0;
+  const displayBase = shouldKeepFullName ? baseName : truncateMiddle(baseName, 12, 12);
+
+  return inferredExtension ? `${displayBase}.${inferredExtension}` : displayBase;
 }
 
 function splitNameAndExtension(filename: string) {

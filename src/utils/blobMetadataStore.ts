@@ -2,19 +2,36 @@ import type { BlossomBlob } from "../lib/blossomClient";
 
 const METADATA_STORAGE_VERSION = "v2";
 
+type StoredAudioMetadata = {
+  title?: string;
+  artist?: string;
+  album?: string;
+  trackNumber?: number;
+  trackTotal?: number;
+  durationSeconds?: number;
+  genre?: string;
+  year?: number;
+};
+
+export type BlobAudioMetadata = StoredAudioMetadata;
+
 type StoredMetadata = {
-  name?: string;
-  type?: string;
+  name?: string | null;
+  type?: string | null;
+  audio?: StoredAudioMetadata | null;
   updatedAt?: number;
   lastCheckedAt?: number;
 };
 
 const STORAGE_KEY = `bloom:blob-metadata:${METADATA_STORAGE_VERSION}`;
+const GLOBAL_METADATA_KEY = "__global__";
 
 let cache: Record<string, Record<string, StoredMetadata>> | null = null;
+let metadataVersion = 0;
+const listeners = new Set<() => void>();
 
 function normalizeServerKey(serverUrl?: string) {
-  if (!serverUrl) return undefined;
+  if (!serverUrl) return GLOBAL_METADATA_KEY;
   return serverUrl.replace(/\/+$/, "");
 }
 
@@ -46,64 +63,150 @@ function persist() {
   }
 }
 
+function notifyChange() {
+  metadataVersion += 1;
+  listeners.forEach(listener => {
+    try {
+      listener();
+    } catch (error) {
+      // Ignore listener failures.
+    }
+  });
+}
+
+export const subscribeToBlobMetadataChanges = (listener: () => void) => {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+};
+
+export const getBlobMetadataVersion = () => metadataVersion;
+
 export function getStoredBlobMetadata(serverUrl: string | undefined, sha256: string) {
   if (!sha256) return undefined;
   const serverKey = normalizeServerKey(serverUrl);
   if (!serverKey) return undefined;
   const store = readCache();
-  return store[serverKey]?.[sha256];
+  const entry = store[serverKey]?.[sha256];
+  const globalEntry = store[GLOBAL_METADATA_KEY]?.[sha256];
+  if (entry && globalEntry) {
+    const entryUpdated = entry.updatedAt ?? 0;
+    const globalUpdated = globalEntry.updatedAt ?? 0;
+    if (globalUpdated >= entryUpdated) {
+      return { ...entry, ...globalEntry };
+    }
+    return { ...globalEntry, ...entry };
+  }
+  return entry ?? globalEntry;
 }
 
-export function setStoredBlobMetadata(
-  serverUrl: string | undefined,
-  sha256: string,
-  metadata: StoredMetadata
-) {
+export function setStoredBlobMetadata(serverUrl: string | undefined, sha256: string, metadata: StoredMetadata) {
   if (!sha256) return;
   const serverKey = normalizeServerKey(serverUrl);
   if (!serverKey) return;
   const store = readCache();
   const serverStore = store[serverKey] ?? (store[serverKey] = {});
   const current = serverStore[sha256] ?? {};
-  const next: StoredMetadata = {
-    name: metadata.name ?? current.name,
-    type: metadata.type ?? current.type,
-    updatedAt: metadata.updatedAt ?? (metadata.name || metadata.type ? Date.now() : current.updatedAt),
-    lastCheckedAt: metadata.lastCheckedAt ?? current.lastCheckedAt,
-  };
-  if (!next.name) delete next.name;
-  if (!next.type) delete next.type;
-  if (!next.updatedAt && (current.name || current.type)) {
+  const nameProvided = Object.prototype.hasOwnProperty.call(metadata, "name");
+  const typeProvided = Object.prototype.hasOwnProperty.call(metadata, "type");
+  const audioProvided = Object.prototype.hasOwnProperty.call(metadata, "audio");
+  const updatedProvided = Object.prototype.hasOwnProperty.call(metadata, "updatedAt");
+  const checkedProvided = Object.prototype.hasOwnProperty.call(metadata, "lastCheckedAt");
+
+  const next: StoredMetadata = {};
+
+  const rawName = nameProvided ? metadata.name : current.name;
+  const rawType = typeProvided ? metadata.type : current.type;
+  const rawAudio = audioProvided ? metadata.audio : current.audio;
+
+  if (typeof rawName === "string") {
+    next.name = rawName;
+  } else if (rawName === null) {
+    // Explicit removal requested; leave name undefined.
+  } else if (typeof current.name === "string" && !nameProvided) {
+    next.name = current.name;
+  }
+
+  if (typeof rawType === "string") {
+    next.type = rawType;
+  } else if (rawType === null) {
+    // Explicit removal requested; leave type undefined.
+  } else if (typeof current.type === "string" && !typeProvided) {
+    next.type = current.type;
+  }
+
+  if (audioProvided) {
+    const normalizedAudio = normalizeStoredAudio(rawAudio ?? undefined);
+    if (normalizedAudio) {
+      next.audio = normalizedAudio;
+    }
+  } else if (current.audio) {
+    next.audio = current.audio;
+  }
+
+  if (updatedProvided) {
+    if (typeof metadata.updatedAt === "number" && Number.isFinite(metadata.updatedAt)) {
+      next.updatedAt = metadata.updatedAt;
+    }
+  } else if (
+    (nameProvided && typeof metadata.name === "string") ||
+    (typeProvided && typeof metadata.type === "string") ||
+    (audioProvided && metadata.audio !== undefined)
+  ) {
+    next.updatedAt = Date.now();
+  } else if (typeof current.updatedAt === "number") {
     next.updatedAt = current.updatedAt;
   }
-  if (!next.lastCheckedAt) delete next.lastCheckedAt;
-  if (!next.name && !next.type && !next.lastCheckedAt) {
+
+  if (checkedProvided) {
+    if (typeof metadata.lastCheckedAt === "number" && Number.isFinite(metadata.lastCheckedAt)) {
+      next.lastCheckedAt = metadata.lastCheckedAt;
+    }
+  } else if (typeof current.lastCheckedAt === "number") {
+    next.lastCheckedAt = current.lastCheckedAt;
+  }
+
+  if (typeof next.name !== "string") delete next.name;
+  if (typeof next.type !== "string") delete next.type;
+  if (typeof next.lastCheckedAt !== "number") delete next.lastCheckedAt;
+  if (!next.audio || Object.keys(next.audio).length === 0) delete next.audio;
+  if (typeof next.updatedAt !== "number") delete next.updatedAt;
+  let changed = false;
+  if (!next.name && !next.type && !next.audio && !next.lastCheckedAt && !next.updatedAt) {
     if (serverStore[sha256]) {
       delete serverStore[sha256];
       if (Object.keys(serverStore).length === 0) {
         delete store[serverKey];
       }
-      persist();
+      changed = true;
     }
-    return;
+  } else {
+    const unchanged =
+      current.name === next.name &&
+      current.type === next.type &&
+      isAudioEqual(current.audio, next.audio) &&
+      current.updatedAt === next.updatedAt &&
+      current.lastCheckedAt === next.lastCheckedAt;
+    if (!unchanged) {
+      serverStore[sha256] = next;
+      changed = true;
+    }
   }
-  if (
-    current.name === next.name &&
-    current.type === next.type &&
-    current.updatedAt === next.updatedAt &&
-    current.lastCheckedAt === next.lastCheckedAt
-  ) {
-    return;
+
+  if (changed) {
+    persist();
+    notifyChange();
   }
-  serverStore[sha256] = next;
-  persist();
 }
 
 export function mergeBlobWithStoredMetadata(serverUrl: string | undefined, blob: BlossomBlob): BlossomBlob {
   const stored = getStoredBlobMetadata(serverUrl, blob.sha256);
   const merged: BlossomBlob = { ...blob };
-  if (stored?.name && !merged.name) {
+  if (typeof stored?.name === "string") {
     merged.name = stored.name;
+  } else if (!merged.name && stored?.name === null) {
+    merged.name = undefined;
   }
   if (stored?.type && !merged.type) {
     merged.type = stored.type;
@@ -118,7 +221,7 @@ export function mergeBlobWithStoredMetadata(serverUrl: string | undefined, blob:
 }
 
 export function mergeBlobsWithStoredMetadata(serverUrl: string | undefined, blobs: BlossomBlob[]) {
-  return blobs.map(blob => mergeBlobWithStoredMetadata(serverUrl, blob));
+  return blobs.map(blob => combineGlobalAlias(blob, mergeBlobWithStoredMetadata(serverUrl, blob)));
 }
 
 export function rememberBlobMetadata(serverUrl: string | undefined, blob: BlossomBlob) {
@@ -129,19 +232,52 @@ export function rememberBlobMetadata(serverUrl: string | undefined, blob: Blosso
   });
 }
 
-export function markBlobMetadataChecked(serverUrl: string | undefined, sha256: string, checkedAt = Date.now()) {
+export function rememberAudioMetadata(
+  serverUrl: string | undefined,
+  sha256: string,
+  metadata: StoredAudioMetadata | null
+) {
   if (!sha256) return;
-  const serverKey = normalizeServerKey(serverUrl);
-  if (!serverKey) return;
-  const store = readCache();
-  const serverStore = store[serverKey] ?? (store[serverKey] = {});
-  const current = serverStore[sha256] ?? {};
-  const next: StoredMetadata = {
-    ...current,
-    lastCheckedAt: checkedAt,
-  };
-  serverStore[sha256] = next;
-  persist();
+  const normalized = normalizeStoredAudio(metadata ?? undefined);
+  if (normalized) {
+    const payload: StoredMetadata = { audio: normalized, updatedAt: Date.now() };
+    setStoredBlobMetadata(serverUrl, sha256, payload);
+    setStoredBlobMetadata(undefined, sha256, payload);
+  } else {
+    setStoredBlobMetadata(serverUrl, sha256, { audio: null, updatedAt: Date.now() });
+    setStoredBlobMetadata(undefined, sha256, { audio: null, updatedAt: Date.now() });
+  }
+}
+
+export function getStoredAudioMetadata(serverUrl: string | undefined, sha256: string) {
+  return getStoredBlobMetadata(serverUrl, sha256)?.audio;
+}
+
+export function applyAliasUpdate(
+  serverUrl: string | undefined,
+  sha256: string,
+  alias: string | null,
+  createdAtSeconds: number | undefined
+) {
+  if (!sha256) return false;
+  const updatedAt = typeof createdAtSeconds === "number" && Number.isFinite(createdAtSeconds)
+    ? Math.max(0, createdAtSeconds) * 1000
+    : Date.now();
+  const existing = getStoredBlobMetadata(undefined, sha256);
+  const existingUpdatedAt = existing?.updatedAt ?? 0;
+  if (existingUpdatedAt >= updatedAt) {
+    return false;
+  }
+  const normalizedAlias = alias === null ? null : alias;
+  setStoredBlobMetadata(undefined, sha256, {
+    name: normalizedAlias,
+    updatedAt,
+  });
+  return true;
+}
+
+export function markBlobMetadataChecked(serverUrl: string | undefined, sha256: string, checkedAt = Date.now()) {
+  setStoredBlobMetadata(serverUrl, sha256, { lastCheckedAt: checkedAt });
 }
 
 export function isMetadataFresh(stored: StoredMetadata | undefined, ttlMs: number) {
@@ -151,4 +287,54 @@ export function isMetadataFresh(stored: StoredMetadata | undefined, ttlMs: numbe
     return Date.now() - stored.lastCheckedAt < ttlMs;
   }
   return false;
+}
+
+function combineGlobalAlias(original: BlossomBlob, merged: BlossomBlob): BlossomBlob {
+  const global = getStoredBlobMetadata(undefined, merged.sha256);
+  if (!global) return merged;
+  const combined: BlossomBlob = { ...merged };
+  if (typeof global.name === "string") {
+    combined.name = global.name;
+  } else if (global.name === null && original.name === undefined) {
+    delete combined.name;
+  }
+  if (!combined.type && typeof global.type === "string") {
+    combined.type = global.type;
+  }
+  return combined;
+}
+
+function normalizeStoredAudio(audio?: StoredAudioMetadata | null): StoredAudioMetadata | undefined {
+  if (!audio) return undefined;
+  const normalized: StoredAudioMetadata = {};
+  if (typeof audio.title === "string" && audio.title.trim()) normalized.title = audio.title.trim();
+  if (typeof audio.artist === "string" && audio.artist.trim()) normalized.artist = audio.artist.trim();
+  if (typeof audio.album === "string" && audio.album.trim()) normalized.album = audio.album.trim();
+  if (isPositiveInteger(audio.trackNumber)) normalized.trackNumber = Math.trunc(audio.trackNumber!);
+  if (isPositiveInteger(audio.trackTotal)) normalized.trackTotal = Math.trunc(audio.trackTotal!);
+  if (isPositiveInteger(audio.durationSeconds)) normalized.durationSeconds = Math.trunc(audio.durationSeconds!);
+  if (typeof audio.genre === "string" && audio.genre.trim()) normalized.genre = audio.genre.trim();
+  if (isPositiveInteger(audio.year)) normalized.year = Math.trunc(audio.year!);
+  return Object.keys(normalized).length > 0 ? normalized : undefined;
+}
+
+function isPositiveInteger(value: number | undefined | null): value is number {
+  return typeof value === "number" && Number.isFinite(value) && Math.trunc(value) > 0;
+}
+
+function isAudioEqual(a?: StoredAudioMetadata | null, b?: StoredAudioMetadata | null) {
+  const normalizedA = normalizeStoredAudio(a ?? undefined);
+  const normalizedB = normalizeStoredAudio(b ?? undefined);
+  if (!normalizedA && !normalizedB) return true;
+  if (!normalizedA || !normalizedB) return false;
+  return (
+    normalizedA.title === normalizedB.title &&
+    normalizedA.artist === normalizedB.artist &&
+    normalizedA.album === normalizedB.album &&
+    normalizedA.trackNumber === normalizedB.trackNumber &&
+    normalizedA.trackTotal === normalizedB.trackTotal &&
+    normalizedA.durationSeconds === normalizedB.durationSeconds &&
+    normalizedA.genre === normalizedB.genre &&
+    normalizedA.year === normalizedB.year
+  );
 }

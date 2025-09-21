@@ -1,11 +1,15 @@
-import { useMemo } from "react";
+import { useMemo, useSyncExternalStore } from "react";
 import { useQueries } from "@tanstack/react-query";
 import { useCurrentPubkey, useNdk } from "../context/NdkContext";
 import type { ManagedServer } from "./useServers";
 import { listUserBlobs, type BlossomBlob } from "../lib/blossomClient";
 import { listNip96Files } from "../lib/nip96Client";
 import { listSatelliteFiles } from "../lib/satelliteClient";
-import { mergeBlobsWithStoredMetadata } from "../utils/blobMetadataStore";
+import {
+  mergeBlobsWithStoredMetadata,
+  subscribeToBlobMetadataChanges,
+  getBlobMetadataVersion,
+} from "../utils/blobMetadataStore";
 
 const filterHiddenBlobTypes = (blobs: BlossomBlob[]) =>
   blobs.filter(blob => (blob.type?.toLowerCase() ?? "") !== "inode/x-empty");
@@ -24,6 +28,11 @@ export type BlobDistribution = {
 export const useServerData = (servers: ManagedServer[]) => {
   const pubkey = useCurrentPubkey();
   const { signer, signEventTemplate } = useNdk();
+  const metadataVersion = useSyncExternalStore(
+    subscribeToBlobMetadataChanges,
+    getBlobMetadataVersion,
+    getBlobMetadataVersion
+  );
 
   const queries = useQueries({
     queries: servers.map(server => ({
@@ -62,11 +71,11 @@ export const useServerData = (servers: ManagedServer[]) => {
   const snapshots: ServerSnapshot[] = useMemo(() => {
     return servers.map((server, index) => ({
       server,
-      blobs: queries[index]?.data ?? [],
+      blobs: mergeBlobsWithStoredMetadata(server.url, queries[index]?.data ?? []),
       isLoading: queries[index]?.isLoading ?? false,
       isError: queries[index]?.isError ?? false,
     }));
-  }, [servers, queries]);
+  }, [servers, queries, metadataVersion]);
 
   const distribution = useMemo<BlobDistribution>(() => {
     const dict: BlobDistribution = {};

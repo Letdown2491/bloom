@@ -1,4 +1,5 @@
 import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { NDKEvent, NDKPublishError, NDKRelaySet } from "@nostr-dev-kit/ndk";
 import { useNdk, useCurrentPubkey } from "./context/NdkContext";
 import { useServers, ManagedServer, sortServersByName } from "./hooks/useServers";
 import { useServerData } from "./hooks/useServerData";
@@ -28,6 +29,16 @@ import { useQueryClient } from "@tanstack/react-query";
 import type { BlossomBlob } from "./lib/blossomClient";
 import { prettyBytes } from "./utils/format";
 import { deriveServerNameFromUrl } from "./utils/serverName";
+import { usePreferredRelays } from "./hooks/usePreferredRelays";
+import { useAliasSync } from "./hooks/useAliasSync";
+import { buildNip94EventTemplate } from "./lib/nip94";
+import {
+  applyAliasUpdate,
+  getStoredAudioMetadata,
+  rememberAudioMetadata,
+  type BlobAudioMetadata,
+} from "./utils/blobMetadataStore";
+import { EditDialog, type EditDialogAudioFields } from "./components/RenameDialog";
 import {
   DocumentIcon,
   FilterIcon,
@@ -83,6 +94,44 @@ const FILTER_OPTION_MAP = FILTER_OPTIONS.reduce(
 );
 
 const ALL_SERVERS_VALUE = "__all__";
+
+const emptyAudioFields = (): EditDialogAudioFields => ({
+  title: "",
+  artist: "",
+  album: "",
+  trackNumber: "",
+  trackTotal: "",
+  durationSeconds: "",
+  genre: "",
+  year: "",
+});
+
+const computeMusicAlias = (titleInput: string, artistInput: string) => {
+  const title = titleInput.trim();
+  const artist = artistInput.trim();
+  if (artist && title) return `${artist} - ${title}`;
+  return title || artist;
+};
+
+const parseMusicAlias = (value?: string | null) => {
+  if (!value) return { artist: "", title: "" };
+  const trimmed = value.trim();
+  if (!trimmed) return { artist: "", title: "" };
+  const separatorIndex = trimmed.indexOf(" - ");
+  if (separatorIndex === -1) return { artist: "", title: trimmed };
+  const artist = trimmed.slice(0, separatorIndex).trim();
+  const title = trimmed.slice(separatorIndex + 3).trim();
+  return { artist, title: title || trimmed };
+};
+
+const parsePositiveIntegerString = (value: string) => {
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  const parsed = Number(trimmed);
+  if (!Number.isFinite(parsed)) return undefined;
+  const rounded = Math.round(parsed);
+  return rounded > 0 ? rounded : undefined;
+};
 
 const normalizeManagedServer = (server: ManagedServer): ManagedServer => {
   const trimmedUrl = (server.url || "").trim();
@@ -239,6 +288,8 @@ export default function App() {
   const { connect, disconnect, user, signer, signEventTemplate, ndk } = useNdk();
   const pubkey = useCurrentPubkey();
   const queryClient = useQueryClient();
+  const { effectiveRelays } = usePreferredRelays();
+  useAliasSync(effectiveRelays, Boolean(pubkey));
 
   const { servers, saveServers, saving } = useServers();
   const [localServers, setLocalServers] = useState<ManagedServer[]>(servers);
@@ -275,6 +326,12 @@ export default function App() {
     payload: null,
     shareKey: null,
   });
+  const [renameTarget, setRenameTarget] = useState<BlossomBlob | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+  const [renameBusy, setRenameBusy] = useState(false);
+  const [renameError, setRenameError] = useState<string | null>(null);
+  const [renameIsMusic, setRenameIsMusic] = useState(false);
+  const [renameAudioFields, setRenameAudioFields] = useState<EditDialogAudioFields>(emptyAudioFields);
 
   const syncEnabledServers = useMemo(() => localServers.filter(server => server.sync), [localServers]);
   const serverValidationError = useMemo(() => validateManagedServers(localServers), [localServers]);
@@ -549,6 +606,227 @@ export default function App() {
     },
     []
   );
+
+  const handleRequestRename = useCallback(
+    (blob: BlossomBlob) => {
+      const music = isMusicBlob(blob);
+      setRenameTarget(blob);
+      setRenameIsMusic(music);
+      setRenameError(null);
+
+      if (music) {
+        const storedAudio = getStoredAudioMetadata(blob.serverUrl, blob.sha256) ?? getStoredAudioMetadata(undefined, blob.sha256);
+        const parsed = parseMusicAlias(blob.name || blob.url || blob.sha256);
+        setRenameAudioFields(() => {
+          const next = emptyAudioFields();
+          next.title = storedAudio?.title || parsed.title || "";
+          next.artist = storedAudio?.artist || parsed.artist || "";
+          next.album = storedAudio?.album || "";
+          next.trackNumber = storedAudio?.trackNumber ? String(storedAudio.trackNumber) : "";
+          next.trackTotal = storedAudio?.trackTotal ? String(storedAudio.trackTotal) : "";
+          next.durationSeconds = storedAudio?.durationSeconds ? String(storedAudio.durationSeconds) : "";
+          next.genre = storedAudio?.genre || "";
+          next.year = storedAudio?.year ? String(storedAudio.year) : "";
+          return next;
+        });
+        setRenameValue(
+          computeMusicAlias(storedAudio?.title || parsed.title || "", storedAudio?.artist || parsed.artist || "") ||
+            (storedAudio?.title || parsed.title || "")
+        );
+      } else {
+        setRenameAudioFields(emptyAudioFields());
+        setRenameValue(blob.name ?? "");
+      }
+    },
+    []
+  );
+
+  const handleRenameCancel = useCallback(() => {
+    if (renameBusy) return;
+    setRenameTarget(null);
+    setRenameValue("");
+    setRenameError(null);
+    setRenameIsMusic(false);
+    setRenameAudioFields(emptyAudioFields());
+  }, [renameBusy]);
+
+  const handleRenameValueChange = useCallback(
+    (next: string) => {
+      if (renameIsMusic) return;
+      setRenameValue(next);
+      if (renameError) setRenameError(null);
+    },
+    [renameError, renameIsMusic]
+  );
+
+  const handleRenameAudioFieldChange = useCallback(
+    (field: keyof EditDialogAudioFields, value: string) => {
+      setRenameAudioFields(prev => {
+        const next = { ...(prev ?? emptyAudioFields()) };
+        next[field] = value;
+        if (field === "title" || field === "artist") {
+          setRenameValue(computeMusicAlias(next.title, next.artist));
+        }
+        return next;
+      });
+      if (renameError) setRenameError(null);
+    },
+    [renameError]
+  );
+
+  const handleRenameSubmit = useCallback(async () => {
+    if (!renameTarget) return;
+    if (!ndk || !signer) {
+      showStatusMessage("Connect your signer to edit file details.", "error", 4000);
+      return;
+    }
+    const relays = effectiveRelays.filter(url => typeof url === "string" && url.trim().length > 0);
+    if (!relays.length) {
+      showStatusMessage("No relays available to publish the update.", "error", 4000);
+      return;
+    }
+
+    const isMusic = renameIsMusic && isMusicBlob(renameTarget);
+    let aliasForEvent: string;
+    let aliasForStore: string | null;
+    let extraTags: string[][] | undefined;
+    let audioMetadata: BlobAudioMetadata | null = null;
+
+    if (isMusic) {
+      const title = renameAudioFields.title.trim();
+      if (!title) {
+        setRenameError("Title is required for audio files.");
+        return;
+      }
+      const artist = renameAudioFields.artist.trim();
+      const album = renameAudioFields.album.trim();
+      const trackNumber = parsePositiveIntegerString(renameAudioFields.trackNumber);
+      const trackTotal = parsePositiveIntegerString(renameAudioFields.trackTotal);
+      const durationSeconds = parsePositiveIntegerString(renameAudioFields.durationSeconds);
+      const genre = renameAudioFields.genre.trim();
+      const year = parsePositiveIntegerString(renameAudioFields.year);
+
+      aliasForEvent = computeMusicAlias(title, artist) || title;
+      if (aliasForEvent.length > 120) {
+        setRenameError("Display name is too long (max 120 characters).");
+        return;
+      }
+      aliasForStore = aliasForEvent;
+
+      const tags: string[][] = [["title", title]];
+      const metadata: BlobAudioMetadata = { title };
+      if (artist) {
+        tags.push(["artist", artist]);
+        metadata.artist = artist;
+      }
+      if (album) {
+        tags.push(["album", album]);
+        metadata.album = album;
+      }
+      if (trackNumber) {
+        const trackValue = trackTotal ? `${trackNumber}/${trackTotal}` : String(trackNumber);
+        tags.push(["track", trackValue]);
+        metadata.trackNumber = trackNumber;
+        if (trackTotal) metadata.trackTotal = trackTotal;
+      } else if (trackTotal) {
+        metadata.trackTotal = trackTotal;
+      }
+      if (durationSeconds) {
+        tags.push(["duration", String(durationSeconds)]);
+        metadata.durationSeconds = durationSeconds;
+      }
+      if (genre) {
+        tags.push(["genre", genre]);
+        metadata.genre = genre;
+      }
+      if (year) {
+        tags.push(["year", String(year)]);
+        metadata.year = year;
+      }
+
+      extraTags = tags;
+      audioMetadata = metadata;
+    } else {
+      const trimmed = renameValue.trim();
+      const currentAlias = (renameTarget.name ?? "").trim();
+      if (trimmed === currentAlias) {
+        setRenameTarget(null);
+        setRenameValue("");
+        setRenameError(null);
+        setRenameIsMusic(false);
+        setRenameAudioFields(emptyAudioFields());
+        return;
+      }
+      if (trimmed.length > 120) {
+        setRenameError("Display name is too long (max 120 characters).");
+        return;
+      }
+      aliasForStore = trimmed.length > 0 ? trimmed : null;
+      aliasForEvent = aliasForStore ?? "";
+    }
+
+    setRenameBusy(true);
+    setRenameError(null);
+    try {
+      const template = buildNip94EventTemplate({
+        blob: renameTarget,
+        alias: aliasForEvent,
+        extraTags,
+      });
+      const event = new NDKEvent(ndk, template);
+      if (!event.created_at) {
+        event.created_at = Math.floor(Date.now() / 1000);
+      }
+      await event.sign();
+
+      let successes = 0;
+      let lastError: Error | null = null;
+      for (const relayUrl of relays) {
+        try {
+          const relaySet = NDKRelaySet.fromRelayUrls([relayUrl], ndk);
+          await event.publish(relaySet, 7000, 1);
+          successes += 1;
+        } catch (publishError) {
+          if (publishError instanceof NDKPublishError) {
+            lastError = new Error(publishError.relayErrors || publishError.message || "Update failed");
+          } else if (publishError instanceof Error) {
+            lastError = publishError;
+          } else {
+            lastError = new Error("Update failed");
+          }
+        }
+      }
+
+      if (successes === 0) {
+        throw lastError ?? new Error("No relays accepted the update.");
+      }
+
+      applyAliasUpdate(undefined, renameTarget.sha256, aliasForStore, event.created_at);
+      if (isMusic) {
+        rememberAudioMetadata(renameTarget.serverUrl, renameTarget.sha256, audioMetadata ?? null);
+      }
+      showStatusMessage("Details updated.", "success", 2500);
+      setRenameTarget(null);
+      setRenameValue("");
+      setRenameIsMusic(false);
+      setRenameAudioFields(emptyAudioFields());
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Update failed.";
+      setRenameError(message);
+      showStatusMessage(message, "error", 5000);
+    } finally {
+      setRenameBusy(false);
+    }
+  }, [
+    renameTarget,
+    ndk,
+    signer,
+    effectiveRelays,
+    renameValue,
+    renameIsMusic,
+    renameAudioFields,
+    showStatusMessage,
+  ]);
 
   const createBlobStreamSource = useCallback(
     (sourceBlob: BlossomBlob, sourceServer: ManagedServer): UploadStreamSource | null => {
@@ -1770,6 +2048,7 @@ export default function App() {
                     onDelete={handleDeleteBlob}
                     onCopy={handleCopyUrl}
                     onShare={handleShareBlob}
+                    onRename={handleRequestRename}
                     onPlay={blob => {
                       const track = buildAudioTrack(blob);
                       if (!track) return;
@@ -1792,6 +2071,7 @@ export default function App() {
                     onDelete={handleDeleteBlob}
                     onCopy={handleCopyUrl}
                     onShare={handleShareBlob}
+                    onRename={handleRequestRename}
                     onPlay={blob => {
                       const track = buildAudioTrack(blob);
                       if (!track) return;
@@ -2057,6 +2337,21 @@ export default function App() {
                 Connect (NIP-07)
               </button>
             </div>
+          )}
+
+          {renameTarget && (
+            <EditDialog
+              blob={renameTarget}
+              alias={renameValue}
+              busy={renameBusy}
+              error={renameError}
+              isMusic={renameIsMusic}
+              audioFields={renameAudioFields}
+              onAliasChange={handleRenameValueChange}
+              onAudioFieldChange={handleRenameAudioFieldChange}
+              onSubmit={handleRenameSubmit}
+              onCancel={handleRenameCancel}
+            />
           )}
         </div>
 
