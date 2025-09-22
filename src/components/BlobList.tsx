@@ -13,13 +13,9 @@ import {
   TrashIcon,
   CancelIcon,
 } from "./icons";
-import {
-  getStoredBlobMetadata,
-  isMetadataFresh,
-  markBlobMetadataChecked,
-  setStoredBlobMetadata,
-} from "../utils/blobMetadataStore";
 import { cachePreviewBlob, getCachedPreviewBlob } from "../utils/blobPreviewCache";
+import { useBlobMetadata } from "../features/browse/useBlobMetadata";
+import { useBlobPreview, type PreviewTarget } from "../features/browse/useBlobPreview";
 import { useInViewport } from "../hooks/useInViewport";
 
 export type BlobListProps = {
@@ -56,21 +52,8 @@ type SortKey = "name" | "size" | "uploaded";
 
 type SortConfig = { key: SortKey; direction: "asc" | "desc" };
 
-type PreviewTarget = {
-  blob: BlossomBlob;
-  displayName: string;
-  previewUrl: string | null;
-  requiresAuth: boolean;
-  signTemplate?: SignTemplate;
-  serverType: "blossom" | "nip96" | "satellite";
-  kind: FileKind;
-  disablePreview: boolean;
-  baseUrl?: string;
-};
-
 const CARD_HEIGHT = 260;
 const LIST_THUMBNAIL_SIZE = 48;
-const METADATA_CHECK_TTL_MS = 12 * 60 * 60 * 1000; // 12 hours
 const GRID_ACTION_BUTTON_CLASS =
   "flex aspect-square w-full items-center justify-center rounded-lg bg-slate-800 text-slate-200 transition focus:outline-none focus:ring-1 focus:ring-emerald-400 focus:ring-offset-1 focus:ring-offset-slate-900 hover:bg-slate-700";
 const GRID_DELETE_BUTTON_CLASS =
@@ -104,324 +87,17 @@ export const BlobList: React.FC<BlobListProps> = ({
   currentTrackUrl,
   currentTrackStatus,
 }) => {
-  const [detectedKinds, setDetectedKinds] = useState<DetectedKindMap>({});
-  const [resolvedMeta, setResolvedMeta] = useState<ResolvedMetaMap>({});
-  const [sortConfig, setSortConfig] = useState<SortConfig | null>(null);
-  const [previewTarget, setPreviewTarget] = useState<PreviewTarget | null>(null);
-  const pendingLookups = useRef(new Set<string>());
-  const attemptedLookups = useRef(new Set<string>());
-  const passiveDetectors = useRef(new Map<string, () => void>());
-  const isMounted = useRef(true);
-  const metadataSchedulerRef = useRef<{ running: number; queue: Array<() => void>; generation: number }>({
-    running: 0,
-    queue: [],
-    generation: 0,
-  });
-  const metadataAbortControllers = useRef(new Map<string, AbortController>());
-  const visibleMetadataRequestsRef = useRef(new Set<string>());
-  const [visibleSignal, setVisibleSignal] = useState(0);
-
-  useEffect(() => {
-    return () => {
-      isMounted.current = false;
-      passiveDetectors.current.forEach(cleanup => cleanup());
-      passiveDetectors.current.clear();
-    };
-  }, []);
-
-  const requestMetadataForBlob = useCallback(
-    (sha: string) => {
-      if (!sha) return;
-      if (visibleMetadataRequestsRef.current.has(sha)) return;
-      visibleMetadataRequestsRef.current.add(sha);
-      setVisibleSignal(signal => signal + 1);
-    },
-    [setVisibleSignal]
-  );
-
-  const handleDetect = useCallback((sha: string, kind: "image" | "video") => {
-    setDetectedKinds(prev => (prev[sha] === kind ? prev : { ...prev, [sha]: kind }));
-  }, []);
-
-  useEffect(() => {
-    setDetectedKinds(prev => {
-      const next: DetectedKindMap = {};
-      blobs.forEach(blob => {
-        const kind = prev[blob.sha256];
-        if (kind) next[blob.sha256] = kind;
-      });
-      return next;
-    });
-    setResolvedMeta(prev => {
-      const next: ResolvedMetaMap = {};
-      blobs.forEach(blob => {
-        const meta = prev[blob.sha256];
-        if (meta) next[blob.sha256] = meta;
-      });
-      return next;
-    });
-    const currentShas = new Set(blobs.map(blob => blob.sha256));
-    attemptedLookups.current.forEach(sha => {
-      if (!currentShas.has(sha)) attemptedLookups.current.delete(sha);
-    });
-    pendingLookups.current.forEach(sha => {
-      if (!currentShas.has(sha)) pendingLookups.current.delete(sha);
-    });
-    visibleMetadataRequestsRef.current.forEach(sha => {
-      if (!currentShas.has(sha)) visibleMetadataRequestsRef.current.delete(sha);
-    });
-    passiveDetectors.current.forEach((cleanup, sha) => {
-      if (!currentShas.has(sha)) {
-        cleanup();
-        passiveDetectors.current.delete(sha);
-      }
-    });
-  }, [blobs]);
-
-  useEffect(() => {
-    const scheduler = metadataSchedulerRef.current;
-    scheduler.generation += 1;
-    scheduler.queue = [];
-    scheduler.running = 0;
-    const currentGeneration = scheduler.generation;
-
-    metadataAbortControllers.current.forEach(controller => controller.abort());
-    metadataAbortControllers.current.clear();
-
-    const schedule = (task: () => Promise<void>) => {
-      const execute = () => {
-        if (scheduler.generation !== currentGeneration) return;
-        scheduler.running += 1;
-        task()
-          .catch(() => undefined)
-          .finally(() => {
-            scheduler.running = Math.max(0, scheduler.running - 1);
-            if (scheduler.generation !== currentGeneration) return;
-            const next = scheduler.queue.shift();
-            if (next) next();
-          });
-      };
-      if (scheduler.running < 4) execute();
-      else scheduler.queue.push(execute);
-    };
-
-    const resolveForBlob = async (blob: BlossomBlob, resourceUrl: string) => {
-      const controller = new AbortController();
-      metadataAbortControllers.current.set(blob.sha256, controller);
-      pendingLookups.current.add(blob.sha256);
-
-      try {
-        const headers: Record<string, string> = {};
-        const effectiveType = blob.serverType ?? serverType;
-        const needsAuthHeader = requiresAuth && effectiveType !== "satellite";
-        const buildAuth = async (method: "HEAD" | "GET") => {
-          if (!needsAuthHeader || !signTemplate) return undefined;
-          if (effectiveType === "nip96") {
-            return buildNip98AuthHeader(signTemplate, {
-              url: resourceUrl,
-              method,
-            });
-          }
-          let resource: URL | null = null;
-          try {
-            resource = new URL(resourceUrl);
-          } catch (error) {
-            resource = null;
-          }
-          return buildAuthorizationHeader(signTemplate, "get", {
-            hash: blob.sha256,
-            serverUrl: resource ? `${resource.protocol}//${resource.host}` : undefined,
-            urlPath: resource ? resource.pathname + (resource.search || "") : undefined,
-            expiresInSeconds: 120,
-          });
-        };
-
-        if (needsAuthHeader) {
-          const auth = await buildAuth("HEAD");
-          if (!auth) return;
-          headers.Authorization = auth;
-        }
-
-        let response = await fetch(resourceUrl, {
-          method: "HEAD",
-          headers,
-          mode: "cors",
-          signal: controller.signal,
-        });
-        if (!response.ok) {
-          if (response.status === 405 || response.status === 501) {
-            const fallbackHeaders: Record<string, string> = { ...headers };
-            if (needsAuthHeader) {
-              const auth = await buildAuth("GET");
-              if (!auth) return;
-              fallbackHeaders.Authorization = auth;
-            }
-            response = await fetch(resourceUrl, {
-              method: "GET",
-              headers: fallbackHeaders,
-              mode: "cors",
-              signal: controller.signal,
-            });
-            if (!response.ok) return;
-            if (response.body) {
-              try {
-                await response.body.cancel();
-              } catch (error) {
-                // Ignore cancellation errors; the headers are already available.
-              }
-            }
-          } else {
-            return;
-          }
-        }
-        const mime = response.headers.get("content-type") || undefined;
-        const disposition = response.headers.get("content-disposition") || undefined;
-        const inferredName = deriveFilename(disposition);
-
-        const nextType = mime && mime !== "application/octet-stream" ? mime : undefined;
-        const nextName = inferredName || undefined;
-
-        const storageServer = blob.serverUrl ?? baseUrl;
-        if ((nextType || nextName) && storageServer) {
-          setStoredBlobMetadata(storageServer, blob.sha256, {
-            name: nextName,
-            type: nextType,
-            lastCheckedAt: Date.now(),
-          });
-        }
-
-        if (isMounted.current) {
-          if (nextType?.startsWith("image/")) {
-            handleDetect(blob.sha256, "image");
-          } else if (nextType?.startsWith("video/")) {
-            handleDetect(blob.sha256, "video");
-          }
-        }
-
-        if (!nextType && !nextName) {
-          markBlobMetadataChecked(blob.serverUrl ?? baseUrl, blob.sha256);
-          return;
-        }
-        if (!isMounted.current) return;
-
-        setResolvedMeta(prev => {
-          const current = prev[blob.sha256] ?? {};
-          const updated: ResolvedMeta = {
-            type: nextType ?? current.type,
-            name: nextName ?? current.name,
-          };
-          if (current.type === updated.type && current.name === updated.name) return prev;
-          return { ...prev, [blob.sha256]: updated };
-        });
-        markBlobMetadataChecked(blob.serverUrl ?? baseUrl, blob.sha256);
-      } catch (error) {
-        if (error instanceof DOMException && error.name === "AbortError") {
-          return;
-        }
-        markBlobMetadataChecked(blob.serverUrl ?? baseUrl, blob.sha256);
-      } finally {
-        pendingLookups.current.delete(blob.sha256);
-        metadataAbortControllers.current.delete(blob.sha256);
-      }
-    };
-
-    const ensurePassiveProbe = (blob: BlossomBlob, resourceUrl: string) => {
-      if (requiresAuth || passiveDetectors.current.has(blob.sha256) || detectedKinds[blob.sha256]) return;
-      const img = new Image();
-      img.decoding = "async";
-      const cleanup = () => {
-        img.onload = null;
-        img.onerror = null;
-        img.src = "";
-        passiveDetectors.current.delete(blob.sha256);
-      };
-      img.onload = () => {
-        if (isMounted.current) {
-          handleDetect(blob.sha256, "image");
-        }
-        cleanup();
-      };
-      img.onerror = () => {
-        cleanup();
-      };
-      passiveDetectors.current.set(blob.sha256, cleanup);
-      img.src = resourceUrl;
-    };
-
-    for (const blob of blobs) {
-      const overrides = resolvedMeta[blob.sha256];
-      const effectiveType = overrides?.type ?? blob.type;
-      const effectiveName = overrides?.name ?? blob.name;
-      const hasType = Boolean(effectiveType && effectiveType !== "application/octet-stream");
-      const hasName = Boolean(effectiveName && effectiveName !== blob.sha256);
-      const resourceUrl = blob.url || (() => {
-        const fallback = blob.serverUrl ?? baseUrl;
-        if (!fallback) return undefined;
-        return `${fallback.replace(/\/$/, "")}/${blob.sha256}`;
-      })();
-      if (!resourceUrl) continue;
-      const sameOrigin = isSameOrigin(resourceUrl);
-      const alreadyAttempted = attemptedLookups.current.has(blob.sha256);
-      const alreadyLoading = pendingLookups.current.has(blob.sha256);
-      const canFetch = requiresAuth || sameOrigin;
-      const storageServer = blob.serverUrl ?? baseUrl;
-      const storedMetadata = getStoredBlobMetadata(storageServer, blob.sha256);
-      const skipDueToFreshAttempt = isMetadataFresh(storedMetadata, METADATA_CHECK_TTL_MS);
-      const visibilityRequested = visibleMetadataRequestsRef.current.has(blob.sha256);
-
-      if (hasType && hasName) {
-        visibleMetadataRequestsRef.current.delete(blob.sha256);
-        continue;
-      }
-
-      if (!visibilityRequested) {
-        continue;
-      }
-
-      if (skipDueToFreshAttempt) {
-        visibleMetadataRequestsRef.current.delete(blob.sha256);
-        continue;
-      }
-
-      if (requiresAuth && !signTemplate) {
-        // Keep the visibility request so we retry once a signer is available.
-        continue;
-      }
-
-      if (!canFetch) {
-        visibleMetadataRequestsRef.current.delete(blob.sha256);
-        ensurePassiveProbe(blob, resourceUrl);
-        continue;
-      }
-
-      if (alreadyAttempted || alreadyLoading) {
-        visibleMetadataRequestsRef.current.delete(blob.sha256);
-        continue;
-      }
-
-      visibleMetadataRequestsRef.current.delete(blob.sha256);
-      attemptedLookups.current.add(blob.sha256);
-      schedule(() => resolveForBlob(blob, resourceUrl));
-    }
-
-    return () => {
-      scheduler.queue = [];
-      scheduler.running = 0;
-      scheduler.generation += 1;
-      metadataAbortControllers.current.forEach(controller => controller.abort());
-      metadataAbortControllers.current.clear();
-    };
-  }, [
-    blobs,
+  const { resolvedMeta, detectedKinds, requestMetadata, reportDetectedKind } = useBlobMetadata(blobs, {
     baseUrl,
     requiresAuth,
     signTemplate,
-    resolvedMeta,
-    detectedKinds,
-    handleDetect,
     serverType,
-    visibleSignal,
-  ]);
+  });
+  const { previewTarget, openPreview, closePreview } = useBlobPreview({
+    defaultServerType: serverType,
+    defaultSignTemplate: signTemplate,
+  });
+  const [sortConfig, setSortConfig] = useState<SortConfig | null>(null);
 
   const decoratedBlobs = useMemo(() => {
     return blobs.map(blob => {
@@ -501,8 +177,15 @@ export const BlobList: React.FC<BlobListProps> = ({
   }, []);
 
   const handleClosePreview = useCallback(() => {
-    setPreviewTarget(null);
-  }, []);
+    closePreview();
+  }, [closePreview]);
+
+  const handleDetect = useCallback(
+    (sha: string, kind: "image" | "video") => {
+      reportDetectedKind(sha, kind);
+    },
+    [reportDetectedKind]
+  );
 
   const handlePreview = useCallback(
     (blob: BlossomBlob) => {
@@ -516,19 +199,16 @@ export const BlobList: React.FC<BlobListProps> = ({
       const previewUrl = buildPreviewUrl(blob, kind, fallbackBaseUrl);
       const disablePreview = shouldDisablePreview(kind);
 
-      setPreviewTarget({
-        blob,
+      openPreview(blob, {
         displayName,
-        previewUrl,
         requiresAuth: effectiveRequiresAuth,
-        signTemplate: effectiveRequiresAuth ? signTemplate : undefined,
-        serverType: effectiveServerType,
-        kind,
+        detectedKind,
+        baseUrl: fallbackBaseUrl ?? undefined,
+        previewUrl,
         disablePreview,
-        baseUrl: fallbackBaseUrl,
       });
     },
-    [baseUrl, requiresAuth, signTemplate, serverType, detectedKinds]
+    [baseUrl, detectedKinds, openPreview, requiresAuth, serverType]
   );
 
   const handleDownload = useCallback(
@@ -625,7 +305,7 @@ export const BlobList: React.FC<BlobListProps> = ({
           onDetect={handleDetect}
           sortConfig={sortConfig}
           onSort={handleSortToggle}
-          onBlobVisible={requestMetadataForBlob}
+          onBlobVisible={requestMetadata}
         />
       ) : (
         <GridLayout
@@ -646,7 +326,7 @@ export const BlobList: React.FC<BlobListProps> = ({
           currentTrackStatus={currentTrackStatus}
           detectedKinds={detectedKinds}
           onDetect={handleDetect}
-          onBlobVisible={requestMetadataForBlob}
+          onBlobVisible={requestMetadata}
         />
       )}
       {previewTarget && (
@@ -655,7 +335,7 @@ export const BlobList: React.FC<BlobListProps> = ({
           onClose={handleClosePreview}
           onDetect={handleDetect}
           onCopy={onCopy}
-          onBlobVisible={requestMetadataForBlob}
+          onBlobVisible={requestMetadata}
         />
       )}
     </div>
@@ -935,7 +615,8 @@ const PreviewDialog: React.FC<{
   onCopy: (blob: BlossomBlob) => void;
   onBlobVisible: (sha: string) => void;
 }> = ({ target, onClose, onDetect, onCopy, onBlobVisible }) => {
-  const { blob, displayName, previewUrl, requiresAuth, signTemplate, serverType, kind, disablePreview } = target;
+  const { blob, displayName, previewUrl, requiresAuth, signTemplate, serverType, disablePreview } = target;
+  const derivedKind: FileKind = (target.kind as FileKind | undefined) ?? decideFileKind(blob, undefined);
   const sizeLabel = typeof blob.size === "number" ? prettyBytes(blob.size) : null;
   const uploadedLabel = typeof blob.uploaded === "number" ? prettyDate(blob.uploaded) : null;
   const typeLabel = blob.type || "Unknown";
@@ -1025,7 +706,7 @@ const PreviewDialog: React.FC<{
         <div className="relative flex min-h-[22rem] flex-1 items-center justify-center overflow-hidden rounded-xl border border-slate-800 bg-slate-950/60">
           {previewUnavailable ? (
             <div className="flex h-full w-full flex-col items-center justify-center gap-4 p-6 text-sm text-slate-400">
-              <FileTypeIcon kind={kind} size={112} className="text-slate-500" />
+              <FileTypeIcon kind={derivedKind} size={112} className="text-slate-500" />
               <p className="max-w-sm text-center">Preview not available for this file type.</p>
             </div>
           ) : (

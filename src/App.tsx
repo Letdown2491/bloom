@@ -3,9 +3,10 @@ import { NDKEvent, NDKPublishError, NDKRelaySet } from "@nostr-dev-kit/ndk";
 import { useNdk, useCurrentPubkey } from "./context/NdkContext";
 import { useServers, ManagedServer, sortServersByName } from "./hooks/useServers";
 import { useServerData } from "./hooks/useServerData";
-import { BlobList } from "./components/BlobList";
 import { ShareComposer, type ShareCompletion, type SharePayload } from "./components/ShareComposer";
 import type { TransferState } from "./components/UploadPanel";
+import { BrowseContent } from "./features/browse/BrowseContent";
+import { TransferContent } from "./features/transfer/TransferContent";
 
 const UploadPanelLazy = React.lazy(() =>
   import("./components/UploadPanel").then(module => ({ default: module.UploadPanel }))
@@ -59,12 +60,13 @@ import {
   VideoIcon,
 } from "./components/icons";
 import { AudioVisualizer } from "./components/AudioVisualizer";
+import { useSelection } from "./features/selection/SelectionContext";
+import { useShareWorkflow } from "./features/share/useShareWorkflow";
+import { useBrowseControls, type FilterMode } from "./features/browse/useBrowseControls";
 
 type TabId = "browse" | "upload" | "servers" | "transfer" | "share";
 
 type StatusMessageTone = "success" | "info" | "error";
-
-type FilterMode = "all" | "music" | "documents" | "images" | "pdfs" | "videos";
 
 type FilterOption = {
   id: Exclude<FilterMode, "all">;
@@ -84,14 +86,6 @@ const FILTER_OPTIONS: FilterOption[] = [
   { id: "pdfs", label: "PDFs", icon: DocumentIcon },
   { id: "videos", label: "Videos", icon: VideoIcon },
 ];
-
-const FILTER_OPTION_MAP = FILTER_OPTIONS.reduce(
-  (acc, option) => {
-    acc[option.id] = option;
-    return acc;
-  },
-  {} as Record<Exclude<FilterMode, "all">, FilterOption>
-);
 
 const ALL_SERVERS_VALUE = "__all__";
 
@@ -296,14 +290,25 @@ export default function App() {
   const [selectedServer, setSelectedServer] = useState<string | null>(servers[0]?.url ?? null);
   const [tab, setTab] = useState<TabId>("browse");
   const [banner, setBanner] = useState<string | null>(null);
-  const [selectedBlobs, setSelectedBlobs] = useState<Set<string>>(new Set());
-  const [viewMode, setViewMode] = useState<"grid" | "list">("list");
-  const [filterMode, setFilterMode] = useState<FilterMode>("all");
+  const { selected: selectedBlobs, toggle: toggleBlob, selectMany: selectManyBlobs, clear: clearSelection } = useSelection();
+  const {
+    viewMode,
+    setViewMode,
+    filterMode,
+    filterButtonLabel,
+    filterButtonAriaLabel,
+    filterButtonActive,
+    isFilterMenuOpen,
+    isMusicFilterActive,
+    toggleFilterMenu,
+    selectFilter,
+    closeFilterMenu,
+    handleTabChange,
+  } = useBrowseControls();
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [statusMessageTone, setStatusMessageTone] = useState<StatusMessageTone>("info");
   const statusMessageTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const previousViewModeRef = useRef<"grid" | "list">("list");
   const syncQueueRef = useRef<Set<string>>(new Set());
   const nextSyncAttemptRef = useRef<Map<string, number>>(new Map());
   const unsupportedMirrorTargetsRef = useRef<Set<string>>(new Set());
@@ -317,15 +322,17 @@ export default function App() {
   const [transferTargets, setTransferTargets] = useState<string[]>([]);
   const [transferBusy, setTransferBusy] = useState(false);
   const [transferFeedback, setTransferFeedback] = useState<string | null>(null);
-  const [isFilterMenuOpen, setIsFilterMenuOpen] = useState(false);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const userMenuRef = useRef<HTMLDivElement | null>(null);
   const filterMenuRef = useRef<HTMLDivElement | null>(null);
   const mainWidgetRef = useRef<HTMLDivElement | null>(null);
-  const [shareState, setShareState] = useState<{ payload: SharePayload | null; shareKey: string | null }>({
-    payload: null,
-    shareKey: null,
-  });
+  const {
+    shareState,
+    openShareForPayload,
+    openShareByKey,
+    handleShareComplete: completeShareInternal,
+    clearShareState,
+  } = useShareWorkflow();
   const [renameTarget, setRenameTarget] = useState<BlossomBlob | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [renameBusy, setRenameBusy] = useState(false);
@@ -383,7 +390,6 @@ export default function App() {
     if (selectedBlobs.size === selectedBlobSources.size) return 0;
     return selectedBlobs.size - selectedBlobSources.size;
   }, [selectedBlobs, selectedBlobSources]);
-  const serverNameMap = useMemo(() => new Map(localServers.map(server => [server.url, server.name])), [localServers]);
   const transferFeedbackTone = useMemo(() => {
     if (!transferFeedback) return "text-slate-400";
     const normalized = transferFeedback.toLowerCase();
@@ -401,27 +407,6 @@ export default function App() {
   const toggleUserMenu = useCallback(() => {
     setIsUserMenuOpen(prev => !prev);
   }, [setIsUserMenuOpen]);
-
-  const toggleFilterMenu = useCallback(() => {
-    setIsFilterMenuOpen(prev => !prev);
-  }, []);
-
-  const handleSelectFilter = useCallback(
-    (next: FilterMode) => {
-      setFilterMode(prev => {
-        const nextValue = prev === next ? "all" : next;
-        if (nextValue === "music" && prev !== "music") {
-          previousViewModeRef.current = viewMode;
-          setViewMode("list");
-        } else if (prev === "music" && nextValue !== "music") {
-          setViewMode(previousViewModeRef.current);
-        }
-        return nextValue;
-      });
-      setIsFilterMenuOpen(false);
-    },
-    [setViewMode, viewMode]
-  );
 
   const handleSelectServers = useCallback(() => {
     setTab("servers");
@@ -446,18 +431,18 @@ export default function App() {
     const params = new URLSearchParams(window.location.search);
     const key = params.get("share");
     if (!key) return;
-    setShareState({ payload: null, shareKey: key });
+    openShareByKey(key);
     setTab("share");
     params.delete("share");
     const nextSearch = params.toString();
     const nextUrl = `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ""}${window.location.hash}`;
     window.history.replaceState({}, "", nextUrl);
-  }, [setShareState, setTab]);
+  }, [openShareByKey, setTab]);
 
   // Auto-sync blobs across all servers marked for synchronization.
   useEffect(() => {
-    setSelectedBlobs(new Set());
-  }, [selectedServer]);
+    clearSelection();
+  }, [clearSelection, selectedServer]);
 
   useEffect(() => {
     if (!isUserMenuOpen) return;
@@ -494,17 +479,17 @@ export default function App() {
       if (!filterMenuRef.current || filterMenuRef.current.contains(event.target as Node)) {
         return;
       }
-      setIsFilterMenuOpen(false);
+      closeFilterMenu();
     };
     const handleFocusIn = (event: FocusEvent) => {
       if (!filterMenuRef.current || filterMenuRef.current.contains(event.target as Node)) {
         return;
       }
-      setIsFilterMenuOpen(false);
+      closeFilterMenu();
     };
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
-        setIsFilterMenuOpen(false);
+        closeFilterMenu();
       }
     };
     document.addEventListener("pointerdown", handlePointerDown, true);
@@ -515,13 +500,11 @@ export default function App() {
       document.removeEventListener("focusin", handleFocusIn);
       document.removeEventListener("keydown", handleKeyDown);
     };
-  }, [isFilterMenuOpen]);
+  }, [closeFilterMenu, isFilterMenuOpen]);
 
   useEffect(() => {
-    if (tab !== "browse") {
-      setIsFilterMenuOpen(false);
-    }
-  }, [tab]);
+    handleTabChange(tab);
+  }, [handleTabChange, tab]);
 
   useEffect(() => {
     if (tab === "transfer" && selectedBlobs.size === 0) {
@@ -1415,28 +1398,6 @@ export default function App() {
     }
   };
 
-  const toggleBlob = (sha: string) => {
-    setSelectedBlobs(prev => {
-      const next = new Set(prev);
-      if (next.has(sha)) next.delete(sha); else next.add(sha);
-      return next;
-    });
-  };
-
-  const selectManyBlobs = (shas: string[], value: boolean) => {
-    setSelectedBlobs(prev => {
-      const next = new Set(prev);
-      shas.forEach(sha => {
-        if (value) {
-          next.add(sha);
-        } else {
-          next.delete(sha);
-        }
-      });
-      return next;
-    });
-  };
-
   const toggleTransferTarget = (url: string) => {
     if (localServers.length <= 1) return;
     if (localServers.length === 2 && selectedServer && url === selectedServer) return;
@@ -1740,11 +1701,7 @@ export default function App() {
         );
       }
       queryClient.invalidateQueries({ queryKey: ["server-blobs", currentSnapshot.server.url, pubkey, currentSnapshot.server.type] });
-      setSelectedBlobs(prev => {
-        const next = new Set(prev);
-        next.delete(blob.sha256);
-        return next;
-      });
+      selectManyBlobs([blob.sha256], false);
       setBanner("Blob deleted");
       setTimeout(() => setBanner(null), 2000);
     } catch (error: any) {
@@ -1757,6 +1714,12 @@ export default function App() {
     navigator.clipboard.writeText(blob.url).catch(() => undefined);
     showStatusMessage("URL copied to clipboard", "success", 1500);
   };
+
+  const handlePlayBlob = useCallback((blob: BlossomBlob) => {
+    const track = buildAudioTrack(blob);
+    if (!track) return;
+    toggleAudioTrack(track, musicQueueTracks);
+  }, [musicQueueTracks, toggleAudioTrack]);
 
   const handleShareBlob = useCallback(
     (blob: BlossomBlob) => {
@@ -1771,41 +1734,34 @@ export default function App() {
         serverUrl: blob.serverUrl ?? null,
         size: typeof blob.size === "number" ? blob.size : null,
       };
-      setShareState({ payload, shareKey: null });
+      openShareForPayload(payload);
       setTab("share");
     },
-    [setShareState, setTab, showStatusMessage]
+    [openShareForPayload, setTab, showStatusMessage]
   );
 
   const handleShareComplete = useCallback(
     (result: ShareCompletion) => {
-      if (result.mode !== "dm") return;
-      const resolveLabel = () => {
-        const info = result.recipient;
-        if (!info) return "recipient";
-        if (info.displayName) return info.displayName;
-        if (info.username) return `@${info.username}`;
-        if (info.nip05) return info.nip05;
-        if (info.npub) {
-          return info.npub.length > 12 ? `${info.npub.slice(0, 6)}…${info.npub.slice(-4)}` : info.npub;
+      const label = completeShareInternal(result);
+      if (result.mode !== "dm") {
+        if (!result.success && result.message) {
+          showStatusMessage(result.message, "error", 5000);
         }
-        return "recipient";
-      };
-
+        return;
+      }
       if (result.success) {
-        let message = `DM sent to ${resolveLabel()}.`;
+        let message = label ? `DM sent to ${label}.` : "DM sent.";
         if (result.failures && result.failures > 0) {
           message += ` ${result.failures} relay${result.failures === 1 ? "" : "s"} reported errors.`;
         }
         showStatusMessage(message, result.failures && result.failures > 0 ? "info" : "success", 5000);
-        setShareState({ payload: null, shareKey: null });
         setTab("browse");
       } else {
-        const message = result.message || `Failed to send DM to ${resolveLabel()}.`;
+        const message = result.message || (label ? `Failed to send DM to ${label}.` : "Failed to send DM.");
         showStatusMessage(message, "error", 6000);
       }
     },
-    [setShareState, setTab, showStatusMessage]
+    [completeShareInternal, setTab, showStatusMessage]
   );
 
   const handleUploadCompleted = (success: boolean) => {
@@ -1862,14 +1818,6 @@ export default function App() {
     : syncStatus.state === "error"
     ? "text-red-400"
     : "text-slate-500";
-  const disableTransferAction =
-    transferBusy || transferTargets.length === 0 || selectedBlobItems.length === 0 || localServers.length <= 1;
-  const activeFilterOption = filterMode === "all" ? null : FILTER_OPTION_MAP[filterMode];
-  const filterButtonLabel = activeFilterOption ? activeFilterOption.label : "Filter";
-  const filterButtonAriaLabel = activeFilterOption ? `Filter: ${activeFilterOption.label}` : "Filter files";
-  const filterButtonActive = filterMode !== "all" || isFilterMenuOpen;
-  const isMusicFilterActive = filterMode === "music";
-
   return (
     <div className="flex min-h-screen max-h-screen flex-col overflow-hidden bg-slate-950 text-slate-100">
       <div className="mx-auto flex w-full flex-1 min-h-0 flex-col gap-6 overflow-hidden px-6 py-8 max-w-7xl">
@@ -2036,7 +1984,7 @@ export default function App() {
                                 href="#"
                                 onClick={event => {
                                   event.preventDefault();
-                                  handleSelectFilter(option.id);
+                                  selectFilter(option.id);
                                 }}
                                 role="menuitemradio"
                                 aria-checked={isActive}
@@ -2057,7 +2005,7 @@ export default function App() {
                               onClick={event => {
                                 event.preventDefault();
                                 if (filterMode === "all") return;
-                                handleSelectFilter("all");
+                                selectFilter("all");
                               }}
                               role="menuitem"
                               aria-disabled={filterMode === "all"}
@@ -2083,56 +2031,24 @@ export default function App() {
             className={`flex flex-1 min-h-0 flex-col p-4 ${tab === "browse" || tab === "share" ? "overflow-hidden" : "overflow-y-auto"}`}
           >
             {tab === "browse" && (
-              <div
-                className={`flex flex-1 min-h-0 flex-col overflow-hidden ${viewMode === "grid" ? "pr-1" : ""}`}
-              >
-                {browsingAllServers ? (
-                  <BlobList
-                    blobs={visibleAggregatedBlobs}
-                    signTemplate={signEventTemplate}
-                    selected={selectedBlobs}
-                    viewMode={viewMode}
-                    onToggle={toggleBlob}
-                    onSelectMany={selectManyBlobs}
-                    onDelete={handleDeleteBlob}
-                    onCopy={handleCopyUrl}
-                    onShare={handleShareBlob}
-                    onRename={handleRequestRename}
-                    onPlay={blob => {
-                      const track = buildAudioTrack(blob);
-                      if (!track) return;
-                      toggleAudioTrack(track, musicQueueTracks);
-                    }}
-                    currentTrackUrl={audio.current?.url}
-                    currentTrackStatus={audio.status}
-                  />
-                ) : currentSnapshot ? (
-                  <BlobList
-                    blobs={currentVisibleBlobs ?? currentSnapshot.blobs}
-                    baseUrl={currentSnapshot.server.url}
-                    requiresAuth={currentSnapshot.server.requiresAuth}
-                    signTemplate={currentSnapshot.server.requiresAuth ? signEventTemplate : undefined}
-                    serverType={currentSnapshot.server.type}
-                    selected={selectedBlobs}
-                    viewMode={viewMode}
-                    onToggle={toggleBlob}
-                    onSelectMany={selectManyBlobs}
-                    onDelete={handleDeleteBlob}
-                    onCopy={handleCopyUrl}
-                    onShare={handleShareBlob}
-                    onRename={handleRequestRename}
-                    onPlay={blob => {
-                      const track = buildAudioTrack(blob);
-                      if (!track) return;
-                      toggleAudioTrack(track, musicQueueTracks);
-                    }}
-                    currentTrackUrl={audio.current?.url}
-                    currentTrackStatus={audio.status}
-                  />
-                ) : (
-                  <div className="text-sm text-slate-400">Select a server to browse its contents.</div>
-                )}
-              </div>
+              <BrowseContent
+                viewMode={viewMode}
+                browsingAllServers={browsingAllServers}
+                aggregatedBlobs={visibleAggregatedBlobs}
+                currentSnapshot={currentSnapshot}
+                currentVisibleBlobs={currentVisibleBlobs}
+                selectedBlobs={selectedBlobs}
+                signTemplate={signEventTemplate}
+                onToggle={toggleBlob}
+                onSelectMany={selectManyBlobs}
+                onDelete={handleDeleteBlob}
+                onCopy={handleCopyUrl}
+                onShare={handleShareBlob}
+                onRename={handleRequestRename}
+                onPlay={handlePlayBlob}
+                currentTrackUrl={audio.current?.url}
+                currentTrackStatus={audio.status}
+              />
             )}
 
             {tab === "upload" && (
@@ -2153,160 +2069,23 @@ export default function App() {
             )}
 
             {tab === "transfer" && (
-              <div className="space-y-6">
-                <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4 sm:p-6 space-y-5">
-                  <div>
-                    <h2 className="text-base font-semibold text-slate-100">Transfer files</h2>
-                    <p className="text-sm text-slate-400">Select where Bloom should copy the files you picked in Browse.</p>
-                  </div>
-                  {selectedBlobItems.length === 0 ? (
-                    <div className="rounded-xl border border-slate-800 bg-slate-900/80 p-4 text-sm text-slate-400">
-                      Choose one or more files in Browse, then return here to send them to another server.
-                    </div>
-                  ) : (
-                    <>
-                      <div className="rounded-xl border border-slate-800 bg-slate-900/80 p-4 space-y-2 text-sm text-slate-200">
-                        <div className="flex flex-wrap gap-4 text-slate-200">
-                          <span>
-                            {selectedBlobItems.length} item{selectedBlobItems.length === 1 ? "" : "s"}
-                          </span>
-                          <span>{prettyBytes(selectedBlobTotalSize)}</span>
-                        </div>
-                        <div className="text-xs uppercase tracking-wide text-slate-500">
-                          From {Array.from(sourceServerUrls)
-                            .map(url => serverNameMap.get(url) || url)
-                            .join(", ") || "unknown server"}
-                        </div>
-                        {missingSourceCount > 0 && (
-                          <div className="text-xs text-amber-300">
-                            {missingSourceCount} item{missingSourceCount === 1 ? "" : "s"} could not be fetched right now.
-                          </div>
-                        )}
-                        <ul className="mt-1 space-y-1 text-xs text-slate-400">
-                          {selectedBlobItems.slice(0, 6).map(item => (
-                            <li key={item.blob.sha256} className="flex items-center justify-between gap-3">
-                              <span className="truncate">{item.blob.name || `${item.blob.sha256.slice(0, 12)}…`}</span>
-                              <span>{prettyBytes(item.blob.size || 0)}</span>
-                            </li>
-                          ))}
-                          {selectedBlobItems.length > 6 && (
-                            <li className="text-xs text-slate-500">+ {selectedBlobItems.length - 6} more</li>
-                          )}
-                        </ul>
-                      </div>
-                      <div className="space-y-2">
-                        <h3 className="text-xs uppercase tracking-wide text-slate-500">Destination servers</h3>
-                        {localServers.length === 0 ? (
-                          <div className="rounded-xl border border-slate-800 bg-slate-900/70 p-4 text-sm text-slate-400">
-                            Add a server in the Servers tab before transferring.
-                          </div>
-                        ) : (
-                          <div className="grid gap-2 sm:grid-cols-2">
-                            {localServers.map(server => {
-                              const isChecked = transferTargets.includes(server.url);
-                              const requiresAuth = Boolean(server.requiresAuth);
-                              const isDisabled =
-                                localServers.length <= 1 ||
-                                (localServers.length === 2 && Boolean(selectedServer) && server.url === selectedServer);
-                              return (
-                                <label
-                                  key={server.url}
-                                  className={`flex items-center justify-between gap-3 rounded-xl border px-3 py-3 transition ${
-                                    isChecked
-                                      ? "border-emerald-500 bg-emerald-500/10 text-emerald-200"
-                                      : "border-slate-800 bg-slate-900/80 hover:border-slate-700"
-                                  } ${
-                                    isDisabled ? "opacity-60 cursor-not-allowed" : ""
-                                  }`}
-                                  aria-disabled={isDisabled}
-                                >
-                                  <div className="min-w-0">
-                                    <div className="text-sm font-medium truncate">{server.name}</div>
-                                    <div className="text-xs text-slate-500 truncate">{server.url}</div>
-                                    {requiresAuth && (!signer || !signEventTemplate) && (
-                                      <div className="mt-1 text-[11px] text-amber-300">Signer required</div>
-                                    )}
-                                  </div>
-                                  <input
-                                    type="checkbox"
-                                    className="h-4 w-4 rounded border-slate-700 bg-slate-900 text-emerald-400 focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                                    checked={isChecked}
-                                    disabled={isDisabled}
-                                    onChange={() => toggleTransferTarget(server.url)}
-                                  />
-                                </label>
-                              );
-                            })}
-                          </div>
-                        )}
-                      </div>
-                      {transferFeedback && (
-                        <div className={`text-sm ${transferFeedbackTone}`}>{transferFeedback}</div>
-                      )}
-                      <div className="flex flex-wrap gap-3">
-                        <button
-                          onClick={handleStartTransfer}
-                          disabled={disableTransferAction}
-                          className={`px-4 py-2 rounded-xl text-sm font-medium transition ${
-                            disableTransferAction
-                              ? "cursor-not-allowed border border-slate-800 bg-slate-900/60 text-slate-500"
-                              : "border border-emerald-500 bg-emerald-500/10 text-emerald-200 hover:bg-emerald-500/20"
-                          }`}
-                        >
-                          {transferBusy ? "Transferring…" : "Start Transfer"}
-                        </button>
-                        <button
-                          onClick={() => setTab("browse")}
-                          className="px-4 py-2 rounded-xl border border-slate-800 bg-slate-900/60 text-sm text-slate-300 hover:border-slate-700"
-                        >
-                          Go Back Home
-                        </button>
-                      </div>
-                    </>
-                  )}
-                </div>
-                {transferActivity.length > 0 && (
-                  <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4 sm:p-6 space-y-4">
-                    <div className="text-sm font-semibold text-slate-100">Transfer activity</div>
-                    <div className="space-y-3">
-                      {transferActivity.map(item => {
-                        const percent = item.total > 0 ? Math.round((item.transferred / item.total) * 100) : 0;
-                        const label = serverNameMap.get(item.serverUrl) || item.serverUrl;
-                        return (
-                          <div key={item.id} className="rounded-xl border border-slate-800 bg-slate-900/80 p-3">
-                            <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-slate-200">
-                              <span className="truncate font-medium">{item.fileName}</span>
-                              <span className="text-xs text-slate-500">{label}</span>
-                            </div>
-                            {item.status === "uploading" && (
-                              <div className="mt-2">
-                                <div className="flex justify-between text-xs text-slate-500">
-                                  <span>{percent}%</span>
-                                  <span>
-                                    {prettyBytes(item.transferred)} / {prettyBytes(item.total)}
-                                  </span>
-                                </div>
-                                <div className="mt-1 h-2 rounded-full bg-slate-800">
-                                  <div
-                                    className="h-2 rounded-full bg-emerald-500"
-                                    style={{ width: `${Math.min(100, Math.max(0, percent))}%` }}
-                                  />
-                                </div>
-                              </div>
-                            )}
-                            {item.status === "success" && (
-                              <div className="mt-2 text-xs text-emerald-300">Transfer complete.</div>
-                            )}
-                            {item.status === "error" && (
-                              <div className="mt-2 text-xs text-red-400">{item.message || "Transfer failed"}</div>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-              </div>
+              <TransferContent
+                localServers={localServers}
+                selectedServer={selectedServer}
+                selectedBlobItems={selectedBlobItems}
+                selectedBlobTotalSize={selectedBlobTotalSize}
+                sourceServerUrls={sourceServerUrls}
+                missingSourceCount={missingSourceCount}
+                transferTargets={transferTargets}
+                transferBusy={transferBusy}
+                transferFeedback={transferFeedback}
+                transferFeedbackTone={transferFeedbackTone}
+                transferActivity={transferActivity}
+                toggleTransferTarget={toggleTransferTarget}
+                handleStartTransfer={handleStartTransfer}
+                onBackToBrowse={() => setTab("browse")}
+                currentSignerMissing={!signer || !signEventTemplate}
+              />
             )}
 
             {tab === "share" && (
@@ -2316,7 +2095,7 @@ export default function App() {
                   payload={shareState.payload}
                   shareKey={shareState.shareKey}
                   onClose={() => {
-                    setShareState({ payload: null, shareKey: null });
+                    clearShareState();
                     setTab("browse");
                   }}
                   onShareComplete={handleShareComplete}
