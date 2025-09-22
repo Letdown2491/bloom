@@ -4,7 +4,7 @@ import { useNdk, useCurrentPubkey } from "./context/NdkContext";
 import { useServers, ManagedServer, sortServersByName } from "./hooks/useServers";
 import { useServerData } from "./hooks/useServerData";
 import { BlobList } from "./components/BlobList";
-import { ShareComposer, type SharePayload } from "./components/ShareComposer";
+import { ShareComposer, type ShareCompletion, type SharePayload } from "./components/ShareComposer";
 import type { TransferState } from "./components/UploadPanel";
 
 const UploadPanelLazy = React.lazy(() =>
@@ -1757,9 +1757,41 @@ export default function App() {
         name: blob.name ?? null,
         sha256: blob.sha256,
         serverUrl: blob.serverUrl ?? null,
+        size: typeof blob.size === "number" ? blob.size : null,
       };
       setShareState({ payload, shareKey: null });
       setTab("share");
+    },
+    [setShareState, setTab, showStatusMessage]
+  );
+
+  const handleShareComplete = useCallback(
+    (result: ShareCompletion) => {
+      if (result.mode !== "dm") return;
+      const resolveLabel = () => {
+        const info = result.recipient;
+        if (!info) return "recipient";
+        if (info.displayName) return info.displayName;
+        if (info.username) return `@${info.username}`;
+        if (info.nip05) return info.nip05;
+        if (info.npub) {
+          return info.npub.length > 12 ? `${info.npub.slice(0, 6)}…${info.npub.slice(-4)}` : info.npub;
+        }
+        return "recipient";
+      };
+
+      if (result.success) {
+        let message = `DM sent to ${resolveLabel()}.`;
+        if (result.failures && result.failures > 0) {
+          message += ` ${result.failures} relay${result.failures === 1 ? "" : "s"} reported errors.`;
+        }
+        showStatusMessage(message, result.failures && result.failures > 0 ? "info" : "success", 5000);
+        setShareState({ payload: null, shareKey: null });
+        setTab("browse");
+      } else {
+        const message = result.message || `Failed to send DM to ${resolveLabel()}.`;
+        showStatusMessage(message, "error", 6000);
+      }
     },
     [setShareState, setTab, showStatusMessage]
   );
@@ -2275,6 +2307,7 @@ export default function App() {
                     setShareState({ payload: null, shareKey: null });
                     setTab("browse");
                   }}
+                  onShareComplete={handleShareComplete}
                 />
               </div>
             )}

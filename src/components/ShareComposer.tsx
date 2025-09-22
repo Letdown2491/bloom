@@ -1,13 +1,33 @@
-import React, { useEffect, useMemo, useState } from "react";
-import { NDKEvent, NDKPublishError, NDKRelaySet, NDKRelayStatus, normalizeRelayUrl } from "@nostr-dev-kit/ndk";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { NDKEvent, NDKPublishError, NDKRelaySet, NDKRelayStatus, NDKUser, normalizeRelayUrl } from "@nostr-dev-kit/ndk";
 import { useCurrentPubkey, useNdk } from "../context/NdkContext";
 import { DEFAULT_PUBLIC_RELAYS, extractPreferredRelays, sanitizeRelayUrl } from "../utils/relays";
+import { giftWrap } from "@nostr-dev-kit/ndk";
+import { nip19 } from "nostr-tools";
 
 export type SharePayload = {
   url: string;
   name?: string | null;
   sha256?: string | null;
   serverUrl?: string | null;
+  size?: number | null;
+};
+
+export type ShareMode = "note" | "dm";
+
+export type ShareCompletion = {
+  mode: ShareMode;
+  success: boolean;
+  recipient?: {
+    pubkey: string;
+    npub: string;
+    displayName: string | null;
+    username: string | null;
+    nip05: string | null;
+  };
+  successes?: number;
+  failures?: number;
+  message?: string | null;
 };
 
 type ShareComposerProps = {
@@ -15,6 +35,7 @@ type ShareComposerProps = {
   payload?: SharePayload | null;
   embedded?: boolean;
   onClose?: () => void;
+  onShareComplete?: (result: ShareCompletion) => void;
 };
 
 type RelayStatus = "idle" | "pending" | "success" | "error";
@@ -166,6 +187,145 @@ const formatPubkeyHandle = (pubkey: string | null): string | null => {
   return `npub:${normalized.slice(0, 6)}…${normalized.slice(-4)}`;
 };
 
+type RecipientProfile = {
+  pubkey: string;
+  npub: string;
+  displayName: string | null;
+  username: string | null;
+  nip05: string | null;
+  picture: string | null;
+  lastFetched?: number;
+};
+
+type RecipientSuggestion = RecipientProfile & {
+  origin: "recent" | "direct" | "nip05" | "cache";
+};
+
+const RECIPIENT_STORAGE_KEY = "bloom-share-dm-recipients";
+
+const HEX_64_REGEX = /^[0-9a-fA-F]{64}$/;
+
+const formatByteSize = (value: number | null | undefined): string | null => {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) return null;
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let size = value;
+  let unitIndex = 0;
+  while (size >= 1024 && unitIndex < units.length - 1) {
+    size /= 1024;
+    unitIndex += 1;
+  }
+  const formatted = size >= 100 ? Math.round(size).toString() : size.toFixed(1).replace(/\.0$/, "");
+  return `${formatted} ${units[unitIndex]}`;
+};
+
+const bytesToHex = (bytes: Uint8Array): string =>
+  Array.from(bytes)
+    .map(b => b.toString(16).padStart(2, "0"))
+    .join("");
+
+const buildMetadataBlock = (payload: SharePayload | null): string | null => {
+  if (!payload) return null;
+  const lines: string[] = [];
+  lines.push("Shared file:");
+  const nameLine = payload.name ? payload.name : undefined;
+  if (nameLine) lines.push(`• Name: ${nameLine}`);
+  if (payload.sha256) lines.push(`• SHA-256: ${payload.sha256}`);
+  const sizeText = formatByteSize(payload.size ?? null);
+  if (sizeText) lines.push(`• Size: ${sizeText}`);
+  const link = payload.url;
+  if (link) lines.push(`• URL: ${link}`);
+  return lines.join("\n");
+};
+
+const combineContent = (message: string, appendix: string | null): string => {
+  const trimmedMessage = message.trimEnd();
+  if (!appendix) return trimmedMessage;
+  if (!trimmedMessage) return appendix;
+  const needsSpacing = !trimmedMessage.endsWith("\n\n") && !trimmedMessage.endsWith("\n");
+  const separator = needsSpacing ? "\n\n" : "";
+  return `${trimmedMessage}${separator}${appendix}`;
+};
+
+const readStoredRecipients = (): RecipientProfile[] => {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(RECIPIENT_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    const entries: RecipientProfile[] = [];
+    for (const item of parsed) {
+      if (!item || typeof item.pubkey !== "string") continue;
+      try {
+        const npub = nip19.npubEncode(item.pubkey);
+        entries.push({
+          pubkey: item.pubkey,
+          npub,
+          displayName: typeof item.displayName === "string" ? item.displayName : null,
+          username: typeof item.username === "string" ? item.username : null,
+          nip05: typeof item.nip05 === "string" ? item.nip05 : null,
+          picture: typeof item.picture === "string" ? item.picture : null,
+          lastFetched: typeof item.lastFetched === "number" ? item.lastFetched : undefined,
+        });
+      } catch {
+        // Ignore decode errors for stored entries.
+      }
+    }
+    return entries;
+  } catch {
+    return [];
+  }
+};
+
+const storeRecipients = (profiles: RecipientProfile[]) => {
+  if (typeof window === "undefined") return;
+  try {
+    const serialized = profiles.map(profile => ({
+      pubkey: profile.pubkey,
+      displayName: profile.displayName,
+      username: profile.username,
+      nip05: profile.nip05,
+      picture: profile.picture,
+      lastFetched: profile.lastFetched ?? Date.now(),
+    }));
+    window.localStorage.setItem(RECIPIENT_STORAGE_KEY, JSON.stringify(serialized));
+  } catch {
+    // Ignore storage errors.
+  }
+};
+
+const toRecipientProfile = (pubkey: string, metadata?: Record<string, unknown>, existing?: RecipientProfile): RecipientProfile => {
+  let npub: string;
+  try {
+    npub = nip19.npubEncode(pubkey);
+  } catch {
+    npub = pubkey;
+  }
+  const safeString = (value: unknown): string | null => {
+    if (typeof value !== "string") return null;
+    const trimmed = value.trim();
+    return trimmed || null;
+  };
+  const result: RecipientProfile = {
+    pubkey,
+    npub,
+    displayName: existing?.displayName ?? null,
+    username: existing?.username ?? null,
+    nip05: existing?.nip05 ?? null,
+    picture: existing?.picture ?? null,
+    lastFetched: Date.now(),
+  };
+  if (metadata) {
+    const meta = metadata as Record<string, unknown>;
+    result.displayName =
+      safeString(meta["display_name"]) ?? safeString(meta["displayName"]) ?? result.displayName;
+    result.username = safeString(meta["name"]) ?? result.username;
+    result.nip05 = safeString(meta["nip05"]) ?? result.nip05;
+    result.picture = safeString(meta["picture"]) ?? result.picture;
+  }
+  return result;
+};
+
 type PreviewAction = {
   key: string;
   label: string;
@@ -224,9 +384,30 @@ const PREVIEW_ACTIONS: PreviewAction[] = [
   { key: "bookmark", label: "Bookmark", icon: BookmarkIcon },
 ];
 
-export const ShareComposer: React.FC<ShareComposerProps> = ({ shareKey, payload: initialPayload = null, embedded = false, onClose }) => {
+export const ShareComposer: React.FC<ShareComposerProps> = ({
+  shareKey,
+  payload: initialPayload = null,
+  embedded = false,
+  onClose,
+  onShareComplete,
+}) => {
   const { connect, signer, ndk } = useNdk();
   const pubkey = useCurrentPubkey();
+  const profileCacheRef = useRef<Map<string, RecipientProfile>>(new Map());
+  const [profileCacheTick, setProfileCacheTick] = useState(0);
+  const [recentRecipients, setRecentRecipients] = useState<RecipientProfile[]>(() => {
+    const stored = readStoredRecipients();
+    stored.forEach(profile => {
+      profileCacheRef.current.set(profile.pubkey, profile);
+    });
+    return stored;
+  });
+  const [shareMode, setShareMode] = useState<ShareMode>("note");
+  const [recipientQuery, setRecipientQuery] = useState("");
+  const [recipientResults, setRecipientResults] = useState<RecipientSuggestion[]>([]);
+  const [selectedRecipient, setSelectedRecipient] = useState<RecipientProfile | null>(null);
+  const [recipientError, setRecipientError] = useState<string | null>(null);
+  const [isSearchingRecipients, setIsSearchingRecipients] = useState(false);
   const [payload, setPayload] = useState<SharePayload | null>(initialPayload);
   const [payloadError, setPayloadError] = useState<string | null>(null);
   const [noteContent, setNoteContent] = useState("");
@@ -239,6 +420,183 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({ shareKey, payload:
   const [metadataError, setMetadataError] = useState<string | null>(null);
   const [globalError, setGlobalError] = useState<string | null>(null);
   const [profileInfo, setProfileInfo] = useState<ProfileInfo>(() => emptyProfileInfo());
+
+  const ensureRecipientProfile = useCallback(
+    async (targetPubkey: string): Promise<RecipientProfile> => {
+      const existing = profileCacheRef.current.get(targetPubkey);
+      const shouldRefresh = !existing || !existing.lastFetched || Date.now() - existing.lastFetched > 5 * 60 * 1000;
+      let metadata: Record<string, unknown> | undefined;
+      if (shouldRefresh && ndk) {
+        try {
+          const evt = await ndk.fetchEvent({ kinds: [0], authors: [targetPubkey] });
+          if (evt?.content) {
+            try {
+              metadata = JSON.parse(evt.content);
+            } catch {
+              metadata = undefined;
+            }
+          }
+        } catch {
+          metadata = undefined;
+        }
+      }
+      const profile = toRecipientProfile(targetPubkey, metadata, existing);
+      profileCacheRef.current.set(targetPubkey, profile);
+      setProfileCacheTick(prev => prev + 1);
+      return profile;
+    },
+    [ndk]
+  );
+
+  const resolveNip05 = useCallback(
+    async (value: string): Promise<RecipientProfile | null> => {
+      const trimmed = value.replace(/^@/, "").trim();
+      const atIndex = trimmed.indexOf("@");
+      if (atIndex <= 0 || atIndex >= trimmed.length - 1) return null;
+      const namePart = trimmed.slice(0, atIndex).toLowerCase();
+      const domainPart = trimmed.slice(atIndex + 1).toLowerCase();
+      if (!namePart || !domainPart) return null;
+      const url = `https://${domainPart}/.well-known/nostr.json?name=${encodeURIComponent(namePart)}`;
+      try {
+        const response = await fetch(url, { headers: { Accept: "application/json" } });
+        if (!response.ok) return null;
+        const data = (await response.json()) as { names?: Record<string, string> };
+        const pubkey = data?.names?.[namePart];
+        if (!pubkey || !HEX_64_REGEX.test(pubkey)) return null;
+        const profile = await ensureRecipientProfile(pubkey.toLowerCase());
+        return { ...profile, nip05: `${namePart}@${domainPart}` };
+      } catch {
+        return null;
+      }
+    },
+    [ensureRecipientProfile]
+  );
+
+  const interpretRecipientInput = useCallback(
+    async (value: string): Promise<RecipientSuggestion | null> => {
+      const trimmed = value.trim();
+      if (!trimmed) return null;
+      if (HEX_64_REGEX.test(trimmed)) {
+        const profile = await ensureRecipientProfile(trimmed.toLowerCase());
+        return { ...profile, origin: "direct" };
+      }
+      const lowered = trimmed.toLowerCase();
+      if (lowered.startsWith("npub1")) {
+        try {
+          const decoded = nip19.decode(trimmed);
+          if (decoded.type === "npub") {
+            const data = decoded.data;
+            const hex = typeof data === "string" ? data : bytesToHex(data as Uint8Array);
+            if (HEX_64_REGEX.test(hex)) {
+              const profile = await ensureRecipientProfile(hex.toLowerCase());
+              return { ...profile, origin: "direct" };
+            }
+          }
+        } catch {
+          // Ignore decode errors and continue.
+        }
+      }
+      if (lowered.includes("@")) {
+        const profile = await resolveNip05(lowered.startsWith("@") ? lowered : `@${lowered}`);
+        if (profile) {
+          return { ...profile, origin: "nip05" };
+        }
+      }
+      return null;
+    },
+    [ensureRecipientProfile, resolveNip05]
+  );
+
+  const handleRecipientSelect = useCallback((profile: RecipientProfile) => {
+    setSelectedRecipient(profile);
+    setRecipientQuery(profile.nip05 ?? profile.displayName ?? profile.username ?? profile.npub);
+    setRecipientResults([{ ...profile, origin: "direct" }]);
+    setRecipientError(null);
+  }, []);
+
+  const handleRecipientInputChange = useCallback((value: string) => {
+    setRecipientQuery(value);
+    setSelectedRecipient(null);
+  }, []);
+
+  const handleClearRecipient = useCallback(() => {
+    setSelectedRecipient(null);
+    setRecipientQuery("");
+    setRecipientError(null);
+  }, []);
+
+  useEffect(() => {
+    if (shareMode !== "dm") return;
+    let ignore = false;
+    const run = async () => {
+      const trimmed = recipientQuery.trim();
+      if (!trimmed) {
+        if (!ignore) {
+          setRecipientResults(recentRecipients.map(profile => ({ ...profile, origin: "recent" })));
+          setRecipientError(null);
+          setIsSearchingRecipients(false);
+        }
+        return;
+      }
+      setIsSearchingRecipients(true);
+      setRecipientError(null);
+      try {
+        const suggestions = new Map<string, RecipientSuggestion>();
+        const direct = await interpretRecipientInput(trimmed);
+        if (direct) {
+          suggestions.set(direct.pubkey, direct);
+        }
+
+        const normalizedQuery = trimmed.replace(/^@/, "").toLowerCase();
+        profileCacheRef.current.forEach(profile => {
+          const haystack = [
+            profile.displayName?.toLowerCase(),
+            profile.username?.toLowerCase(),
+            profile.nip05?.toLowerCase(),
+            profile.npub.toLowerCase(),
+          ];
+          if (haystack.some(entry => entry && entry.includes(normalizedQuery))) {
+            if (!suggestions.has(profile.pubkey)) {
+              suggestions.set(profile.pubkey, { ...profile, origin: "cache" });
+            }
+          }
+        });
+
+        if (!suggestions.size && normalizedQuery.includes("@")) {
+          const nip05Profile = await resolveNip05(normalizedQuery.startsWith("@") ? normalizedQuery : `@${normalizedQuery}`);
+          if (nip05Profile) {
+            suggestions.set(nip05Profile.pubkey, { ...nip05Profile, origin: "nip05" });
+          }
+        }
+
+        const ordered = Array.from(suggestions.values()).sort((a, b) => {
+          if (a.origin === b.origin) {
+            return (a.displayName || a.username || a.nip05 || a.npub).localeCompare(
+              b.displayName || b.username || b.nip05 || b.npub
+            );
+          }
+          const priority: Record<RecipientSuggestion["origin"], number> = { direct: 0, nip05: 1, recent: 2, cache: 3 };
+          return priority[a.origin] - priority[b.origin];
+        });
+
+        if (!ignore) {
+          setRecipientResults(ordered);
+          if (!ordered.length) {
+            setRecipientError("No cached matches. Paste an npub, hex key, or full NIP-05 handle.");
+          } else {
+            setRecipientError(null);
+          }
+        }
+      } finally {
+        if (!ignore) setIsSearchingRecipients(false);
+      }
+    };
+
+    run();
+    return () => {
+      ignore = true;
+    };
+  }, [shareMode, recipientQuery, interpretRecipientInput, recentRecipients, resolveNip05, profileCacheTick]);
 
   const shareKeyDetails = useMemo(() => {
     if (!shareKey) return null;
@@ -262,6 +620,12 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({ shareKey, payload:
     setGlobalError(null);
     setPublishing(false);
     setNoteContent("");
+    setShareMode("note");
+    setRecipientQuery("");
+    setRecipientResults([]);
+    setSelectedRecipient(null);
+    setRecipientError(null);
+    setIsSearchingRecipients(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialPayload]);
 
@@ -502,9 +866,18 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({ shareKey, payload:
       setGlobalError("Connect your NIP-07 signer to share.");
       return;
     }
+    if (!pubkey) {
+      setGlobalError("Unable to resolve your pubkey. Reconnect your signer and try again.");
+      return;
+    }
     const relays = effectiveRelays;
     if (!relays.length) {
       setGlobalError("No relays available. Update your profile with preferred relays and try again.");
+      return;
+    }
+
+    if (shareMode === "dm" && !selectedRecipient) {
+      setGlobalError("Choose a DM recipient before sending.");
       return;
     }
 
@@ -517,30 +890,114 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({ shareKey, payload:
     setPublishing(true);
 
     const createdAt = Math.floor(Date.now() / 1000);
-    const baseContent = noteContent.trimEnd();
-    const finalContent = baseContent
-      ? `${baseContent}${baseContent.endsWith("\n") ? "" : "\n\n"}${payload.url}`
-      : payload.url;
+    const finalContent = composedContent || payload.url || "";
 
-    for (const relayUrl of relays) {
-      try {
-        const event = new NDKEvent(ndk, { kind: 1, content: finalContent, tags: [], created_at: createdAt });
-        await event.sign();
-        const relaySet = NDKRelaySet.fromRelayUrls([relayUrl], ndk);
-        await event.publish(relaySet, 7000, 1);
-        setRelayStatuses(prev => ({ ...prev, [relayUrl]: { status: "success" } }));
-      } catch (error) {
-        let message = "Failed to publish.";
-        if (error instanceof NDKPublishError) {
-          message = error.relayErrors || error.message;
-        } else if (error instanceof Error) {
-          message = error.message;
-        }
-        setRelayStatuses(prev => ({ ...prev, [relayUrl]: { status: "error", message } }));
+    if (shareMode === "dm") {
+      if (!signer.encryptionEnabled || !signer.encryptionEnabled("nip44")) {
+        setGlobalError("Connected signer does not support encrypted DMs (NIP-44).");
+        setPublishing(false);
+        return;
       }
-    }
+      const recipientProfile = selectedRecipient!;
+      const recipientUser = new NDKUser({ pubkey: recipientProfile.pubkey });
+      const senderUser = new NDKUser({ pubkey });
+      const rumorEvent = new NDKEvent(ndk);
+      rumorEvent.kind = 14;
+      rumorEvent.created_at = createdAt;
+      rumorEvent.tags = [["p", recipientProfile.pubkey]];
+      rumorEvent.content = finalContent;
+      rumorEvent.pubkey = pubkey;
 
-    setPublishing(false);
+      try {
+        const wrapForRecipient = await giftWrap(rumorEvent, recipientUser, signer);
+        const wrapForSender = await giftWrap(rumorEvent, senderUser, signer);
+        let dmSuccessCount = 0;
+        let dmFailureCount = 0;
+
+        for (const relayUrl of relays) {
+          try {
+            const relaySet = NDKRelaySet.fromRelayUrls([relayUrl], ndk);
+            await wrapForRecipient.publish(relaySet, 7000, 1);
+            await wrapForSender.publish(relaySet, 7000, 1);
+            dmSuccessCount += 1;
+            setRelayStatuses(prev => ({ ...prev, [relayUrl]: { status: "success" } }));
+          } catch (error) {
+            dmFailureCount += 1;
+            let message = "Failed to send DM.";
+            if (error instanceof NDKPublishError) {
+              message = error.relayErrors || error.message;
+            } else if (error instanceof Error) {
+              message = error.message;
+            }
+            setRelayStatuses(prev => ({ ...prev, [relayUrl]: { status: "error", message } }));
+          }
+        }
+
+        const dmResult: ShareCompletion = {
+          mode: "dm",
+          success: dmSuccessCount > 0,
+          recipient: {
+            pubkey: recipientProfile.pubkey,
+            npub: recipientProfile.npub,
+            displayName: recipientProfile.displayName,
+            username: recipientProfile.username,
+            nip05: recipientProfile.nip05,
+          },
+          successes: dmSuccessCount,
+          failures: dmFailureCount,
+          message:
+            dmFailureCount > 0 && dmSuccessCount > 0
+              ? `${dmFailureCount} relay${dmFailureCount === 1 ? "" : "s"} reported errors.`
+              : dmSuccessCount === 0
+              ? "All relay deliveries failed."
+              : null,
+        };
+
+        const nextRecent = [recipientProfile, ...recentRecipients.filter(item => item.pubkey !== recipientProfile.pubkey)].slice(0, 10);
+        setRecentRecipients(nextRecent);
+        storeRecipients(nextRecent);
+        onShareComplete?.(dmResult);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Sending DM failed.";
+        setGlobalError(message);
+        onShareComplete?.({
+          mode: "dm",
+          success: false,
+          recipient: {
+            pubkey: recipientProfile.pubkey,
+            npub: recipientProfile.npub,
+            displayName: recipientProfile.displayName,
+            username: recipientProfile.username,
+            nip05: recipientProfile.nip05,
+          },
+          successes: 0,
+          failures: relays.length,
+          message,
+        });
+      } finally {
+        setPublishing(false);
+      }
+    } else {
+      for (const relayUrl of relays) {
+        try {
+          const event = new NDKEvent(ndk, { kind: 1, content: finalContent, tags: [], created_at: createdAt });
+          await event.sign();
+          const relaySet = NDKRelaySet.fromRelayUrls([relayUrl], ndk);
+          await event.publish(relaySet, 7000, 1);
+          setRelayStatuses(prev => ({ ...prev, [relayUrl]: { status: "success" } }));
+        } catch (error) {
+          let message = "Failed to publish.";
+          if (error instanceof NDKPublishError) {
+            message = error.relayErrors || error.message;
+          } else if (error instanceof Error) {
+            message = error.message;
+          }
+          setRelayStatuses(prev => ({ ...prev, [relayUrl]: { status: "error", message } }));
+        }
+      }
+
+      setPublishing(false);
+    }
   };
 
   const handleConnectClick = async () => {
@@ -616,7 +1073,15 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({ shareKey, payload:
   const shareCardClasses = "flex h-full w-full flex-col overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/80 shadow-lg";
   const previewCardClasses = "hidden lg:flex lg:w-1/2 flex-col rounded-2xl border border-slate-800 bg-slate-900/70";
 
-  const previewNote = noteContent.trim();
+  const shareAppendix = useMemo(() => {
+    if (!payload) return null;
+    if (shareMode === "dm") return buildMetadataBlock(payload);
+    return payload.url ?? null;
+  }, [payload, shareMode]);
+
+  const composedContent = useMemo(() => combineContent(noteContent, shareAppendix), [noteContent, shareAppendix]);
+
+  const previewNote = composedContent.trim().length > 0 ? composedContent : "";
   const mediaSourcePath = useMemo(() => {
     if (!payload?.url) return "";
     try {
@@ -640,7 +1105,9 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({ shareKey, payload:
 
   const data = payload!;
 
-  const relayLabel = usingFallbackRelays
+  const relayLabel = shareMode === "dm"
+    ? "Relays for DM delivery"
+    : usingFallbackRelays
     ? usingDefaultFallback
       ? "Using default Bloom relays"
       : "Using connected relays"
@@ -650,31 +1117,158 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({ shareKey, payload:
       <div className={wrapperClasses}>
         <div className="flex w-full min-h-0 lg:w-1/2">
           <div className={`${shareCardClasses} ${embedded ? "p-4 sm:p-6" : "p-6"}`}>
-            <header className="space-y-2">
-              <h1 className="text-xl font-semibold">Note Composer</h1>
-              <span className="text-xs text-slate-400">
-                &nbsp;
-              </span>
+            <header className="space-y-3">
+              <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                <h1 className="text-xl font-semibold text-slate-100">Share Composer</h1>
+              </div>
+              <div className="flex flex-wrap items-center gap-3">
+                <div className="inline-flex rounded-2xl border border-slate-800 bg-slate-900/70 p-1 text-xs">
+                  <button
+                    type="button"
+                    className={`rounded-xl px-3 py-1 font-medium transition-colors ${
+                      shareMode === "note"
+                        ? "bg-emerald-600 text-white shadow"
+                        : "text-slate-300 hover:text-white"
+                    }`}
+                    onClick={() => setShareMode("note")}
+                    disabled={publishing}
+                  >
+                    Share note
+                  </button>
+                  <button
+                    type="button"
+                    className={`rounded-xl px-3 py-1 font-medium transition-colors ${
+                      shareMode === "dm"
+                        ? "bg-emerald-600 text-white shadow"
+                        : "text-slate-300 hover:text-white"
+                    }`}
+                    onClick={() => setShareMode("dm")}
+                    disabled={publishing}
+                  >
+                    Share via DM
+                  </button>
+                </div>
+                <span className="w-full text-xs text-slate-400">
+                  {shareMode === "dm"
+                    ? "Send an encrypted direct message with download details."
+                    : "Publish a note with the shared link to your relays."}
+                </span>
+              </div>
             </header>
         
             <div className="flex-1 overflow-auto space-y-6 pr-1">
+              {shareMode === "dm" && (
+                <section className="space-y-3">
+                  <div className="flex items-center justify-between text-xs font-semibold uppercase tracking-wide text-slate-400">
+                    
+                    {isSearchingRecipients && <span className="text-emerald-300">Searching…</span>}
+                  </div>
+                  <div className="relative">
+                    <input
+                      id="share-dm-recipient"
+                      className="w-full rounded-xl border border-slate-800 bg-slate-950/80 px-3 py-2 text-sm text-slate-200 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                      placeholder="Paste npub, hex, or @name@domain"
+                      value={recipientQuery}
+                      onChange={event => handleRecipientInputChange(event.target.value)}
+                      disabled={publishing}
+                      autoComplete="off"
+                    />
+                    {recipientQuery && (
+                      <button
+                        type="button"
+                        onClick={handleClearRecipient}
+                        className="absolute inset-y-0 right-2 flex items-center text-xs text-slate-500 hover:text-slate-300"
+                        aria-label="Clear recipient"
+                        disabled={publishing}
+                      >
+                        Clear
+                      </button>
+                    )}
+                  </div>
+                  {recipientError && !isSearchingRecipients && (
+                    <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+                      {recipientError}
+                    </div>
+                  )}
+                  {recipientResults.length > 0 && (
+                    <ul className="max-h-48 space-y-2 overflow-auto rounded-xl border border-slate-800 bg-slate-950/80 p-2 text-sm">
+                      {recipientResults.map(result => {
+                        const display = result.displayName || result.username || result.nip05 || result.npub;
+                        const handle = result.nip05 || (result.username ? `@${result.username}` : result.npub);
+                        const initials = computeInitials(display);
+                        const isActive = selectedRecipient?.pubkey === result.pubkey;
+                        return (
+                          <li key={`${result.pubkey}-${result.origin}`}>
+                            <button
+                              type="button"
+                              onClick={() => handleRecipientSelect(result)}
+                              className={`w-full rounded-lg border px-3 py-2 text-left transition-colors ${
+                                isActive
+                                  ? "border-emerald-500/60 bg-emerald-500/10 text-emerald-100"
+                                  : "border-transparent bg-slate-900/60 text-slate-200 hover:border-slate-700 hover:bg-slate-900"
+                              }`}
+                              disabled={publishing}
+                            >
+                              <div className="flex items-center gap-3">
+                                <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center overflow-hidden rounded-full bg-slate-800 text-xs font-semibold">
+                                  {result.picture ? (
+                                    <img src={result.picture} alt={`${display}'s avatar`} className="h-full w-full object-cover" />
+                                  ) : (
+                                    <span>{initials}</span>
+                                  )}
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                  <div className="truncate text-sm font-medium">{display}</div>
+                                  <div className="truncate text-xs text-slate-400">{handle}</div>
+                                </div>
+                                <span className="text-[10px] uppercase text-slate-500">{result.origin}</span>
+                              </div>
+                            </button>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                  {selectedRecipient && (
+                    <div className="rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-100">
+                      Sending to {selectedRecipient.displayName || selectedRecipient.username || selectedRecipient.nip05 || selectedRecipient.npub}
+                    </div>
+                  )}
+                </section>
+              )}
+
               <section className="space-y-3">
                 <textarea
                   id="share-note"
                   className="min-h-[160px] w-full resize-none rounded-xl border border-slate-800 bg-slate-950/80 px-3 py-2 text-sm text-slate-200 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                  placeholder="Write something about this file…"
+                  placeholder={shareMode === "dm" ? "Add a message to include with the DM…" : "Write something about this file…"}
                   value={noteContent}
                   onChange={event => setNoteContent(event.target.value)}
                   disabled={publishing}
                 />
-                <div className="text-xs text-slate-400">
-                  Shared file will be appended automatically:
-                  <div className="mt-1 truncate text-slate-200">
-                    <a href={data.url} target="_blank" rel="noopener noreferrer" className="hover:text-emerald-300">
-                      {data.url}
-                    </a>
+                {shareMode === "dm" ? (
+                  <div className="space-y-2 text-xs text-slate-300">
+                    <div>DM will include this file summary:</div>
+                    {shareAppendix ? (
+                      <pre className="whitespace-pre-wrap rounded-lg border border-slate-800 bg-slate-950/80 px-3 py-2 text-left text-[11px] text-slate-200">
+                        {shareAppendix}
+                      </pre>
+                    ) : (
+                      <div className="rounded-lg border border-slate-800 bg-slate-950/80 px-3 py-2 text-[11px] text-slate-400">
+                        File metadata unavailable.
+                      </div>
+                    )}
                   </div>
-                </div>
+                ) : (
+                  <div className="text-xs text-slate-400">
+                    Shared file will be appended automatically:
+                    <div className="mt-1 truncate text-slate-200">
+                      <a href={data.url} target="_blank" rel="noopener noreferrer" className="hover:text-emerald-300">
+                        {data.url}
+                      </a>
+                    </div>
+                  </div>
+                )}
               </section>
 
               <section className="space-y-2">
@@ -706,8 +1300,12 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({ shareKey, payload:
               {allComplete && (
                 <div className="rounded-lg border border-emerald-500/50 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-200">
                   {failures.length === 0
-                    ? `Successfully published to ${successes.length} relay${successes.length === 1 ? "" : "s"}.`
-                    : `Published to ${successes.length} relay${successes.length === 1 ? "" : "s"}. ${failures.length} failure${
+                    ? `${shareMode === "dm" ? "Successfully delivered" : "Successfully published"} to ${successes.length} relay${
+                        successes.length === 1 ? "" : "s"
+                      }.`
+                    : `${shareMode === "dm" ? "Delivered" : "Published"} to ${successes.length} relay${
+                        successes.length === 1 ? "" : "s"
+                      }. ${failures.length} ${shareMode === "dm" ? "delivery" : "publish"} failure${
                         failures.length === 1 ? "" : "s"
                       }.`}
                 </div>
@@ -737,9 +1335,15 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({ shareKey, payload:
                   type="button"
                   onClick={handleShare}
                   className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-60"
-                  disabled={publishing || !data.url}
+                  disabled={publishing || !data.url || (shareMode === "dm" && !selectedRecipient)}
                 >
-                  {publishing ? "Publishing…" : "Publish note"}
+                  {publishing
+                    ? shareMode === "dm"
+                      ? "Sending…"
+                      : "Publishing…"
+                    : shareMode === "dm"
+                    ? "Send DM"
+                    : "Publish note"}
                 </button>
               </div>
             </footer>
@@ -749,7 +1353,7 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({ shareKey, payload:
         <aside className={previewCardClasses}>
           <div className="flex flex-col gap-5 p-5">
             <div>
-              <h1 className="text-xl font-semibold text-slate-100">Note Preview</h1>
+              <h1 className="text-xl font-semibold text-slate-100">{shareMode === "dm" ? "DM Preview" : "Note Preview"}</h1>
             </div>
 
             <div className="flex-1 overflow-auto">
@@ -778,7 +1382,7 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({ shareKey, payload:
                     {previewNote ? previewNote : <span className="text-slate-500">Start typing to add a message.</span>}
                   </div>
 
-                  {mediaType ? (
+                  {mediaType && (
                     <div className="overflow-hidden rounded-xl border border-slate-800 bg-slate-950/80">
                       {mediaType === "image" ? (
                         <img
@@ -797,10 +1401,6 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({ shareKey, payload:
                           onError={() => setMediaError(true)}
                         />
                       )}
-                    </div>
-                  ) : (
-                    <div className="rounded-xl border border-slate-800 bg-slate-950/80 px-4 py-12 text-center text-xs text-slate-500">
-                      {mediaError ? "Unable to load media preview." : "Media preview not available."}
                     </div>
                   )}
 
