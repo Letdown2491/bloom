@@ -43,7 +43,7 @@ const buildServerMap = (servers: ManagedServer[]) => {
 
 export const useServerData = (servers: ManagedServer[], options?: UseServerDataOptions) => {
   const pubkey = useCurrentPubkey();
-  const { signer, signEventTemplate } = useNdk();
+  const { signer, signEventTemplate, status: ndkStatus, connectionError: ndkError } = useNdk();
   const metadataVersion = useSyncExternalStore(
     subscribeToBlobMetadataChanges,
     getBlobMetadataVersion,
@@ -247,5 +247,5 @@ export const useServerData = (servers: ManagedServer[], options?: UseServerDataO
     };
   }, [snapshots]);
 
-  return { snapshots, distribution, aggregated, activateServer };
+  return { snapshots, distribution, aggregated, activateServer, ndkStatus, ndkError };
 };

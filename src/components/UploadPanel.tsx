@@ -257,7 +257,7 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
     }
     setBusy(true);
     const limit = pLimit(2);
-    const preparedUploads: { entry: UploadEntry; file: File }[] = [];
+    const preparedUploads: { entry: UploadEntry; file: File; buffer: ArrayBuffer }[] = [];
 
     for (const entry of entries) {
       let processed = entry.file;
@@ -268,156 +268,165 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
       if (resize && entry.kind === "image") {
         processed = await resizeImage(processed, resize.size!, resize.size!);
       }
-      preparedUploads.push({ entry, file: processed });
+      const buffer = await processed.arrayBuffer();
+      preparedUploads.push({ entry, file: processed, buffer });
     }
 
     const blurhashCache = new Map<string, { hash: string; width: number; height: number } | undefined>();
 
     let encounteredError = false;
 
-    await Promise.all(
-      preparedUploads.map(({ entry, file }) =>
-        Promise.all(
-          selectedServers.map(serverUrl =>
-            limit(async () => {
-              const server = serverMap.get(serverUrl);
-              if (!server) return;
-              const transferLabel = resolveEntryDisplayName(entry);
-              const transferKey = `${serverUrl}-${entry.id}`;
-              setTransfers(prev => [
-                ...prev.filter(t => t.id !== transferKey),
-                {
-                  id: transferKey,
-                  serverUrl,
-                  fileName: transferLabel,
-                  transferred: 0,
-                  total: file.size,
-                  status: "uploading",
-                  kind: "manual",
-                },
-              ]);
-              try {
-                const blurHash = entry.kind === "image"
-                  ? blurhashCache.get(entry.id) ?? (await computeBlurhash(file))
-                  : undefined;
-                if (!blurhashCache.has(entry.id)) {
-                  blurhashCache.set(entry.id, blurHash);
-                }
-                const requiresAuthForServer = server.type === "satellite" || Boolean(server.requiresAuth);
-                const handleProgress = (progress: AxiosProgressEvent) => {
-                  setTransfers(prev =>
-                    prev.map(item =>
-                      item.id === transferKey
-                        ? {
-                            ...item,
-                            transferred: progress.loaded,
-                            total: progress.total || file.size,
-                          }
-                        : item
-                    )
-                  );
-                };
+    const performUpload = async (entry: UploadEntry, file: File, buffer: ArrayBuffer, serverUrl: string) => {
+      const server = serverMap.get(serverUrl);
+      if (!server) return;
+      const clonedBuffer = buffer.slice(0);
+      const serverFile = new File([clonedBuffer], file.name, {
+        type: file.type,
+        lastModified: file.lastModified,
+      });
+      const transferLabel = resolveEntryDisplayName(entry);
+      const transferKey = `${serverUrl}-${entry.id}`;
+      setTransfers(prev => [
+        ...prev.filter(t => t.id !== transferKey),
+        {
+          id: transferKey,
+          serverUrl,
+          fileName: transferLabel,
+          transferred: 0,
+          total: serverFile.size,
+          status: "uploading",
+          kind: "manual",
+        },
+      ]);
+      try {
+        const blurHash =
+          entry.kind === "image"
+            ? blurhashCache.get(entry.id) ?? (await computeBlurhash(serverFile))
+            : undefined;
+        if (!blurhashCache.has(entry.id)) {
+          blurhashCache.set(entry.id, blurHash);
+        }
+        const requiresAuthForServer = server.type === "satellite" || Boolean(server.requiresAuth);
+        const handleProgress = (progress: AxiosProgressEvent) => {
+          setTransfers(prev =>
+            prev.map(item =>
+                  item.id === transferKey
+                    ? {
+                        ...item,
+                        transferred: progress.loaded,
+                        total: progress.total || serverFile.size,
+                      }
+                    : item
+            )
+          );
+        };
 
-                let uploaded: BlossomBlob;
-                if (server.type === "nip96") {
-                  uploaded = await uploadBlobToNip96(
-                    server.url,
-                    file,
-                    requiresAuthForServer ? signEventTemplate : undefined,
-                    requiresAuthForServer,
-                    handleProgress
-                  );
-                } else if (server.type === "satellite") {
-                  uploaded = await uploadBlobToSatellite(
-                    server.url,
-                    file,
-                    signEventTemplate,
-                    true,
-                    handleProgress
-                  );
-                } else {
-                  uploaded = await uploadBlobToServer(
-                    server.url,
-                    file,
-                    requiresAuthForServer ? signEventTemplate : undefined,
-                    requiresAuthForServer,
-                    handleProgress
-                  );
-                }
-                const blob: BlossomBlob = {
-                  ...uploaded,
-                  name: uploaded.name || entry.file.name,
-                  type: uploaded.type || file.type || entry.file.type,
-                };
+        let uploaded: BlossomBlob;
+        if (server.type === "nip96") {
+          uploaded = await uploadBlobToNip96(
+            server.url,
+            serverFile,
+            requiresAuthForServer ? signEventTemplate : undefined,
+            requiresAuthForServer,
+            handleProgress
+          );
+        } else if (server.type === "satellite") {
+          uploaded = await uploadBlobToSatellite(
+            server.url,
+            serverFile,
+            signEventTemplate,
+            true,
+            handleProgress
+          );
+        } else {
+          uploaded = await uploadBlobToServer(
+            server.url,
+            serverFile,
+            requiresAuthForServer ? signEventTemplate : undefined,
+            requiresAuthForServer,
+            handleProgress
+          );
+        }
+        const blob: BlossomBlob = {
+          ...uploaded,
+          name: uploaded.name || entry.file.name,
+          type: uploaded.type || serverFile.type || entry.file.type,
+        };
 
-                let aliasForEvent: string | undefined;
-                let extraTags: string[][] | undefined;
+        let aliasForEvent: string | undefined;
+        let extraTags: string[][] | undefined;
 
-                if (entry.metadata.kind === "audio") {
-                  const overrides = createAudioOverridesFromForm(entry.metadata);
-                  const audioDetails = buildAudioEventDetails(
-                    entry.extractedAudioMetadata ?? null,
-                    blob,
-                    entry.file.name,
-                    overrides
-                  );
-                  aliasForEvent = audioDetails.alias ?? undefined;
-                  extraTags = audioDetails.tags;
-                  if (audioDetails.alias) {
-                    blob.name = audioDetails.alias;
-                  }
-                  rememberAudioMetadata(server.url, blob.sha256, audioDetails.stored ?? null);
-                  if (audioDetails.alias) {
-                    applyAliasUpdate(undefined, blob.sha256, audioDetails.alias, Math.floor(Date.now() / 1000));
-                  }
-                } else if (entry.metadata.kind === "generic") {
-                  const alias = sanitizePart(entry.metadata.alias);
-                  if (alias) {
-                    aliasForEvent = alias;
-                    blob.name = alias;
-                    applyAliasUpdate(undefined, blob.sha256, alias, Math.floor(Date.now() / 1000));
-                  }
-                }
+        if (entry.metadata.kind === "audio") {
+          const overrides = createAudioOverridesFromForm(entry.metadata);
+          const audioDetails = buildAudioEventDetails(
+            entry.extractedAudioMetadata ?? null,
+            blob,
+            entry.file.name,
+            overrides
+          );
+          aliasForEvent = audioDetails.alias ?? undefined;
+          extraTags = audioDetails.tags;
+          if (audioDetails.alias) {
+            blob.name = audioDetails.alias;
+          }
+          rememberAudioMetadata(server.url, blob.sha256, audioDetails.stored ?? null);
+          if (audioDetails.alias) {
+            applyAliasUpdate(undefined, blob.sha256, audioDetails.alias, Math.floor(Date.now() / 1000));
+          }
+        } else if (entry.metadata.kind === "generic") {
+          const alias = sanitizePart(entry.metadata.alias);
+          if (alias) {
+            aliasForEvent = alias;
+            blob.name = alias;
+            applyAliasUpdate(undefined, blob.sha256, alias, Math.floor(Date.now() / 1000));
+          }
+        }
 
-                rememberBlobMetadata(server.url, blob);
-                if (pubkey) {
-                  queryClient.setQueryData<BlossomBlob[]>(["server-blobs", server.url, pubkey, server.type], prev => {
-                    if (!prev) return [blob];
-                    const index = prev.findIndex(item => item.sha256 === blob.sha256);
-                    if (index >= 0) {
-                      const next = [...prev];
-                      next[index] = { ...prev[index], ...blob };
-                      return next;
-                    }
-                    return [...prev, blob];
-                  });
+        rememberBlobMetadata(server.url, blob);
+        if (pubkey) {
+          queryClient.setQueryData<BlossomBlob[]>(["server-blobs", server.url, pubkey, server.type], prev => {
+            if (!prev) return [blob];
+            const index = prev.findIndex(item => item.sha256 === blob.sha256);
+            if (index >= 0) {
+              const next = [...prev];
+              next[index] = { ...prev[index], ...blob };
+              return next;
+            }
+            return [...prev, blob];
+          });
+        }
+        setTransfers(prev =>
+          prev.map(item => (item.id === transferKey ? { ...item, transferred: item.total, status: "success" } : item))
+        );
+        await publishMetadata(blob, {
+          blurHash,
+          alias: aliasForEvent ?? null,
+          extraTags,
+        });
+        queryClient.invalidateQueries({ queryKey: ["server-blobs", server.url, pubkey, server.type] });
+      } catch (err: any) {
+        encounteredError = true;
+        setTransfers(prev =>
+          prev.map(item =>
+            item.id === transferKey
+              ? {
+                  ...item,
+                  status: "error",
+                  message: err?.message || "Upload failed",
                 }
-                setTransfers(prev =>
-                  prev.map(item => (item.id === transferKey ? { ...item, transferred: item.total, status: "success" } : item))
-                );
-                await publishMetadata(blob, {
-                  blurHash,
-                  alias: aliasForEvent ?? null,
-                  extraTags,
-                });
-                queryClient.invalidateQueries({ queryKey: ["server-blobs", server.url, pubkey, server.type] });
-              } catch (err: any) {
-                encounteredError = true;
-                setTransfers(prev =>
-                  prev.map(item =>
-                    item.id === transferKey
-                      ? {
-                          ...item,
-                          status: "error",
-                          message: err?.message || "Upload failed",
-                        }
-                      : item
-                  )
-                );
-              }
-            })
+              : item
           )
-        )
+        );
+      }
+    };
+
+    await Promise.all(
+      preparedUploads.map(({ entry, file, buffer }) =>
+        (async () => {
+          for (const serverUrl of selectedServers) {
+            await limit(() => performUpload(entry, file, buffer, serverUrl));
+          }
+        })()
       )
     );
 

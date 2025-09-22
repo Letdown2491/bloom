@@ -48,11 +48,11 @@ export const sortServersByName = (servers: ManagedServer[]): ManagedServer[] => 
 };
 
 export const useServers = () => {
-  const { ndk } = useNdk();
+  const { ndk, status: ndkStatus, connectionError: ndkError } = useNdk();
   const pubkey = useCurrentPubkey();
   const queryClient = useQueryClient();
 
-  const canFetchUserServers = Boolean(ndk && pubkey);
+  const canFetchUserServers = Boolean(ndk && pubkey && ndkStatus !== "error");
 
   const query = useQuery({
     queryKey: ["servers", pubkey],
@@ -123,9 +123,10 @@ export const useServers = () => {
 
   return {
     servers,
-    isLoading: query.isLoading,
+    isLoading: query.isLoading || ndkStatus === "connecting",
     saveServers: guardedSaveServers,
     saving: isPending,
-    error: query.error || saveMutation.error,
+    error: query.error || saveMutation.error || ndkError,
+    ndkStatus,
   };
 };

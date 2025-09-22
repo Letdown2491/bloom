@@ -1,4 +1,5 @@
 import axios, { type AxiosProgressEvent } from "axios";
+import { BloomHttpError, fromAxiosError, httpRequest, requestJson } from "./httpService";
 
 export type BlossomBlob = {
   sha256: string;
@@ -90,13 +91,37 @@ const extractSha256FromUrl = (value: string): string | undefined => {
   return undefined;
 };
 
+const readBlobArrayBuffer = async (blob: Blob): Promise<ArrayBuffer> => {
+  try {
+    return await blob.arrayBuffer();
+  } catch (error) {
+    if (error instanceof DOMException) {
+      const clone = blob.slice(0, blob.size, blob.type);
+      return clone.arrayBuffer();
+    }
+    throw error;
+  }
+};
+
 async function computeBlobSha256Hex(blob: Blob): Promise<string> {
-  const arrayBuffer = await blob.arrayBuffer();
   const crypto = globalThis.crypto;
   if (!crypto?.subtle) {
     throw new Error("SHA-256 hashing unavailable in this environment");
   }
-  const hashBuffer = await crypto.subtle.digest("SHA-256", arrayBuffer);
+
+  const buffer = await readBlobArrayBuffer(blob);
+  const data = new Uint8Array(buffer);
+
+  let hashBuffer: ArrayBuffer;
+  try {
+    hashBuffer = await crypto.subtle.digest("SHA-256", data);
+  } catch (error) {
+    if (error instanceof DOMException) {
+      throw new Error("Unable to compute SHA-256 hash for the selected file.");
+    }
+    throw error;
+  }
+
   return toHex(new Uint8Array(hashBuffer));
 }
 
@@ -198,23 +223,43 @@ export async function listUserBlobs(
   pubkey: string,
   options?: { requiresAuth?: boolean; signTemplate?: SignTemplate }
 ): Promise<BlossomBlob[]> {
-  const url = new URL(`/list/${pubkey}`, serverUrl).toString();
+  const path = `/list/${pubkey}`;
+  const url = new URL(path, serverUrl).toString();
   const headers: Record<string, string> = {};
   if (options?.requiresAuth) {
-    if (!options.signTemplate) throw new Error("Server requires auth. Connect your signer first.");
+    if (!options.signTemplate) throw new BloomHttpError("Server requires auth. Connect your signer first.", {
+      request: { url, method: "GET" },
+      source: "blossom",
+    });
     const auth = await createAuthEvent(options.signTemplate, "list", {
       serverUrl,
-      urlPath: `/list/${pubkey}`,
+      urlPath: path,
     });
     headers.Authorization = encodeAuthHeader(auth);
   }
-  const res = await fetch(url, { headers });
-  if (!res.ok) throw new Error(`List failed with status ${res.status}`);
-  const data = await res.json();
-  const items: BlossomBlob[] = Array.isArray(data) ? data : data.items ?? [];
-  const now = Math.floor(Date.now() / 1000);
+
   const normalizedServer = serverUrl.replace(/\/$/, "");
-  return items.map(item => {
+  const now = Math.floor(Date.now() / 1000);
+
+  const data = await requestJson<unknown>({
+    url,
+    method: "GET",
+    headers,
+    source: "blossom",
+    retries: 1,
+  });
+
+  const rawItems: BlossomBlob[] = (() => {
+    if (Array.isArray(data)) {
+      return data as BlossomBlob[];
+    }
+    if (data && typeof data === "object" && Array.isArray((data as { items?: unknown[] }).items)) {
+      return ((data as { items?: unknown[] }).items ?? []) as BlossomBlob[];
+    }
+    return [];
+  })();
+
+  return rawItems.map(item => {
     const rawSize = (item as any)?.size;
     const size = rawSize === undefined || rawSize === null ? undefined : Number(rawSize);
     return {
@@ -225,7 +270,7 @@ export async function listUserBlobs(
       serverUrl: normalizedServer,
       requiresAuth: Boolean(options?.requiresAuth),
       serverType: "blossom",
-    };
+    } as BlossomBlob;
   });
 }
 
@@ -304,21 +349,21 @@ export async function uploadBlobToServer(
       } as BlossomBlob;
     } catch (error) {
       if (axios.isAxiosError(error)) {
-        const status = error.response?.status;
-        const serverMessage = (error.response?.data as any)?.message || error.message;
+        const serverMessage = (error.response?.data as { message?: string } | undefined)?.message || error.message;
         if (requiresAuth && !skipSizeTag && (serverMessage || "").toLowerCase().includes("size tag")) {
           return attempt(true);
         }
-        if (status === 413) {
-          throw new Error(
-            "Upload rejected: the server responded with 413 (payload too large). Reduce the file size or ask the server admin to raise the limit."
+        if (error.response?.status === 413) {
+          throw new BloomHttpError(
+            "Upload rejected: the server responded with 413 (payload too large). Reduce the file size or ask the server admin to raise the limit.",
+            {
+              status: 413,
+              request: { url, method: "PUT" },
+              source: "blossom",
+            }
           );
         }
-        const uploadError = new Error(serverMessage || `Upload failed with status ${status ?? "unknown"}`) as Error & {
-          status?: number;
-        };
-        uploadError.status = status;
-        throw uploadError;
+        throw fromAxiosError(error, { url, method: "PUT", source: "blossom" });
       }
       throw error;
     }
@@ -348,16 +393,21 @@ export async function deleteUserBlob(
     headers["content-type"] = "application/json";
     body = JSON.stringify({ event: authEvent });
   }
-  const res = await fetch(url, {
+  const response = await httpRequest({
+    url,
     method: "DELETE",
     headers,
     body,
     mode: "cors",
+    source: "blossom",
   });
-  if (!res.ok) throw new Error(`Delete failed with status ${res.status}`);
-  const contentType = res.headers.get("content-type") || "";
+  const contentType = response.headers.get("content-type") || "";
   if (contentType.includes("application/json")) {
-    return res.json().catch(() => undefined);
+    try {
+      return await response.json();
+    } catch (error) {
+      return undefined;
+    }
   }
   return undefined;
 }
@@ -390,13 +440,13 @@ export async function mirrorBlobToServer(
     headers.Authorization = encodeAuthHeader(authEvent);
     body = JSON.stringify({ url: sourceUrl, event: authEvent });
   }
-  const res = await fetch(url, {
+  const data = await requestJson<any>({
+    url,
     method: "PUT",
     headers,
     body,
+    source: "blossom",
   });
-  if (!res.ok) throw new Error(`Mirror failed with status ${res.status}`);
-  const data = await res.json();
   const normalizedServer = serverUrl.replace(/\/$/, "");
   const rawSize = (data as any)?.size;
   const size = rawSize === undefined || rawSize === null ? undefined : Number(rawSize);

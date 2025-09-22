@@ -2,6 +2,8 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useS
 import NDK, { NDKEvent, NDKNip07Signer, NDKSigner, NDKUser } from "@nostr-dev-kit/ndk";
 import type { EventTemplate, SignedEvent } from "../lib/blossomClient";
 
+export type NdkConnectionStatus = "idle" | "connecting" | "connected" | "error";
+
 export type NdkContextValue = {
   ndk: NDK | null;
   signer: NDKSigner | null;
@@ -9,6 +11,8 @@ export type NdkContextValue = {
   connect: () => Promise<void>;
   disconnect: () => void;
   signEventTemplate: (template: EventTemplate) => Promise<SignedEvent>;
+  status: NdkConnectionStatus;
+  connectionError: Error | null;
 };
 
 const NdkContext = createContext<NdkContextValue | undefined>(undefined);
@@ -24,10 +28,25 @@ export const NdkProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [ndk] = useState(() => new NDK({ explicitRelayUrls: DEFAULT_RELAYS }));
   const [signer, setSigner] = useState<NDKSigner | null>(null);
   const [user, setUser] = useState<NDKUser | null>(null);
+  const [status, setStatus] = useState<NdkConnectionStatus>("idle");
+  const [connectionError, setConnectionError] = useState<Error | null>(null);
 
   const ensureNdkConnection = useCallback(async () => {
     const attempt = ndk.connect();
-    attempt.catch(() => undefined);
+    setStatus(prev => (prev === "connected" ? prev : "connecting"));
+    setConnectionError(null);
+
+    attempt
+      .then(() => {
+        setStatus("connected");
+        return undefined;
+      })
+      .catch(error => {
+        const normalized = error instanceof Error ? error : new Error("Failed to connect to relays");
+        setConnectionError(normalized);
+        setStatus("error");
+        return undefined;
+      });
 
     if (typeof window === "undefined") {
       await attempt.catch(() => undefined);
@@ -88,21 +107,35 @@ export const NdkProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const connect = useCallback(async () => {
     if (!(window as any).nostr) {
-      throw new Error("A NIP-07 signer is required (e.g. Alby, nos2x).");
+      const error = new Error("A NIP-07 signer is required (e.g. Alby, nos2x).");
+      setConnectionError(error);
+      setStatus("error");
+      throw error;
     }
-    await ensureNdkConnection();
-    const nip07Signer = new NDKNip07Signer();
-    await nip07Signer.blockUntilReady();
-    const nip07User = await nip07Signer.user();
-    setSigner(nip07Signer);
-    setUser(nip07User);
-    ndk.signer = nip07Signer;
-  }, [ndk]);
+    try {
+      await ensureNdkConnection();
+      const nip07Signer = new NDKNip07Signer();
+      await nip07Signer.blockUntilReady();
+      const nip07User = await nip07Signer.user();
+      setSigner(nip07Signer);
+      setUser(nip07User);
+      ndk.signer = nip07Signer;
+      setStatus("connected");
+      setConnectionError(null);
+    } catch (error) {
+      const normalized = error instanceof Error ? error : new Error("Failed to connect Nostr signer");
+      setConnectionError(normalized);
+      setStatus("error");
+      throw normalized;
+    }
+  }, [ensureNdkConnection, ndk]);
 
   const disconnect = useCallback(() => {
     setSigner(null);
     setUser(null);
     ndk.signer = undefined;
+    setStatus("idle");
+    setConnectionError(null);
   }, [ndk]);
 
   const signEventTemplate = useCallback<
@@ -117,7 +150,10 @@ export const NdkProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return event.rawEvent();
   }, [signer, ndk]);
 
-  const value = useMemo<NdkContextValue>(() => ({ ndk, signer, user, connect, disconnect, signEventTemplate }), [ndk, signer, user, connect, disconnect, signEventTemplate]);
+  const value = useMemo<NdkContextValue>(
+    () => ({ ndk, signer, user, connect, disconnect, signEventTemplate, status, connectionError }),
+    [ndk, signer, user, connect, disconnect, signEventTemplate, status, connectionError]
+  );
 
   return <NdkContext.Provider value={value}>{children}</NdkContext.Provider>;
 };

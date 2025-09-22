@@ -1,4 +1,5 @@
 import axios, { type AxiosProgressEvent } from "axios";
+import { BloomHttpError, fromAxiosError, httpRequest, requestJson } from "./httpService";
 import { buildNip98AuthHeader } from "./nip98";
 import { resolveUploadSource, type BlossomBlob, type SignTemplate, type UploadSource } from "./blossomClient";
 
@@ -65,23 +66,35 @@ async function fetchConfig(baseUrl: string, depth = 0): Promise<Nip96ResolvedCon
   if (depth > 4) throw new Error("Too many NIP-96 delegation redirects");
   const normalizedBase = normalizeBase(baseUrl);
   const wellKnownUrl = new URL("/.well-known/nostr/nip96.json", ensureTrailingSlash(normalizedBase)).toString();
-  const res = await fetch(wellKnownUrl, { headers: { Accept: "application/json" } });
-  if (!res.ok) {
-    throw new Error(`Failed to load NIP-96 config from ${wellKnownUrl} (${res.status})`);
-  }
-  const data = await res.json();
+  const data = await requestJson<Record<string, unknown>>({
+    url: wellKnownUrl,
+    method: "GET",
+    headers: { Accept: "application/json" },
+    retries: depth === 0 ? 1 : 0,
+    source: "nip96",
+  });
   if (data && typeof data === "object") {
     const delegated = typeof data.delegated_to_url === "string" ? data.delegated_to_url.trim() : "";
     const apiUrlRaw = typeof data.api_url === "string" ? data.api_url.trim() : "";
     if (!apiUrlRaw && delegated) {
       return fetchConfig(delegated, depth + 1);
     }
-    if (!apiUrlRaw) throw new Error(`Invalid NIP-96 config from ${wellKnownUrl} (missing api_url)`);
+    if (!apiUrlRaw) {
+      throw new BloomHttpError(`Invalid NIP-96 config from ${wellKnownUrl} (missing api_url)`, {
+        request: { url: wellKnownUrl, method: "GET" },
+        source: "nip96",
+        data,
+      });
+    }
     const apiUrl = resolveAbsolute(normalizedBase, apiUrlRaw);
     const downloadUrl = resolveAbsolute(apiUrl, typeof data.download_url === "string" ? data.download_url.trim() : "");
     return { apiUrl, downloadUrl, raw: data as Record<string, any> };
   }
-  throw new Error(`Invalid response from ${wellKnownUrl}`);
+  throw new BloomHttpError(`Invalid response from ${wellKnownUrl}`, {
+    request: { url: wellKnownUrl, method: "GET" },
+    source: "nip96",
+    data,
+  });
 }
 
 export async function getNip96Config(serverUrl: string): Promise<Nip96ResolvedConfig> {
@@ -192,13 +205,20 @@ export async function listNip96Files(
       method: "GET",
     });
   }
-  const res = await fetch(listUrl.toString(), {
+  const data = await requestJson<Nip96ListResponse | undefined>({
+    url: listUrl.toString(),
     method: "GET",
     headers,
+    source: "nip96",
+  }).catch(error => {
+    if (error instanceof BloomHttpError) throw error;
+    throw new BloomHttpError("Failed to list NIP-96 files", {
+      request: { url: listUrl.toString(), method: "GET" },
+      source: "nip96",
+      cause: error instanceof Error ? error : undefined,
+    });
   });
-  if (!res.ok) throw new Error(`List failed with status ${res.status}`);
-  const data = (await res.json().catch(() => undefined)) as Nip96ListResponse | undefined;
-  const files = Array.isArray(data?.files) ? data!.files! : [];
+  const files = Array.isArray(data?.files) ? data.files : [];
   const blobs: BlossomBlob[] = [];
   for (const file of files) {
     const event = extractNip94Event(file);
@@ -220,7 +240,12 @@ export async function uploadBlobToNip96(
   const headers: Record<string, string> = { Accept: "application/json" };
   const url = config.apiUrl;
   if (requiresAuth) {
-    if (!signTemplate) throw new Error("Server requires auth. Connect your signer first.");
+    if (!signTemplate) {
+      throw new BloomHttpError("Server requires auth. Connect your signer first.", {
+        request: { url, method: "POST" },
+        source: "nip96",
+      });
+    }
     headers.Authorization = await buildNip98AuthHeader(signTemplate, {
       url,
       method: "POST",
@@ -241,25 +266,39 @@ export async function uploadBlobToNip96(
   }
   formData.append("no_transform", "true");
 
-  const response = await axios.post(url, formData, {
-    headers,
-    onUploadProgress: progressEvent => {
-      if (onProgress) onProgress(progressEvent as AxiosProgressEvent);
-    },
-  });
+  try {
+    const response = await axios.post(url, formData, {
+      headers,
+      onUploadProgress: progressEvent => {
+        if (onProgress) onProgress(progressEvent as AxiosProgressEvent);
+      },
+    });
 
-  const payload = response.data as Nip96UploadResponse | undefined;
+    const payload = response.data as Nip96UploadResponse | undefined;
 
-  if (!payload || payload.status !== "success" || !payload.nip94_event) {
-    const message = payload?.message || payload?.status || "Upload failed";
-    throw new Error(message);
+    if (!payload || payload.status !== "success" || !payload.nip94_event) {
+      const message = payload?.message || payload?.status || "Upload failed";
+      throw new BloomHttpError(message, {
+        request: { url, method: "POST" },
+        source: "nip96",
+        data: payload,
+      });
+    }
+
+    const blob = nip94ToBlob(config, serverUrl, payload.nip94_event, requiresAuth);
+    if (!blob) {
+      throw new BloomHttpError("Upload succeeded but response missing file metadata", {
+        request: { url, method: "POST" },
+        source: "nip96",
+        data: payload,
+      });
+    }
+    if (!blob.name) blob.name = source.fileName;
+    if (!blob.type) blob.type = uploadFile.type || source.contentType;
+    return blob;
+  } catch (error) {
+    throw fromAxiosError(error, { url, method: "POST", source: "nip96" });
   }
-
-  const blob = nip94ToBlob(config, serverUrl, payload.nip94_event, requiresAuth);
-  if (!blob) throw new Error("Upload succeeded but response missing file metadata");
-  if (!blob.name) blob.name = source.fileName;
-  if (!blob.type) blob.type = uploadFile.type || source.contentType;
-  return blob;
 }
 
 export async function deleteNip96File(
@@ -272,20 +311,30 @@ export async function deleteNip96File(
   const targetUrl = `${ensureTrailingSlash(config.apiUrl)}${hash}`;
   const headers: Record<string, string> = { Accept: "application/json" };
   if (requiresAuth) {
-    if (!signTemplate) throw new Error("Server requires auth. Connect your signer first.");
+    if (!signTemplate) {
+      throw new BloomHttpError("Server requires auth. Connect your signer first.", {
+        request: { url: targetUrl, method: "DELETE" },
+        source: "nip96",
+      });
+    }
     headers.Authorization = await buildNip98AuthHeader(signTemplate, {
       url: targetUrl,
       method: "DELETE",
     });
   }
-  const res = await fetch(targetUrl, {
+  const response = await httpRequest({
+    url: targetUrl,
     method: "DELETE",
     headers,
+    source: "nip96",
   });
-  if (!res.ok) throw new Error(`Delete failed with status ${res.status}`);
-  const contentType = res.headers.get("content-type") || "";
+  const contentType = response.headers.get("content-type") || "";
   if (contentType.includes("application/json")) {
-    return res.json().catch(() => undefined);
+    try {
+      return await response.json();
+    } catch (error) {
+      return undefined;
+    }
   }
   return undefined;
 }
