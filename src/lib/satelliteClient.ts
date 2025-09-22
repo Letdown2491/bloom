@@ -197,6 +197,13 @@ export async function getSatelliteAccount(serverUrl: string, signTemplate: SignT
     method: "GET",
     headers: { Accept: "application/json" },
     source: "satellite",
+    retries: 2,
+    retryDelayMs: 800,
+    retryJitterRatio: 0.35,
+    retryOn: err => {
+      const status = err.status ?? 0;
+      return status === 0 || status >= 500 || status === 429;
+    },
   });
   if (!data || typeof data !== "object") {
     throw new BloomHttpError("Satellite account response malformed", {
@@ -330,6 +337,13 @@ export async function requestSatelliteCreditOffer(
     method: "GET",
     headers: { Accept: "application/json" },
     source: "satellite",
+    retries: 2,
+    retryDelayMs: 800,
+    retryJitterRatio: 0.35,
+    retryOn: err => {
+      const status = err.status ?? 0;
+      return status === 0 || status >= 500 || status === 429;
+    },
   });
   if (!data || typeof data !== "object") {
     throw new BloomHttpError("Satellite credit offer response malformed", {

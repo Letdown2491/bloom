@@ -104,7 +104,6 @@ export const useBlobMetadata = (blobs: BlossomBlob[], options?: MetadataOptions)
 
   const requestMetadata = useCallback((sha: string) => {
     if (!sha) return;
-    if (visibleRequestsRef.current.has(sha)) return;
     visibleRequestsRef.current.add(sha);
     setVisibilitySignal(signal => signal + 1);
   }, []);
@@ -274,6 +273,9 @@ export const useBlobMetadata = (blobs: BlossomBlob[], options?: MetadataOptions)
       }
     };
 
+    const MAX_LOOKUPS_PER_TICK = 6;
+    let processedThisCycle = 0;
+
     for (const blob of blobs) {
       const overrides = resolvedMeta[blob.sha256];
       const effectiveType = overrides?.type ?? blob.type;
@@ -327,9 +329,11 @@ export const useBlobMetadata = (blobs: BlossomBlob[], options?: MetadataOptions)
       attemptedLookups.current.add(blob.sha256);
       visibleRequestsRef.current.delete(blob.sha256);
       enqueue(() => resolveMetadata(blob, resourceUrl));
+      processedThisCycle += 1;
+      if (processedThisCycle >= MAX_LOOKUPS_PER_TICK) {
+        break;
+      }
     }
-
-    setVisibilitySignal(signal => signal);
   }, [baseUrl, blobs, detectedKinds, requiresAuth, resolvedMeta, serverType, signTemplate, ttlMs, visibilitySignal]);
 
   const reportDetectedKind = useCallback((sha: string, kind: "image" | "video") => {

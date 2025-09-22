@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { FixedSizeList as VirtualList } from "react-window";
 import { prettyBytes, prettyDate } from "../utils/format";
 import { buildAuthorizationHeader, type BlossomBlob, type SignTemplate } from "../lib/blossomClient";
 import { buildNip98AuthHeader } from "../lib/nip98";
@@ -306,6 +307,7 @@ export const BlobList: React.FC<BlobListProps> = ({
           sortConfig={sortConfig}
           onSort={handleSortToggle}
           onBlobVisible={requestMetadata}
+          requestMetadata={requestMetadata}
         />
       ) : (
         <GridLayout
@@ -338,6 +340,250 @@ export const BlobList: React.FC<BlobListProps> = ({
           onBlobVisible={requestMetadata}
         />
       )}
+    </div>
+  );
+};
+
+const LIST_ROW_HEIGHT = 76;
+const LIST_ROW_GAP = 8;
+
+const ListLayout: React.FC<{
+  blobs: BlossomBlob[];
+  baseUrl?: string;
+  requiresAuth: boolean;
+  signTemplate?: SignTemplate;
+  serverType?: "blossom" | "nip96" | "satellite";
+  selected: Set<string>;
+  onToggle: (sha: string) => void;
+  onSelectMany?: (shas: string[], value: boolean) => void;
+  onDelete: (blob: BlossomBlob) => void;
+  onDownload: (blob: BlossomBlob) => void;
+  onPreview: (blob: BlossomBlob) => void;
+  onPlay?: (blob: BlossomBlob) => void;
+  onShare?: (blob: BlossomBlob) => void;
+  onRename?: (blob: BlossomBlob) => void;
+  currentTrackUrl?: string;
+  currentTrackStatus?: "idle" | "playing" | "paused";
+  detectedKinds: DetectedKindMap;
+  onDetect: (sha: string, kind: "image" | "video") => void;
+  sortConfig: SortConfig | null;
+  onSort: (key: SortKey) => void;
+  onBlobVisible: (sha: string) => void;
+  requestMetadata: (sha: string) => void;
+}> = ({
+  blobs,
+  baseUrl,
+  requiresAuth,
+  signTemplate,
+  serverType,
+  selected,
+  onToggle,
+  onSelectMany,
+  onDelete,
+  onDownload,
+  onPreview,
+  onPlay,
+  onShare,
+  onRename,
+  currentTrackUrl,
+  currentTrackStatus,
+  detectedKinds,
+  onDetect,
+  sortConfig,
+  onSort,
+  onBlobVisible,
+  requestMetadata,
+}) => {
+  const selectAllRef = useRef<HTMLInputElement | null>(null);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const [container, setContainer] = useState({ width: 0, height: 0 });
+
+  const allSelected = blobs.length > 0 && blobs.every(blob => selected.has(blob.sha256));
+  const partiallySelected = !allSelected && blobs.some(blob => selected.has(blob.sha256));
+
+  useEffect(() => {
+    if (selectAllRef.current) {
+      selectAllRef.current.indeterminate = partiallySelected;
+    }
+  }, [partiallySelected, allSelected]);
+
+  useLayoutEffect(() => {
+    const element = containerRef.current;
+    if (!element) return;
+
+    const update = () => setContainer({ width: element.clientWidth, height: element.clientHeight });
+
+    update();
+
+    if (typeof ResizeObserver === "function") {
+      const observer = new ResizeObserver(update);
+      observer.observe(element);
+      return () => observer.disconnect();
+    }
+
+    const handleResize = () => update();
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, [blobs.length]);
+
+  const listWidth = container.width || 800;
+  const estimatedHeight = (LIST_ROW_HEIGHT + LIST_ROW_GAP) * Math.min(blobs.length, 8);
+  const listHeight = container.height > 0 ? container.height : Math.min(480, Math.max(LIST_ROW_HEIGHT + LIST_ROW_GAP, estimatedHeight));
+
+  const headerIndicator = useCallback(
+    (key: SortKey) => {
+      if (!sortConfig || sortConfig.key !== key) return null;
+      return sortConfig.direction === "asc" ? "^" : "v";
+    },
+    [sortConfig]
+  );
+
+  const handleSelectAll: React.ChangeEventHandler<HTMLInputElement> = event => {
+    const value = event.target.checked;
+    if (onSelectMany) {
+      onSelectMany(
+        blobs.map(blob => blob.sha256),
+        value
+      );
+    } else {
+      blobs.forEach(blob => {
+        const isSelected = selected.has(blob.sha256);
+        if (value && !isSelected) onToggle(blob.sha256);
+        if (!value && isSelected) onToggle(blob.sha256);
+      });
+    }
+  };
+
+  const Row = useCallback(
+    ({ index, style }: { index: number; style: React.CSSProperties }) => {
+      const blob = blobs[index];
+      if (!blob) return null;
+      requestMetadata(blob.sha256);
+      const adjustedStyle: React.CSSProperties = {
+        ...style,
+        position: "absolute",
+        top: typeof style.top === "number" ? style.top + LIST_ROW_GAP / 2 : style.top,
+        left: 0,
+        width: listWidth,
+        height: LIST_ROW_HEIGHT,
+      };
+
+      return (
+        <ListRow
+          key={blob.sha256}
+          style={adjustedStyle}
+          blob={blob}
+          baseUrl={baseUrl}
+          requiresAuth={requiresAuth}
+          signTemplate={signTemplate}
+          serverType={serverType}
+          selected={selected}
+          onToggle={onToggle}
+          onDelete={onDelete}
+          onDownload={onDownload}
+          onPreview={onPreview}
+          onPlay={onPlay}
+          onShare={onShare}
+          onRename={onRename}
+          currentTrackUrl={currentTrackUrl}
+          currentTrackStatus={currentTrackStatus}
+          detectedKinds={detectedKinds}
+          onDetect={onDetect}
+          onBlobVisible={onBlobVisible}
+        />
+      );
+    },
+    [
+      blobs,
+      baseUrl,
+      requiresAuth,
+      signTemplate,
+      serverType,
+      selected,
+      onToggle,
+      onDelete,
+      onDownload,
+      onPreview,
+      onPlay,
+      onShare,
+      onRename,
+      currentTrackUrl,
+      currentTrackStatus,
+      detectedKinds,
+      onDetect,
+      onBlobVisible,
+      requestMetadata,
+      listWidth,
+    ]
+  );
+
+  const handleItemsRendered = useCallback(
+    ({ visibleStartIndex, visibleStopIndex }: { visibleStartIndex: number; visibleStopIndex: number }) => {
+      for (let index = visibleStartIndex; index <= visibleStopIndex; index += 1) {
+        const blob = blobs[index];
+        if (blob) requestMetadata(blob.sha256);
+      }
+    },
+    [blobs, requestMetadata]
+  );
+
+  return (
+    <div className="flex flex-1 min-h-0 w-full flex-col overflow-hidden pb-1">
+      <div className="border-b border-slate-800 bg-slate-900/60 px-2 pb-2 pt-0 text-xs uppercase tracking-wide text-slate-200">
+        <div className="grid grid-cols-[40px,minmax(0,1fr)] md:grid-cols-[40px,minmax(0,1fr),10rem,6rem,16rem] items-center gap-2">
+          <div className="flex justify-center">
+            <input
+              ref={selectAllRef}
+              type="checkbox"
+              className="h-4 w-4 rounded border-slate-700 bg-slate-900 text-emerald-400 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+              checked={allSelected}
+              onChange={handleSelectAll}
+              aria-label="Select all files"
+            />
+          </div>
+          <button
+            type="button"
+            onClick={() => onSort("name")}
+            className="flex items-center gap-1 text-left font-semibold text-slate-200 hover:text-slate-100"
+          >
+            <span>Name</span>
+            <span aria-hidden="true">{headerIndicator("name")}</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => onSort("uploaded")}
+            className="hidden items-center gap-1 text-left font-semibold text-slate-200 hover:text-slate-100 md:flex"
+          >
+            <span>Uploaded</span>
+            <span aria-hidden="true">{headerIndicator("uploaded")}</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => onSort("size")}
+            className="flex items-center gap-1 text-left font-semibold text-slate-200 hover:text-slate-100"
+          >
+            <span>Size</span>
+            <span aria-hidden="true">{headerIndicator("size")}</span>
+          </button>
+          <div className="hidden justify-center text-center font-semibold text-slate-200 md:flex">Actions</div>
+        </div>
+      </div>
+      <div ref={containerRef} className="flex-1 min-h-0 overflow-hidden">
+        {blobs.length === 0 ? (
+          <div className="p-4 text-sm text-slate-400">No content on this server yet.</div>
+        ) : (
+          <VirtualList
+            height={listHeight}
+            itemCount={blobs.length}
+            itemSize={LIST_ROW_HEIGHT + LIST_ROW_GAP}
+            width={listWidth}
+            onItemsRendered={handleItemsRendered}
+            overscanCount={6}
+          >
+            {Row}
+          </VirtualList>
+        )}
+      </div>
     </div>
   );
 };
@@ -1102,6 +1348,7 @@ const ListThumbnail: React.FC<{
 };
 
 function ListRow({
+  style,
   blob,
   baseUrl,
   requiresAuth,
@@ -1121,6 +1368,7 @@ function ListRow({
   onDetect,
   onBlobVisible,
 }: {
+  style: React.CSSProperties;
   blob: BlossomBlob;
   baseUrl?: string;
   requiresAuth: boolean;
@@ -1147,9 +1395,7 @@ function ListRow({
   const playButtonLabel = isActivePlaying ? "Pause" : "Play";
   const playButtonAria = isActivePlaying ? "Pause audio" : "Play audio";
   const playButtonClass = `p-2 rounded-lg flex items-center justify-center transition focus:outline-none focus:ring-1 focus:ring-emerald-400 ${
-    isActivePlaying
-      ? "bg-emerald-500/80 text-slate-900 hover:bg-emerald-400"
-      : "bg-emerald-700/70 text-slate-100 hover:bg-emerald-600"
+    isActivePlaying ? "bg-emerald-500/80 text-slate-900 hover:bg-emerald-400" : "bg-emerald-700/70 text-slate-100 hover:bg-emerald-600"
   }`;
   const playPauseIcon = isActivePlaying ? <PauseIcon size={16} /> : <PlayIcon size={16} />;
   const displayName = buildDisplayName(blob);
@@ -1157,12 +1403,14 @@ function ListRow({
   const disablePreview = shouldDisablePreview(kind);
 
   return (
-    <tr
-      className={`border-b border-slate-800 transition-colors ${
+    <div
+      style={style}
+      className={`absolute left-0 right-0 flex items-center gap-2 border-b border-slate-800 px-2 transition-colors ${
         isSelected ? "bg-slate-800/50" : "hover:bg-slate-800/40"
       }`}
+      role="row"
     >
-      <td className="w-12 py-3 px-3 align-middle">
+      <div className="flex w-12 justify-center">
         <input
           type="checkbox"
           className="h-4 w-4 rounded border-slate-700 bg-slate-900 text-emerald-400 focus:outline-none focus:ring-1 focus:ring-emerald-500"
@@ -1171,305 +1419,109 @@ function ListRow({
           aria-label={`Select ${displayName}`}
           onClick={event => event.stopPropagation()}
         />
-      </td>
-      <td className="py-3 px-3">
-        <div className="flex items-center gap-3">
-          <ListThumbnail
-            blob={blob}
-            kind={kind}
-            baseUrl={baseUrl}
-            requiresAuth={requiresAuth}
-            signTemplate={signTemplate}
-            serverType={serverType}
-            onDetect={(sha, detectedKind) => onDetect(sha, detectedKind)}
-            onVisible={onBlobVisible}
-          />
-          <div className="min-w-0 flex-1">
-            <div className="font-medium text-slate-100 truncate">{displayName}</div>
-          </div>
+      </div>
+      <div className="flex min-w-0 flex-1 items-center gap-3">
+        <ListThumbnail
+          blob={blob}
+          kind={kind}
+          baseUrl={baseUrl}
+          requiresAuth={requiresAuth}
+          signTemplate={signTemplate}
+          serverType={serverType}
+          onDetect={(sha, detectedKind) => onDetect(sha, detectedKind)}
+          onVisible={onBlobVisible}
+        />
+        <div className="min-w-0">
+          <div className="truncate font-medium text-slate-100">{displayName}</div>
         </div>
-      </td>
-      <td className="hidden py-3 px-3 text-sm text-slate-400 whitespace-nowrap md:table-cell md:w-32">
+      </div>
+      <div className="hidden w-40 shrink-0 px-3 text-xs text-slate-400 md:block">
         {blob.uploaded ? prettyDate(blob.uploaded) : "—"}
-      </td>
-      <td className="w-24 py-3 px-3 text-sm text-slate-400 whitespace-nowrap">
-        {prettyBytes(blob.size || 0)}
-      </td>
-      <td className="py-3 pl-3 pr-0 md:w-64">
-        <div className="flex flex-wrap items-center justify-end gap-2">
-          {!isAudio && (
-            <button
-              className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200"
-              onClick={event => {
-                event.stopPropagation();
-                onPreview(blob);
-              }}
-              aria-label={disablePreview ? "Preview unavailable" : "Preview blob"}
-              title={disablePreview ? "Preview unavailable" : "Preview"}
-            >
-              <PreviewIcon size={16} />
-            </button>
-          )}
-          {isAudio && onPlay && blob.url && (
-            <button
-              className={playButtonClass}
-              onClick={event => {
-                event.stopPropagation();
-                onPlay?.(blob);
-              }}
-              aria-label={playButtonAria}
-              aria-pressed={isActivePlaying}
-              title={playButtonLabel}
-            >
-              {playPauseIcon}
-            </button>
-          )}
-          {blob.url && onShare && (
-            <button
-              className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200"
-              onClick={event => {
-                event.stopPropagation();
-                onShare?.(blob);
-              }}
-              aria-label="Share blob"
-              title="Share"
-            >
-              <ShareIcon size={16} />
-            </button>
-          )}
-          {blob.url && (
-            <button
-              className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200"
-              onClick={event => {
-                event.stopPropagation();
-                onDownload(blob);
-              }}
-              aria-label="Download blob"
-              title="Download"
-            >
-              <DownloadIcon size={16} />
-            </button>
-          )}
-          {onRename && (
-            <button
-              className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200"
-              onClick={event => {
-                event.stopPropagation();
-                onRename(blob);
-              }}
-              aria-label="Edit file details"
-              title="Edit details"
-            >
-              <EditIcon size={16} />
-            </button>
-          )}
+      </div>
+      <div className="w-24 shrink-0 px-3 text-sm text-slate-400">{prettyBytes(blob.size || 0)}</div>
+      <div className="flex shrink-0 flex-wrap items-center justify-center gap-2 px-2 md:w-64">
+        {!isAudio && (
           <button
-            className="p-2 rounded-lg bg-red-900/80 hover:bg-red-800 text-slate-100"
+            className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200"
             onClick={event => {
               event.stopPropagation();
-              onDelete(blob);
+              onPreview(blob);
             }}
-            aria-label="Delete blob"
-            title="Delete"
+            aria-label={disablePreview ? "Preview unavailable" : "Preview blob"}
+            title={disablePreview ? "Preview unavailable" : "Preview"}
           >
-            <TrashIcon size={16} />
+            <PreviewIcon size={16} />
           </button>
-        </div>
-      </td>
-    </tr>
-  );
-}
-
-const ListLayout: React.FC<{
-  blobs: BlossomBlob[];
-  baseUrl?: string;
-  requiresAuth: boolean;
-  signTemplate?: SignTemplate;
-  serverType?: "blossom" | "nip96" | "satellite";
-  selected: Set<string>;
-  onToggle: (sha: string) => void;
-  onSelectMany?: (shas: string[], value: boolean) => void;
-  onDelete: (blob: BlossomBlob) => void;
-  onDownload: (blob: BlossomBlob) => void;
-  onPreview: (blob: BlossomBlob) => void;
-  onPlay?: (blob: BlossomBlob) => void;
-  onShare?: (blob: BlossomBlob) => void;
-  onRename?: (blob: BlossomBlob) => void;
-  currentTrackUrl?: string;
-  currentTrackStatus?: "idle" | "playing" | "paused";
-  detectedKinds: DetectedKindMap;
-  onDetect: (sha: string, kind: "image" | "video") => void;
-  sortConfig: SortConfig | null;
-  onSort: (key: SortKey) => void;
-  onBlobVisible: (sha: string) => void;
-}> = ({
-  blobs,
-  baseUrl,
-  requiresAuth,
-  signTemplate,
-  serverType,
-  selected,
-  onToggle,
-  onSelectMany,
-  onDelete,
-  onDownload,
-  onPreview,
-  onPlay,
-  onShare,
-  onRename,
-  currentTrackUrl,
-  currentTrackStatus,
-  detectedKinds,
-  onDetect,
-  sortConfig,
-  onSort,
-  onBlobVisible,
-}) => {
-  const COLUMN_COUNT = 5;
-  const selectAllRef = useRef<HTMLInputElement | null>(null);
-  const allSelected = blobs.length > 0 && blobs.every(blob => selected.has(blob.sha256));
-  const partiallySelected = !allSelected && blobs.some(blob => selected.has(blob.sha256));
-
-  useEffect(() => {
-    if (selectAllRef.current) {
-      selectAllRef.current.indeterminate = partiallySelected;
-    }
-  }, [partiallySelected, allSelected]);
-
-  const indicatorFor = (key: SortKey) => {
-    if (!sortConfig || sortConfig.key !== key) return null;
-    return sortConfig.direction === "asc" ? "^" : "v";
-  };
-
-  const ariaSortFor = (key: SortKey): "ascending" | "descending" | undefined => {
-    if (!sortConfig || sortConfig.key !== key) return undefined;
-    return sortConfig.direction === "asc" ? "ascending" : "descending";
-  };
-
-  return (
-    <div className="flex flex-1 min-h-0 w-full flex-col overflow-hidden pb-1">
-      <div className="flex-1 min-h-0 overflow-auto">
-        <table className="min-w-full top-0 table-fixed border-collapse text-sm text-slate-300">
-          <thead className="sticky top-0 z-10 text-[10px] uppercase tracking-wide text-slate-300">
-            <tr>
-              <th scope="col" className="w-12 py-2 px-3">
-                <input
-                  ref={selectAllRef}
-                  type="checkbox"
-                  className="h-4 w-4 rounded border-slate-700 bg-slate-900 text-emerald-400 focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                  checked={allSelected}
-                  onChange={event => {
-                    const value = event.target.checked;
-                    if (onSelectMany) {
-                      onSelectMany(
-                        blobs.map(blob => blob.sha256),
-                        value
-                      );
-                    } else {
-                      blobs.forEach(blob => {
-                        const isSelected = selected.has(blob.sha256);
-                        if (value && !isSelected) onToggle(blob.sha256);
-                        if (!value && isSelected) onToggle(blob.sha256);
-                      });
-                    }
-                  }}
-                  aria-label="Select all files"
-                />
-              </th>
-              <th
-                scope="col"
-                className="py-2 px-3 text-left font-semibold"
-                aria-sort={ariaSortFor("name")}
-                onClick={() => onSort("name")}
-                onKeyDown={event => {
-                  if (event.key === "Enter" || event.key === " ") {
-                    event.preventDefault();
-                    onSort("name");
-                  }
-                }}
-                tabIndex={0}
-              >
-                <div className="flex items-center gap-1 text-left uppercase tracking-wide text-slate-300 hover:text-slate-200 cursor-pointer select-none">
-                  <span>Name</span>
-                  <span aria-hidden="true">{indicatorFor("name")}</span>
-                </div>
-              </th>
-              <th
-                scope="col"
-                className="hidden py-2 px-3 text-left font-semibold md:table-cell md:w-32"
-                aria-sort={ariaSortFor("uploaded")}
-                onClick={() => onSort("uploaded")}
-                onKeyDown={event => {
-                  if (event.key === "Enter" || event.key === " ") {
-                    event.preventDefault();
-                    onSort("uploaded");
-                  }
-                }}
-                tabIndex={0}
-              >
-                <div className="flex items-center gap-1 text-left uppercase tracking-wide text-slate-300 hover:text-slate-200 cursor-pointer select-none">
-                  <span>Uploaded</span>
-                  <span aria-hidden="true">{indicatorFor("uploaded")}</span>
-                </div>
-              </th>
-              <th
-                scope="col"
-                className="w-24 py-2 px-3 text-left font-semibold"
-                aria-sort={ariaSortFor("size")}
-                onClick={() => onSort("size")}
-                onKeyDown={event => {
-                  if (event.key === "Enter" || event.key === " ") {
-                    event.preventDefault();
-                    onSort("size");
-                  }
-                }}
-                tabIndex={0}
-              >
-                <div className="flex items-center gap-1 text-left uppercase tracking-wide text-slate-300 hover:text-slate-200 cursor-pointer select-none">
-                  <span>Size</span>
-                  <span aria-hidden="true">{indicatorFor("size")}</span>
-                </div>
-              </th>
-              <th scope="col" className="py-2 pl-3 pr-0 text-right font-semibold md:w-64">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {blobs.map(blob => (
-              <ListRow
-                key={blob.sha256}
-                blob={blob}
-                baseUrl={baseUrl}
-                requiresAuth={requiresAuth}
-                signTemplate={signTemplate}
-                serverType={serverType}
-                selected={selected}
-                onToggle={onToggle}
-                onDelete={onDelete}
-                onDownload={onDownload}
-                onPreview={onPreview}
-                onPlay={onPlay}
-                onShare={onShare}
-                onRename={onRename}
-                currentTrackUrl={currentTrackUrl}
-                currentTrackStatus={currentTrackStatus}
-                detectedKinds={detectedKinds}
-                onDetect={onDetect}
-                onBlobVisible={onBlobVisible}
-              />
-            ))}
-            {blobs.length === 0 && (
-              <tr>
-                <td colSpan={COLUMN_COUNT} className="py-6 px-3 text-sm text-center text-slate-300">
-                  No content on this server yet.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+        )}
+        {isAudio && onPlay && blob.url && (
+          <button
+            className={playButtonClass}
+            onClick={event => {
+              event.stopPropagation();
+              onPlay?.(blob);
+            }}
+            aria-label={playButtonAria}
+            aria-pressed={isActivePlaying}
+            title={playButtonLabel}
+          >
+            {playPauseIcon}
+          </button>
+        )}
+        {blob.url && onShare && (
+          <button
+            className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200"
+            onClick={event => {
+              event.stopPropagation();
+              onShare?.(blob);
+            }}
+            aria-label="Share blob"
+            title="Share"
+          >
+            <ShareIcon size={16} />
+          </button>
+        )}
+        {blob.url && (
+          <button
+            className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200"
+            onClick={event => {
+              event.stopPropagation();
+              onDownload(blob);
+            }}
+            aria-label="Download blob"
+            title="Download"
+          >
+            <DownloadIcon size={16} />
+          </button>
+        )}
+        {onRename && (
+          <button
+            className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200"
+            onClick={event => {
+              event.stopPropagation();
+              onRename(blob);
+            }}
+            aria-label="Edit file details"
+            title="Edit details"
+          >
+            <EditIcon size={16} />
+          </button>
+        )}
+        <button
+          className="p-2 rounded-lg bg-red-900/80 hover:bg-red-800 text-slate-100"
+          onClick={event => {
+            event.stopPropagation();
+            onDelete(blob);
+          }}
+          aria-label="Delete blob"
+          title="Delete"
+        >
+          <TrashIcon size={16} />
+        </button>
       </div>
     </div>
   );
-};
+}
+
 
 const BlobPreview: React.FC<{
   sha: string;

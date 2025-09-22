@@ -246,7 +246,13 @@ export async function listUserBlobs(
     method: "GET",
     headers,
     source: "blossom",
-    retries: 1,
+    retries: 2,
+    retryDelayMs: 600,
+    retryJitterRatio: 0.4,
+    retryOn: error => {
+      const status = error.status ?? 0;
+      return status === 0 || status >= 500 || status === 429;
+    },
   });
 
   const rawItems: BlossomBlob[] = (() => {

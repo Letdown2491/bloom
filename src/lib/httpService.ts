@@ -10,6 +10,8 @@ export type HttpRequestOptions = {
   signal?: AbortSignal;
   retries?: number;
   retryDelayMs?: number;
+  retryJitterRatio?: number;
+  retryMaxDelayMs?: number;
   retryOn?: (error: BloomHttpError) => boolean;
   source?: string;
   credentials?: RequestCredentials;
@@ -137,6 +139,8 @@ export const httpRequest = async (options: HttpRequestOptions): Promise<Response
     signal,
     retries = 0,
     retryDelayMs = 600,
+    retryJitterRatio = 0.35,
+    retryMaxDelayMs = 30_000,
     retryOn,
     source,
     credentials,
@@ -170,9 +174,14 @@ export const httpRequest = async (options: HttpRequestOptions): Promise<Response
       if (attempt >= retries || !shouldRetry(normalized, retryOn) || signal?.aborted) {
         throw normalized;
       }
-      const backoffMs = retryDelayMs * Math.pow(2, attempt);
-      await delay(backoffMs);
+      const baseDelay = retryDelayMs * Math.pow(2, attempt);
+      const jitter = retryJitterRatio > 0 ? baseDelay * retryJitterRatio * Math.random() : 0;
+      const waitMs = Math.min(retryMaxDelayMs, Math.round(baseDelay + jitter));
       attempt += 1;
+      if (signal?.aborted) {
+        throw normalized;
+      }
+      await delay(waitMs);
     }
   }
 

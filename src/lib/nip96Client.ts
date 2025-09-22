@@ -70,7 +70,9 @@ async function fetchConfig(baseUrl: string, depth = 0): Promise<Nip96ResolvedCon
     url: wellKnownUrl,
     method: "GET",
     headers: { Accept: "application/json" },
-    retries: depth === 0 ? 1 : 0,
+    retries: depth === 0 ? 2 : 1,
+    retryDelayMs: 500,
+    retryJitterRatio: 0.3,
     source: "nip96",
   });
   if (data && typeof data === "object") {
@@ -210,6 +212,13 @@ export async function listNip96Files(
     method: "GET",
     headers,
     source: "nip96",
+    retries: 2,
+    retryDelayMs: 700,
+    retryJitterRatio: 0.35,
+    retryOn: err => {
+      const status = err.status ?? 0;
+      return status === 0 || status >= 500 || status === 429;
+    },
   }).catch(error => {
     if (error instanceof BloomHttpError) throw error;
     throw new BloomHttpError("Failed to list NIP-96 files", {

@@ -19,6 +19,7 @@ export type ServerSnapshot = {
   blobs: BlossomBlob[];
   isLoading: boolean;
   isError: boolean;
+  error: unknown;
 };
 
 export type BlobDistribution = {
@@ -112,6 +113,7 @@ export const useServerData = (servers: ManagedServer[], options?: UseServerDataO
     let cancelled = false;
     let idleHandle: number | null = null;
     let timeoutHandle: number | null = null;
+    let visibilityListener: (() => void) | null = null;
 
     const win = window as typeof window & {
       requestIdleCallback?: (callback: IdleRequestCallback, options?: IdleRequestOptions) => number;
@@ -128,14 +130,34 @@ export const useServerData = (servers: ManagedServer[], options?: UseServerDataO
         activateServer(nextServer.url);
       };
 
+      const baseDelay = backgroundPrefetchDelayMs;
+      const jitter = baseDelay > 0 ? baseDelay * (0.5 + Math.random()) : 0;
+      const delay = Math.max(250, Math.round(jitter));
+
       if (typeof win.requestIdleCallback === "function") {
-        idleHandle = win.requestIdleCallback(() => activate(), { timeout: backgroundPrefetchDelayMs });
+        idleHandle = win.requestIdleCallback(() => activate(), { timeout: delay });
       } else {
-        timeoutHandle = window.setTimeout(activate, backgroundPrefetchDelayMs);
+        timeoutHandle = window.setTimeout(activate, delay);
       }
     };
 
-    scheduleActivation();
+    const maybeSchedule = () => {
+      if (cancelled) return;
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") {
+        visibilityListener = () => {
+          if (document.visibilityState === "visible" && !cancelled) {
+            document.removeEventListener("visibilitychange", visibilityListener!);
+            visibilityListener = null;
+            scheduleActivation();
+          }
+        };
+        document.addEventListener("visibilitychange", visibilityListener);
+        return;
+      }
+      scheduleActivation();
+    };
+
+    maybeSchedule();
 
     return () => {
       cancelled = true;
@@ -144,6 +166,9 @@ export const useServerData = (servers: ManagedServer[], options?: UseServerDataO
       }
       if (timeoutHandle !== null) {
         window.clearTimeout(timeoutHandle);
+      }
+      if (visibilityListener) {
+        document.removeEventListener("visibilitychange", visibilityListener);
       }
     };
   }, [activateServer, activeServerUrls, backgroundPrefetch, backgroundPrefetchDelayMs, servers]);
@@ -189,12 +214,16 @@ export const useServerData = (servers: ManagedServer[], options?: UseServerDataO
   });
 
   const snapshots: ServerSnapshot[] = useMemo(() => {
-    return servers.map((server, index) => ({
-      server,
-      blobs: mergeBlobsWithStoredMetadata(server.url, queries[index]?.data ?? []),
-      isLoading: activeServerUrls.has(server.url) ? queries[index]?.isLoading ?? false : false,
-      isError: queries[index]?.isError ?? false,
-    }));
+    return servers.map((server, index) => {
+      const query = queries[index];
+      return {
+        server,
+        blobs: mergeBlobsWithStoredMetadata(server.url, query?.data ?? []),
+        isLoading: activeServerUrls.has(server.url) ? query?.isLoading ?? false : false,
+        isError: query?.isError ?? false,
+        error: query?.error ?? null,
+      };
+    });
   }, [servers, queries, metadataVersion, activeServerUrls]);
 
   const { distribution, aggregated } = useMemo(() => {
