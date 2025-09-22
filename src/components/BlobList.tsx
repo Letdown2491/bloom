@@ -118,6 +118,8 @@ export const BlobList: React.FC<BlobListProps> = ({
     generation: 0,
   });
   const metadataAbortControllers = useRef(new Map<string, AbortController>());
+  const visibleMetadataRequestsRef = useRef(new Set<string>());
+  const [visibleSignal, setVisibleSignal] = useState(0);
 
   useEffect(() => {
     return () => {
@@ -126,6 +128,16 @@ export const BlobList: React.FC<BlobListProps> = ({
       passiveDetectors.current.clear();
     };
   }, []);
+
+  const requestMetadataForBlob = useCallback(
+    (sha: string) => {
+      if (!sha) return;
+      if (visibleMetadataRequestsRef.current.has(sha)) return;
+      visibleMetadataRequestsRef.current.add(sha);
+      setVisibleSignal(signal => signal + 1);
+    },
+    [setVisibleSignal]
+  );
 
   const handleDetect = useCallback((sha: string, kind: "image" | "video") => {
     setDetectedKinds(prev => (prev[sha] === kind ? prev : { ...prev, [sha]: kind }));
@@ -154,6 +166,9 @@ export const BlobList: React.FC<BlobListProps> = ({
     });
     pendingLookups.current.forEach(sha => {
       if (!currentShas.has(sha)) pendingLookups.current.delete(sha);
+    });
+    visibleMetadataRequestsRef.current.forEach(sha => {
+      if (!currentShas.has(sha)) visibleMetadataRequestsRef.current.delete(sha);
     });
     passiveDetectors.current.forEach((cleanup, sha) => {
       if (!currentShas.has(sha)) {
@@ -352,19 +367,39 @@ export const BlobList: React.FC<BlobListProps> = ({
       const storageServer = blob.serverUrl ?? baseUrl;
       const storedMetadata = getStoredBlobMetadata(storageServer, blob.sha256);
       const skipDueToFreshAttempt = isMetadataFresh(storedMetadata, METADATA_CHECK_TTL_MS);
+      const visibilityRequested = visibleMetadataRequestsRef.current.has(blob.sha256);
 
-      if (!hasType || !hasName) {
-        if (skipDueToFreshAttempt) {
-          continue;
-        }
-        if (!canFetch) {
-          ensurePassiveProbe(blob, resourceUrl);
-          continue;
-        }
+      if (hasType && hasName) {
+        visibleMetadataRequestsRef.current.delete(blob.sha256);
+        continue;
       }
 
-      if ((hasType && hasName) || alreadyAttempted || alreadyLoading) continue;
-      if (requiresAuth && !signTemplate) continue;
+      if (!visibilityRequested) {
+        continue;
+      }
+
+      if (skipDueToFreshAttempt) {
+        visibleMetadataRequestsRef.current.delete(blob.sha256);
+        continue;
+      }
+
+      if (requiresAuth && !signTemplate) {
+        // Keep the visibility request so we retry once a signer is available.
+        continue;
+      }
+
+      if (!canFetch) {
+        visibleMetadataRequestsRef.current.delete(blob.sha256);
+        ensurePassiveProbe(blob, resourceUrl);
+        continue;
+      }
+
+      if (alreadyAttempted || alreadyLoading) {
+        visibleMetadataRequestsRef.current.delete(blob.sha256);
+        continue;
+      }
+
+      visibleMetadataRequestsRef.current.delete(blob.sha256);
       attemptedLookups.current.add(blob.sha256);
       schedule(() => resolveForBlob(blob, resourceUrl));
     }
@@ -376,7 +411,17 @@ export const BlobList: React.FC<BlobListProps> = ({
       metadataAbortControllers.current.forEach(controller => controller.abort());
       metadataAbortControllers.current.clear();
     };
-  }, [blobs, baseUrl, requiresAuth, signTemplate, resolvedMeta, detectedKinds, handleDetect, serverType]);
+  }, [
+    blobs,
+    baseUrl,
+    requiresAuth,
+    signTemplate,
+    resolvedMeta,
+    detectedKinds,
+    handleDetect,
+    serverType,
+    visibleSignal,
+  ]);
 
   const decoratedBlobs = useMemo(() => {
     return blobs.map(blob => {
@@ -580,6 +625,7 @@ export const BlobList: React.FC<BlobListProps> = ({
           onDetect={handleDetect}
           sortConfig={sortConfig}
           onSort={handleSortToggle}
+          onBlobVisible={requestMetadataForBlob}
         />
       ) : (
         <GridLayout
@@ -600,10 +646,17 @@ export const BlobList: React.FC<BlobListProps> = ({
           currentTrackStatus={currentTrackStatus}
           detectedKinds={detectedKinds}
           onDetect={handleDetect}
+          onBlobVisible={requestMetadataForBlob}
         />
       )}
       {previewTarget && (
-        <PreviewDialog target={previewTarget} onClose={handleClosePreview} onDetect={handleDetect} onCopy={onCopy} />
+        <PreviewDialog
+          target={previewTarget}
+          onClose={handleClosePreview}
+          onDetect={handleDetect}
+          onCopy={onCopy}
+          onBlobVisible={requestMetadataForBlob}
+        />
       )}
     </div>
   );
@@ -628,6 +681,7 @@ const GridLayout: React.FC<{
   currentTrackStatus?: "idle" | "playing" | "paused";
   detectedKinds: DetectedKindMap;
   onDetect: (sha: string, kind: "image" | "video") => void;
+  onBlobVisible: (sha: string) => void;
 }> = ({
   blobs,
   baseUrl,
@@ -647,6 +701,7 @@ const GridLayout: React.FC<{
   currentTrackStatus,
   detectedKinds,
   onDetect,
+  onBlobVisible,
 }) => {
   const CARD_WIDTH = 220;
   const GAP = 16;
@@ -759,6 +814,7 @@ const GridLayout: React.FC<{
                         onDetect={onDetect}
                         fallbackIconSize={Math.round(CARD_HEIGHT * 0.5)}
                         className="h-full rounded-none border-0 bg-transparent"
+                        onVisible={onBlobVisible}
                       />
                     ) : (
                       <div className="flex h-full w-full items-center justify-center bg-slate-950/80">
@@ -877,7 +933,8 @@ const PreviewDialog: React.FC<{
   onClose: () => void;
   onDetect: (sha: string, kind: "image" | "video") => void;
   onCopy: (blob: BlossomBlob) => void;
-}> = ({ target, onClose, onDetect, onCopy }) => {
+  onBlobVisible: (sha: string) => void;
+}> = ({ target, onClose, onDetect, onCopy, onBlobVisible }) => {
   const { blob, displayName, previewUrl, requiresAuth, signTemplate, serverType, kind, disablePreview } = target;
   const sizeLabel = typeof blob.size === "number" ? prettyBytes(blob.size) : null;
   const uploadedLabel = typeof blob.uploaded === "number" ? prettyDate(blob.uploaded) : null;
@@ -985,6 +1042,7 @@ const PreviewDialog: React.FC<{
               fallbackIconSize={160}
               className="h-[28rem] w-full max-w-full"
               variant="dialog"
+              onVisible={onBlobVisible}
             />
           )}
         </div>
@@ -1020,7 +1078,17 @@ const ListThumbnail: React.FC<{
   signTemplate?: SignTemplate;
   serverType?: "blossom" | "nip96" | "satellite";
   onDetect?: (sha: string, kind: "image" | "video") => void;
-}> = ({ blob, kind, baseUrl, requiresAuth, signTemplate, serverType = "blossom", onDetect }) => {
+  onVisible?: (sha: string) => void;
+}> = ({
+  blob,
+  kind,
+  baseUrl,
+  requiresAuth,
+  signTemplate,
+  serverType = "blossom",
+  onDetect,
+  onVisible,
+}) => {
   const [failed, setFailed] = useState(false);
   const [src, setSrc] = useState<string | null>(null);
   const [isLoaded, setIsLoaded] = useState(false);
@@ -1030,6 +1098,7 @@ const ListThumbnail: React.FC<{
   const lastFailureKeyRef = useRef<string | null>(null);
   const activeRequestRef = useRef<{ key: string; controller: AbortController } | null>(null);
   const [observeTarget, isVisible] = useInViewport<HTMLDivElement>({ rootMargin: "200px" });
+  const hasReportedVisibilityRef = useRef(false);
 
   const containerClass = "flex h-12 w-12 flex-shrink-0 overflow-hidden rounded-lg border border-slate-800 bg-slate-950/80 relative";
   const effectiveServerType = blob.serverType ?? serverType;
@@ -1296,6 +1365,12 @@ const ListThumbnail: React.FC<{
     }
   }, [previewKey, effectiveRequiresAuth, signTemplate]);
 
+  useEffect(() => {
+    if (!isVisible || !onVisible || hasReportedVisibilityRef.current) return;
+    hasReportedVisibilityRef.current = true;
+    onVisible(blob.sha256);
+  }, [isVisible, onVisible, blob.sha256]);
+
   const altText = blob.name || previewUrl?.split("/").pop() || blob.sha256;
   const showText = Boolean(textPreview) && !failed;
   const showMedia = Boolean(src) && !failed && Boolean(previewUrl);
@@ -1363,6 +1438,7 @@ function ListRow({
   currentTrackStatus,
   detectedKinds,
   onDetect,
+  onBlobVisible,
 }: {
   blob: BlossomBlob;
   baseUrl?: string;
@@ -1381,6 +1457,7 @@ function ListRow({
   currentTrackStatus?: "idle" | "playing" | "paused";
   detectedKinds: DetectedKindMap;
   onDetect: (sha: string, kind: "image" | "video") => void;
+  onBlobVisible: (sha: string) => void;
 }) {
   const kind = decideFileKind(blob, detectedKinds[blob.sha256]);
   const isAudio = blob.type?.startsWith("audio/");
@@ -1424,6 +1501,7 @@ function ListRow({
             signTemplate={signTemplate}
             serverType={serverType}
             onDetect={(sha, detectedKind) => onDetect(sha, detectedKind)}
+            onVisible={onBlobVisible}
           />
           <div className="min-w-0 flex-1">
             <div className="font-medium text-slate-100 truncate">{displayName}</div>
@@ -1542,6 +1620,7 @@ const ListLayout: React.FC<{
   onDetect: (sha: string, kind: "image" | "video") => void;
   sortConfig: SortConfig | null;
   onSort: (key: SortKey) => void;
+  onBlobVisible: (sha: string) => void;
 }> = ({
   blobs,
   baseUrl,
@@ -1563,6 +1642,7 @@ const ListLayout: React.FC<{
   onDetect,
   sortConfig,
   onSort,
+  onBlobVisible,
 }) => {
   const COLUMN_COUNT = 5;
   const selectAllRef = useRef<HTMLInputElement | null>(null);
@@ -1693,6 +1773,7 @@ const ListLayout: React.FC<{
                 currentTrackStatus={currentTrackStatus}
                 detectedKinds={detectedKinds}
                 onDetect={onDetect}
+                onBlobVisible={onBlobVisible}
               />
             ))}
             {blobs.length === 0 && (
@@ -1722,6 +1803,7 @@ const BlobPreview: React.FC<{
   className?: string;
   fallbackIconSize?: number;
   variant?: "inline" | "dialog";
+  onVisible?: (sha: string) => void;
 }> = ({
   sha,
   url,
@@ -1735,6 +1817,7 @@ const BlobPreview: React.FC<{
   className,
   fallbackIconSize,
   variant = "inline",
+  onVisible,
 }) => {
   const [src, setSrc] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
@@ -1750,6 +1833,7 @@ const BlobPreview: React.FC<{
   const lastFailureKeyRef = useRef<string | null>(null);
   const activeRequestRef = useRef<{ key: string; controller: AbortController } | null>(null);
   const [observeTarget, isVisible] = useInViewport<HTMLDivElement>({ rootMargin: "400px" });
+  const hasReportedVisibilityRef = useRef(false);
 
   const fallbackIconKind = useMemo<FileKind>(() => {
     if (previewType === "image" || previewType === "video") return previewType;
@@ -2007,6 +2091,12 @@ const BlobPreview: React.FC<{
       lastFailureKeyRef.current = null;
     }
   }, [requiresAuth, signTemplate, previewKey]);
+
+  useEffect(() => {
+    if (!isVisible || !onVisible || hasReportedVisibilityRef.current) return;
+    hasReportedVisibilityRef.current = true;
+    onVisible(sha);
+  }, [isVisible, onVisible, sha]);
 
   const handlePreviewError = () => {
     releaseObjectUrl();

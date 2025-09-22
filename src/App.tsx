@@ -334,8 +334,20 @@ export default function App() {
   const [renameAudioFields, setRenameAudioFields] = useState<EditDialogAudioFields>(emptyAudioFields);
 
   const syncEnabledServers = useMemo(() => localServers.filter(server => server.sync), [localServers]);
+  const eagerServerUrls = useMemo(() => {
+    const urls = new Set<string>();
+    if (selectedServer) {
+      urls.add(selectedServer);
+    } else {
+      localServers.forEach(server => urls.add(server.url));
+    }
+    syncEnabledServers.forEach(server => urls.add(server.url));
+    return Array.from(urls);
+  }, [localServers, selectedServer, syncEnabledServers]);
   const serverValidationError = useMemo(() => validateManagedServers(localServers), [localServers]);
-  const { snapshots, distribution, aggregated } = useServerData(localServers);
+  const { snapshots, distribution, aggregated } = useServerData(localServers, {
+    prioritizedServerUrls: eagerServerUrls,
+  });
   const selectedBlobSources = useMemo(() => {
     const map = new Map<string, { blob: BlossomBlob; server: ManagedServer }>();
     snapshots.forEach(snapshot => {

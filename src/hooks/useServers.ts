@@ -17,7 +17,7 @@ export type ManagedServer = {
 const DEFAULT_SERVERS: ManagedServer[] = [
   { name: "Nostrcheck", url: "https://nostrcheck.me", type: "nip96", requiresAuth: true, sync: false },
   { name: "Primal", url: "https://blossom.primal.net", type: "blossom", requiresAuth: true, sync: false },
-  { name: "Satellite Earth", url: "https://cdn.satellite.earth", type: "blossom", requiresAuth: true, sync: false },
+  { name: "Satellite Earth", url: "https://cdn.satellite.earth", type: "satellite", requiresAuth: true, sync: false },
 ];
 
 function parseServerTags(event: NDKEvent): ManagedServer[] {

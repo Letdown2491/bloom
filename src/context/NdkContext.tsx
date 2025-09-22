@@ -15,7 +15,6 @@ const NdkContext = createContext<NdkContextValue | undefined>(undefined);
 
 const DEFAULT_RELAYS = [
   "wss://nos.lol",
-  "wss://nostrelites.org",
   "wss://relay.damus.io",
   "wss://relay.nos.social",
   "wss://relay.primal.net",
@@ -26,14 +25,72 @@ export const NdkProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [signer, setSigner] = useState<NDKSigner | null>(null);
   const [user, setUser] = useState<NDKUser | null>(null);
 
-  useEffect(() => {
-    ndk.connect().catch(() => undefined);
+  const ensureNdkConnection = useCallback(async () => {
+    const attempt = ndk.connect();
+    attempt.catch(() => undefined);
+
+    if (typeof window === "undefined") {
+      await attempt.catch(() => undefined);
+      return;
+    }
+
+    let timeoutHandle: number | null = null;
+    const settleOrTimeout = Promise.race([
+      attempt.catch(() => undefined),
+      new Promise(resolve => {
+        timeoutHandle = window.setTimeout(() => {
+          timeoutHandle = null;
+          resolve(undefined);
+        }, 2000);
+      }),
+    ]);
+
+    try {
+      await settleOrTimeout;
+    } finally {
+      if (timeoutHandle !== null) {
+        window.clearTimeout(timeoutHandle);
+      }
+    }
   }, [ndk]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    let cancelled = false;
+
+    const connectIfActive = () => {
+      if (cancelled) return;
+      ensureNdkConnection().catch(() => undefined);
+    };
+
+    const win = window as typeof window & {
+      requestIdleCallback?: (callback: IdleRequestCallback, options?: IdleRequestOptions) => number;
+      cancelIdleCallback?: (handle: number) => void;
+    };
+
+    if (typeof win.requestIdleCallback === "function") {
+      const idleHandle = win.requestIdleCallback(() => connectIfActive());
+      return () => {
+        cancelled = true;
+        win.cancelIdleCallback?.(idleHandle);
+      };
+    }
+
+    const timeoutHandle = window.setTimeout(connectIfActive, 1500);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeoutHandle);
+    };
+  }, [ensureNdkConnection]);
 
   const connect = useCallback(async () => {
     if (!(window as any).nostr) {
       throw new Error("A NIP-07 signer is required (e.g. Alby, nos2x).");
     }
+    await ensureNdkConnection();
     const nip07Signer = new NDKNip07Signer();
     await nip07Signer.blockUntilReady();
     const nip07User = await nip07Signer.user();
