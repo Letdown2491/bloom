@@ -357,6 +357,7 @@ export default function App() {
   const serverValidationError = useMemo(() => validateManagedServers(localServers), [localServers]);
   const { snapshots, distribution, aggregated } = useServerData(localServers, {
     prioritizedServerUrls: eagerServerUrls,
+    foregroundServerUrl: selectedServer ?? localServers[0]?.url ?? null,
   });
   const selectedBlobSources = useMemo(() => {
     const map = new Map<string, { blob: BlossomBlob; server: ManagedServer }>();

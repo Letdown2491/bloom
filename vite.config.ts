@@ -24,6 +24,7 @@ export default defineConfig({
     strictPort: true,
   },
   build: {
+    sourcemap: false,
     rollupOptions: {
       output: {
         manualChunks(id) {
@@ -36,6 +37,11 @@ export default defineConfig({
           return "vendor";
         },
       },
+    },
+  },
+  optimizeDeps: {
+    esbuildOptions: {
+      sourcemap: false,
     },
   },
 });

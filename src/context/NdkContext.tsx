@@ -41,6 +41,13 @@ const DEFAULT_RELAYS = [
 
 const RELAY_HEALTH_STORAGE_KEY = "bloom.ndk.relayHealth.v1";
 
+let relayHealthStorageBlocked = false;
+let relayHealthStorageWarned = false;
+
+const isQuotaExceededError = (error: unknown) =>
+  error instanceof DOMException &&
+  (error.name === "QuotaExceededError" || error.code === 22 || error.name === "NS_ERROR_DOM_QUOTA_REACHED");
+
 type PersistableRelayHealth = {
   url: string;
   status: RelayHealth["status"];
@@ -116,8 +123,9 @@ const loadPersistedRelayHealth = (): RelayHealth[] | null => {
 };
 
 const persistRelayHealth = (entries: RelayHealth[]) => {
-  if (typeof window === "undefined") return;
+  if (typeof window === "undefined" || relayHealthStorageBlocked) return;
   try {
+    window.localStorage.removeItem(RELAY_HEALTH_STORAGE_KEY);
     const payload: PersistableRelayHealth[] = entries.map(entry => ({
       url: entry.url,
       status: entry.status,
@@ -126,6 +134,14 @@ const persistRelayHealth = (entries: RelayHealth[]) => {
     }));
     window.localStorage.setItem(RELAY_HEALTH_STORAGE_KEY, JSON.stringify(payload));
   } catch (error) {
+    if (isQuotaExceededError(error)) {
+      relayHealthStorageBlocked = true;
+      if (!relayHealthStorageWarned) {
+        relayHealthStorageWarned = true;
+        console.info("Relay health caching disabled: storage quota exceeded.");
+      }
+      return;
+    }
     console.warn("Unable to persist relay health cache", error);
   }
 };
