@@ -15,6 +15,9 @@ export type ServerListProps = {
   onRemove: (url: string) => void;
   onToggleAuth: (url: string, value: boolean) => void;
   onToggleSync: (url: string, value: boolean) => void;
+  onSync?: () => void;
+  syncDisabled?: boolean;
+  syncInProgress?: boolean;
   validationError?: string | null;
 };
 
@@ -60,6 +63,9 @@ export const ServerList: React.FC<ServerListProps> = ({
   onRemove,
   onToggleAuth,
   onToggleSync,
+  onSync,
+  syncDisabled,
+  syncInProgress,
   validationError,
 }) => {
   const [isAdding, setIsAdding] = useState(false);
@@ -74,6 +80,8 @@ export const ServerList: React.FC<ServerListProps> = ({
   const controlsDisabled = Boolean(disabled || saving);
   const saveButtonDisabled = Boolean(saving || disabled || validationError);
   const saveButtonLabel = saving ? "Saving…" : disabled ? "Save (connect signer)" : "Save";
+  const syncButtonDisabled = Boolean(syncDisabled || disabled || syncInProgress);
+  const syncButtonLabel = syncInProgress ? "Syncing…" : "Sync selected";
 
   const handleDraftKeyDown = (event: React.KeyboardEvent<HTMLElement>) => {
     if (event.key === "Enter") {
@@ -446,6 +454,20 @@ export const ServerList: React.FC<ServerListProps> = ({
           <p className="text-xs text-slate-400">Select where your content lives. Please note that the NIP-96 server spec has been deprecated.</p>
         </div>
         <div className="flex gap-2">
+          {onSync ? (
+            <button
+              type="button"
+              onClick={event => {
+                event.preventDefault();
+                onSync?.();
+              }}
+              className="px-3 py-2 rounded-xl bg-emerald-600 text-sm text-slate-950 hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-40"
+              disabled={syncButtonDisabled}
+              aria-busy={syncInProgress ? true : undefined}
+            >
+              {syncButtonLabel}
+            </button>
+          ) : null}
           <button
             onClick={beginAdd}
             className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-sm disabled:opacity-40 disabled:cursor-not-allowed"

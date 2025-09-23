@@ -11,6 +11,7 @@ import {
   PreviewIcon,
   PlayIcon,
   ShareIcon,
+  SyncIndicatorIcon,
   TrashIcon,
   CancelIcon,
 } from "./icons";
@@ -19,12 +20,18 @@ import { useBlobMetadata } from "../features/browse/useBlobMetadata";
 import { useBlobPreview, type PreviewTarget } from "../features/browse/useBlobPreview";
 import { useInViewport } from "../hooks/useInViewport";
 
+export type BlobReplicaSummary = {
+  count: number;
+  servers: { url: string; name: string }[];
+};
+
 export type BlobListProps = {
   blobs: BlossomBlob[];
   baseUrl?: string;
   requiresAuth?: boolean;
   signTemplate?: SignTemplate;
   serverType?: "blossom" | "nip96" | "satellite";
+  replicaInfo?: Map<string, BlobReplicaSummary>;
   selected: Set<string>;
   viewMode: "grid" | "list";
   onToggle: (sha: string) => void;
@@ -49,7 +56,7 @@ type ResolvedMetaMap = Record<string, ResolvedMeta>;
 
 type FileKind = "image" | "video" | "pdf" | "doc" | "sheet" | "document";
 
-type SortKey = "name" | "size" | "uploaded";
+type SortKey = "name" | "replicas" | "size" | "uploaded";
 
 type SortConfig = { key: SortKey; direction: "asc" | "desc" };
 
@@ -59,6 +66,32 @@ const GRID_ACTION_BUTTON_CLASS =
   "flex aspect-square w-full items-center justify-center rounded-lg bg-slate-800 text-slate-200 transition focus:outline-none focus:ring-1 focus:ring-emerald-400 focus:ring-offset-1 focus:ring-offset-slate-900 hover:bg-slate-700";
 const GRID_DELETE_BUTTON_CLASS =
   "flex aspect-square w-full items-center justify-center rounded-lg bg-red-900/80 text-slate-100 transition focus:outline-none focus:ring-1 focus:ring-red-400 focus:ring-offset-1 focus:ring-offset-slate-900 hover:bg-red-800";
+
+const ReplicaBadge: React.FC<{ info: BlobReplicaSummary; variant: "grid" | "list" }> = ({ info, variant }) => {
+  const title = info.servers.length
+    ? `Available on ${info.servers.map(server => server.name).join(", ")}`
+    : `Available on ${info.count} ${info.count === 1 ? "server" : "servers"}`;
+  const baseClass =
+    variant === "grid"
+      ? "bg-slate-950 text-emerald-100 shadow-lg"
+      : "bg-slate-900/85 text-emerald-100 shadow";
+  const paddingClass = variant === "grid" ? "px-2 py-1" : "px-2.5 py-0.5";
+  const iconSize = variant === "grid" ? 14 : 13;
+
+  return (
+    <span
+      className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border border-emerald-500/60 ${baseClass} ${paddingClass} font-semibold text-[11px] tabular-nums cursor-default select-none`}
+      title={title}
+      aria-label={title}
+      onMouseDown={event => event.stopPropagation()}
+      onClick={event => event.stopPropagation()}
+      onKeyDown={event => event.stopPropagation()}
+    >
+      <SyncIndicatorIcon size={iconSize} className="text-emerald-300" aria-hidden="true" />
+      <span>{info.count}</span>
+    </span>
+  );
+};
 
 const deriveBlobSortName = (blob: BlossomBlob) => {
   const explicit = blob.name?.trim();
@@ -76,6 +109,7 @@ export const BlobList: React.FC<BlobListProps> = ({
   requiresAuth = false,
   signTemplate,
   serverType = "blossom",
+  replicaInfo,
   selected,
   viewMode,
   onToggle,
@@ -280,7 +314,32 @@ export const BlobList: React.FC<BlobListProps> = ({
     [signTemplate, serverType]
   );
 
-  const listBlobs = viewMode === "list" ? sortedBlobs : decoratedBlobs;
+  const listBlobs = useMemo(() => {
+    if (viewMode !== "list") return decoratedBlobs;
+    if (!sortConfig || sortConfig.key === "name") return sortedBlobs;
+
+    const sorted = [...decoratedBlobs].sort((a, b) => {
+      if (sortConfig.key === "size") {
+        const aSize = typeof a.size === "number" ? a.size : -1;
+        const bSize = typeof b.size === "number" ? b.size : -1;
+        const diff = aSize - bSize;
+        if (diff !== 0) return diff;
+      } else if (sortConfig.key === "uploaded") {
+        const aUploaded = typeof a.uploaded === "number" ? a.uploaded : 0;
+        const bUploaded = typeof b.uploaded === "number" ? b.uploaded : 0;
+        const diff = aUploaded - bUploaded;
+        if (diff !== 0) return diff;
+      } else if (sortConfig.key === "replicas") {
+        const aCount = replicaInfo?.get(a.sha256)?.count ?? 0;
+        const bCount = replicaInfo?.get(b.sha256)?.count ?? 0;
+        const diff = aCount - bCount;
+        if (diff !== 0) return diff;
+      }
+      return deriveBlobSortName(a).localeCompare(deriveBlobSortName(b));
+    });
+
+    return sortConfig.direction === "asc" ? sorted : sorted.reverse();
+  }, [decoratedBlobs, replicaInfo, sortConfig, sortedBlobs, viewMode]);
 
   return (
     <div className="flex h-full flex-1 min-h-0 w-full flex-col overflow-hidden">
@@ -302,17 +361,18 @@ export const BlobList: React.FC<BlobListProps> = ({
           onRename={onRename}
           currentTrackUrl={currentTrackUrl}
           currentTrackStatus={currentTrackStatus}
-          detectedKinds={detectedKinds}
-          onDetect={handleDetect}
-          sortConfig={sortConfig}
-          onSort={handleSortToggle}
-          onBlobVisible={requestMetadata}
-          requestMetadata={requestMetadata}
-        />
-      ) : (
-        <GridLayout
-          blobs={gridBlobs}
-          baseUrl={baseUrl}
+        detectedKinds={detectedKinds}
+        onDetect={handleDetect}
+        sortConfig={sortConfig}
+        onSort={handleSortToggle}
+        onBlobVisible={requestMetadata}
+        requestMetadata={requestMetadata}
+        replicaInfo={replicaInfo}
+      />
+    ) : (
+      <GridLayout
+        blobs={gridBlobs}
+        baseUrl={baseUrl}
           requiresAuth={requiresAuth}
           signTemplate={signTemplate}
           serverType={serverType}
@@ -326,11 +386,12 @@ export const BlobList: React.FC<BlobListProps> = ({
           onRename={onRename}
           currentTrackUrl={currentTrackUrl}
           currentTrackStatus={currentTrackStatus}
-          detectedKinds={detectedKinds}
-          onDetect={handleDetect}
-          onBlobVisible={requestMetadata}
-        />
-      )}
+        detectedKinds={detectedKinds}
+        onDetect={handleDetect}
+        onBlobVisible={requestMetadata}
+        replicaInfo={replicaInfo}
+      />
+    )}
       {previewTarget && (
         <PreviewDialog
           target={previewTarget}
@@ -370,6 +431,7 @@ const ListLayout: React.FC<{
   onSort: (key: SortKey) => void;
   onBlobVisible: (sha: string) => void;
   requestMetadata: (sha: string) => void;
+  replicaInfo?: Map<string, BlobReplicaSummary>;
 }> = ({
   blobs,
   baseUrl,
@@ -393,6 +455,7 @@ const ListLayout: React.FC<{
   onSort,
   onBlobVisible,
   requestMetadata,
+  replicaInfo,
 }) => {
   const selectAllRef = useRef<HTMLInputElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -477,6 +540,7 @@ const ListLayout: React.FC<{
         width: listWidth,
         height: LIST_ROW_HEIGHT,
       };
+      const replicaSummary = replicaInfo?.get(blob.sha256);
 
       return (
         <ListRow
@@ -500,6 +564,7 @@ const ListLayout: React.FC<{
           detectedKinds={detectedKinds}
           onDetect={onDetect}
           onBlobVisible={onBlobVisible}
+          replicaSummary={replicaSummary}
         />
       );
     },
@@ -523,6 +588,7 @@ const ListLayout: React.FC<{
       onDetect,
       onBlobVisible,
       requestMetadata,
+      replicaInfo,
       listWidth,
     ]
   );
@@ -540,7 +606,7 @@ const ListLayout: React.FC<{
   return (
     <div className="flex flex-1 min-h-0 w-full flex-col overflow-hidden overflow-x-hidden pb-1">
       <div className="border-b border-slate-800 bg-slate-900/60 px-2 pb-2 pt-0 text-xs uppercase tracking-wide text-slate-200">
-        <div className="grid grid-cols-[40px,minmax(0,1fr)] md:grid-cols-[40px,minmax(0,1fr),10rem,6rem,16rem] items-center gap-2">
+        <div className="grid grid-cols-[40px,minmax(0,1fr)] md:grid-cols-[40px,minmax(0,1fr),6rem,10rem,6rem,16rem] items-center gap-2">
           <div className="flex justify-center">
             <input
               ref={selectAllRef}
@@ -558,6 +624,14 @@ const ListLayout: React.FC<{
           >
             <span>Name</span>
             <span aria-hidden="true">{headerIndicator("name")}</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => onSort("replicas")}
+            className="hidden items-center justify-center gap-1 font-semibold text-slate-200 hover:text-slate-100 md:flex"
+          >
+            <span>Servers</span>
+            <span aria-hidden="true">{headerIndicator("replicas")}</span>
           </button>
           <button
             type="button"
@@ -619,6 +693,7 @@ const GridLayout: React.FC<{
   detectedKinds: DetectedKindMap;
   onDetect: (sha: string, kind: "image" | "video") => void;
   onBlobVisible: (sha: string) => void;
+  replicaInfo?: Map<string, BlobReplicaSummary>;
 }> = ({
   blobs,
   baseUrl,
@@ -639,6 +714,7 @@ const GridLayout: React.FC<{
   detectedKinds,
   onDetect,
   onBlobVisible,
+  replicaInfo,
 }) => {
   const CARD_WIDTH = 220;
   const GAP = 16;
@@ -722,6 +798,8 @@ const GridLayout: React.FC<{
             const previewUrl = buildPreviewUrl(blob, kind, baseUrl);
             const top = GAP + row * rowHeight;
             const left = GAP + col * (effectiveColumnWidth + GAP);
+            const replicaSummary = replicaInfo?.get(blob.sha256);
+            const showReplicaBadge = replicaSummary && replicaSummary.count > 1;
             return (
               <React.Fragment key={blob.sha256}>
                 <div
@@ -741,6 +819,17 @@ const GridLayout: React.FC<{
                   style={{ top, left, width: effectiveColumnWidth, height: CARD_HEIGHT }}
                 >
                   <div className="relative flex-1" style={{ height: CARD_HEIGHT * 0.75 }}>
+                    {showReplicaBadge ? (
+                      <div className="pointer-events-none absolute inset-x-0 top-0 z-20 flex justify-start p-2">
+                        <div
+                          className="pointer-events-auto"
+                          onClick={event => event.stopPropagation()}
+                          onKeyDown={event => event.stopPropagation()}
+                        >
+                          <ReplicaBadge info={replicaSummary!} variant="grid" />
+                        </div>
+                      </div>
+                    ) : null}
                     {previewUrl ? (
                       <BlobPreview
                         sha={blob.sha256}
@@ -1381,6 +1470,7 @@ function ListRow({
   detectedKinds,
   onDetect,
   onBlobVisible,
+  replicaSummary,
 }: {
   style: React.CSSProperties;
   blob: BlossomBlob;
@@ -1401,6 +1491,7 @@ function ListRow({
   detectedKinds: DetectedKindMap;
   onDetect: (sha: string, kind: "image" | "video") => void;
   onBlobVisible: (sha: string) => void;
+  replicaSummary?: BlobReplicaSummary;
 }) {
   const kind = decideFileKind(blob, detectedKinds[blob.sha256]);
   const isAudio = blob.type?.startsWith("audio/");
@@ -1415,7 +1506,6 @@ function ListRow({
   const displayName = buildDisplayName(blob);
   const isSelected = selected.has(blob.sha256);
   const disablePreview = shouldDisablePreview(kind);
-
   return (
     <div
       style={style}
@@ -1434,7 +1524,7 @@ function ListRow({
           onClick={event => event.stopPropagation()}
         />
       </div>
-      <div className="flex min-w-0 flex-1 items-center gap-3">
+      <div className="flex min-w-0 flex-[2] items-center gap-3">
         <ListThumbnail
           blob={blob}
           kind={kind}
@@ -1445,9 +1535,12 @@ function ListRow({
           onDetect={(sha, detectedKind) => onDetect(sha, detectedKind)}
           onVisible={onBlobVisible}
         />
-        <div className="min-w-0">
-          <div className="truncate font-medium text-slate-100">{displayName}</div>
+        <div className="truncate font-medium text-slate-100" title={displayName}>
+          {displayName}
         </div>
+      </div>
+      <div className="hidden w-20 shrink-0 items-center justify-center text-sm text-slate-200 md:flex">
+        {replicaSummary?.count ? <ReplicaBadge info={replicaSummary} variant="list" /> : "—"}
       </div>
       <div className="hidden w-40 shrink-0 px-3 text-xs text-slate-400 md:block">
         {blob.uploaded ? prettyDate(blob.uploaded) : "—"}

@@ -184,6 +184,15 @@ export const CancelIcon = createIcon(
   </>
 );
 
+export const SyncIndicatorIcon = createIcon(
+  <>
+    <path d="M4 12a8 8 0 0 1 13.66-5.66" />
+    <path d="M17.5 3.5H21V7" />
+    <path d="M20 12a8 8 0 0 1-13.66 5.66" />
+    <path d="m6.5 20.5H3V17" />
+  </>
+);
+
 export const CopyIcon = createIcon(
   <>
     <rect x="9" y="9" width="11" height="11" rx="2" />

@@ -4,6 +4,7 @@ import { useNdk, useCurrentPubkey } from "./context/NdkContext";
 import { useServers, ManagedServer, sortServersByName } from "./hooks/useServers";
 import { useServerData } from "./hooks/useServerData";
 import { ShareComposer, type ShareCompletion, type SharePayload } from "./components/ShareComposer";
+import type { BlobReplicaSummary } from "./components/BlobList";
 import type { TransferState } from "./components/UploadPanel";
 import { BrowseContent } from "./features/browse/BrowseContent";
 import { TransferContent } from "./features/transfer/TransferContent";
@@ -37,6 +38,7 @@ import { deriveServerNameFromUrl } from "./utils/serverName";
 import { usePreferredRelays } from "./hooks/usePreferredRelays";
 import { useAliasSync } from "./hooks/useAliasSync";
 import { buildNip94EventTemplate } from "./lib/nip94";
+import { BloomHttpError } from "./lib/httpService";
 import {
   applyAliasUpdate,
   getStoredAudioMetadata,
@@ -316,7 +318,10 @@ export default function App() {
   const nextSyncAttemptRef = useRef<Map<string, number>>(new Map());
   const unsupportedMirrorTargetsRef = useRef<Set<string>>(new Set());
   const unauthorizedSyncTargetsRef = useRef<Set<string>>(new Set());
+  const blockedSyncTargetsRef = useRef<Set<string>>(new Set());
   const [syncTransfers, setSyncTransfers] = useState<TransferState[]>([]);
+  const [autoSyncedServers, setAutoSyncedServers] = useState<string[]>([]);
+  const [syncRunToken, setSyncRunToken] = useState(0);
   const [syncStatus, setSyncStatus] = useState<{ state: "idle" | "syncing" | "synced" | "error"; progress: number }>({
     state: "idle",
     progress: 0,
@@ -344,6 +349,13 @@ export default function App() {
   const [renameAudioFields, setRenameAudioFields] = useState<EditDialogAudioFields>(emptyAudioFields);
 
   const syncEnabledServers = useMemo(() => localServers.filter(server => server.sync), [localServers]);
+  const syncEnabledServerUrls = useMemo(() => syncEnabledServers.map(server => server.url), [syncEnabledServers]);
+  const autoSyncedSet = useMemo(() => new Set(autoSyncedServers), [autoSyncedServers]);
+  const syncAutoReady = syncEnabledServerUrls.length >= 2 && syncEnabledServerUrls.every(url => autoSyncedSet.has(url));
+  const syncEnabledUrlSet = useMemo(() => new Set(syncEnabledServerUrls), [syncEnabledServerUrls]);
+  const serverNameByUrl = useMemo(() => {
+    return new Map(localServers.map(server => [server.url, server.name]));
+  }, [localServers]);
   const eagerServerUrls = useMemo(() => {
     const urls = new Set<string>();
     if (selectedServer) {
@@ -359,6 +371,17 @@ export default function App() {
     prioritizedServerUrls: eagerServerUrls,
     foregroundServerUrl: selectedServer ?? localServers[0]?.url ?? null,
   });
+  const blobReplicaInfo = useMemo<Map<string, BlobReplicaSummary>>(() => {
+    const map = new Map<string, BlobReplicaSummary>();
+    Object.entries(distribution).forEach(([sha, entry]) => {
+      const servers = entry.servers.map(url => {
+        const name = serverNameByUrl.get(url) || deriveServerNameFromUrl(url) || url;
+        return { url, name };
+      });
+      map.set(sha, { count: servers.length, servers });
+    });
+    return map;
+  }, [distribution, serverNameByUrl]);
   const selectedBlobSources = useMemo(() => {
     const map = new Map<string, { blob: BlossomBlob; server: ManagedServer }>();
     snapshots.forEach(snapshot => {
@@ -394,6 +417,17 @@ export default function App() {
     if (selectedBlobs.size === selectedBlobSources.size) return 0;
     return selectedBlobs.size - selectedBlobSources.size;
   }, [selectedBlobs, selectedBlobSources]);
+  const allLinkedServersSynced = useMemo(() => {
+    if (syncEnabledServerUrls.length < 2) return true;
+    if (syncEnabledUrlSet.size < 2) return true;
+    for (const entry of Object.values(distribution)) {
+      const presentCount = entry.servers.reduce((acc, url) => acc + (syncEnabledUrlSet.has(url) ? 1 : 0), 0);
+      if (presentCount > 0 && presentCount < syncEnabledUrlSet.size) {
+        return false;
+      }
+    }
+    return true;
+  }, [distribution, syncEnabledServerUrls, syncEnabledUrlSet]);
   const transferFeedbackTone = useMemo(() => {
     if (!transferFeedback) return "text-slate-400";
     const normalized = transferFeedback.toLowerCase();
@@ -434,6 +468,25 @@ export default function App() {
       return servers.some(server => server.url === prev) ? prev : servers[0]?.url ?? null;
     });
   }, [servers]);
+
+  useEffect(() => {
+    setAutoSyncedServers(prev => {
+      if (prev.length === 0) return prev;
+      const filtered = prev.filter(url => syncEnabledServerUrls.includes(url));
+      if (filtered.length === prev.length) return prev;
+      return filtered;
+    });
+    if (blockedSyncTargetsRef.current.size > 0) {
+      const allowed = new Set(syncEnabledServerUrls);
+      const stale: string[] = [];
+      blockedSyncTargetsRef.current.forEach(url => {
+        if (!allowed.has(url)) {
+          stale.push(url);
+        }
+      });
+      stale.forEach(url => blockedSyncTargetsRef.current.delete(url));
+    }
+  }, [syncEnabledServerUrls]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -966,7 +1019,7 @@ export default function App() {
   }, [signer]);
 
   useEffect(() => {
-    if (syncEnabledServers.length < 2) {
+    if (!syncAutoReady || syncEnabledServerUrls.length < 2) {
       setSyncStatus({ state: "idle", progress: 0 });
       return;
     }
@@ -992,25 +1045,32 @@ export default function App() {
       setSyncStatus({ state: "error", progress: 0 });
       return;
     }
-    setSyncStatus({ state: "synced", progress: 1 });
-  }, [syncEnabledServers.length, syncTransfers]);
+    if (allLinkedServersSynced) {
+      setSyncStatus({ state: "synced", progress: 1 });
+      return;
+    }
+    setSyncStatus({ state: "idle", progress: 0 });
+  }, [syncAutoReady, syncEnabledServerUrls.length, syncTransfers, allLinkedServersSynced]);
 
   useEffect(() => {
-    if (syncEnabledServers.length < 2) return;
+    if (syncEnabledServerUrls.length < 2) return;
+    if (!syncAutoReady) return;
 
     let cancelled = false;
-    const syncUrlSet = new Set(syncEnabledServers.map(server => server.url));
+    const syncUrlSet = new Set(syncEnabledServerUrls);
 
     const run = async () => {
       for (const target of syncEnabledServers) {
         if (cancelled) break;
+        if (blockedSyncTargetsRef.current.has(target.url)) continue;
         const targetSnapshot = snapshots.find(snapshot => snapshot.server.url === target.url);
         if (!targetSnapshot || targetSnapshot.isLoading) continue;
 
         const existing = new Set(targetSnapshot.blobs.map(blob => blob.sha256));
 
+        let skipRemainingForTarget = false;
         for (const [sha, entry] of Object.entries(distribution)) {
-          if (cancelled) break;
+          if (cancelled || skipRemainingForTarget) break;
           if (existing.has(sha)) continue;
           if (!entry.servers.some(url => syncUrlSet.has(url) && url !== target.url)) continue;
 
@@ -1216,7 +1276,26 @@ export default function App() {
             const errorMessage = error instanceof Error ? error.message : String(error);
             const statusMatch = errorMessage.match(/status\s*(\d{3})/i);
             const statusCode = statusMatch ? Number(statusMatch[1]) : undefined;
-            if (statusCode === 404 || statusCode === 405) {
+            const cause =
+              error instanceof BloomHttpError
+                ? error.cause
+                : error instanceof Error && "cause" in error
+                ? (error as Error & { cause?: unknown }).cause
+                : undefined;
+            const isNetworkError =
+              error instanceof TypeError ||
+              cause instanceof TypeError ||
+              (cause && typeof cause === "object" && (cause as { name?: string }).name === "TypeError") ||
+              errorMessage.toLowerCase().includes("unable to fetch blob content for sync");
+            if (isNetworkError) {
+              const alreadyBlocked = blockedSyncTargetsRef.current.has(target.url);
+              blockedSyncTargetsRef.current.add(target.url);
+              unsupportedMirrorTargetsRef.current.add(target.url);
+              nextSyncAttemptRef.current.set(key, Date.now() + 30 * 60 * 1000);
+              if (!alreadyBlocked) {
+                showStatusMessage("Sync blocked: remote server disallows cross-origin requests.", "error", 6000);
+              }
+            } else if (statusCode === 404 || statusCode === 405) {
               unsupportedMirrorTargetsRef.current.add(target.url);
               nextSyncAttemptRef.current.set(key, Date.now() + 30 * 60 * 1000);
             } else if (statusCode === 401) {
@@ -1226,22 +1305,27 @@ export default function App() {
             } else {
               nextSyncAttemptRef.current.set(key, Date.now() + 15 * 60 * 1000);
             }
+            const syncErrorMessage = isNetworkError
+              ? "Sync unsupported: remote server blocks cross-origin requests"
+              : statusCode === 404 || statusCode === 405
+              ? "Sync unsupported: target blocks mirroring"
+              : statusCode === 401
+              ? "Sync auth failed"
+              : errorMessage || "Sync failed";
             setSyncTransfers(prev =>
               prev.map(item =>
                 item.id === transferId
                   ? {
                       ...item,
                       status: "error",
-                      message:
-                        statusCode === 404 || statusCode === 405
-                          ? "Sync unsupported: target blocks mirroring"
-                          : statusCode === 401
-                          ? "Sync auth failed"
-                          : errorMessage || "Sync failed",
+                      message: syncErrorMessage,
                     }
                   : item
               )
             );
+            if (blockedSyncTargetsRef.current.has(target.url)) {
+              skipRemainingForTarget = true;
+            }
           } finally {
             syncQueueRef.current.delete(key);
           }
@@ -1263,6 +1347,10 @@ export default function App() {
     signer,
     snapshots,
     syncEnabledServers,
+    syncEnabledServerUrls,
+    syncAutoReady,
+    syncRunToken,
+    showStatusMessage,
   ]);
 
   const currentSnapshot = useMemo(() => snapshots.find(snapshot => snapshot.server.url === selectedServer), [snapshots, selectedServer]);
@@ -1364,6 +1452,18 @@ export default function App() {
       }
       return prev;
     });
+
+    setAutoSyncedServers(prev => {
+      if (!prev.includes(originalUrl)) return prev;
+      const next = prev.filter(item => item !== originalUrl);
+      if (normalized.sync && !next.includes(normalizedUrl)) {
+        next.push(normalizedUrl);
+      }
+      return next;
+    });
+    blockedSyncTargetsRef.current.delete(originalUrl);
+    unsupportedMirrorTargetsRef.current.delete(originalUrl);
+    unauthorizedSyncTargetsRef.current.delete(originalUrl);
   };
 
   const handleRemoveServer = (url: string) => {
@@ -1371,6 +1471,13 @@ export default function App() {
     if (selectedServer === url) {
       setSelectedServer(null);
     }
+    setAutoSyncedServers(prev => {
+      if (!prev.includes(url)) return prev;
+      return prev.filter(item => item !== url);
+    });
+    blockedSyncTargetsRef.current.delete(url);
+    unsupportedMirrorTargetsRef.current.delete(url);
+    unauthorizedSyncTargetsRef.current.delete(url);
   };
 
   const handleToggleRequiresAuth = (url: string, value: boolean) => {
@@ -1379,7 +1486,33 @@ export default function App() {
 
   const handleToggleSync = (url: string, value: boolean) => {
     setLocalServers(prev => prev.map(server => (server.url === url ? { ...server, sync: value } : server)));
+    if (!value) {
+      setAutoSyncedServers(prev => {
+        if (!prev.includes(url)) return prev;
+        return prev.filter(item => item !== url);
+      });
+      blockedSyncTargetsRef.current.delete(url);
+      unsupportedMirrorTargetsRef.current.delete(url);
+      unauthorizedSyncTargetsRef.current.delete(url);
+    }
   };
+
+  const handleSyncSelectedServers = useCallback(() => {
+    if (syncEnabledServerUrls.length < 2) {
+      showStatusMessage("Enable sync on at least two servers to start.", "info", 3000);
+      return;
+    }
+    unauthorizedSyncTargetsRef.current.clear();
+    syncQueueRef.current.clear();
+    nextSyncAttemptRef.current.clear();
+    unsupportedMirrorTargetsRef.current.clear();
+    blockedSyncTargetsRef.current.clear();
+    setSyncTransfers([]);
+    const unique = Array.from(new Set(syncEnabledServerUrls));
+    setAutoSyncedServers(unique);
+    setSyncRunToken(prev => prev + 1);
+    setSyncStatus({ state: "syncing", progress: 0 });
+  }, [showStatusMessage, syncEnabledServerUrls]);
 
   const handleSaveServers = async () => {
     if (!signer) {
@@ -1795,34 +1928,49 @@ export default function App() {
   const statusCount = currentVisibleBlobs ? currentVisibleBlobs.length : visibleAggregatedBlobs.length;
   const statusSize = currentSnapshot ? currentSize : aggregatedVisibleSize;
   const statusSelectValue = selectedServer ?? ALL_SERVERS_VALUE;
-  const syncIndicator = useMemo(() => {
-    if (syncEnabledServers.length < 2) return null;
+  const syncSummary = useMemo(() => {
+    if (syncEnabledServerUrls.length < 2) {
+      return { text: null, tone: "muted" as const };
+    }
     if (syncStatus.state === "syncing") {
       const percent = Math.min(100, Math.max(0, Math.round((syncStatus.progress || 0) * 100)));
-      return `Syncing servers - ${percent}%`;
-    }
-    if (syncStatus.state === "synced") {
-      return "Synced";
+      return { text: `Syncing servers – ${percent}%`, tone: "syncing" as const };
     }
     if (syncStatus.state === "error") {
-      return "Sync issue";
+      return { text: "Servers not in sync", tone: "error" as const };
     }
-    return null;
-  }, [syncEnabledServers.length, syncStatus]);
-  const centerMessage = statusMessage ?? syncIndicator;
+    if (!syncAutoReady) {
+      return { text: "Sync setup pending", tone: "info" as const };
+    }
+    if (allLinkedServersSynced) {
+      return { text: "All servers synced", tone: "success" as const };
+    }
+    return { text: "Servers not in sync", tone: "warning" as const };
+  }, [syncEnabledServerUrls.length, syncStatus, syncAutoReady, allLinkedServersSynced]);
+
+  const centerMessage = statusMessage ?? syncSummary.text;
+  const toneClassByKey: Record<"muted" | "syncing" | "success" | "warning" | "info" | "error", string> = {
+    muted: "text-slate-500",
+    syncing: "text-emerald-300",
+    success: "text-emerald-200",
+    warning: "text-amber-300",
+    info: "text-slate-400",
+    error: "text-red-400",
+  };
   const centerClass = statusMessage
     ? statusMessageTone === "error"
       ? "text-red-400"
       : statusMessageTone === "success"
       ? "text-emerald-300"
       : "text-slate-400"
-    : syncStatus.state === "syncing"
-    ? "text-emerald-300"
-    : syncStatus.state === "synced"
-    ? "text-emerald-200"
-    : syncStatus.state === "error"
-    ? "text-red-400"
+    : centerMessage
+    ? toneClassByKey[syncSummary.tone] ?? "text-slate-500"
     : "text-slate-500";
+  const syncBusy = syncStatus.state === "syncing";
+  const syncButtonDisabled =
+    syncEnabledServerUrls.length < 2 ||
+    syncBusy ||
+    (syncAutoReady && allLinkedServersSynced && syncStatus.state !== "error");
   return (
     <div className="flex min-h-screen max-h-screen flex-col overflow-hidden bg-slate-950 text-slate-100">
       <div className="mx-auto flex w-full flex-1 min-h-0 flex-col gap-6 overflow-hidden px-6 py-8 max-w-7xl">
@@ -2054,6 +2202,7 @@ export default function App() {
                 currentVisibleBlobs={currentVisibleBlobs}
                 selectedBlobs={selectedBlobs}
                 signTemplate={signEventTemplate}
+                replicaInfo={blobReplicaInfo}
                 onToggle={toggleBlob}
                 onSelectMany={selectManyBlobs}
                 onDelete={handleDeleteBlob}
@@ -2138,6 +2287,9 @@ export default function App() {
                   onRemove={handleRemoveServer}
                   onToggleAuth={handleToggleRequiresAuth}
                   onToggleSync={handleToggleSync}
+                  onSync={handleSyncSelectedServers}
+                  syncDisabled={syncButtonDisabled}
+                  syncInProgress={syncBusy}
                   validationError={serverValidationError}
                 />
               </Suspense>

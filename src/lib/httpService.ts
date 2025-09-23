@@ -25,6 +25,7 @@ export class BloomHttpError extends Error {
   request?: { url: string; method: HttpMethod };
   retryable?: boolean;
   source?: string;
+  cause?: unknown;
 
   constructor(message: string, options: {
     status?: number;

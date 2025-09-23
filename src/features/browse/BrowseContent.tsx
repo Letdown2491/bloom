@@ -1,7 +1,7 @@
 import React from "react";
 import type { BlossomBlob, SignTemplate } from "../../lib/blossomClient";
 import type { ServerSnapshot } from "../../hooks/useServerData";
-import { BlobList } from "../../components/BlobList";
+import { BlobList, type BlobReplicaSummary } from "../../components/BlobList";
 
 export type BrowseContentProps = {
   viewMode: "grid" | "list";
@@ -11,6 +11,7 @@ export type BrowseContentProps = {
   currentVisibleBlobs?: BlossomBlob[];
   selectedBlobs: Set<string>;
   signTemplate?: SignTemplate;
+  replicaInfo?: Map<string, BlobReplicaSummary>;
   onToggle: (sha: string) => void;
   onSelectMany: (shas: string[], value: boolean) => void;
   onDelete: (blob: BlossomBlob) => void;
@@ -30,6 +31,7 @@ export const BrowseContent: React.FC<BrowseContentProps> = ({
   currentVisibleBlobs,
   selectedBlobs,
   signTemplate,
+  replicaInfo,
   onToggle,
   onSelectMany,
   onDelete,
@@ -57,7 +59,7 @@ export const BrowseContent: React.FC<BrowseContentProps> = ({
   if (browsingAllServers) {
     return (
       <div className={`flex flex-1 min-h-0 flex-col overflow-hidden ${viewMode === "grid" ? "pr-1" : ""}`}>
-        <BlobList blobs={aggregatedBlobs} signTemplate={signTemplate} {...commonProps} />
+        <BlobList blobs={aggregatedBlobs} signTemplate={signTemplate} replicaInfo={replicaInfo} {...commonProps} />
       </div>
     );
   }
@@ -80,6 +82,7 @@ export const BrowseContent: React.FC<BrowseContentProps> = ({
         requiresAuth={currentSnapshot.server.requiresAuth}
         signTemplate={currentSnapshot.server.requiresAuth ? signTemplate : undefined}
         serverType={currentSnapshot.server.type}
+        replicaInfo={replicaInfo}
         {...commonProps}
       />
     </div>
