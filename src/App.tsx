@@ -293,7 +293,6 @@ export default function App() {
   const [localServers, setLocalServers] = useState<ManagedServer[]>(servers);
   const [selectedServer, setSelectedServer] = useState<string | null>(servers[0]?.url ?? null);
   const [tab, setTab] = useState<TabId>("browse");
-  const [banner, setBanner] = useState<string | null>(null);
   const { selected: selectedBlobs, toggle: toggleBlob, selectMany: selectManyBlobs, clear: clearSelection } = useSelection();
   const {
     viewMode,
@@ -1383,27 +1382,24 @@ export default function App() {
 
   const handleSaveServers = async () => {
     if (!signer) {
-      setBanner("Connect your signer to save servers");
+      showStatusMessage("Connect your signer to save servers", "error", 2500);
       return;
     }
     if (saving) {
-      setBanner("Server list update already in progress.");
-      setTimeout(() => setBanner(null), 2000);
+      showStatusMessage("Server list update already in progress.", "info", 2000);
       return;
     }
     if (serverValidationError) {
-      setBanner(serverValidationError);
-      setTimeout(() => setBanner(null), 3000);
+      showStatusMessage(serverValidationError, "error", 3000);
       return;
     }
     const normalized = sortServersByName(localServers.map(normalizeManagedServer));
     setLocalServers(normalized);
     try {
       await saveServers(normalized);
-      setBanner("Server list updated");
-      setTimeout(() => setBanner(null), 2500);
+      showStatusMessage("Server list updated", "success", 2500);
     } catch (error: any) {
-      setBanner(error?.message || "Failed to save servers");
+      showStatusMessage(error?.message || "Failed to save servers", "error", 3000);
     }
   };
 
@@ -1711,8 +1707,7 @@ export default function App() {
       }
       queryClient.invalidateQueries({ queryKey: ["server-blobs", currentSnapshot.server.url, pubkey, currentSnapshot.server.type] });
       selectManyBlobs([blob.sha256], false);
-      setBanner("Blob deleted");
-      setTimeout(() => setBanner(null), 2000);
+      showStatusMessage("Blob deleted", "success", 2000);
     } catch (error: any) {
       showStatusMessage(error?.message || "Delete failed", "error", 5000);
     }
@@ -1907,8 +1902,6 @@ export default function App() {
             )}
           </div>
         </header>
-
-        {banner && <div className="rounded-xl border border-emerald-500 bg-emerald-500/10 px-4 py-2 text-sm">{banner}</div>}
 
         <div className="relative flex flex-1 min-h-0 flex-col overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/70">
           <div
