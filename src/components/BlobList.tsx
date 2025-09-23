@@ -396,6 +396,7 @@ const ListLayout: React.FC<{
 }) => {
   const selectAllRef = useRef<HTMLInputElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const listOuterRef = useRef<HTMLDivElement | null>(null);
   const [container, setContainer] = useState({ width: 0, height: 0 });
 
   const allSelected = blobs.length > 0 && blobs.every(blob => selected.has(blob.sha256));
@@ -426,7 +427,17 @@ const ListLayout: React.FC<{
     return () => window.removeEventListener("resize", handleResize);
   }, [blobs.length]);
 
-  const listWidth = container.width || 800;
+  const listWidth = container.width > 0 ? Math.max(0, container.width - 1) : container.width || 0;
+
+  useLayoutEffect(() => {
+    const outer = listOuterRef.current;
+    if (!outer) return;
+    const previous = outer.style.overflowX;
+    outer.style.overflowX = "hidden";
+    return () => {
+      outer.style.overflowX = previous;
+    };
+  }, [listWidth]);
   const estimatedHeight = (LIST_ROW_HEIGHT + LIST_ROW_GAP) * Math.min(blobs.length, 8);
   const listHeight = container.height > 0 ? container.height : Math.min(480, Math.max(LIST_ROW_HEIGHT + LIST_ROW_GAP, estimatedHeight));
 
@@ -527,7 +538,7 @@ const ListLayout: React.FC<{
   );
 
   return (
-    <div className="flex flex-1 min-h-0 w-full flex-col overflow-hidden pb-1">
+    <div className="flex flex-1 min-h-0 w-full flex-col overflow-hidden overflow-x-hidden pb-1">
       <div className="border-b border-slate-800 bg-slate-900/60 px-2 pb-2 pt-0 text-xs uppercase tracking-wide text-slate-200">
         <div className="grid grid-cols-[40px,minmax(0,1fr)] md:grid-cols-[40px,minmax(0,1fr),10rem,6rem,16rem] items-center gap-2">
           <div className="flex justify-center">
@@ -567,7 +578,7 @@ const ListLayout: React.FC<{
           <div className="hidden justify-center text-center font-semibold text-slate-200 md:flex">Actions</div>
         </div>
       </div>
-      <div ref={containerRef} className="flex-1 min-h-0 overflow-hidden">
+      <div ref={containerRef} className="flex-1 min-h-0 overflow-hidden overflow-x-hidden">
         {blobs.length === 0 ? (
           <div className="p-4 text-sm text-slate-400">No content on this server yet.</div>
         ) : (
@@ -578,6 +589,7 @@ const ListLayout: React.FC<{
             width={listWidth}
             onItemsRendered={handleItemsRendered}
             overscanCount={6}
+            outerRef={listOuterRef}
           >
             {Row}
           </VirtualList>
@@ -684,7 +696,10 @@ const GridLayout: React.FC<{
 
   return (
     <div className="flex flex-1 min-h-0 w-full flex-col overflow-hidden">
-      <div ref={viewportRef} className="relative flex-1 min-h-0 w-full overflow-y-auto px-2">
+      <div
+        ref={viewportRef}
+        className="relative flex-1 min-h-0 w-full overflow-y-auto overflow-x-hidden px-2"
+      >
         <div style={{ position: "relative", height: containerHeight }}>
           {items.map(({ blob, row, col }) => {
             const isSelected = selected.has(blob.sha256);
