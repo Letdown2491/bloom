@@ -39,6 +39,97 @@ const DEFAULT_RELAYS = [
   "wss://relay.primal.net",
 ];
 
+const RELAY_HEALTH_STORAGE_KEY = "bloom.ndk.relayHealth.v1";
+
+type PersistableRelayHealth = {
+  url: string;
+  status: RelayHealth["status"];
+  lastError?: string | null;
+  lastEventAt?: number | null;
+};
+
+const normalizeRelayUrl = (url: string | undefined | null) => {
+  if (!url) return null;
+  const trimmed = url.trim();
+  if (!trimmed) return null;
+  return trimmed.replace(/\/$/, "");
+};
+
+const seedRelayHealth = (seed?: RelayHealth[]) => {
+  const map = new Map<string, RelayHealth>();
+  const addEntry = (entry: RelayHealth) => {
+    const normalizedUrl = normalizeRelayUrl(entry.url);
+    if (!normalizedUrl) return;
+    if (entry.status !== "connecting" && entry.status !== "connected" && entry.status !== "error") return;
+    map.set(normalizedUrl, {
+      url: normalizedUrl,
+      status: entry.status,
+      lastError: entry.lastError ?? null,
+      lastEventAt: typeof entry.lastEventAt === "number" ? entry.lastEventAt : null,
+    });
+  };
+
+  seed?.forEach(addEntry);
+  DEFAULT_RELAYS.forEach(url => {
+    const normalizedUrl = normalizeRelayUrl(url);
+    if (!normalizedUrl) return;
+    if (!map.has(normalizedUrl)) {
+      map.set(normalizedUrl, {
+        url: normalizedUrl,
+        status: "error",
+        lastError: "Not connected",
+        lastEventAt: null,
+      });
+    }
+  });
+  return Array.from(map.values());
+};
+
+const loadPersistedRelayHealth = (): RelayHealth[] | null => {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(RELAY_HEALTH_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return null;
+    const entries: RelayHealth[] = [];
+    parsed.forEach(item => {
+      const normalizedUrl = normalizeRelayUrl((item as PersistableRelayHealth)?.url);
+      const status = (item as PersistableRelayHealth)?.status;
+      if (!normalizedUrl) return;
+      if (status !== "connecting" && status !== "connected" && status !== "error") return;
+      entries.push({
+        url: normalizedUrl,
+        status,
+        lastError: (item as PersistableRelayHealth)?.lastError ?? null,
+        lastEventAt:
+          typeof (item as PersistableRelayHealth)?.lastEventAt === "number"
+            ? (item as PersistableRelayHealth).lastEventAt
+            : null,
+      });
+    });
+    return entries.length > 0 ? entries : null;
+  } catch (error) {
+    console.warn("Unable to load relay health cache", error);
+    return null;
+  }
+};
+
+const persistRelayHealth = (entries: RelayHealth[]) => {
+  if (typeof window === "undefined") return;
+  try {
+    const payload: PersistableRelayHealth[] = entries.map(entry => ({
+      url: entry.url,
+      status: entry.status,
+      lastError: entry.lastError ?? null,
+      lastEventAt: entry.lastEventAt ?? null,
+    }));
+    window.localStorage.setItem(RELAY_HEALTH_STORAGE_KEY, JSON.stringify(payload));
+  } catch (error) {
+    console.warn("Unable to persist relay health cache", error);
+  }
+};
+
 const enqueueMicrotask = (cb: () => void) => {
   if (typeof queueMicrotask === "function") {
     queueMicrotask(cb);
@@ -55,9 +146,10 @@ export const NdkProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [user, setUser] = useState<NDKUser | null>(null);
   const [status, setStatus] = useState<NdkConnectionStatus>("idle");
   const [connectionError, setConnectionError] = useState<Error | null>(null);
-  const [relayHealth, setRelayHealth] = useState<RelayHealth[]>(() =>
-    DEFAULT_RELAYS.map(url => ({ url, status: "connecting" as const, lastError: null, lastEventAt: null }))
-  );
+  const [relayHealth, setRelayHealth] = useState<RelayHealth[]>(() => {
+    const cached = loadPersistedRelayHealth();
+    return seedRelayHealth(cached ?? undefined);
+  });
   const pendingRelayUpdatesRef = useRef<Map<string, Partial<RelayHealth>> | null>(null);
   const relayUpdateScheduledRef = useRef(false);
 
@@ -66,7 +158,7 @@ export const NdkProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setStatus(prev => (prev === "connected" ? prev : "connecting"));
     setConnectionError(null);
     setRelayHealth(current =>
-      current.map(relay => ({ ...relay, status: "connecting", lastError: relay.lastError, lastEventAt: relay.lastEventAt }))
+      current.map(relay => ({ ...relay, status: "connecting", lastError: null, lastEventAt: relay.lastEventAt }))
     );
 
     attempt
@@ -276,36 +368,8 @@ export const NdkProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, [ndk]);
 
   useEffect(() => {
-    if (typeof window === "undefined") {
-      return;
-    }
-
-    let cancelled = false;
-
-    const connectIfActive = () => {
-      if (cancelled) return;
-      ensureNdkConnection().catch(() => undefined);
-    };
-
-    const win = window as typeof window & {
-      requestIdleCallback?: (callback: IdleRequestCallback, options?: IdleRequestOptions) => number;
-      cancelIdleCallback?: (handle: number) => void;
-    };
-
-    if (typeof win.requestIdleCallback === "function") {
-      const idleHandle = win.requestIdleCallback(() => connectIfActive());
-      return () => {
-        cancelled = true;
-        win.cancelIdleCallback?.(idleHandle);
-      };
-    }
-
-    const timeoutHandle = window.setTimeout(connectIfActive, 1500);
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timeoutHandle);
-    };
-  }, [ensureNdkConnection]);
+    persistRelayHealth(relayHealth);
+  }, [relayHealth]);
 
   const connect = useCallback(async () => {
     if (!(window as any).nostr) {

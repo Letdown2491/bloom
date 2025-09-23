@@ -30,6 +30,12 @@ const UNKNOWN_STATUS_STYLE = {
   text: "text-slate-400",
 };
 
+const NOT_CONNECTED_STATUS_STYLE = {
+  label: "Not connected",
+  dot: "bg-slate-600",
+  text: "text-slate-400",
+};
+
 
 const createDraftId = () => `relay-${Math.random().toString(36).slice(2)}-${Date.now()}`;
 
@@ -341,7 +347,21 @@ const RelayList: React.FC = () => {
                   const sanitized = sanitizeRelayUrl(draft.url);
                   const normalized = sanitized ? normalizeRelayOrigin(sanitized) ?? sanitized : null;
                   const health = normalized ? healthMap.get(normalized) : undefined;
-                  const style = health ? statusStyles[health.status] : UNKNOWN_STATUS_STYLE;
+                  const baseStyle = health ? statusStyles[health.status] : UNKNOWN_STATUS_STYLE;
+                  const style =
+                    health && health.status === "error" && (!health.lastError || health.lastError === "Not connected")
+                      ? NOT_CONNECTED_STATUS_STYLE
+                      : baseStyle;
+                  const statusMessage =
+                    health && health.status === "error"
+                      ? health.lastError && health.lastError !== "Not connected"
+                        ? health.lastError
+                        : "Connect your signer to refresh status."
+                      : null;
+                  const statusMessageClass =
+                    health && health.status === "error" && health.lastError && health.lastError !== "Not connected"
+                      ? "text-[11px] text-red-300"
+                      : "text-[11px] text-slate-400";
                   const validationMessage = validationErrors.get(draft.id) ?? null;
                   const isEditing = editingId === draft.id;
 
@@ -365,9 +385,14 @@ const RelayList: React.FC = () => {
                           ) : null}
                         </td>
                         <td className="py-3 px-3 text-xs">
-                          <div className={`inline-flex items-center gap-2 ${style.text}`}>
-                            <span className={`h-2 w-2 rounded-full ${style.dot}`} aria-hidden />
-                            {style.label}
+                          <div className="flex flex-col">
+                            <div className={`inline-flex items-center gap-2 ${style.text}`}>
+                              <span className={`h-2 w-2 rounded-full ${style.dot}`} aria-hidden />
+                              {style.label}
+                            </div>
+                            {statusMessage ? (
+                              <span className={`mt-1 ${statusMessageClass}`}>{statusMessage}</span>
+                            ) : null}
                           </div>
                         </td>
                         <td className="py-3 px-3 text-center">
@@ -419,9 +444,14 @@ const RelayList: React.FC = () => {
                         </div>
                       </td>
                       <td className="py-3 px-3 text-xs">
-                        <div className={`inline-flex items-center gap-2 ${style.text}`}>
-                          <span className={`h-2 w-2 rounded-full ${style.dot}`} aria-hidden />
-                          {style.label}
+                        <div className="flex flex-col">
+                          <div className={`inline-flex items-center gap-2 ${style.text}`}>
+                            <span className={`h-2 w-2 rounded-full ${style.dot}`} aria-hidden />
+                            {style.label}
+                          </div>
+                          {statusMessage ? (
+                            <span className={`mt-1 ${statusMessageClass}`}>{statusMessage}</span>
+                          ) : null}
                         </div>
                       </td>
                       <td className="py-3 px-3 text-center">
