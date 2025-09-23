@@ -85,6 +85,7 @@ const diffPolicies = (drafts: RelayDraft[], policies: RelayPolicy[]) => {
   for (let index = 0; index < normalizedDrafts.length; index += 1) {
     const a = normalizedDrafts[index];
     const b = normalizedPolicies[index];
+    if (!a || !b) return true;
     if (a.url !== b.url || a.read !== b.read || a.write !== b.write) return true;
   }
   return false;

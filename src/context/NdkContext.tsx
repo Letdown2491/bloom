@@ -166,14 +166,14 @@ export const NdkProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         const applyPatch = (url: string, patch: Partial<RelayHealth>) => {
           let foundIndex = -1;
           for (let index = 0; index < next.length; index += 1) {
-            if (next[index].url === url) {
+            if (next[index]?.url === url) {
               foundIndex = index;
               break;
             }
           }
 
           if (foundIndex >= 0) {
-            const entry = next[foundIndex];
+            const entry = next[foundIndex]!;
             const nextStatus = patch.status ?? entry.status;
             const nextLastError = patch.lastError !== undefined ? patch.lastError : entry.lastError ?? null;
             const nextLastEventAt = patch.lastEventAt !== undefined ? patch.lastEventAt : entry.lastEventAt ?? null;
