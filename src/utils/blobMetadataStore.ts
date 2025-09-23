@@ -30,6 +30,61 @@ let cache: Record<string, Record<string, StoredMetadata>> | null = null;
 let metadataVersion = 0;
 const listeners = new Set<() => void>();
 
+type PendingMetadataWrite = {
+  serverUrl: string | undefined;
+  sha256: string;
+  metadata: StoredMetadata;
+};
+
+const pendingMetadataWrites = new Map<string, PendingMetadataWrite>();
+let metadataWriteScheduled = false;
+
+const enqueueMicrotask = (cb: () => void) => {
+  if (typeof queueMicrotask === "function") {
+    queueMicrotask(cb);
+    return;
+  }
+  Promise.resolve()
+    .then(cb)
+    .catch(() => undefined);
+};
+
+const metadataWriteKey = (serverUrl: string | undefined, sha256: string) => `${serverUrl ?? ""}\u0000${sha256}`;
+
+const flushPendingMetadataWrites = () => {
+  metadataWriteScheduled = false;
+  if (pendingMetadataWrites.size === 0) return;
+
+  const entries = Array.from(pendingMetadataWrites.values());
+  pendingMetadataWrites.clear();
+
+  for (const entry of entries) {
+    setStoredBlobMetadata(entry.serverUrl, entry.sha256, entry.metadata);
+  }
+};
+
+const scheduleMetadataWrite = () => {
+  if (metadataWriteScheduled) return;
+  metadataWriteScheduled = true;
+  enqueueMicrotask(flushPendingMetadataWrites);
+};
+
+const queueStoredBlobMetadata = (serverUrl: string | undefined, sha256: string, metadata: StoredMetadata) => {
+  if (!sha256) return;
+  const key = metadataWriteKey(serverUrl, sha256);
+  const existing = pendingMetadataWrites.get(key);
+  if (existing) {
+    pendingMetadataWrites.set(key, {
+      serverUrl,
+      sha256,
+      metadata: { ...existing.metadata, ...metadata },
+    });
+  } else {
+    pendingMetadataWrites.set(key, { serverUrl, sha256, metadata });
+  }
+  scheduleMetadataWrite();
+};
+
 function normalizeServerKey(serverUrl?: string) {
   if (!serverUrl) return GLOBAL_METADATA_KEY;
   return serverUrl.replace(/\/+$/, "");
@@ -212,10 +267,10 @@ export function mergeBlobWithStoredMetadata(serverUrl: string | undefined, blob:
     merged.type = stored.type;
   }
   if (merged.name && merged.name !== stored?.name) {
-    setStoredBlobMetadata(serverUrl, blob.sha256, { name: merged.name });
+    queueStoredBlobMetadata(serverUrl, blob.sha256, { name: merged.name });
   }
   if (merged.type && merged.type !== stored?.type) {
-    setStoredBlobMetadata(serverUrl, blob.sha256, { type: merged.type });
+    queueStoredBlobMetadata(serverUrl, blob.sha256, { type: merged.type });
   }
   return merged;
 }

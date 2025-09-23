@@ -15,6 +15,10 @@ const UploadPanelLazy = React.lazy(() =>
 const ServerListLazy = React.lazy(() =>
   import("./components/ServerList").then(module => ({ default: module.ServerList }))
 );
+
+const RelayListLazy = React.lazy(() =>
+  import("./components/RelayList").then(module => ({ default: module.RelayList }))
+);
 import { useAudio, type Track as AudioTrack } from "./context/AudioContext";
 import {
   deleteUserBlob,
@@ -64,7 +68,7 @@ import { useSelection } from "./features/selection/SelectionContext";
 import { useShareWorkflow } from "./features/share/useShareWorkflow";
 import { useBrowseControls, type FilterMode } from "./features/browse/useBrowseControls";
 
-type TabId = "browse" | "upload" | "servers" | "transfer" | "share";
+type TabId = "browse" | "upload" | "servers" | "relays" | "transfer" | "share";
 
 type StatusMessageTone = "success" | "info" | "error";
 
@@ -410,6 +414,11 @@ export default function App() {
 
   const handleSelectServers = useCallback(() => {
     setTab("servers");
+    setIsUserMenuOpen(false);
+  }, [setIsUserMenuOpen, setTab]);
+
+  const handleSelectRelays = useCallback(() => {
+    setTab("relays");
     setIsUserMenuOpen(false);
   }, [setIsUserMenuOpen, setTab]);
 
@@ -1872,6 +1881,18 @@ export default function App() {
                           href="#"
                           onClick={event => {
                             event.preventDefault();
+                            handleSelectRelays();
+                          }}
+                          className="block px-1 py-1 hover:text-emerald-300"
+                        >
+                          Relays
+                        </a>
+                      </li>
+                      <li>
+                        <a
+                          href="#"
+                          onClick={event => {
+                            event.preventDefault();
                             handleDisconnectClick();
                           }}
                           className="block px-1 py-1 hover:text-emerald-300"
@@ -2125,6 +2146,18 @@ export default function App() {
                   onToggleSync={handleToggleSync}
                   validationError={serverValidationError}
                 />
+              </Suspense>
+            )}
+
+            {tab === "relays" && (
+              <Suspense
+                fallback={
+                  <div className="flex flex-1 items-center justify-center text-sm text-slate-400">
+                    Loading relays…
+                  </div>
+                }
+              >
+                <RelayListLazy />
               </Suspense>
             )}
 

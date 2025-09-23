@@ -458,7 +458,6 @@ const ListLayout: React.FC<{
     ({ index, style }: { index: number; style: React.CSSProperties }) => {
       const blob = blobs[index];
       if (!blob) return null;
-      requestMetadata(blob.sha256);
       const adjustedStyle: React.CSSProperties = {
         ...style,
         position: "absolute",
