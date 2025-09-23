@@ -30,14 +30,6 @@ const UNKNOWN_STATUS_STYLE = {
   text: "text-slate-400",
 };
 
-const formatRelativeTime = (value: number | null | undefined) => {
-  if (!value) return "No activity yet";
-  const delta = Date.now() - value;
-  if (delta < 15_000) return "Updated moments ago";
-  if (delta < 60_000) return `Updated ${Math.floor(delta / 1_000)}s ago`;
-  if (delta < 3_600_000) return `Updated ${Math.floor(delta / 60_000)}m ago`;
-  return `Updated ${Math.floor(delta / 3_600_000)}h ago`;
-};
 
 const createDraftId = () => `relay-${Math.random().toString(36).slice(2)}-${Date.now()}`;
 
@@ -376,12 +368,6 @@ const RelayList: React.FC = () => {
                             <span className={`h-2 w-2 rounded-full ${style.dot}`} aria-hidden />
                             {style.label}
                           </div>
-                          <div className="mt-1 text-[11px] text-slate-400">
-                            {health ? formatRelativeTime(health.lastEventAt ?? null) : "—"}
-                          </div>
-                          {health?.lastError ? (
-                            <div className="mt-1 text-[11px] text-amber-300 break-words">{health.lastError}</div>
-                          ) : null}
                         </td>
                         <td className="py-3 px-3 text-center">
                           <input
@@ -436,12 +422,6 @@ const RelayList: React.FC = () => {
                           <span className={`h-2 w-2 rounded-full ${style.dot}`} aria-hidden />
                           {style.label}
                         </div>
-                        <div className="mt-1 text-[11px] text-slate-400">
-                          {health ? formatRelativeTime(health.lastEventAt ?? null) : "—"}
-                        </div>
-                        {health?.lastError ? (
-                          <div className="mt-1 text-[11px] text-amber-300 break-words">{health.lastError}</div>
-                        ) : null}
                       </td>
                       <td className="py-3 px-3 text-center">
                         <input
