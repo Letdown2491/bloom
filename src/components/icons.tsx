@@ -51,6 +51,12 @@ export const MusicIcon = createIcon(
   </>
 );
 
+export const ChevronDownIcon = createIcon(
+  <>
+    <path d="M6 9.5 12 15l6-5.5" />
+  </>
+);
+
 export const FilterIcon = createIcon(
   <>
     <path d="M4 5h16l-6.5 8v6.5L10.5 21v-8L4 5Z" />
@@ -105,6 +111,16 @@ export const RepeatOneIcon = createIcon(
   </>
 );
 
+export const ShuffleIcon = createIcon(
+  <>
+    <polyline points="16 3 21 3 21 8" />
+    <line x1="4" y1="20" x2="21" y2="3" />
+    <polyline points="21 16 21 21 16 21" />
+    <line x1="4" y1="4" x2="9" y2="9" />
+    <line x1="15" y1="15" x2="21" y2="21" />
+  </>
+);
+
 export const StopIcon = createIcon(
   <>
     <rect x="7" y="7" width="10" height="10" rx="1.5" />
@@ -141,7 +157,15 @@ export const DocumentIcon = createIcon(
   </>
 );
 
-export type FileKind = "folder" | "image" | "video" | "document" | "pdf" | "doc" | "sheet";
+export type FileKind =
+  | "folder"
+  | "image"
+  | "video"
+  | "music"
+  | "document"
+  | "pdf"
+  | "doc"
+  | "sheet";
 
 export const DownloadIcon = createIcon(
   <>
@@ -259,6 +283,8 @@ export const FileTypeIcon: React.FC<{ kind: FileKind; size?: number; className?:
       return <ImageIcon size={size} className={className} />;
     case "video":
       return <VideoIcon size={size} className={className} />;
+    case "music":
+      return <MusicIcon size={size} className={className} />;
     case "pdf":
       return <PdfIcon size={size} className={className} />;
     case "doc":

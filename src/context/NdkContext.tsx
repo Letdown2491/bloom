@@ -1,13 +1,18 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import NDK, {
-  NDKEvent,
-  NDKNip07Signer,
-  NDKRelay,
-  NDKRelayStatus,
-  NDKSigner,
-  NDKUser,
-} from "@nostr-dev-kit/ndk";
+import type { NDKRelay, NDKSigner, NDKUser } from "@nostr-dev-kit/ndk";
 import type { EventTemplate, SignedEvent } from "../lib/blossomClient";
+
+type NdkModule = typeof import("@nostr-dev-kit/ndk");
+type NdkInstance = InstanceType<NdkModule["default"]>;
+
+let ndkModuleLoader: Promise<NdkModule> | null = null;
+
+const loadNdkModule = async (): Promise<NdkModule> => {
+  if (!ndkModuleLoader) {
+    ndkModuleLoader = import("@nostr-dev-kit/ndk");
+  }
+  return ndkModuleLoader;
+};
 
 export type NdkConnectionStatus = "idle" | "connecting" | "connected" | "error";
 
@@ -19,11 +24,12 @@ export type RelayHealth = {
 };
 
 export type NdkContextValue = {
-  ndk: NDK | null;
+  ndk: NdkInstance | null;
   signer: NDKSigner | null;
   user: NDKUser | null;
   connect: () => Promise<void>;
   disconnect: () => void;
+  adoptSigner: (signer: NDKSigner | null) => Promise<void>;
   signEventTemplate: (template: EventTemplate) => Promise<SignedEvent>;
   status: NdkConnectionStatus;
   connectionError: Error | null;
@@ -157,7 +163,9 @@ const enqueueMicrotask = (cb: () => void) => {
 };
 
 export const NdkProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [ndk] = useState(() => new NDK({ explicitRelayUrls: DEFAULT_RELAYS }));
+  const ndkRef = useRef<NdkInstance | null>(null);
+  const ndkModuleRef = useRef<NdkModule | null>(null);
+  const [ndk, setNdk] = useState<NdkInstance | null>(null);
   const [signer, setSigner] = useState<NDKSigner | null>(null);
   const [user, setUser] = useState<NDKUser | null>(null);
   const [status, setStatus] = useState<NdkConnectionStatus>("idle");
@@ -169,8 +177,24 @@ export const NdkProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const pendingRelayUpdatesRef = useRef<Map<string, Partial<RelayHealth>> | null>(null);
   const relayUpdateScheduledRef = useRef(false);
 
-  const ensureNdkConnection = useCallback(async () => {
-    const attempt = ndk.connect();
+  const ensureNdkInstance = useCallback(async () => {
+    let mod = ndkModuleRef.current;
+    if (!mod) {
+      mod = await loadNdkModule();
+      ndkModuleRef.current = mod;
+    }
+
+    if (!ndkRef.current) {
+      ndkRef.current = new mod.default({ explicitRelayUrls: DEFAULT_RELAYS });
+      setNdk(ndkRef.current);
+    }
+
+    return { ndk: ndkRef.current, module: mod } as { ndk: NdkInstance; module: NdkModule };
+  }, []);
+
+  const ensureNdkConnection = useCallback(async (): Promise<NdkInstance> => {
+    const { ndk: instance } = await ensureNdkInstance();
+    const attempt = instance.connect();
     setStatus(prev => (prev === "connected" ? prev : "connecting"));
     setConnectionError(null);
     setRelayHealth(current =>
@@ -191,7 +215,7 @@ export const NdkProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     if (typeof window === "undefined") {
       await attempt.catch(() => undefined);
-      return;
+      return instance;
     }
 
     let timeoutHandle: number | null = null;
@@ -212,11 +236,18 @@ export const NdkProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         window.clearTimeout(timeoutHandle);
       }
     }
-  }, [ndk]);
+
+    return instance;
+  }, [ensureNdkInstance]);
 
   useEffect(() => {
+    if (!ndk) return;
+    const module = ndkModuleRef.current;
+    if (!module) return;
     const pool = ndk.pool;
     if (!pool) return;
+
+    const { NDKRelayStatus } = module;
 
     const statusFromRelay = (relay: NDKRelay): RelayHealth["status"] => {
       switch (relay.status) {
@@ -387,6 +418,36 @@ export const NdkProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     persistRelayHealth(relayHealth);
   }, [relayHealth]);
 
+  const adoptSigner = useCallback(
+    async (nextSigner: NDKSigner | null) => {
+      try {
+        if (nextSigner) {
+          const instance = await ensureNdkConnection();
+          const nextUser = await nextSigner.user();
+          instance.signer = nextSigner;
+          setSigner(nextSigner);
+          setUser(nextUser);
+          setStatus("connected");
+          setConnectionError(null);
+        } else {
+          const instance = ndkRef.current;
+          if (instance) {
+            instance.signer = undefined;
+          }
+          setSigner(null);
+          setUser(null);
+          setStatus("idle");
+        }
+      } catch (error) {
+        const normalized = error instanceof Error ? error : new Error("Failed to adopt signer");
+        setConnectionError(normalized);
+        setStatus("error");
+        throw normalized;
+      }
+    },
+    [ensureNdkConnection]
+  );
+
   const connect = useCallback(async () => {
     if (!(window as any).nostr) {
       const error = new Error("A NIP-07 signer is required (e.g. Alby, nos2x).");
@@ -395,46 +456,51 @@ export const NdkProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       throw error;
     }
     try {
-      await ensureNdkConnection();
-      const nip07Signer = new NDKNip07Signer();
+      const { module } = await ensureNdkInstance();
+      const nip07Signer = new module.NDKNip07Signer();
       await nip07Signer.blockUntilReady();
-      const nip07User = await nip07Signer.user();
-      setSigner(nip07Signer);
-      setUser(nip07User);
-      ndk.signer = nip07Signer;
-      setStatus("connected");
-      setConnectionError(null);
+      await adoptSigner(nip07Signer);
     } catch (error) {
       const normalized = error instanceof Error ? error : new Error("Failed to connect Nostr signer");
       setConnectionError(normalized);
       setStatus("error");
       throw normalized;
     }
-  }, [ensureNdkConnection, ndk]);
+  }, [adoptSigner, ensureNdkInstance]);
 
   const disconnect = useCallback(() => {
-    setSigner(null);
-    setUser(null);
-    ndk.signer = undefined;
-    setStatus("idle");
+    void adoptSigner(null);
     setConnectionError(null);
-  }, [ndk]);
+  }, [adoptSigner]);
 
-  const signEventTemplate = useCallback<
-    NdkContextValue["signEventTemplate"]
-  >(async template => {
-    if (!signer || !ndk) throw new Error("Connect a signer first.");
-    const event = new NDKEvent(ndk, template);
-    if (!event.created_at) {
-      event.created_at = Math.floor(Date.now() / 1000);
-    }
-    await event.sign();
-    return event.rawEvent();
-  }, [signer, ndk]);
+  const signEventTemplate = useCallback<NdkContextValue["signEventTemplate"]>(
+    async template => {
+      if (!signer) throw new Error("Connect a signer first.");
+      const { ndk: instance, module } = await ensureNdkInstance();
+      const event = new module.NDKEvent(instance, template);
+      if (!event.created_at) {
+        event.created_at = Math.floor(Date.now() / 1000);
+      }
+      await event.sign();
+      return event.rawEvent();
+    },
+    [ensureNdkInstance, signer]
+  );
 
   const value = useMemo<NdkContextValue>(
-    () => ({ ndk, signer, user, connect, disconnect, signEventTemplate, status, connectionError, relayHealth }),
-    [ndk, signer, user, connect, disconnect, signEventTemplate, status, connectionError, relayHealth]
+    () => ({
+      ndk,
+      signer,
+      user,
+      connect,
+      disconnect,
+      adoptSigner,
+      signEventTemplate,
+      status,
+      connectionError,
+      relayHealth,
+    }),
+    [ndk, signer, user, connect, disconnect, adoptSigner, signEventTemplate, status, connectionError, relayHealth]
   );
 
   return <NdkContext.Provider value={value}>{children}</NdkContext.Provider>;

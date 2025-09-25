@@ -6,7 +6,9 @@ import { CancelIcon, EditIcon, FolderIcon, SaveIcon, TrashIcon } from "./icons";
 export type ServerListProps = {
   servers: ManagedServer[];
   selected: string | null;
+  defaultServerUrl: string | null;
   onSelect: (serverUrl: string | null) => void;
+  onSetDefaultServer: (serverUrl: string | null) => void;
   onAdd: (server: ManagedServer) => void;
   onUpdate: (originalUrl: string, server: ManagedServer) => void;
   onSave: () => void;
@@ -54,7 +56,9 @@ const HEALTH_PENDING_GRACE_MS = 12 * 1000;
 export const ServerList: React.FC<ServerListProps> = ({
   servers,
   selected,
+  defaultServerUrl,
   onSelect,
+  onSetDefaultServer,
   onAdd,
   onUpdate,
   onSave,
@@ -448,7 +452,7 @@ export const ServerList: React.FC<ServerListProps> = ({
 
   return (
     <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4">
-      <header className="flex items-center justify-between mb-3">
+      <header className="mb-3 flex items-center justify-between">
         <div>
           <h2 className="text-lg font-semibold text-slate-100">Servers</h2>
           <p className="text-xs text-slate-400">Select where your content lives. Please note that the NIP-96 server spec has been deprecated.</p>
@@ -461,7 +465,7 @@ export const ServerList: React.FC<ServerListProps> = ({
                 event.preventDefault();
                 onSync?.();
               }}
-              className="px-3 py-2 rounded-xl bg-emerald-600 text-sm text-slate-950 hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-40"
+              className="rounded-xl bg-emerald-600 px-3 py-2 text-sm text-slate-950 hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-40"
               disabled={syncButtonDisabled}
               aria-busy={syncInProgress ? true : undefined}
             >
@@ -470,14 +474,14 @@ export const ServerList: React.FC<ServerListProps> = ({
           ) : null}
           <button
             onClick={beginAdd}
-            className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-sm disabled:opacity-40 disabled:cursor-not-allowed"
+            className="rounded-xl bg-slate-800 px-3 py-2 text-sm hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
             disabled={saving || isAdding || Boolean(editingUrl)}
           >
             Add server
           </button>
           <button
             onClick={onSave}
-            className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-sm disabled:opacity-40"
+            className="rounded-xl bg-slate-800 px-3 py-2 text-sm hover:bg-slate-700 disabled:opacity-40"
             disabled={saveButtonDisabled}
           >
             {saveButtonLabel}
@@ -497,11 +501,11 @@ export const ServerList: React.FC<ServerListProps> = ({
           {validationError || "Saving changes…"}
         </div>
       )}
-
       <div className="overflow-x-auto">
         <table className="min-w-full table-fixed text-sm text-slate-300">
           <thead className="text-[11px] uppercase tracking-wide text-slate-300">
             <tr>
+              <th scope="col" className="w-28 py-2 px-3 text-center font-semibold">Default</th>
               <th scope="col" className="py-2 px-3 text-left font-semibold">Server</th>
               <th scope="col" className="py-2 px-3 text-left font-semibold">URL</th>
               <th scope="col" className="w-44 py-2 px-3 text-left font-semibold">Status</th>
@@ -514,6 +518,7 @@ export const ServerList: React.FC<ServerListProps> = ({
           <tbody>
             {isAdding && (
               <tr className="border-t border-slate-800 bg-slate-900/70">
+                <td className="py-3 px-3 text-center text-xs text-slate-500">Save to set default</td>
                 <td className="py-3 px-3">
                   <input
                     type="text"
@@ -645,10 +650,17 @@ export const ServerList: React.FC<ServerListProps> = ({
             )}
             {servers.map(server => {
               const isEditing = editingUrl === server.url;
+              const isDefault = defaultServerUrl === server.url;
+              const rowHighlightClass = selected === server.url
+                ? "bg-emerald-500/10"
+                : isDefault
+                ? "bg-slate-800/40"
+                : "hover:bg-slate-800/50";
 
               if (isEditing) {
                 return (
                   <tr key={server.url} className="border-t border-slate-800 bg-slate-900/70">
+                    <td className="py-3 px-3 text-center text-xs text-slate-500">Save to set default</td>
                     <td className="py-3 px-3">
                       <input
                         type="text"
@@ -795,10 +807,27 @@ export const ServerList: React.FC<ServerListProps> = ({
                       handleToggle(server);
                     }
                   }}
-                  className={`border-t border-slate-800 first:border-t-0 cursor-pointer transition-colors focus:outline-none focus:ring-2 focus:ring-emerald-500/60 focus:ring-offset-2 focus:ring-offset-slate-900 ${
-                    selected === server.url ? "bg-emerald-500/10" : "hover:bg-slate-800/50"
-                  }`}
+                  className={`border-t border-slate-800 first:border-t-0 cursor-pointer transition-colors focus:outline-none focus:ring-2 focus:ring-emerald-500/60 focus:ring-offset-2 focus:ring-offset-slate-900 ${rowHighlightClass}`}
                 >
+                  <td className="py-3 px-3 text-center">
+                    {isDefault ? (
+                      <span className="rounded-lg border border-emerald-500/60 bg-emerald-500/10 px-2 py-1 text-[10px] uppercase tracking-wide text-emerald-200">
+                        Default
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        className="text-xs rounded-lg border border-slate-700 px-2 py-1 text-slate-200 transition hover:border-emerald-500 hover:text-emerald-200"
+                        onClick={event => {
+                          event.stopPropagation();
+                          onSetDefaultServer(server.url);
+                          onSelect(server.url);
+                        }}
+                      >
+                        Set default
+                      </button>
+                    )}
+                  </td>
                   <td className="py-3 px-3 font-medium text-slate-100">
                     <div className="flex items-center gap-2">
                       <FolderIcon size={18} className="text-slate-300" />
@@ -871,7 +900,7 @@ export const ServerList: React.FC<ServerListProps> = ({
             })}
             {servers.length === 0 && !isAdding && !editingUrl && (
               <tr>
-                <td colSpan={7} className="py-6 px-3 text-sm text-center text-slate-400">
+                <td colSpan={8} className="py-6 px-3 text-sm text-center text-slate-400">
                   No servers yet. Add your first Blossom or NIP-96 server.
                 </td>
               </tr>

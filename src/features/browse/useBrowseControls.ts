@@ -1,19 +1,23 @@
-import { useCallback, useMemo, useRef, useState } from "react";
-
-export type FilterMode = "all" | "music" | "documents" | "images" | "pdfs" | "videos";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useUserPreferences } from "../../context/UserPreferencesContext";
+import type { FilterMode } from "../../types/filter";
 
 type FilterOption = {
   id: Exclude<FilterMode, "all">;
   label: string;
 };
 
-const FILTER_OPTIONS: FilterOption[] = [
-  { id: "music", label: "Music" },
+const BASE_FILTER_OPTIONS: FilterOption[] = [
   { id: "documents", label: "Documents" },
   { id: "images", label: "Images" },
+  { id: "music", label: "Music" },
   { id: "pdfs", label: "PDFs" },
   { id: "videos", label: "Videos" },
 ];
+
+const FILTER_OPTIONS: FilterOption[] = [...BASE_FILTER_OPTIONS].sort((a, b) =>
+  a.label.localeCompare(b.label)
+);
 
 const OPTION_MAP = FILTER_OPTIONS.reduce<Record<Exclude<FilterMode, "all">, FilterOption>>((acc, option) => {
   acc[option.id] = option;
@@ -21,12 +25,20 @@ const OPTION_MAP = FILTER_OPTIONS.reduce<Record<Exclude<FilterMode, "all">, Filt
 }, {} as any);
 
 export const useBrowseControls = () => {
-  const [viewMode, setViewMode] = useState<"grid" | "list">("list");
-  const [filterMode, setFilterMode] = useState<FilterMode>("all");
+  const { preferences, setDefaultViewMode } = useUserPreferences();
+  const [viewMode, setViewModeState] = useState<"grid" | "list">(() => preferences.defaultViewMode);
+  const [filterMode, setFilterMode] = useState<FilterMode>(() => preferences.defaultFilterMode);
   const [isFilterMenuOpen, setIsFilterMenuOpen] = useState(false);
-  const previousViewModeRef = useRef<"grid" | "list">("list");
 
-  const isMusicFilterActive = filterMode === "music";
+  const setViewMode = useCallback(
+    (mode: "grid" | "list", persist = true) => {
+      setViewModeState(prev => (prev === mode ? prev : mode));
+      if (persist) {
+        setDefaultViewMode(mode);
+      }
+    },
+    [setDefaultViewMode]
+  );
 
   const openFilterMenu = useCallback(() => setIsFilterMenuOpen(true), []);
   const closeFilterMenu = useCallback(() => setIsFilterMenuOpen(false), []);
@@ -38,18 +50,24 @@ export const useBrowseControls = () => {
     (next: FilterMode) => {
       setFilterMode(prev => {
         const nextValue = prev === next ? "all" : next;
-        if (nextValue === "music" && prev !== "music") {
-          previousViewModeRef.current = viewMode;
-          setViewMode("list");
-        } else if (prev === "music" && nextValue !== "music") {
-          setViewMode(previousViewModeRef.current);
-        }
         return nextValue;
       });
       setIsFilterMenuOpen(false);
     },
-    [viewMode]
+    [setFilterMode, setIsFilterMenuOpen]
   );
+
+  useEffect(() => {
+    setViewModeState(prev => (prev === preferences.defaultViewMode ? prev : preferences.defaultViewMode));
+  }, [preferences.defaultViewMode]);
+
+  useEffect(() => {
+    setFilterMode(prev => {
+      const nextValue = preferences.defaultFilterMode;
+      if (prev === nextValue) return prev;
+      return nextValue;
+    });
+  }, [preferences.defaultFilterMode]);
 
   const filterContext = useMemo(() => {
     const activeOption = filterMode === "all" ? null : OPTION_MAP[filterMode];
@@ -61,9 +79,8 @@ export const useBrowseControls = () => {
       filterButtonAriaLabel,
       filterButtonActive,
       isFilterMenuOpen,
-      isMusicFilterActive,
     };
-  }, [filterMode, isFilterMenuOpen, isMusicFilterActive]);
+  }, [filterMode, isFilterMenuOpen]);
 
   const handleTabChange = useCallback((tabId: string) => {
     if (tabId !== "browse") {

@@ -6,6 +6,16 @@
   color-scheme: dark;
 }
 
+@layer base {
+  html {
+    @apply overflow-x-hidden;
+  }
+
+  body {
+    @apply overflow-x-hidden;
+  }
+}
+
 button {
   @apply px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 transition shadow;
 }

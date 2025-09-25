@@ -63,12 +63,14 @@ export const useServers = () => {
         throw new Error("Nostr context unavailable");
       }
       await ndk.connect().catch(() => undefined);
-      const events = await ndk.fetchEvents({
+      const events = (await ndk.fetchEvents({
         authors: [pubkey],
         kinds: [USER_BLOSSOM_SERVER_LIST_KIND],
-      });
+      })) as Set<NDKEvent>;
       if (events.size === 0) return [];
-      const newest = Array.from(events).sort((a, b) => (b.created_at || 0) - (a.created_at || 0))[0];
+      const eventsArray = Array.from(events) as NDKEvent[];
+      eventsArray.sort((a, b) => (b.created_at ?? 0) - (a.created_at ?? 0));
+      const newest = eventsArray[0];
       if (!newest) return [];
       return parseServerTags(newest);
     },

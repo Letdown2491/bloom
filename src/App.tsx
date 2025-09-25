@@ -1,16 +1,29 @@
 import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { NDKEvent, NDKPublishError, NDKRelaySet } from "@nostr-dev-kit/ndk";
+import { useQueryClient } from "@tanstack/react-query";
+
 import { useNdk, useCurrentPubkey } from "./context/NdkContext";
 import { useServers, ManagedServer, sortServersByName } from "./hooks/useServers";
-import { useServerData } from "./hooks/useServerData";
-import { ShareComposer, type ShareCompletion, type SharePayload } from "./components/ShareComposer";
-import type { BlobReplicaSummary } from "./components/BlobList";
-import type { TransferState } from "./components/UploadPanel";
-import { BrowseContent } from "./features/browse/BrowseContent";
-import { TransferContent } from "./features/transfer/TransferContent";
+import { usePreferredRelays } from "./hooks/usePreferredRelays";
+import { useAliasSync } from "./hooks/useAliasSync";
+import { useSelection } from "./features/selection/SelectionContext";
+import { useShareWorkflow } from "./features/share/useShareWorkflow";
+import { useAudio } from "./context/AudioContext";
+import { useUserPreferences } from "./context/UserPreferencesContext";
 
-const UploadPanelLazy = React.lazy(() =>
-  import("./components/UploadPanel").then(module => ({ default: module.UploadPanel }))
+import type { ShareCompletion, SharePayload } from "./components/ShareComposer";
+import type { BlossomBlob } from "./lib/blossomClient";
+import type { StatusMessageTone } from "./types/status";
+import type { TabId } from "./types/tabs";
+import type { SyncStateSnapshot } from "./features/workspace/TransferTabContainer";
+import type { FilterMode } from "./types/filter";
+
+import { prettyBytes } from "./utils/format";
+import { deriveServerNameFromUrl } from "./utils/serverName";
+
+import { HomeIcon, TransferIcon, UploadIcon } from "./components/icons";
+
+const WorkspaceLazy = React.lazy(() =>
+  import("./features/workspace/Workspace").then(module => ({ default: module.Workspace }))
 );
 
 const ServerListLazy = React.lazy(() =>
@@ -20,117 +33,37 @@ const ServerListLazy = React.lazy(() =>
 const RelayListLazy = React.lazy(() =>
   import("./components/RelayList").then(module => ({ default: module.RelayList }))
 );
-import { useAudio, type Track as AudioTrack } from "./context/AudioContext";
-import {
-  deleteUserBlob,
-  mirrorBlobToServer,
-  buildAuthorizationHeader,
-  uploadBlobToServer,
-  type UploadStreamSource,
-} from "./lib/blossomClient";
-import { deleteNip96File, uploadBlobToNip96 } from "./lib/nip96Client";
-import { deleteSatelliteFile, uploadBlobToSatellite } from "./lib/satelliteClient";
-import { buildNip98AuthHeader } from "./lib/nip98";
-import { useQueryClient } from "@tanstack/react-query";
-import type { BlossomBlob } from "./lib/blossomClient";
-import { prettyBytes } from "./utils/format";
-import { deriveServerNameFromUrl } from "./utils/serverName";
-import { usePreferredRelays } from "./hooks/usePreferredRelays";
-import { useAliasSync } from "./hooks/useAliasSync";
-import { buildNip94EventTemplate } from "./lib/nip94";
-import { BloomHttpError } from "./lib/httpService";
-import {
-  applyAliasUpdate,
-  getStoredAudioMetadata,
-  rememberAudioMetadata,
-  type BlobAudioMetadata,
-} from "./utils/blobMetadataStore";
-import { EditDialog, type EditDialogAudioFields } from "./components/RenameDialog";
-import {
-  DocumentIcon,
-  FilterIcon,
-  GridIcon,
-  HomeIcon,
-  ImageIcon,
-  ListIcon,
-  MusicIcon,
-  NextIcon,
-  PauseIcon,
-  PlayIcon,
-  PreviousIcon,
-  RepeatIcon,
-  RepeatOneIcon,
-  StopIcon,
-  TransferIcon,
-  UploadIcon,
-  VideoIcon,
-} from "./components/icons";
-import { AudioVisualizer } from "./components/AudioVisualizer";
-import { useSelection } from "./features/selection/SelectionContext";
-import { useShareWorkflow } from "./features/share/useShareWorkflow";
-import { useBrowseControls, type FilterMode } from "./features/browse/useBrowseControls";
 
-type TabId = "browse" | "upload" | "servers" | "relays" | "transfer" | "share";
+const ShareComposerLazy = React.lazy(() =>
+  import("./features/share/ShareComposerPanel").then(module => ({ default: module.ShareComposerPanel }))
+);
 
-type StatusMessageTone = "success" | "info" | "error";
+const ConnectSignerDialogLazy = React.lazy(() =>
+  import("./features/nip46/ConnectSignerDialog").then(module => ({ default: module.ConnectSignerDialog }))
+);
 
-type FilterOption = {
-  id: Exclude<FilterMode, "all">;
-  label: string;
-  icon: React.ComponentType<{ size?: number; className?: string }>;
-};
+const RenameDialogLazy = React.lazy(() =>
+  import("./features/rename/RenameDialog").then(module => ({ default: module.RenameDialog }))
+);
+
+const AudioPlayerCardLazy = React.lazy(() =>
+  import("./features/browse/BrowseTab").then(module => ({ default: module.AudioPlayerCard }))
+);
+
+const SettingsPanelLazy = React.lazy(() =>
+  import("./features/settings/SettingsPanel").then(module => ({ default: module.SettingsPanel }))
+);
 
 const NAV_TABS = [
   { id: "browse" as const, label: "Home", icon: HomeIcon },
   { id: "upload" as const, label: "Upload", icon: UploadIcon },
 ];
 
-const FILTER_OPTIONS: FilterOption[] = [
-  { id: "music", label: "Music", icon: MusicIcon },
-  { id: "documents", label: "Documents", icon: DocumentIcon },
-  { id: "images", label: "Images", icon: ImageIcon },
-  { id: "pdfs", label: "PDFs", icon: DocumentIcon },
-  { id: "videos", label: "Videos", icon: VideoIcon },
-];
-
 const ALL_SERVERS_VALUE = "__all__";
 
-const emptyAudioFields = (): EditDialogAudioFields => ({
-  title: "",
-  artist: "",
-  album: "",
-  trackNumber: "",
-  trackTotal: "",
-  durationSeconds: "",
-  genre: "",
-  year: "",
-});
-
-const computeMusicAlias = (titleInput: string, artistInput: string) => {
-  const title = titleInput.trim();
-  const artist = artistInput.trim();
-  if (artist && title) return `${artist} - ${title}`;
-  return title || artist;
-};
-
-const parseMusicAlias = (value?: string | null) => {
-  if (!value) return { artist: "", title: "" };
-  const trimmed = value.trim();
-  if (!trimmed) return { artist: "", title: "" };
-  const separatorIndex = trimmed.indexOf(" - ");
-  if (separatorIndex === -1) return { artist: "", title: trimmed };
-  const artist = trimmed.slice(0, separatorIndex).trim();
-  const title = trimmed.slice(separatorIndex + 3).trim();
-  return { artist, title: title || trimmed };
-};
-
-const parsePositiveIntegerString = (value: string) => {
-  const trimmed = value.trim();
-  if (!trimmed) return undefined;
-  const parsed = Number(trimmed);
-  if (!Number.isFinite(parsed)) return undefined;
-  const rounded = Math.round(parsed);
-  return rounded > 0 ? rounded : undefined;
+type StatusMetrics = {
+  count: number;
+  size: number;
 };
 
 const normalizeManagedServer = (server: ManagedServer): ManagedServer => {
@@ -165,175 +98,34 @@ const validateManagedServers = (servers: ManagedServer[]): string | null => {
   return null;
 };
 
-const MUSIC_EXTENSION_REGEX =
-  /\.(mp3|wav|ogg|oga|flac|aac|m4a|weba|webm|alac|aiff|aif|wma|mid|midi|amr|opus)(?:\?|#|$)/;
-
-const ADDITIONAL_AUDIO_MIME_TYPES = new Set([
-  "application/ogg",
-  "application/x-ogg",
-  "application/flac",
-  "application/x-flac",
-]);
-
-const IMAGE_EXTENSION_REGEX = /\.(png|jpe?g|gif|webp|bmp|svg|heic|heif|avif)(?:\?|#|$)/;
-const VIDEO_EXTENSION_REGEX = /\.(mp4|mov|webm|mkv|avi|hevc|m4v|mpg|mpeg)(?:\?|#|$)/;
-const PDF_EXTENSION_REGEX = /\.pdf(?:\?|#|$)/;
-
-const ADDITIONAL_VIDEO_MIME_TYPES = new Set([
-  "application/x-matroska",
-  "video/x-matroska",
-  "application/vnd.apple.mpegurl",
-  "application/dash+xml",
-]);
-
-const normalizeMime = (value?: string) => value?.split(";")[0]?.trim().toLowerCase() ?? "";
-
-const matchesExtension = (value: string | undefined, regex: RegExp) => {
-  if (!value) return false;
-  return regex.test(value.toLowerCase());
-};
-
-const isImageBlob = (blob: BlossomBlob) => {
-  const rawType = normalizeMime(blob.type);
-  if (rawType.startsWith("image/")) return true;
-  if (matchesExtension(blob.name, IMAGE_EXTENSION_REGEX)) return true;
-  if (matchesExtension(blob.url, IMAGE_EXTENSION_REGEX)) return true;
-  return false;
-};
-
-const isVideoBlob = (blob: BlossomBlob) => {
-  const rawType = normalizeMime(blob.type);
-  if (rawType.startsWith("video/")) return true;
-  if (ADDITIONAL_VIDEO_MIME_TYPES.has(rawType)) return true;
-  if (matchesExtension(blob.name, VIDEO_EXTENSION_REGEX)) return true;
-  if (matchesExtension(blob.url, VIDEO_EXTENSION_REGEX)) return true;
-  return false;
-};
-
-const isPdfBlob = (blob: BlossomBlob) => {
-  const rawType = normalizeMime(blob.type);
-  if (rawType === "application/pdf") return true;
-  if (matchesExtension(blob.name, PDF_EXTENSION_REGEX)) return true;
-  if (matchesExtension(blob.url, PDF_EXTENSION_REGEX)) return true;
-  return false;
-};
-
-const isMusicBlob = (blob: BlossomBlob) => {
-  const rawType = normalizeMime(blob.type);
-  if (rawType) {
-    if (rawType.startsWith("audio/")) return true;
-    if (ADDITIONAL_AUDIO_MIME_TYPES.has(rawType)) return true;
-  }
-
-  if (matchesExtension(blob.name, MUSIC_EXTENSION_REGEX)) return true;
-  if (matchesExtension(blob.url, MUSIC_EXTENSION_REGEX)) return true;
-
-  return false;
-};
-
-const matchesFilter = (blob: BlossomBlob, filter: FilterMode) => {
-  switch (filter) {
-    case "music":
-      return isMusicBlob(blob);
-    case "images":
-      return isImageBlob(blob);
-    case "videos":
-      return isVideoBlob(blob);
-    case "pdfs":
-      return isPdfBlob(blob);
-    case "documents":
-      return !isMusicBlob(blob) && !isImageBlob(blob) && !isVideoBlob(blob) && !isPdfBlob(blob);
-    case "all":
-    default:
-      return true;
-  }
-};
-
-const deriveTrackTitle = (blob: BlossomBlob) => {
-  const explicit = blob.name?.trim();
-  if (explicit) return explicit;
-  if (blob.url) {
-    const segments = blob.url.split("/");
-    const tail = segments[segments.length - 1];
-    if (tail) {
-      try {
-        const decoded = decodeURIComponent(tail);
-        if (decoded) return decoded;
-      } catch {
-        return tail;
-      }
-      return tail;
-    }
-  }
-  return `${blob.sha256.slice(0, 12)}…`;
-};
-
-const buildAudioTrack = (blob: BlossomBlob): AudioTrack | null => {
-  if (!blob.url) return null;
-  return {
-    id: blob.sha256,
-    url: blob.url,
-    title: deriveTrackTitle(blob),
-  };
-};
-
-const formatTime = (value: number) => {
-  const total = Math.max(0, Math.floor(value || 0));
-  const minutes = Math.floor(total / 60);
-  const seconds = total % 60;
-  return `${minutes}:${seconds.toString().padStart(2, "0")}`;
-};
-
 export default function App() {
-  const { connect, disconnect, user, signer, signEventTemplate, ndk } = useNdk();
-  const pubkey = useCurrentPubkey();
   const queryClient = useQueryClient();
+  const { connect, disconnect, user, signer, ndk } = useNdk();
+  const pubkey = useCurrentPubkey();
+  const { servers, saveServers, saving } = useServers();
+  const {
+    preferences,
+    setDefaultServerUrl,
+    setDefaultViewMode,
+    setDefaultFilterMode,
+    setShowGridPreviews,
+    setShowListPreviews,
+  } = useUserPreferences();
   const { effectiveRelays } = usePreferredRelays();
   useAliasSync(effectiveRelays, Boolean(pubkey));
 
-  const { servers, saveServers, saving } = useServers();
   const [localServers, setLocalServers] = useState<ManagedServer[]>(servers);
-  const [selectedServer, setSelectedServer] = useState<string | null>(servers[0]?.url ?? null);
-  const [tab, setTab] = useState<TabId>("browse");
-  const { selected: selectedBlobs, toggle: toggleBlob, selectMany: selectManyBlobs, clear: clearSelection } = useSelection();
-  const {
-    viewMode,
-    setViewMode,
-    filterMode,
-    filterButtonLabel,
-    filterButtonAriaLabel,
-    filterButtonActive,
-    isFilterMenuOpen,
-    isMusicFilterActive,
-    toggleFilterMenu,
-    selectFilter,
-    closeFilterMenu,
-    handleTabChange,
-  } = useBrowseControls();
-  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
-  const [statusMessage, setStatusMessage] = useState<string | null>(null);
-  const [statusMessageTone, setStatusMessageTone] = useState<StatusMessageTone>("info");
-  const statusMessageTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const syncQueueRef = useRef<Set<string>>(new Set());
-  const nextSyncAttemptRef = useRef<Map<string, number>>(new Map());
-  const unsupportedMirrorTargetsRef = useRef<Set<string>>(new Set());
-  const unauthorizedSyncTargetsRef = useRef<Set<string>>(new Set());
-  const blockedSyncTargetsRef = useRef<Set<string>>(new Set());
-  const [syncTransfers, setSyncTransfers] = useState<TransferState[]>([]);
-  const [autoSyncedServers, setAutoSyncedServers] = useState<string[]>([]);
-  const [syncRunToken, setSyncRunToken] = useState(0);
-  const [syncStatus, setSyncStatus] = useState<{ state: "idle" | "syncing" | "synced" | "error"; progress: number }>({
-    state: "idle",
-    progress: 0,
+  const [selectedServer, setSelectedServer] = useState<string | null>(() => {
+    if (preferences.defaultServerUrl) {
+      return preferences.defaultServerUrl;
+    }
+    return servers[0]?.url ?? null;
   });
-  const [manualTransfers, setManualTransfers] = useState<TransferState[]>([]);
-  const [transferTargets, setTransferTargets] = useState<string[]>([]);
-  const [transferBusy, setTransferBusy] = useState(false);
-  const [transferFeedback, setTransferFeedback] = useState<string | null>(null);
-  const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
-  const userMenuRef = useRef<HTMLDivElement | null>(null);
-  const filterMenuRef = useRef<HTMLDivElement | null>(null);
-  const mainWidgetRef = useRef<HTMLDivElement | null>(null);
+  const [tab, setTab] = useState<TabId>("browse");
+  const [browseHeaderControls, setBrowseHeaderControls] = useState<React.ReactNode | null>(null);
+  const [activeBrowseFilter, setActiveBrowseFilter] = useState<FilterMode>(preferences.defaultFilterMode);
+
+  const { selected: selectedBlobs } = useSelection();
   const {
     shareState,
     openShareForPayload,
@@ -341,170 +133,86 @@ export default function App() {
     handleShareComplete: completeShareInternal,
     clearShareState,
   } = useShareWorkflow();
-  const [renameTarget, setRenameTarget] = useState<BlossomBlob | null>(null);
-  const [renameValue, setRenameValue] = useState("");
-  const [renameBusy, setRenameBusy] = useState(false);
-  const [renameError, setRenameError] = useState<string | null>(null);
-  const [renameIsMusic, setRenameIsMusic] = useState(false);
-  const [renameAudioFields, setRenameAudioFields] = useState<EditDialogAudioFields>(emptyAudioFields);
 
-  const syncEnabledServers = useMemo(() => localServers.filter(server => server.sync), [localServers]);
-  const syncEnabledServerUrls = useMemo(() => syncEnabledServers.map(server => server.url), [syncEnabledServers]);
-  const autoSyncedSet = useMemo(() => new Set(autoSyncedServers), [autoSyncedServers]);
-  const syncAutoReady = syncEnabledServerUrls.length >= 2 && syncEnabledServerUrls.every(url => autoSyncedSet.has(url));
-  const syncEnabledUrlSet = useMemo(() => new Set(syncEnabledServerUrls), [syncEnabledServerUrls]);
-  const serverNameByUrl = useMemo(() => {
-    return new Map(localServers.map(server => [server.url, server.name]));
-  }, [localServers]);
-  const eagerServerUrls = useMemo(() => {
-    const urls = new Set<string>();
-    if (selectedServer) {
-      urls.add(selectedServer);
-    } else {
-      localServers.forEach(server => urls.add(server.url));
-    }
-    syncEnabledServers.forEach(server => urls.add(server.url));
-    return Array.from(urls);
-  }, [localServers, selectedServer, syncEnabledServers]);
-  const serverValidationError = useMemo(() => validateManagedServers(localServers), [localServers]);
-  const { snapshots, distribution, aggregated } = useServerData(localServers, {
-    prioritizedServerUrls: eagerServerUrls,
-    foregroundServerUrl: selectedServer ?? localServers[0]?.url ?? null,
+  const audio = useAudio();
+
+  const handleFilterModeChange = useCallback((mode: FilterMode) => {
+    setActiveBrowseFilter(prev => (prev === mode ? prev : mode));
+  }, []);
+
+  const [statusMetrics, setStatusMetrics] = useState<StatusMetrics>({ count: 0, size: 0 });
+  const [syncSnapshot, setSyncSnapshot] = useState<SyncStateSnapshot>({
+    syncStatus: { state: "idle", progress: 0 },
+    syncAutoReady: false,
+    allLinkedServersSynced: true,
   });
-  const blobReplicaInfo = useMemo<Map<string, BlobReplicaSummary>>(() => {
-    const map = new Map<string, BlobReplicaSummary>();
-    Object.entries(distribution).forEach(([sha, entry]) => {
-      const servers = entry.servers.map(url => {
-        const name = serverNameByUrl.get(url) || deriveServerNameFromUrl(url) || url;
-        return { url, name };
-      });
-      map.set(sha, { count: servers.length, servers });
-    });
-    return map;
-  }, [distribution, serverNameByUrl]);
-  const selectedBlobSources = useMemo(() => {
-    const map = new Map<string, { blob: BlossomBlob; server: ManagedServer }>();
-    snapshots.forEach(snapshot => {
-      if (!snapshot.blobs.length) return;
-      snapshot.blobs.forEach(blob => {
-        if (!selectedBlobs.has(blob.sha256)) return;
-        if (selectedServer) {
-          if (snapshot.server.url === selectedServer && !map.has(blob.sha256)) {
-            map.set(blob.sha256, { blob, server: snapshot.server });
-          }
-          return;
-        }
-        if (!map.has(blob.sha256)) {
-          map.set(blob.sha256, { blob, server: snapshot.server });
-        }
-      });
-    });
-    return map;
-  }, [snapshots, selectedBlobs, selectedServer]);
-  const selectedBlobItems = useMemo(() => Array.from(selectedBlobSources.values()), [selectedBlobSources]);
-  const selectedBlobTotalSize = useMemo(
-    () => selectedBlobItems.reduce((total, item) => total + (item.blob.size || 0), 0),
-    [selectedBlobItems]
+  const syncStarterRef = useRef<(() => void) | null>(null);
+  const pendingSyncRef = useRef(false);
+
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [statusMessageTone, setStatusMessageTone] = useState<StatusMessageTone>("info");
+  const statusMessageTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+  const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
+  const [connectSignerOpen, setConnectSignerOpen] = useState(false);
+  const [renameTarget, setRenameTarget] = useState<BlossomBlob | null>(null);
+
+  const userMenuRef = useRef<HTMLDivElement | null>(null);
+  const mainWidgetRef = useRef<HTMLDivElement | null>(null);
+
+  const syncEnabledServerUrls = useMemo(
+    () => localServers.filter(server => server.sync).map(server => server.url),
+    [localServers]
   );
-  const sourceServerUrls = useMemo(() => {
-    const set = new Set<string>();
-    selectedBlobItems.forEach(item => {
-      set.add(item.server.url);
-    });
-    return set;
-  }, [selectedBlobItems]);
-  const missingSourceCount = useMemo(() => {
-    if (selectedBlobs.size === selectedBlobSources.size) return 0;
-    return selectedBlobs.size - selectedBlobSources.size;
-  }, [selectedBlobs, selectedBlobSources]);
-  const allLinkedServersSynced = useMemo(() => {
-    if (syncEnabledServerUrls.length < 2) return true;
-    if (syncEnabledUrlSet.size < 2) return true;
-    for (const entry of Object.values(distribution)) {
-      const presentCount = entry.servers.reduce((acc, url) => acc + (syncEnabledUrlSet.has(url) ? 1 : 0), 0);
-      if (presentCount > 0 && presentCount < syncEnabledUrlSet.size) {
-        return false;
-      }
-    }
-    return true;
-  }, [distribution, syncEnabledServerUrls, syncEnabledUrlSet]);
-  const transferFeedbackTone = useMemo(() => {
-    if (!transferFeedback) return "text-slate-400";
-    const normalized = transferFeedback.toLowerCase();
-    if (normalized.includes("issue") || normalized.includes("try again")) return "text-amber-300";
-    if (normalized.includes("failed") || normalized.includes("unable") || normalized.includes("error")) return "text-red-400";
-    return "text-emerald-300";
-  }, [transferFeedback]);
-  const transferActivity = useMemo(() => manualTransfers.slice().reverse(), [manualTransfers]);
+
+  const serverValidationError = useMemo(() => validateManagedServers(localServers), [localServers]);
+
   const userInitials = useMemo(() => {
     const npub = user?.npub;
     if (!npub) return "??";
     return npub.slice(0, 2).toUpperCase();
   }, [user]);
 
-  const toggleUserMenu = useCallback(() => {
-    setIsUserMenuOpen(prev => !prev);
-  }, [setIsUserMenuOpen]);
-
-  const handleSelectServers = useCallback(() => {
-    setTab("servers");
-    setIsUserMenuOpen(false);
-  }, [setIsUserMenuOpen, setTab]);
-
-  const handleSelectRelays = useCallback(() => {
-    setTab("relays");
-    setIsUserMenuOpen(false);
-  }, [setIsUserMenuOpen, setTab]);
-
-  const handleDisconnectClick = useCallback(() => {
-    setIsUserMenuOpen(false);
-    disconnect();
-  }, [disconnect, setIsUserMenuOpen]);
+  const syncStatus = syncSnapshot.syncStatus;
+  const syncBusy = syncStatus.state === "syncing";
+  const syncButtonDisabled =
+    syncEnabledServerUrls.length < 2 ||
+    syncBusy ||
+    (syncSnapshot.syncAutoReady && syncSnapshot.allLinkedServersSynced && syncStatus.state !== "error");
 
   useEffect(() => {
     setLocalServers(servers);
-    setSelectedServer(prev => {
-      if (!prev) return prev;
-      return servers.some(server => server.url === prev) ? prev : servers[0]?.url ?? null;
-    });
   }, [servers]);
 
   useEffect(() => {
-    setAutoSyncedServers(prev => {
-      if (prev.length === 0) return prev;
-      const filtered = prev.filter(url => syncEnabledServerUrls.includes(url));
-      if (filtered.length === prev.length) return prev;
-      return filtered;
+    setSelectedServer(prev => {
+      if (prev && servers.some(server => server.url === prev)) {
+        return prev;
+      }
+      if (preferences.defaultServerUrl && servers.some(server => server.url === preferences.defaultServerUrl)) {
+        return preferences.defaultServerUrl;
+      }
+      return servers[0]?.url ?? null;
     });
-    if (blockedSyncTargetsRef.current.size > 0) {
-      const allowed = new Set(syncEnabledServerUrls);
-      const stale: string[] = [];
-      blockedSyncTargetsRef.current.forEach(url => {
-        if (!allowed.has(url)) {
-          stale.push(url);
-        }
-      });
-      stale.forEach(url => blockedSyncTargetsRef.current.delete(url));
+  }, [servers, preferences.defaultServerUrl]);
+
+  useEffect(() => {
+    if (!preferences.defaultServerUrl) return;
+    if (!servers.some(server => server.url === preferences.defaultServerUrl)) {
+      setDefaultServerUrl(null);
     }
-  }, [syncEnabledServerUrls]);
+  }, [servers, preferences.defaultServerUrl, setDefaultServerUrl]);
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    const params = new URLSearchParams(window.location.search);
-    const key = params.get("share");
-    if (!key) return;
-    openShareByKey(key);
-    setTab("share");
-    params.delete("share");
-    const nextSearch = params.toString();
-    const nextUrl = `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ""}${window.location.hash}`;
-    window.history.replaceState({}, "", nextUrl);
-  }, [openShareByKey, setTab]);
+    setActiveBrowseFilter(preferences.defaultFilterMode);
+  }, [preferences.defaultFilterMode]);
 
-  // Auto-sync blobs across all servers marked for synchronization.
   useEffect(() => {
-    clearSelection();
-  }, [clearSelection, selectedServer]);
+    if (tab === "transfer" && selectedBlobs.size === 0) {
+      setTab("upload");
+    }
+  }, [selectedBlobs.size, tab]);
 
   useEffect(() => {
     if (!isUserMenuOpen) return;
@@ -536,49 +244,10 @@ export default function App() {
   }, [isUserMenuOpen]);
 
   useEffect(() => {
-    if (!isFilterMenuOpen) return;
-    const handlePointerDown = (event: PointerEvent) => {
-      if (!filterMenuRef.current || filterMenuRef.current.contains(event.target as Node)) {
-        return;
-      }
-      closeFilterMenu();
-    };
-    const handleFocusIn = (event: FocusEvent) => {
-      if (!filterMenuRef.current || filterMenuRef.current.contains(event.target as Node)) {
-        return;
-      }
-      closeFilterMenu();
-    };
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        closeFilterMenu();
-      }
-    };
-    document.addEventListener("pointerdown", handlePointerDown, true);
-    document.addEventListener("focusin", handleFocusIn);
-    document.addEventListener("keydown", handleKeyDown);
-    return () => {
-      document.removeEventListener("pointerdown", handlePointerDown, true);
-      document.removeEventListener("focusin", handleFocusIn);
-      document.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [closeFilterMenu, isFilterMenuOpen]);
-
-  useEffect(() => {
-    handleTabChange(tab);
-  }, [handleTabChange, tab]);
-
-  useEffect(() => {
-    if (tab === "transfer" && selectedBlobs.size === 0) {
-      setTab("upload");
-    }
-  }, [selectedBlobs.size, tab]);
-
-  useEffect(() => {
     if (!user) {
       setIsUserMenuOpen(false);
     }
-  }, [setIsUserMenuOpen, user]);
+  }, [user]);
 
   const showAuthPrompt = !user;
 
@@ -598,44 +267,17 @@ export default function App() {
   }, [showAuthPrompt]);
 
   useEffect(() => {
-    if (tab !== "transfer") return;
-    setTransferTargets(prev => {
-      const validTargetUrls = localServers.map(server => server.url);
-      const filtered = prev.filter(url => validTargetUrls.includes(url));
-
-      let next: string[] = [];
-
-      if (localServers.length <= 1) {
-        next = [];
-      } else if (localServers.length === 2) {
-        const fallback = localServers.find(server => server.url !== selectedServer) ?? localServers[0];
-        next = fallback?.url ? [fallback.url] : [];
-      } else if (filtered.length > 0) {
-        next = filtered;
-      } else {
-        const preferred = localServers.filter(server => !sourceServerUrls.has(server.url));
-        const firstPreferred = preferred[0];
-        if (firstPreferred?.url) {
-          next = [firstPreferred.url];
-        } else if (validTargetUrls[0]) {
-          next = [validTargetUrls[0]];
-        } else {
-          next = [];
-        }
-      }
-
-      const sameLength = next.length === prev.length;
-      const sameOrder = sameLength && next.every((url, index) => url === prev[index]);
-      return sameOrder ? prev : next;
-    });
-  }, [localServers, selectedServer, sourceServerUrls, tab]);
-
-  useEffect(() => {
-    if (tab !== "transfer") {
-      setTransferBusy(false);
-      setTransferFeedback(null);
-    }
-  }, [tab]);
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const key = params.get("share");
+    if (!key) return;
+    openShareByKey(key);
+    setTab("share");
+    params.delete("share");
+    const nextSearch = params.toString();
+    const nextUrl = `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ""}${window.location.hash}`;
+    window.history.replaceState({}, "", nextUrl);
+  }, [openShareByKey]);
 
   useEffect(() => {
     return () => {
@@ -644,6 +286,33 @@ export default function App() {
       }
     };
   }, []);
+
+  useEffect(() => {
+    let ignore = false;
+    async function loadProfile() {
+      if (!ndk || !user?.pubkey) {
+        setAvatarUrl(null);
+        return;
+      }
+      try {
+        const evt = await ndk.fetchEvent({ kinds: [0], authors: [user.pubkey] });
+        if (evt?.content && !ignore) {
+          try {
+            const metadata = JSON.parse(evt.content);
+            setAvatarUrl(metadata.picture || null);
+          } catch {
+            if (!ignore) setAvatarUrl(null);
+          }
+        }
+      } catch {
+        if (!ignore) setAvatarUrl(null);
+      }
+    }
+    loadProfile();
+    return () => {
+      ignore = true;
+    };
+  }, [ndk, user?.pubkey]);
 
   const showStatusMessage = useCallback(
     (message: string, tone: StatusMessageTone = "info", duration = 5000) => {
@@ -664,759 +333,67 @@ export default function App() {
     []
   );
 
-  const handleRequestRename = useCallback(
-    (blob: BlossomBlob) => {
-      const music = isMusicBlob(blob);
-      setRenameTarget(blob);
-      setRenameIsMusic(music);
-      setRenameError(null);
+  const handleRequestRename = useCallback((blob: BlossomBlob) => {
+    setRenameTarget(blob);
+  }, []);
 
-      if (music) {
-        const storedAudio = getStoredAudioMetadata(blob.serverUrl, blob.sha256) ?? getStoredAudioMetadata(undefined, blob.sha256);
-        const parsed = parseMusicAlias(blob.name || blob.url || blob.sha256);
-        setRenameAudioFields(() => {
-          const next = emptyAudioFields();
-          next.title = storedAudio?.title || parsed.title || "";
-          next.artist = storedAudio?.artist || parsed.artist || "";
-          next.album = storedAudio?.album || "";
-          next.trackNumber = storedAudio?.trackNumber ? String(storedAudio.trackNumber) : "";
-          next.trackTotal = storedAudio?.trackTotal ? String(storedAudio.trackTotal) : "";
-          next.durationSeconds = storedAudio?.durationSeconds ? String(storedAudio.durationSeconds) : "";
-          next.genre = storedAudio?.genre || "";
-          next.year = storedAudio?.year ? String(storedAudio.year) : "";
-          return next;
-        });
-        setRenameValue(
-          computeMusicAlias(storedAudio?.title || parsed.title || "", storedAudio?.artist || parsed.artist || "") ||
-            (storedAudio?.title || parsed.title || "")
-        );
-      } else {
-        setRenameAudioFields(emptyAudioFields());
-        setRenameValue(blob.name ?? "");
-      }
-    },
-    []
-  );
-
-  const handleRenameCancel = useCallback(() => {
-    if (renameBusy) return;
+  const handleRenameDialogClose = useCallback(() => {
     setRenameTarget(null);
-    setRenameValue("");
-    setRenameError(null);
-    setRenameIsMusic(false);
-    setRenameAudioFields(emptyAudioFields());
-  }, [renameBusy]);
+  }, []);
 
-  const handleRenameValueChange = useCallback(
-    (next: string) => {
-      if (renameIsMusic) return;
-      setRenameValue(next);
-      if (renameError) setRenameError(null);
+  const handleSyncSelectedServers = useCallback(() => {
+    if (syncEnabledServerUrls.length < 2) {
+      showStatusMessage("Enable sync on at least two servers to start.", "info", 3000);
+      return;
+    }
+    pendingSyncRef.current = true;
+    setTab("transfer");
+    if (syncStarterRef.current) {
+      const runner = syncStarterRef.current;
+      pendingSyncRef.current = false;
+      runner();
+    }
+  }, [showStatusMessage, syncEnabledServerUrls.length]);
+
+  const handleSetDefaultServer = useCallback(
+    (url: string | null) => {
+      setDefaultServerUrl(url);
+      if (url) {
+        setSelectedServer(url);
+      }
     },
-    [renameError, renameIsMusic]
+    [setDefaultServerUrl]
   );
 
-  const handleRenameAudioFieldChange = useCallback(
-    (field: keyof EditDialogAudioFields, value: string) => {
-      setRenameAudioFields(prev => {
-        const next = { ...(prev ?? emptyAudioFields()) };
-        next[field] = value;
-        if (field === "title" || field === "artist") {
-          setRenameValue(computeMusicAlias(next.title, next.artist));
-        }
-        return next;
-      });
-      if (renameError) setRenameError(null);
+  const handleSetDefaultViewMode = useCallback(
+    (mode: "grid" | "list") => {
+      setDefaultViewMode(mode);
     },
-    [renameError]
+    [setDefaultViewMode]
   );
 
-  const handleRenameSubmit = useCallback(async () => {
-    if (!renameTarget) return;
-    if (!ndk || !signer) {
-      showStatusMessage("Connect your signer to edit file details.", "error", 4000);
-      return;
-    }
-    const relays = effectiveRelays.filter(url => typeof url === "string" && url.trim().length > 0);
-    if (!relays.length) {
-      showStatusMessage("No relays available to publish the update.", "error", 4000);
-      return;
-    }
-
-    const isMusic = renameIsMusic && isMusicBlob(renameTarget);
-    let aliasForEvent: string;
-    let aliasForStore: string | null;
-    let extraTags: string[][] | undefined;
-    let audioMetadata: BlobAudioMetadata | null = null;
-
-    if (isMusic) {
-      const title = renameAudioFields.title.trim();
-      if (!title) {
-        setRenameError("Title is required for audio files.");
-        return;
-      }
-      const artist = renameAudioFields.artist.trim();
-      const album = renameAudioFields.album.trim();
-      const trackNumber = parsePositiveIntegerString(renameAudioFields.trackNumber);
-      const trackTotal = parsePositiveIntegerString(renameAudioFields.trackTotal);
-      const durationSeconds = parsePositiveIntegerString(renameAudioFields.durationSeconds);
-      const genre = renameAudioFields.genre.trim();
-      const year = parsePositiveIntegerString(renameAudioFields.year);
-
-      aliasForEvent = computeMusicAlias(title, artist) || title;
-      if (aliasForEvent.length > 120) {
-        setRenameError("Display name is too long (max 120 characters).");
-        return;
-      }
-      aliasForStore = aliasForEvent;
-
-      const tags: string[][] = [["title", title]];
-      const metadata: BlobAudioMetadata = { title };
-      if (artist) {
-        tags.push(["artist", artist]);
-        metadata.artist = artist;
-      }
-      if (album) {
-        tags.push(["album", album]);
-        metadata.album = album;
-      }
-      if (trackNumber) {
-        const trackValue = trackTotal ? `${trackNumber}/${trackTotal}` : String(trackNumber);
-        tags.push(["track", trackValue]);
-        metadata.trackNumber = trackNumber;
-        if (trackTotal) metadata.trackTotal = trackTotal;
-      } else if (trackTotal) {
-        metadata.trackTotal = trackTotal;
-      }
-      if (durationSeconds) {
-        tags.push(["duration", String(durationSeconds)]);
-        metadata.durationSeconds = durationSeconds;
-      }
-      if (genre) {
-        tags.push(["genre", genre]);
-        metadata.genre = genre;
-      }
-      if (year) {
-        tags.push(["year", String(year)]);
-        metadata.year = year;
-      }
-
-      extraTags = tags;
-      audioMetadata = metadata;
-    } else {
-      const trimmed = renameValue.trim();
-      const currentAlias = (renameTarget.name ?? "").trim();
-      if (trimmed === currentAlias) {
-        setRenameTarget(null);
-        setRenameValue("");
-        setRenameError(null);
-        setRenameIsMusic(false);
-        setRenameAudioFields(emptyAudioFields());
-        return;
-      }
-      if (trimmed.length > 120) {
-        setRenameError("Display name is too long (max 120 characters).");
-        return;
-      }
-      aliasForStore = trimmed.length > 0 ? trimmed : null;
-      aliasForEvent = aliasForStore ?? "";
-    }
-
-    setRenameBusy(true);
-    setRenameError(null);
-    try {
-      const template = buildNip94EventTemplate({
-        blob: renameTarget,
-        alias: aliasForEvent,
-        extraTags,
-      });
-      const event = new NDKEvent(ndk, template);
-      if (!event.created_at) {
-        event.created_at = Math.floor(Date.now() / 1000);
-      }
-      await event.sign();
-
-      let successes = 0;
-      let lastError: Error | null = null;
-      for (const relayUrl of relays) {
-        try {
-          const relaySet = NDKRelaySet.fromRelayUrls([relayUrl], ndk);
-          await event.publish(relaySet, 7000, 1);
-          successes += 1;
-        } catch (publishError) {
-          if (publishError instanceof NDKPublishError) {
-            lastError = new Error(publishError.relayErrors || publishError.message || "Update failed");
-          } else if (publishError instanceof Error) {
-            lastError = publishError;
-          } else {
-            lastError = new Error("Update failed");
-          }
-        }
-      }
-
-      if (successes === 0) {
-        throw lastError ?? new Error("No relays accepted the update.");
-      }
-
-      applyAliasUpdate(undefined, renameTarget.sha256, aliasForStore, event.created_at);
-      if (isMusic) {
-        rememberAudioMetadata(renameTarget.serverUrl, renameTarget.sha256, audioMetadata ?? null);
-      }
-      showStatusMessage("Details updated.", "success", 2500);
-      setRenameTarget(null);
-      setRenameValue("");
-      setRenameIsMusic(false);
-      setRenameAudioFields(emptyAudioFields());
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Update failed.";
-      setRenameError(message);
-      showStatusMessage(message, "error", 5000);
-    } finally {
-      setRenameBusy(false);
-    }
-  }, [
-    renameTarget,
-    ndk,
-    signer,
-    effectiveRelays,
-    renameValue,
-    renameIsMusic,
-    renameAudioFields,
-    showStatusMessage,
-  ]);
-
-  const createBlobStreamSource = useCallback(
-    (sourceBlob: BlossomBlob, sourceServer: ManagedServer): UploadStreamSource | null => {
-      if (!sourceBlob.url) return null;
-      const sourceRequiresAuth = sourceServer.type === "satellite" ? false : Boolean(sourceServer.requiresAuth);
-      if (sourceRequiresAuth && !signEventTemplate) return null;
-
-      const inferExtensionFromType = (type?: string) => {
-        if (!type) return undefined;
-        const [mime] = type.split(";");
-        if (!mime) return undefined;
-        const lookup: Record<string, string> = {
-          "image/png": "png",
-          "image/jpeg": "jpg",
-          "image/jpg": "jpg",
-          "image/gif": "gif",
-          "image/webp": "webp",
-          "image/bmp": "bmp",
-          "image/svg+xml": "svg",
-          "image/avif": "avif",
-          "image/heic": "heic",
-          "video/mp4": "mp4",
-          "video/quicktime": "mov",
-          "video/webm": "webm",
-          "video/x-matroska": "mkv",
-          "audio/mpeg": "mp3",
-          "audio/wav": "wav",
-          "audio/ogg": "ogg",
-          "application/pdf": "pdf",
-        };
-        const key = mime.trim().toLowerCase();
-        return lookup[key];
-      };
-
-      const extractExtensionFromPath = (value: string) => {
-        const match = value.match(/\.([a-zA-Z0-9]+)(?:\?|$)/);
-        return match ? match[1] : undefined;
-      };
-
-      const buildFileName = (fallbackHash: string) => {
-        const rawName = sourceBlob.name?.trim();
-        if (rawName && /\.[a-zA-Z0-9]{1,8}$/.test(rawName)) {
-          return rawName.replace(/[\\/]/g, "_");
-        }
-        if (rawName) {
-          const safeRaw = rawName.replace(/[\\/]/g, "_");
-          const inferredExt = inferExtensionFromType(sourceBlob.type);
-          if (inferredExt) return `${safeRaw}.${inferredExt}`;
-          return safeRaw;
-        }
-        let derived = fallbackHash;
-        const sourceUrl = sourceBlob.url!;
-        try {
-          const url = new URL(sourceUrl);
-          const tail = url.pathname.split("/").pop();
-          if (tail) derived = tail;
-        } catch (error) {
-          const tail = sourceUrl.split("/").pop();
-          if (tail) derived = tail;
-        }
-        derived = derived.replace(/[?#].*$/, "");
-        if (!/\.[a-zA-Z0-9]{1,8}$/.test(derived)) {
-          const urlExt = extractExtensionFromPath(sourceBlob.url!);
-          const typeExt = inferExtensionFromType(sourceBlob.type);
-          const extension = urlExt || typeExt;
-          if (extension) {
-            return `${derived}.${extension}`.replace(/[\\/]/g, "_");
-          }
-        }
-        return derived.replace(/[\\/]/g, "_");
-      };
-
-      const template = signEventTemplate;
-      const preferredType = sourceBlob.type || "application/octet-stream";
-      const size = typeof sourceBlob.size === "number" && Number.isFinite(sourceBlob.size)
-        ? Math.max(0, Math.round(sourceBlob.size))
-        : undefined;
-      const sourceUrl = sourceBlob.url;
-
-      const buildHeaders = async () => {
-        const headers: Record<string, string> = {};
-        if (sourceRequiresAuth && template) {
-          if (sourceServer.type === "blossom") {
-            let url: URL | null = null;
-            try {
-              url = new URL(sourceUrl);
-            } catch (error) {
-              url = null;
-            }
-            const auth = await buildAuthorizationHeader(template, "get", {
-              hash: sourceBlob.sha256,
-              serverUrl: sourceServer.url,
-              urlPath: url ? url.pathname + (url.search || "") : undefined,
-              expiresInSeconds: 300,
-            });
-            headers.Authorization = auth;
-          } else if (sourceServer.type === "nip96") {
-            headers.Authorization = await buildNip98AuthHeader(template, {
-              url: sourceUrl,
-              method: "GET",
-            });
-          }
-        }
-        return headers;
-      };
-
-      return {
-        kind: "stream",
-        fileName: buildFileName(sourceBlob.sha256),
-        contentType: preferredType,
-        size,
-        async createStream() {
-          const headers = await buildHeaders();
-          const response = await fetch(sourceUrl, { headers, mode: "cors" });
-          if (!response.ok) {
-            throw new Error(`Unable to fetch blob from source (${response.status})`);
-          }
-          if (!response.body) {
-            throw new Error("Source response does not support streaming");
-          }
-          return response.body;
-        },
-      };
+  const handleSetDefaultFilterMode = useCallback(
+    (mode: FilterMode) => {
+      if (preferences.defaultFilterMode === mode) return;
+      setDefaultFilterMode(mode);
+      setActiveBrowseFilter(mode);
     },
-    [signEventTemplate]
+    [preferences.defaultFilterMode, setDefaultFilterMode]
   );
 
-
-  useEffect(() => {
-    if (signer) {
-      unauthorizedSyncTargetsRef.current.clear();
-    }
-  }, [signer]);
-
-  useEffect(() => {
-    if (!syncAutoReady || syncEnabledServerUrls.length < 2) {
-      setSyncStatus({ state: "idle", progress: 0 });
-      return;
-    }
-    const activeTransfers = syncTransfers.filter(item => item.status === "uploading" || item.status === "success");
-    const uploading = syncTransfers.some(item => item.status === "uploading");
-    if (uploading && activeTransfers.length > 0) {
-      const totals = activeTransfers.reduce(
-        (acc, item) => {
-          const total = item.total || 0;
-          const transferred = item.status === "success" ? total : Math.min(total, item.transferred);
-          return {
-            transferred: acc.transferred + transferred,
-            total: acc.total + total,
-          };
-        },
-        { transferred: 0, total: 0 }
-      );
-      const progress = totals.total > 0 ? totals.transferred / totals.total : 0;
-      setSyncStatus({ state: "syncing", progress });
-      return;
-    }
-    if (syncTransfers.some(item => item.status === "error")) {
-      setSyncStatus({ state: "error", progress: 0 });
-      return;
-    }
-    if (allLinkedServersSynced) {
-      setSyncStatus({ state: "synced", progress: 1 });
-      return;
-    }
-    setSyncStatus({ state: "idle", progress: 0 });
-  }, [syncAutoReady, syncEnabledServerUrls.length, syncTransfers, allLinkedServersSynced]);
-
-  useEffect(() => {
-    if (syncEnabledServerUrls.length < 2) return;
-    if (!syncAutoReady) return;
-
-    let cancelled = false;
-    const syncUrlSet = new Set(syncEnabledServerUrls);
-
-    const run = async () => {
-      for (const target of syncEnabledServers) {
-        if (cancelled) break;
-        if (blockedSyncTargetsRef.current.has(target.url)) continue;
-        const targetSnapshot = snapshots.find(snapshot => snapshot.server.url === target.url);
-        if (!targetSnapshot || targetSnapshot.isLoading) continue;
-
-        const existing = new Set(targetSnapshot.blobs.map(blob => blob.sha256));
-
-        let skipRemainingForTarget = false;
-        for (const [sha, entry] of Object.entries(distribution)) {
-          if (cancelled || skipRemainingForTarget) break;
-          if (existing.has(sha)) continue;
-          if (!entry.servers.some(url => syncUrlSet.has(url) && url !== target.url)) continue;
-
-          const key = `${target.url}::${sha}`;
-          const nextAllowedAt = nextSyncAttemptRef.current.get(key) ?? 0;
-          if (Date.now() < nextAllowedAt) continue;
-          if (syncQueueRef.current.has(key)) continue;
-
-          const sourceUrl = entry.servers.find(url => url !== target.url && syncUrlSet.has(url));
-          if (!sourceUrl) continue;
-
-          const sourceSnapshot = snapshots.find(snapshot => snapshot.server.url === sourceUrl);
-          if (!sourceSnapshot || sourceSnapshot.isLoading) continue;
-
-          const sourceBlob = sourceSnapshot.blobs.find(blob => blob.sha256 === sha);
-          if (!sourceBlob || !sourceBlob.url) continue;
-
-          const targetNeedsSigner = target.type === "satellite" || Boolean(target.requiresAuth);
-          if (targetNeedsSigner && !signer) continue;
-          if (targetNeedsSigner && !signEventTemplate) continue;
-
-          if (target.type !== "blossom" && target.type !== "nip96" && target.type !== "satellite") continue;
-
-          const transferId = `sync-${target.url}-${sha}`;
-          const fileName = sourceBlob.name || sha;
-          const totalSize = sourceBlob.size && sourceBlob.size > 0 ? sourceBlob.size : 1;
-          const baseTransfer: TransferState = {
-            id: transferId,
-            serverUrl: target.url,
-            fileName,
-            transferred: 0,
-            total: totalSize,
-            status: "uploading",
-            kind: "sync",
-          };
-
-          if (unauthorizedSyncTargetsRef.current.has(target.url)) {
-            setSyncTransfers(prev => {
-              const filtered = prev.filter(item => item.id !== transferId);
-              return [
-                ...filtered,
-                { ...baseTransfer, status: "error", message: "Sync auth failed" },
-              ];
-            });
-            nextSyncAttemptRef.current.set(key, Date.now() + 30 * 60 * 1000);
-            continue;
-          }
-
-          syncQueueRef.current.add(key);
-          setSyncTransfers(prev => {
-            const filtered = prev.filter(item => item.id !== transferId);
-            const next = [...filtered, baseTransfer];
-            return next.slice(-40);
-          });
-          try {
-            let completed = false;
-            const targetRequiresAuth = target.type === "satellite" || Boolean(target.requiresAuth);
-            const mirrorUnsupported = unsupportedMirrorTargetsRef.current.has(target.url);
-            const uploadDirectlyToBlossom = async () => {
-              const streamSource = createBlobStreamSource(sourceBlob, sourceSnapshot.server);
-              if (!streamSource) {
-                nextSyncAttemptRef.current.set(key, Date.now() + 30 * 60 * 1000);
-                throw new Error("Unable to fetch blob content for sync");
-              }
-              const fallbackTotal = streamSource.size && streamSource.size > 0 ? streamSource.size : totalSize;
-              await uploadBlobToServer(
-                target.url,
-                streamSource,
-                targetRequiresAuth ? signEventTemplate : undefined,
-                targetRequiresAuth,
-                progress => {
-                  const totalProgress = progress.total && progress.total > 0 ? progress.total : fallbackTotal;
-                  const loadedRaw = typeof progress.loaded === "number" ? progress.loaded : 0;
-                  const loaded = Math.min(totalProgress, loadedRaw);
-                  setSyncTransfers(prev =>
-                    prev.map(item =>
-                      item.id === transferId
-                        ? {
-                            ...item,
-                            transferred: loaded,
-                            total: totalProgress,
-                          }
-                        : item
-                    )
-                  );
-                }
-              );
-              return fallbackTotal;
-            };
-            if (target.type === "blossom") {
-              if (!mirrorUnsupported) {
-                try {
-                  await mirrorBlobToServer(
-                    target.url,
-                    sourceBlob.url,
-                    targetRequiresAuth ? signEventTemplate : undefined,
-                    targetRequiresAuth,
-                    sourceBlob.sha256
-                  );
-                  completed = true;
-                } catch (error) {
-                  const message = error instanceof Error ? error.message : String(error);
-                  const statusMatch = message.match(/status\s*(\d{3})/i);
-                  const statusCode = statusMatch ? Number(statusMatch[1]) : undefined;
-                  const canFallback = statusCode === 405 || statusCode === 404;
-                  if (!canFallback) {
-                    nextSyncAttemptRef.current.set(key, Date.now() + 15 * 60 * 1000);
-                    throw error;
-                  }
-                  unsupportedMirrorTargetsRef.current.add(target.url);
-                  await uploadDirectlyToBlossom();
-                  completed = true;
-                }
-              }
-              if (!completed) {
-                await uploadDirectlyToBlossom();
-                completed = true;
-              }
-            } else if (target.type === "nip96") {
-              const streamSource = createBlobStreamSource(sourceBlob, sourceSnapshot.server);
-              if (!streamSource) {
-                nextSyncAttemptRef.current.set(key, Date.now() + 15 * 60 * 1000);
-                throw new Error("Unable to fetch blob content for sync");
-              }
-              await uploadBlobToNip96(
-                target.url,
-                streamSource,
-                targetRequiresAuth ? signEventTemplate : undefined,
-                targetRequiresAuth,
-                progress => {
-                  const fallbackTotal = streamSource.size && streamSource.size > 0 ? streamSource.size : totalSize;
-                  const totalProgress = progress.total && progress.total > 0 ? progress.total : fallbackTotal;
-                  const loadedRaw = typeof progress.loaded === "number" ? progress.loaded : 0;
-                  const loaded = Math.min(totalProgress, loadedRaw);
-                  setSyncTransfers(prev =>
-                    prev.map(item =>
-                      item.id === transferId
-                        ? {
-                            ...item,
-                            transferred: loaded,
-                            total: totalProgress,
-                          }
-                        : item
-                    )
-                  );
-                }
-              );
-              completed = true;
-            } else if (target.type === "satellite") {
-              const streamSource = createBlobStreamSource(sourceBlob, sourceSnapshot.server);
-              if (!streamSource) {
-                nextSyncAttemptRef.current.set(key, Date.now() + 15 * 60 * 1000);
-                throw new Error("Unable to fetch blob content for sync");
-              }
-              await uploadBlobToSatellite(
-                target.url,
-                streamSource,
-                targetRequiresAuth ? signEventTemplate : undefined,
-                targetRequiresAuth,
-                progress => {
-                  const fallbackTotal = streamSource.size && streamSource.size > 0 ? streamSource.size : totalSize;
-                  const totalProgress = progress.total && progress.total > 0 ? progress.total : fallbackTotal;
-                  const loadedRaw = typeof progress.loaded === "number" ? progress.loaded : 0;
-                  const loaded = Math.min(totalProgress, loadedRaw);
-                  setSyncTransfers(prev =>
-                    prev.map(item =>
-                      item.id === transferId
-                        ? {
-                            ...item,
-                            transferred: loaded,
-                            total: totalProgress,
-                          }
-                        : item
-                    )
-                  );
-                }
-              );
-              completed = true;
-            } else {
-              throw new Error(`Unsupported target type: ${target.type}`);
-            }
-            if (!completed) {
-              throw new Error("Unknown sync completion state");
-            }
-            nextSyncAttemptRef.current.set(key, Date.now() + 60 * 1000);
-            setSyncTransfers(prev =>
-              prev.map(item =>
-                item.id === transferId
-                  ? {
-                      ...item,
-                      transferred: item.total || totalSize,
-                      total: item.total || totalSize,
-                      status: "success",
-                    }
-                  : item
-              )
-            );
-            if (!cancelled) {
-              queryClient.invalidateQueries({ queryKey: ["server-blobs", target.url, pubkey, target.type] });
-            }
-          } catch (error) {
-            console.error("Auto-sync failed", error);
-            const errorMessage = error instanceof Error ? error.message : String(error);
-            const statusMatch = errorMessage.match(/status\s*(\d{3})/i);
-            const statusCode = statusMatch ? Number(statusMatch[1]) : undefined;
-            const cause =
-              error instanceof BloomHttpError
-                ? error.cause
-                : error instanceof Error && "cause" in error
-                ? (error as Error & { cause?: unknown }).cause
-                : undefined;
-            const isNetworkError =
-              error instanceof TypeError ||
-              cause instanceof TypeError ||
-              (cause && typeof cause === "object" && (cause as { name?: string }).name === "TypeError") ||
-              errorMessage.toLowerCase().includes("unable to fetch blob content for sync");
-            if (isNetworkError) {
-              const alreadyBlocked = blockedSyncTargetsRef.current.has(target.url);
-              blockedSyncTargetsRef.current.add(target.url);
-              unsupportedMirrorTargetsRef.current.add(target.url);
-              nextSyncAttemptRef.current.set(key, Date.now() + 30 * 60 * 1000);
-              if (!alreadyBlocked) {
-                showStatusMessage("Sync blocked: remote server disallows cross-origin requests.", "error", 6000);
-              }
-            } else if (statusCode === 404 || statusCode === 405) {
-              unsupportedMirrorTargetsRef.current.add(target.url);
-              nextSyncAttemptRef.current.set(key, Date.now() + 30 * 60 * 1000);
-            } else if (statusCode === 401) {
-              unauthorizedSyncTargetsRef.current.add(target.url);
-              nextSyncAttemptRef.current.set(key, Date.now() + 30 * 60 * 1000);
-              showStatusMessage("Sync auth failed – reconnect your signer.", "error", 6000);
-            } else {
-              nextSyncAttemptRef.current.set(key, Date.now() + 15 * 60 * 1000);
-            }
-            const syncErrorMessage = isNetworkError
-              ? "Sync unsupported: remote server blocks cross-origin requests"
-              : statusCode === 404 || statusCode === 405
-              ? "Sync unsupported: target blocks mirroring"
-              : statusCode === 401
-              ? "Sync auth failed"
-              : errorMessage || "Sync failed";
-            setSyncTransfers(prev =>
-              prev.map(item =>
-                item.id === transferId
-                  ? {
-                      ...item,
-                      status: "error",
-                      message: syncErrorMessage,
-                    }
-                  : item
-              )
-            );
-            if (blockedSyncTargetsRef.current.has(target.url)) {
-              skipRemainingForTarget = true;
-            }
-          } finally {
-            syncQueueRef.current.delete(key);
-          }
-        }
-      }
-    };
-
-    run();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    distribution,
-    createBlobStreamSource,
-    pubkey,
-    queryClient,
-    signEventTemplate,
-    signer,
-    snapshots,
-    syncEnabledServers,
-    syncEnabledServerUrls,
-    syncAutoReady,
-    syncRunToken,
-    showStatusMessage,
-  ]);
-
-  const currentSnapshot = useMemo(() => snapshots.find(snapshot => snapshot.server.url === selectedServer), [snapshots, selectedServer]);
-  const browsingAllServers = selectedServer === null;
-
-  const visibleAggregatedBlobs = useMemo(() => {
-    if (filterMode === "all") return aggregated.blobs;
-    return aggregated.blobs.filter(blob => matchesFilter(blob, filterMode));
-  }, [aggregated.blobs, filterMode]);
-
-  const currentVisibleBlobs = useMemo(() => {
-    if (!currentSnapshot) return undefined;
-    if (filterMode === "all") return currentSnapshot.blobs;
-    return currentSnapshot.blobs.filter(blob => matchesFilter(blob, filterMode));
-  }, [currentSnapshot, filterMode]);
-
-  const aggregatedVisibleSize = useMemo(
-    () => visibleAggregatedBlobs.reduce((total, blob) => total + (blob.size || 0), 0),
-    [visibleAggregatedBlobs]
+  const handleSetShowPreviewsInGrid = useCallback(
+    (value: boolean) => {
+      setShowGridPreviews(value);
+    },
+    [setShowGridPreviews]
   );
 
-  const musicQueueTracks = useMemo(() => {
-    return aggregated.blobs
-      .filter(isMusicBlob)
-      .map(buildAudioTrack)
-      .filter((track): track is AudioTrack => Boolean(track));
-  }, [aggregated.blobs]);
-
-  const audio = useAudio();
-  const { toggle: toggleAudioTrack } = audio;
-  const scrubberMax = audio.duration > 0 ? audio.duration : Math.max(audio.currentTime || 0, 1);
-  const scrubberValue = Math.min(audio.currentTime || 0, scrubberMax);
-  const scrubberDisabled = !audio.current || audio.duration <= 0;
-
-  const handleScrub: React.ChangeEventHandler<HTMLInputElement> = event => {
-    const next = Number(event.target.value);
-    if (!Number.isFinite(next)) return;
-    audio.seek(next);
-  };
-
-  useEffect(() => {
-    let ignore = false;
-    async function loadProfile() {
-      if (!ndk || !user?.pubkey) {
-        setAvatarUrl(null);
-        return;
-      }
-      try {
-        const evt = await ndk.fetchEvent({ kinds: [0], authors: [user.pubkey] });
-        if (evt?.content && !ignore) {
-          try {
-            const metadata = JSON.parse(evt.content);
-            setAvatarUrl(metadata.picture || null);
-          } catch (error) {
-            if (!ignore) setAvatarUrl(null);
-          }
-        }
-      } catch (error) {
-        if (!ignore) setAvatarUrl(null);
-      }
-    }
-    loadProfile();
-    return () => {
-      ignore = true;
-    };
-  }, [ndk, user?.pubkey]);
+  const handleSetShowPreviewsInList = useCallback(
+    (value: boolean) => {
+      setShowListPreviews(value);
+    },
+    [setShowListPreviews]
+  );
 
   const handleAddServer = (server: ManagedServer) => {
     const normalized = normalizeManagedServer(server);
@@ -1452,18 +429,6 @@ export default function App() {
       }
       return prev;
     });
-
-    setAutoSyncedServers(prev => {
-      if (!prev.includes(originalUrl)) return prev;
-      const next = prev.filter(item => item !== originalUrl);
-      if (normalized.sync && !next.includes(normalizedUrl)) {
-        next.push(normalizedUrl);
-      }
-      return next;
-    });
-    blockedSyncTargetsRef.current.delete(originalUrl);
-    unsupportedMirrorTargetsRef.current.delete(originalUrl);
-    unauthorizedSyncTargetsRef.current.delete(originalUrl);
   };
 
   const handleRemoveServer = (url: string) => {
@@ -1471,13 +436,6 @@ export default function App() {
     if (selectedServer === url) {
       setSelectedServer(null);
     }
-    setAutoSyncedServers(prev => {
-      if (!prev.includes(url)) return prev;
-      return prev.filter(item => item !== url);
-    });
-    blockedSyncTargetsRef.current.delete(url);
-    unsupportedMirrorTargetsRef.current.delete(url);
-    unauthorizedSyncTargetsRef.current.delete(url);
   };
 
   const handleToggleRequiresAuth = (url: string, value: boolean) => {
@@ -1486,33 +444,7 @@ export default function App() {
 
   const handleToggleSync = (url: string, value: boolean) => {
     setLocalServers(prev => prev.map(server => (server.url === url ? { ...server, sync: value } : server)));
-    if (!value) {
-      setAutoSyncedServers(prev => {
-        if (!prev.includes(url)) return prev;
-        return prev.filter(item => item !== url);
-      });
-      blockedSyncTargetsRef.current.delete(url);
-      unsupportedMirrorTargetsRef.current.delete(url);
-      unauthorizedSyncTargetsRef.current.delete(url);
-    }
   };
-
-  const handleSyncSelectedServers = useCallback(() => {
-    if (syncEnabledServerUrls.length < 2) {
-      showStatusMessage("Enable sync on at least two servers to start.", "info", 3000);
-      return;
-    }
-    unauthorizedSyncTargetsRef.current.clear();
-    syncQueueRef.current.clear();
-    nextSyncAttemptRef.current.clear();
-    unsupportedMirrorTargetsRef.current.clear();
-    blockedSyncTargetsRef.current.clear();
-    setSyncTransfers([]);
-    const unique = Array.from(new Set(syncEnabledServerUrls));
-    setAutoSyncedServers(unique);
-    setSyncRunToken(prev => prev + 1);
-    setSyncStatus({ state: "syncing", progress: 0 });
-  }, [showStatusMessage, syncEnabledServerUrls]);
 
   const handleSaveServers = async () => {
     if (!signer) {
@@ -1537,345 +469,12 @@ export default function App() {
     }
   };
 
-  const toggleTransferTarget = (url: string) => {
-    if (localServers.length <= 1) return;
-    if (localServers.length === 2 && selectedServer && url === selectedServer) return;
-    setTransferTargets(prev => (prev.includes(url) ? prev.filter(item => item !== url) : [...prev, url]));
-  };
-
-  const handleStartTransfer = async () => {
-    if (transferBusy) return;
-    if (selectedBlobItems.length === 0) {
-      setTransferFeedback("Select files in Browse to start a transfer.");
-      return;
-    }
-    const targets = transferTargets
-      .map(url => localServers.find(server => server.url === url))
-      .filter((server): server is ManagedServer => Boolean(server));
-    if (targets.length === 0) {
-      setTransferFeedback("Choose at least one destination server.");
-      return;
-    }
-    if (
-      selectedBlobItems.some(item => item.server.type !== "satellite" && item.server.requiresAuth) &&
-      !signEventTemplate
-    ) {
-      setTransferFeedback("Connect your signer to read from the selected servers.");
-      return;
-    }
-    if (targets.some(server => server.type === "satellite" || server.requiresAuth) && (!signer || !signEventTemplate)) {
-      setTransferFeedback("Connect your signer to upload to servers that require authorization.");
-      return;
-    }
-    if (missingSourceCount > 0) {
-      setTransferFeedback("Bloom couldn't load details for every selected file. Refresh and try again.");
-      return;
-    }
-
-    setTransferBusy(true);
-    setTransferFeedback(null);
-    let encounteredError = false;
-
-    const serverNameByUrl = new Map(localServers.map(server => [server.url, server.name]));
-
-    try {
-      for (const target of targets) {
-        for (const { blob, server: sourceServer } of selectedBlobItems) {
-          const sha = blob.sha256;
-          const transferId = `transfer-${target.url}-${sha}`;
-          const fileName = blob.name || sha;
-          const totalSize = blob.size && blob.size > 0 ? blob.size : 1;
-          const baseTransfer: TransferState = {
-            id: transferId,
-            serverUrl: target.url,
-            fileName,
-            transferred: 0,
-            total: totalSize,
-            status: "uploading",
-            kind: "transfer",
-          };
-
-          const existing = distribution[sha];
-          if (existing?.servers.includes(target.url)) {
-            setManualTransfers(prev => {
-              const filtered = prev.filter(item => item.id !== transferId);
-              const completedTransfer: TransferState = {
-                ...baseTransfer,
-                transferred: totalSize,
-                total: totalSize,
-                status: "success",
-                message: "Already present",
-              };
-              const next: TransferState[] = [...filtered, completedTransfer];
-              return next.slice(-60);
-            });
-            continue;
-          }
-
-          setManualTransfers(prev => {
-            const filtered = prev.filter(item => item.id !== transferId);
-            const next: TransferState[] = [...filtered, baseTransfer];
-            return next.slice(-60);
-          });
-
-          try {
-            let completed = false;
-            const targetRequiresAuth = target.type === "satellite" || Boolean(target.requiresAuth);
-            if (target.type === "blossom") {
-              const mirrorUnsupported = unsupportedMirrorTargetsRef.current.has(target.url);
-              if (!mirrorUnsupported) {
-                try {
-                  if (!blob.url) {
-                    throw new Error("Missing source URL for mirror operation");
-                  }
-                  await mirrorBlobToServer(
-                    target.url,
-                    blob.url,
-                    targetRequiresAuth ? signEventTemplate : undefined,
-                    targetRequiresAuth,
-                    blob.sha256
-                  );
-                  completed = true;
-                } catch (error) {
-                  const message = error instanceof Error ? error.message : String(error);
-                  const statusMatch = message.match(/status\s*(\d{3})/i);
-                  const statusCode = statusMatch ? Number(statusMatch[1]) : undefined;
-                  if (statusCode === 404 || statusCode === 405) {
-                    unsupportedMirrorTargetsRef.current.add(target.url);
-                  } else if (statusCode === 401) {
-                    unauthorizedSyncTargetsRef.current.add(target.url);
-                    throw new Error("Transfer auth failed");
-                  } else {
-                    throw error;
-                  }
-                }
-              }
-
-              if (!completed) {
-                const streamSource = createBlobStreamSource(blob, sourceServer);
-                if (!streamSource) {
-                  throw new Error(
-                    `Unable to fetch ${fileName} from ${serverNameByUrl.get(sourceServer.url) || sourceServer.url}`
-                  );
-                }
-                const fallbackTotal = streamSource.size && streamSource.size > 0 ? streamSource.size : totalSize;
-                await uploadBlobToServer(
-                  target.url,
-                  streamSource,
-                  targetRequiresAuth ? signEventTemplate : undefined,
-                  targetRequiresAuth,
-                  progress => {
-                    const totalProgress = progress.total && progress.total > 0 ? progress.total : fallbackTotal;
-                    const loadedRaw = typeof progress.loaded === "number" ? progress.loaded : 0;
-                    const loaded = Math.min(totalProgress, loadedRaw);
-                    setManualTransfers(prev =>
-                      prev.map(item =>
-                        item.id === transferId
-                          ? {
-                              ...item,
-                              transferred: loaded,
-                              total: totalProgress,
-                            }
-                          : item
-                      )
-                    );
-                  }
-                );
-                completed = true;
-              }
-            } else if (target.type === "nip96") {
-              const streamSource = createBlobStreamSource(blob, sourceServer);
-              if (!streamSource) {
-                throw new Error(
-                  `Unable to fetch ${fileName} from ${serverNameByUrl.get(sourceServer.url) || sourceServer.url}`
-                );
-              }
-              await uploadBlobToNip96(
-                target.url,
-                streamSource,
-                targetRequiresAuth ? signEventTemplate : undefined,
-                targetRequiresAuth,
-                progress => {
-                  const fallbackTotal = streamSource.size && streamSource.size > 0 ? streamSource.size : totalSize;
-                  const totalProgress = progress.total && progress.total > 0 ? progress.total : fallbackTotal;
-                  const loadedRaw = typeof progress.loaded === "number" ? progress.loaded : 0;
-                  const loaded = Math.min(totalProgress, loadedRaw);
-                  setManualTransfers(prev =>
-                    prev.map(item =>
-                      item.id === transferId
-                        ? {
-                            ...item,
-                            transferred: loaded,
-                            total: totalProgress,
-                          }
-                        : item
-                    )
-                  );
-                }
-              );
-              completed = true;
-            } else if (target.type === "satellite") {
-              const streamSource = createBlobStreamSource(blob, sourceServer);
-              if (!streamSource) {
-                throw new Error(
-                  `Unable to fetch ${fileName} from ${serverNameByUrl.get(sourceServer.url) || sourceServer.url}`
-                );
-              }
-              await uploadBlobToSatellite(
-                target.url,
-                streamSource,
-                targetRequiresAuth ? signEventTemplate : undefined,
-                targetRequiresAuth,
-                progress => {
-                  const fallbackTotal = streamSource.size && streamSource.size > 0 ? streamSource.size : totalSize;
-                  const totalProgress = progress.total && progress.total > 0 ? progress.total : fallbackTotal;
-                  const loadedRaw = typeof progress.loaded === "number" ? progress.loaded : 0;
-                  const loaded = Math.min(totalProgress, loadedRaw);
-                  setManualTransfers(prev =>
-                    prev.map(item =>
-                      item.id === transferId
-                        ? {
-                            ...item,
-                            transferred: loaded,
-                            total: totalProgress,
-                          }
-                        : item
-                    )
-                  );
-                }
-              );
-              completed = true;
-            } else {
-              throw new Error(`Unsupported target type: ${target.type}`);
-            }
-
-            if (!completed) {
-              throw new Error("Unknown transfer completion state");
-            }
-
-            setManualTransfers(prev =>
-              prev.map(item =>
-                item.id === transferId
-                  ? {
-                      ...item,
-                      transferred: item.total || totalSize,
-                      total: item.total || totalSize,
-                      status: "success",
-                    }
-                  : item
-              )
-            );
-            if (pubkey) {
-              await queryClient.invalidateQueries({ queryKey: ["server-blobs", target.url, pubkey, target.type] });
-            }
-          } catch (error) {
-            encounteredError = true;
-            const message = error instanceof Error ? error.message : String(error);
-            const statusMatch = message.match(/status\s*(\d{3})/i);
-            const statusCode = statusMatch ? Number(statusMatch[1]) : undefined;
-            if (statusCode === 401) {
-              unauthorizedSyncTargetsRef.current.add(target.url);
-            }
-            if (statusCode === 404 || statusCode === 405) {
-              unsupportedMirrorTargetsRef.current.add(target.url);
-            }
-            setManualTransfers(prev =>
-              prev.map(item =>
-                item.id === transferId
-                  ? {
-                      ...item,
-                      status: "error",
-                      message: message || "Transfer failed",
-                    }
-                  : item
-              )
-            );
-          }
-        }
-      }
-
-      if (!encounteredError) {
-        setTransferFeedback("Transfer complete.");
-      } else {
-        setTransferFeedback("Transfer finished with some issues. Review the activity log below.");
-      }
-    } finally {
-      setTransferBusy(false);
-    }
-  };
-
-  const handleDeleteBlob = async (blob: BlossomBlob) => {
-    if (!currentSnapshot) {
-      showStatusMessage("Select a specific server to delete files.", "error", 2000);
-      return;
-    }
-    const confirmDelete = window.confirm(`Delete ${blob.sha256.slice(0, 10)}… from ${currentSnapshot.server.name}?`);
-    if (!confirmDelete) return;
-    const requiresSigner = currentSnapshot.server.type === "satellite" || Boolean(currentSnapshot.server.requiresAuth);
-    if (requiresSigner && !signer) {
-      showStatusMessage("Connect your signer to delete from this server.", "error", 2000);
-      return;
-    }
-    try {
-      if (currentSnapshot.server.type === "nip96") {
-        await deleteNip96File(
-          currentSnapshot.server.url,
-          blob.sha256,
-          requiresSigner ? signEventTemplate : undefined,
-          requiresSigner
-        );
-      } else if (currentSnapshot.server.type === "satellite") {
-        await deleteSatelliteFile(
-          currentSnapshot.server.url,
-          blob.sha256,
-          requiresSigner ? signEventTemplate : undefined,
-          requiresSigner
-        );
-      } else {
-        await deleteUserBlob(
-          currentSnapshot.server.url,
-          blob.sha256,
-          requiresSigner ? signEventTemplate : undefined,
-          requiresSigner
-        );
-      }
-      queryClient.invalidateQueries({ queryKey: ["server-blobs", currentSnapshot.server.url, pubkey, currentSnapshot.server.type] });
-      selectManyBlobs([blob.sha256], false);
-      showStatusMessage("Blob deleted", "success", 2000);
-    } catch (error: any) {
-      showStatusMessage(error?.message || "Delete failed", "error", 5000);
-    }
-  };
-
-  const handleCopyUrl = (blob: BlossomBlob) => {
-    if (!blob.url) return;
-    navigator.clipboard.writeText(blob.url).catch(() => undefined);
-    showStatusMessage("URL copied to clipboard", "success", 1500);
-  };
-
-  const handlePlayBlob = useCallback((blob: BlossomBlob) => {
-    const track = buildAudioTrack(blob);
-    if (!track) return;
-    toggleAudioTrack(track, musicQueueTracks);
-  }, [musicQueueTracks, toggleAudioTrack]);
-
   const handleShareBlob = useCallback(
-    (blob: BlossomBlob) => {
-      if (!blob.url) {
-        showStatusMessage("This file does not have a shareable URL.", "error", 3000);
-        return;
-      }
-      const payload: SharePayload = {
-        url: blob.url,
-        name: blob.name ?? null,
-        sha256: blob.sha256,
-        serverUrl: blob.serverUrl ?? null,
-        size: typeof blob.size === "number" ? blob.size : null,
-      };
+    (payload: SharePayload) => {
       openShareForPayload(payload);
       setTab("share");
     },
-    [openShareForPayload, setTab, showStatusMessage]
+    [openShareForPayload]
   );
 
   const handleShareComplete = useCallback(
@@ -1899,13 +498,14 @@ export default function App() {
         showStatusMessage(message, "error", 6000);
       }
     },
-    [completeShareInternal, setTab, showStatusMessage]
+    [completeShareInternal, showStatusMessage]
   );
 
   const handleUploadCompleted = (success: boolean) => {
     if (!success) return;
-
-    servers.forEach(server => queryClient.invalidateQueries({ queryKey: ["server-blobs", server.url] }));
+    servers.forEach(server => {
+      queryClient.invalidateQueries({ queryKey: ["server-blobs", server.url] });
+    });
     setTab("browse");
     showStatusMessage("All files uploaded successfully", "success", 5000);
   };
@@ -1920,14 +520,15 @@ export default function App() {
     setTab("browse");
   };
 
-  const currentSize = useMemo(() => {
-    if (!currentVisibleBlobs) return 0;
-    return currentVisibleBlobs.reduce((acc, blob) => acc + (blob.size || 0), 0);
-  }, [currentVisibleBlobs]);
+  const toneClassByKey: Record<"muted" | "syncing" | "success" | "warning" | "info" | "error", string> = {
+    muted: "text-slate-500",
+    syncing: "text-emerald-300",
+    success: "text-emerald-200",
+    warning: "text-amber-300",
+    info: "text-slate-400",
+    error: "text-red-400",
+  };
 
-  const statusCount = currentVisibleBlobs ? currentVisibleBlobs.length : visibleAggregatedBlobs.length;
-  const statusSize = currentSnapshot ? currentSize : aggregatedVisibleSize;
-  const statusSelectValue = selectedServer ?? ALL_SERVERS_VALUE;
   const syncSummary = useMemo(() => {
     if (syncEnabledServerUrls.length < 2) {
       return { text: null, tone: "muted" as const };
@@ -1939,24 +540,16 @@ export default function App() {
     if (syncStatus.state === "error") {
       return { text: "Servers not in sync", tone: "error" as const };
     }
-    if (!syncAutoReady) {
+    if (!syncSnapshot.syncAutoReady) {
       return { text: "Sync setup pending", tone: "info" as const };
     }
-    if (allLinkedServersSynced) {
+    if (syncSnapshot.allLinkedServersSynced) {
       return { text: "All servers synced", tone: "success" as const };
     }
     return { text: "Servers not in sync", tone: "warning" as const };
-  }, [syncEnabledServerUrls.length, syncStatus, syncAutoReady, allLinkedServersSynced]);
+  }, [syncEnabledServerUrls.length, syncStatus, syncSnapshot.allLinkedServersSynced, syncSnapshot.syncAutoReady]);
 
   const centerMessage = statusMessage ?? syncSummary.text;
-  const toneClassByKey: Record<"muted" | "syncing" | "success" | "warning" | "info" | "error", string> = {
-    muted: "text-slate-500",
-    syncing: "text-emerald-300",
-    success: "text-emerald-200",
-    warning: "text-amber-300",
-    info: "text-slate-400",
-    error: "text-red-400",
-  };
   const centerClass = statusMessage
     ? statusMessageTone === "error"
       ? "text-red-400"
@@ -1964,19 +557,68 @@ export default function App() {
       ? "text-emerald-300"
       : "text-slate-400"
     : centerMessage
-    ? toneClassByKey[syncSummary.tone] ?? "text-slate-500"
+    ? toneClassByKey[syncSummary.tone]
     : "text-slate-500";
-  const syncBusy = syncStatus.state === "syncing";
-  const syncButtonDisabled =
-    syncEnabledServerUrls.length < 2 ||
-    syncBusy ||
-    (syncAutoReady && allLinkedServersSynced && syncStatus.state !== "error");
+
+  const statusSelectValue = selectedServer ?? ALL_SERVERS_VALUE;
+
+  const statusCount = statusMetrics.count;
+  const statusSize = statusMetrics.size;
+
+  const handleProvideSyncStarter = useCallback((runner: () => void) => {
+    syncStarterRef.current = runner;
+    if (pendingSyncRef.current) {
+      pendingSyncRef.current = false;
+      runner();
+    }
+  }, []);
+
+  const handleStatusMetricsChange = useCallback((metrics: StatusMetrics) => {
+    setStatusMetrics(metrics);
+  }, []);
+
+  const handleSyncStateChange = useCallback((snapshot: SyncStateSnapshot) => {
+    setSyncSnapshot(snapshot);
+  }, []);
+
+  const toggleUserMenu = useCallback(() => {
+    setIsUserMenuOpen(prev => !prev);
+  }, []);
+
+  const handleSelectServers = useCallback(() => {
+    setTab("servers");
+    setIsUserMenuOpen(false);
+  }, []);
+
+  const handleSelectRelays = useCallback(() => {
+    setTab("relays");
+    setIsUserMenuOpen(false);
+  }, []);
+
+  const handleSelectSettings = useCallback(() => {
+    setTab("settings");
+    setIsUserMenuOpen(false);
+  }, []);
+
+  const handleDisconnectClick = useCallback(() => {
+    setIsUserMenuOpen(false);
+    disconnect();
+  }, [disconnect]);
+
+  const isInlineMusicPlayerActive = tab === "browse" && activeBrowseFilter === "music";
+  const shouldShowFloatingPlayer = Boolean(audio.current) && !isInlineMusicPlayerActive;
+
   return (
     <div className="flex min-h-screen max-h-screen flex-col overflow-hidden bg-slate-950 text-slate-100">
-      <div className="mx-auto flex w-full flex-1 min-h-0 flex-col gap-6 overflow-hidden px-6 py-8 max-w-7xl">
+      <div className="mx-auto flex w-full flex-1 min-h-0 flex-col gap-6 overflow-hidden px-6 py-8 max-w-7xl box-border">
         <header className="flex flex-wrap items-center gap-4">
           <div className="flex items-center gap-3">
-            <img src="/bloom.png" alt="Bloom logo" className="h-10 w-10 rounded-xl object-cover" />
+            <img
+              src="/bloom.png"
+              alt="Bloom logo"
+              fetchPriority="high"
+              className="h-10 w-10 rounded-xl object-cover"
+            />
             <div>
               <h1 className="text-2xl font-semibold">Bloom</h1>
               <p className="hidden md:block text-xs text-slate-400">
@@ -2037,6 +679,18 @@ export default function App() {
                           href="#"
                           onClick={event => {
                             event.preventDefault();
+                            handleSelectSettings();
+                          }}
+                          className="block px-1 py-1 hover:text-emerald-300"
+                        >
+                          Settings
+                        </a>
+                      </li>
+                      <li>
+                        <a
+                          href="#"
+                          onClick={event => {
+                            event.preventDefault();
                             handleDisconnectClick();
                           }}
                           className="block px-1 py-1 hover:text-emerald-300"
@@ -2058,7 +712,7 @@ export default function App() {
             className={`flex flex-1 min-h-0 flex-col ${showAuthPrompt ? "pointer-events-none opacity-40" : ""}`}
             aria-hidden={showAuthPrompt || undefined}
           >
-            <nav className="flex flex-wrap items-center gap-3 px-4 py-3 border-b border-slate-800">
+            <nav className="flex flex-wrap items-center gap-3 px-4 py-3 border-b border-slate-800 box-border w-full">
               <div className="flex gap-3">
                 {NAV_TABS.map(item => {
                   const selectedCount = selectedBlobs.size;
@@ -2087,227 +741,134 @@ export default function App() {
                   );
                 })}
               </div>
-              <div className="ml-auto flex items-center gap-2">
-                {tab === "browse" && (
-                  <>
-                    <button
-                      onClick={() => setViewMode("grid")}
-                      disabled={showAuthPrompt || isMusicFilterActive}
-                      className={`rounded-xl border px-3 py-2 text-sm flex items-center gap-2 disabled:cursor-not-allowed disabled:opacity-60 ${
-                        viewMode === "grid"
-                          ? "border-emerald-500 bg-emerald-500/10 text-emerald-200"
-                          : "border-slate-800 bg-slate-900/70 text-slate-300 hover:border-slate-700"
-                      }`}
-                      title="Icon view"
-                    >
-                      <GridIcon size={18} />
-                      <span className="hidden sm:inline">Icons</span>
-                    </button>
-                    <button
-                      onClick={() => setViewMode("list")}
-                      disabled={showAuthPrompt}
-                      className={`rounded-xl border px-3 py-2 text-sm flex items-center gap-2 disabled:cursor-not-allowed disabled:opacity-60 ${
-                        viewMode === "list"
-                          ? "border-emerald-500 bg-emerald-500/10 text-emerald-200"
-                          : "border-slate-800 bg-slate-900/70 text-slate-300 hover:border-slate-700"
-                      }`}
-                      title="List view"
-                    >
-                      <ListIcon size={18} />
-                      <span className="hidden sm:inline">List</span>
-                    </button>
-                    <div className="relative" ref={filterMenuRef}>
-                      <button
-                        type="button"
-                        onClick={toggleFilterMenu}
-                        disabled={showAuthPrompt}
-                        className={`rounded-xl border px-3 py-2 text-sm flex items-center gap-2 disabled:cursor-not-allowed disabled:opacity-60 ${
-                          filterButtonActive
-                            ? "border-emerald-500 bg-emerald-500/10 text-emerald-200"
-                            : "border-slate-800 bg-slate-900/70 text-slate-300 hover:border-slate-700"
-                        }`}
-                        aria-haspopup="menu"
-                        aria-expanded={isFilterMenuOpen}
-                        title={filterButtonAriaLabel}
-                        aria-label={filterButtonAriaLabel}
-                      >
-                        <FilterIcon size={18} />
-                        <span className="hidden sm:inline">{filterButtonLabel}</span>
-                      </button>
-                      {isFilterMenuOpen && (
-                        <div
-                          role="menu"
-                          className="absolute right-0 z-20 mt-2 w-48 rounded-xl border border-slate-800 bg-slate-950/95 p-1 shadow-lg backdrop-blur"
-                        >
-                          {FILTER_OPTIONS.map(option => {
-                            const isActive = filterMode === option.id;
-                            return (
-                              <a
-                                key={option.id}
-                                href="#"
-                                onClick={event => {
-                                  event.preventDefault();
-                                  selectFilter(option.id);
-                                }}
-                                role="menuitemradio"
-                                aria-checked={isActive}
-                                className={`flex w-full items-center gap-2 px-2 py-2 text-left text-sm transition focus:outline-none ${
-                                  isActive
-                                    ? "text-emerald-200"
-                                    : "text-slate-100 hover:text-emerald-300"
-                                }`}
-                              >
-                                <option.icon size={16} />
-                                <span>{option.label}</span>
-                              </a>
-                            );
-                          })}
-                          <div className="mt-1 border-t border-slate-800 pt-1">
-                            <a
-                              href="#"
-                              onClick={event => {
-                                event.preventDefault();
-                                if (filterMode === "all") return;
-                                selectFilter("all");
-                              }}
-                              role="menuitem"
-                              aria-disabled={filterMode === "all"}
-                              className={`w-full px-2 py-2 text-left text-sm transition focus:outline-none ${
-                                filterMode === "all"
-                                  ? "cursor-default text-slate-500"
-                                  : "text-slate-100 hover:text-emerald-300"
-                              }`}
-                              tabIndex={filterMode === "all" ? -1 : 0}
-                            >
-                              Clear Filters
-                            </a>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  </>
-                )}
-              </div>
+              {browseHeaderControls ? (
+                <div className="flex items-center gap-3 ml-auto">{browseHeaderControls}</div>
+              ) : null}
             </nav>
 
-          <div
-            className={`flex flex-1 min-h-0 flex-col p-4 ${tab === "browse" || tab === "share" ? "overflow-hidden" : "overflow-y-auto"}`}
-          >
-            {tab === "browse" && (
-              <BrowseContent
-                viewMode={viewMode}
-                browsingAllServers={browsingAllServers}
-                aggregatedBlobs={visibleAggregatedBlobs}
-                currentSnapshot={currentSnapshot}
-                currentVisibleBlobs={currentVisibleBlobs}
-                selectedBlobs={selectedBlobs}
-                signTemplate={signEventTemplate}
-                replicaInfo={blobReplicaInfo}
-                onToggle={toggleBlob}
-                onSelectMany={selectManyBlobs}
-                onDelete={handleDeleteBlob}
-                onCopy={handleCopyUrl}
-                onShare={handleShareBlob}
-                onRename={handleRequestRename}
-                onPlay={handlePlayBlob}
-                currentTrackUrl={audio.current?.url}
-                currentTrackStatus={audio.status}
-              />
-            )}
-
-            {tab === "upload" && (
+            <div
+              className={`flex flex-1 min-h-0 flex-col box-border p-4 ${
+                tab === "browse" || tab === "share" ? "overflow-hidden" : "overflow-y-auto"
+              }`}
+            >
               <Suspense
                 fallback={
                   <div className="flex flex-1 items-center justify-center text-sm text-slate-400">
-                    Loading uploader…
+                    Loading workspace…
                   </div>
                 }
               >
-                <UploadPanelLazy
-                  servers={servers}
-                  selectedServerUrl={selectedServer}
-                  onUploaded={handleUploadCompleted}
-                  syncTransfers={syncTransfers}
-                />
-              </Suspense>
-            )}
-
-            {tab === "transfer" && (
-              <TransferContent
-                localServers={localServers}
-                selectedServer={selectedServer}
-                selectedBlobItems={selectedBlobItems}
-                selectedBlobTotalSize={selectedBlobTotalSize}
-                sourceServerUrls={sourceServerUrls}
-                missingSourceCount={missingSourceCount}
-                transferTargets={transferTargets}
-                transferBusy={transferBusy}
-                transferFeedback={transferFeedback}
-                transferFeedbackTone={transferFeedbackTone}
-                transferActivity={transferActivity}
-                toggleTransferTarget={toggleTransferTarget}
-                handleStartTransfer={handleStartTransfer}
-                onBackToBrowse={() => setTab("browse")}
-                currentSignerMissing={!signer || !signEventTemplate}
-              />
-            )}
-
-            {tab === "share" && (
-              <div className="flex flex-1 min-h-0">
-                <ShareComposer
-                  embedded
-                  payload={shareState.payload}
-                  shareKey={shareState.shareKey}
-                  onClose={() => {
-                    clearShareState();
-                    setTab("browse");
-                  }}
-                  onShareComplete={handleShareComplete}
-                />
-              </div>
-            )}
-
-            {tab === "servers" && (
-              <Suspense
-                fallback={
-                  <div className="flex flex-1 items-center justify-center text-sm text-slate-400">
-                    Loading servers…
-                  </div>
-                }
-              >
-                <ServerListLazy
+                <WorkspaceLazy
+                  tab={tab}
                   servers={localServers}
-                  selected={selectedServer}
-                  onSelect={setSelectedServer}
-                  onAdd={handleAddServer}
-                  onUpdate={handleUpdateServer}
-                  onSave={handleSaveServers}
-                  saving={saving}
-                  disabled={!signer}
-                  onRemove={handleRemoveServer}
-                  onToggleAuth={handleToggleRequiresAuth}
-                  onToggleSync={handleToggleSync}
-                  onSync={handleSyncSelectedServers}
-                  syncDisabled={syncButtonDisabled}
-                  syncInProgress={syncBusy}
-                  validationError={serverValidationError}
+                  selectedServer={selectedServer}
+                  onSelectServer={setSelectedServer}
+                  showGridPreviews={preferences.showGridPreviews}
+                  showListPreviews={preferences.showListPreviews}
+                  onStatusMetricsChange={handleStatusMetricsChange}
+                  onSyncStateChange={handleSyncStateChange}
+                  onProvideSyncStarter={handleProvideSyncStarter}
+                  onRequestRename={handleRequestRename}
+                  onRequestShare={handleShareBlob}
+                  onSetTab={setTab}
+                  onUploadCompleted={handleUploadCompleted}
+                  showStatusMessage={showStatusMessage}
+                  onProvideBrowseControls={setBrowseHeaderControls}
+                  onFilterModeChange={handleFilterModeChange}
                 />
               </Suspense>
-            )}
 
-            {tab === "relays" && (
-              <Suspense
-                fallback={
-                  <div className="flex flex-1 items-center justify-center text-sm text-slate-400">
-                    Loading relays…
-                  </div>
-                }
-              >
-                <RelayListLazy />
-              </Suspense>
-            )}
+              {tab === "share" && (
+                <div className="flex flex-1 min-h-0">
+                  <Suspense
+                    fallback={
+                      <div className="flex flex-1 items-center justify-center text-sm text-slate-400">
+                        Loading share composer…
+                      </div>
+                    }
+                  >
+                    <ShareComposerLazy
+                      embedded
+                      payload={shareState.payload}
+                      shareKey={shareState.shareKey}
+                      onClose={() => {
+                        clearShareState();
+                        setTab("browse");
+                      }}
+                      onShareComplete={handleShareComplete}
+                    />
+                  </Suspense>
+                </div>
+              )}
 
+              {tab === "servers" && (
+                <Suspense
+                  fallback={
+                    <div className="flex flex-1 items-center justify-center text-sm text-slate-400">
+                      Loading servers…
+                    </div>
+                  }
+                >
+                  <ServerListLazy
+                    servers={localServers}
+                    selected={selectedServer}
+                    defaultServerUrl={preferences.defaultServerUrl}
+                    onSelect={setSelectedServer}
+                    onSetDefaultServer={handleSetDefaultServer}
+                    onAdd={handleAddServer}
+                    onUpdate={handleUpdateServer}
+                    onSave={handleSaveServers}
+                    saving={saving}
+                    disabled={!signer}
+                    onRemove={handleRemoveServer}
+                    onToggleAuth={handleToggleRequiresAuth}
+                    onToggleSync={handleToggleSync}
+                    onSync={handleSyncSelectedServers}
+                    syncDisabled={syncButtonDisabled}
+                    syncInProgress={syncBusy}
+                    validationError={serverValidationError}
+                  />
+                </Suspense>
+              )}
+
+              {tab === "settings" && (
+                <Suspense
+                  fallback={
+                    <div className="flex flex-1 items-center justify-center text-sm text-slate-400">
+                      Loading settings…
+                    </div>
+                  }
+                >
+                  <SettingsPanelLazy
+                    servers={localServers}
+                    defaultServerUrl={preferences.defaultServerUrl}
+                    showIconsPreviews={preferences.showGridPreviews}
+                    showListPreviews={preferences.showListPreviews}
+                    defaultViewMode={preferences.defaultViewMode}
+                    defaultFilterMode={preferences.defaultFilterMode}
+                    onSetDefaultViewMode={handleSetDefaultViewMode}
+                    onSetDefaultFilterMode={handleSetDefaultFilterMode}
+                    onSetDefaultServer={handleSetDefaultServer}
+                    onSetShowIconsPreviews={handleSetShowPreviewsInGrid}
+                    onSetShowListPreviews={handleSetShowPreviewsInList}
+                  />
+                </Suspense>
+              )}
+
+              {tab === "relays" && (
+                <Suspense
+                  fallback={
+                    <div className="flex flex-1 items-center justify-center text-sm text-slate-400">
+                      Loading relays…
+                    </div>
+                  }
+                >
+                  <RelayListLazy />
+                </Suspense>
+              )}
+            </div>
           </div>
+
           <footer className="border-t border-slate-800 bg-slate-900/70 px-4 py-3 text-xs text-slate-300 flex flex-wrap items-center gap-4">
             <div className="flex items-center gap-2">
               <label htmlFor="status-server" className="text-[11px] uppercase tracking-wide text-slate-300">
@@ -2320,7 +881,7 @@ export default function App() {
                 className="rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-200 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
               >
                 <option value={ALL_SERVERS_VALUE}>All servers</option>
-                {servers.map(server => (
+                {localServers.map(server => (
                   <option key={server.url} value={server.url}>
                     {server.name}
                   </option>
@@ -2329,149 +890,66 @@ export default function App() {
             </div>
             <div className={`flex-1 text-center ${centerClass}`}>{centerMessage ?? ""}</div>
             <div className="ml-auto flex gap-4">
-              <span>{statusCount} item{statusCount === 1 ? "" : "s"}</span>
+              <span>
+                {statusCount} item{statusCount === 1 ? "" : "s"}
+              </span>
               <span>{prettyBytes(statusSize)}</span>
             </div>
           </footer>
-          </div>
 
           {showAuthPrompt && (
             <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-4 bg-slate-950/80 px-6 text-center backdrop-blur-sm">
               <img src="/bloom.png" alt="Bloom logo" className="w-24 md:w-32 rounded-xl" />
               <p className="text-sm text-slate-200">Connect your Nostr account to use Bloom.</p>
-              <button
-                onClick={connect}
-                className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-slate-900"
-              >
-                Connect (NIP-07)
-              </button>
+              <div className="flex flex-col gap-2">
+                <button
+                  onClick={connect}
+                  className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-slate-900"
+                >
+                  Connect With Browser Extension
+                </button>
+                <button
+                  onClick={() => setConnectSignerOpen(true)}
+                  className="px-3 py-2 rounded-xl border border-emerald-500/60 bg-transparent text-emerald-300 hover:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-slate-900"
+                >
+                  Connect With Signer
+                </button>
+              </div>
             </div>
           )}
 
           {renameTarget && (
-            <EditDialog
-              blob={renameTarget}
-              alias={renameValue}
-              busy={renameBusy}
-              error={renameError}
-              isMusic={renameIsMusic}
-              audioFields={renameAudioFields}
-              onAliasChange={handleRenameValueChange}
-              onAudioFieldChange={handleRenameAudioFieldChange}
-              onSubmit={handleRenameSubmit}
-              onCancel={handleRenameCancel}
-            />
+            <Suspense
+              fallback={
+                <div className="fixed inset-0 z-20 flex items-center justify-center bg-slate-950/80 text-sm text-slate-300">
+                  Loading editor…
+                </div>
+              }
+            >
+              <RenameDialogLazy
+                blob={renameTarget}
+                ndk={ndk}
+                signer={signer}
+                relays={effectiveRelays}
+                onClose={handleRenameDialogClose}
+                onStatus={showStatusMessage}
+              />
+            </Suspense>
           )}
+
+          <Suspense fallback={null}>
+            <ConnectSignerDialogLazy
+              open={connectSignerOpen}
+              onClose={() => setConnectSignerOpen(false)}
+              onPaired={() => showStatusMessage("Amber signer connected", "success")}
+            />
+          </Suspense>
         </div>
 
-        {audio.current && (
-          <div className="fixed bottom-4 right-4 w-full max-w-sm rounded-xl border border-slate-800 bg-slate-900/85 px-4 py-3 text-sm text-slate-200 shadow-lg">
-              <div className="flex flex-col gap-3">
-                <div className="min-w-0">
-                  <div className="text-[11px] uppercase tracking-wide text-slate-400">Now playing</div>
-                  <div className="text-sm font-medium text-slate-100 truncate">
-                    {audio.current.title || audio.current.url}
-                  </div>
-                </div>
-                <div className="flex items-center gap-3">
-                  <span className="text-xs tabular-nums text-slate-400 w-10">
-                    {formatTime(audio.currentTime)}
-                  </span>
-                  <input
-                    type="range"
-                    min={0}
-                    max={scrubberMax}
-                    step={0.1}
-                    value={scrubberValue}
-                    onChange={handleScrub}
-                    disabled={scrubberDisabled}
-                    aria-label="Seek through current track"
-                    aria-valuetext={formatTime(scrubberValue)}
-                    className="flex-1 h-1.5 cursor-pointer appearance-none rounded-full bg-slate-800 accent-emerald-500"
-                  />
-                  <span className="text-xs tabular-nums text-slate-400 w-10 text-right">
-                    {audio.duration > 0 ? formatTime(audio.duration) : "--:--"}
-                  </span>
-                </div>
-                {audio.status === "playing" && audio.visualizerAvailable && (
-                  <div className="h-16 rounded-lg border border-slate-800 bg-slate-900/60 px-1 py-2">
-                    <AudioVisualizer className="h-full w-full" />
-                  </div>
-                )}
-                <div className="flex items-center justify-between gap-2">
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={audio.previous}
-                    disabled={!audio.hasPrevious}
-                    className={`p-2 rounded-lg flex items-center justify-center transition focus:outline-none focus:ring-1 focus:ring-emerald-400 ${
-                      audio.hasPrevious
-                        ? "bg-slate-800 hover:bg-slate-700 text-slate-200"
-                        : "bg-slate-800/50 text-slate-500 cursor-not-allowed"
-                    }`}
-                    aria-label="Play previous track"
-                  >
-                    <PreviousIcon size={18} />
-                    <span className="sr-only">Previous</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => audio.toggle(audio.current!, audio.queue)}
-                    className={`p-2 rounded-lg flex items-center justify-center transition focus:outline-none focus:ring-1 focus:ring-emerald-400 ${
-                      audio.status === "playing"
-                        ? "bg-emerald-500 text-slate-900 hover:bg-emerald-400"
-                        : "bg-slate-800 hover:bg-slate-700 text-slate-200"
-                    }`}
-                    aria-label={audio.status === "playing" ? "Pause track" : "Play track"}
-                  >
-                    {audio.status === "playing" ? <PauseIcon size={18} /> : <PlayIcon size={18} />}
-                    <span className="sr-only">{audio.status === "playing" ? "Pause" : "Play"}</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={audio.next}
-                    disabled={!audio.hasNext}
-                    className={`p-2 rounded-lg flex items-center justify-center transition focus:outline-none focus:ring-1 focus:ring-emerald-400 ${
-                      audio.hasNext
-                        ? "bg-slate-800 hover:bg-slate-700 text-slate-200"
-                        : "bg-slate-800/50 text-slate-500 cursor-not-allowed"
-                    }`}
-                    aria-label="Play next track"
-                  >
-                    <NextIcon size={18} />
-                    <span className="sr-only">Next</span>
-                  </button>
-                </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={audio.toggleRepeatMode}
-                    aria-label="Toggle repeat mode"
-                    aria-pressed={audio.repeatMode === "track"}
-                    className={`p-2 rounded-lg flex items-center justify-center transition focus:outline-none focus:ring-1 focus:ring-emerald-400 ${
-                      audio.repeatMode === "track"
-                        ? "bg-emerald-700 text-slate-100 hover:bg-emerald-600"
-                        : "bg-slate-800 hover:bg-slate-700 text-slate-200"
-                    }`}
-                  >
-                    {audio.repeatMode === "track" ? <RepeatOneIcon size={18} /> : <RepeatIcon size={18} />}
-                    <span className="sr-only">
-                      {audio.repeatMode === "track" ? "Repeat current track" : "Repeat entire queue"}
-                    </span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={audio.stop}
-                    className="p-2 rounded-lg flex items-center justify-center transition bg-red-900/80 text-slate-100 hover:bg-red-800 focus:outline-none focus:ring-1 focus:ring-red-400"
-                    aria-label="Stop playback"
-                  >
-                    <StopIcon size={18} />
-                    <span className="sr-only">Stop</span>
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
+        {shouldShowFloatingPlayer && (
+          <Suspense fallback={null}>
+            <AudioPlayerCardLazy audio={audio} />
+          </Suspense>
         )}
       </div>
     </div>

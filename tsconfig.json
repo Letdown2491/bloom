@@ -16,9 +16,8 @@
     "jsx": "react-jsx",
     "noUncheckedIndexedAccess": true,
     "strict": true,
-    "paths": {
-      "tseep": ["./src/lib/tseep"]
-    }
+    "noUnusedLocals": true,
+    "noUnusedParameters": true
   },
   "include": [
     "src"

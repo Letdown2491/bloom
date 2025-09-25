@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { decode } from "blurhash";
 import { FixedSizeList as VirtualList } from "react-window";
 import { prettyBytes, prettyDate } from "../utils/format";
 import { buildAuthorizationHeader, type BlossomBlob, type SignTemplate } from "../lib/blossomClient";
@@ -10,15 +11,22 @@ import {
   PauseIcon,
   PreviewIcon,
   PlayIcon,
+  ChevronDownIcon,
   ShareIcon,
   SyncIndicatorIcon,
   TrashIcon,
   CancelIcon,
+  MusicIcon,
+  VideoIcon,
+  DocumentIcon,
 } from "./icons";
+import type { FileKind } from "./icons";
+import type { BlobAudioMetadata } from "../utils/blobMetadataStore";
 import { cachePreviewBlob, getCachedPreviewBlob } from "../utils/blobPreviewCache";
 import { useBlobMetadata } from "../features/browse/useBlobMetadata";
 import { useBlobPreview, type PreviewTarget } from "../features/browse/useBlobPreview";
 import { useInViewport } from "../hooks/useInViewport";
+import { useAudioMetadataMap } from "../features/browse/useAudioMetadata";
 
 export type BlobReplicaSummary = {
   count: number;
@@ -34,6 +42,7 @@ export type BlobListProps = {
   replicaInfo?: Map<string, BlobReplicaSummary>;
   selected: Set<string>;
   viewMode: "grid" | "list";
+  isMusicView?: boolean;
   onToggle: (sha: string) => void;
   onSelectMany?: (shas: string[], value: boolean) => void;
   onDelete: (blob: BlossomBlob) => void;
@@ -43,29 +52,32 @@ export type BlobListProps = {
   onRename?: (blob: BlossomBlob) => void;
   currentTrackUrl?: string;
   currentTrackStatus?: "idle" | "playing" | "paused";
+  showGridPreviews?: boolean;
+  showListPreviews?: boolean;
 };
 
 type DetectedKindMap = Record<string, "image" | "video">;
 
-type ResolvedMeta = {
-  type?: string;
-  name?: string;
+const MUSIC_EXTENSION_REGEX =
+  /\.(mp3|wav|ogg|oga|flac|aac|m4a|weba|webm|alac|aiff|aif|wma|mid|midi|amr|opus)(?:\?|#|$)/i;
+
+const ADDITIONAL_AUDIO_MIME_TYPES = new Set(
+  ["application/ogg", "application/x-ogg", "application/flac", "application/x-flac"].map(value =>
+    value.toLowerCase()
+  )
+);
+
+type BlurhashInfo = {
+  hash: string;
+  width?: number;
+  height?: number;
 };
 
-type ResolvedMetaMap = Record<string, ResolvedMeta>;
-
-type FileKind = "image" | "video" | "pdf" | "doc" | "sheet" | "document";
-
-type SortKey = "name" | "replicas" | "size" | "uploaded";
+type SortKey = "name" | "replicas" | "size" | "uploaded" | "artist" | "album" | "duration";
 
 type SortConfig = { key: SortKey; direction: "asc" | "desc" };
 
 const CARD_HEIGHT = 260;
-const LIST_THUMBNAIL_SIZE = 48;
-const GRID_ACTION_BUTTON_CLASS =
-  "flex aspect-square w-full items-center justify-center rounded-lg bg-slate-800 text-slate-200 transition focus:outline-none focus:ring-1 focus:ring-emerald-400 focus:ring-offset-1 focus:ring-offset-slate-900 hover:bg-slate-700";
-const GRID_DELETE_BUTTON_CLASS =
-  "flex aspect-square w-full items-center justify-center rounded-lg bg-red-900/80 text-slate-100 transition focus:outline-none focus:ring-1 focus:ring-red-400 focus:ring-offset-1 focus:ring-offset-slate-900 hover:bg-red-800";
 
 const ReplicaBadge: React.FC<{ info: BlobReplicaSummary; variant: "grid" | "list" }> = ({ info, variant }) => {
   const title = info.servers.length
@@ -112,6 +124,7 @@ export const BlobList: React.FC<BlobListProps> = ({
   replicaInfo,
   selected,
   viewMode,
+  isMusicView = false,
   onToggle,
   onSelectMany,
   onDelete,
@@ -121,6 +134,8 @@ export const BlobList: React.FC<BlobListProps> = ({
   onRename,
   currentTrackUrl,
   currentTrackStatus,
+  showGridPreviews = true,
+  showListPreviews = true,
 }) => {
   const { resolvedMeta, detectedKinds, requestMetadata, reportDetectedKind } = useBlobMetadata(blobs, {
     baseUrl,
@@ -128,12 +143,6 @@ export const BlobList: React.FC<BlobListProps> = ({
     signTemplate,
     serverType,
   });
-  const { previewTarget, openPreview, closePreview } = useBlobPreview({
-    defaultServerType: serverType,
-    defaultSignTemplate: signTemplate,
-  });
-  const [sortConfig, setSortConfig] = useState<SortConfig | null>(null);
-
   const decoratedBlobs = useMemo(() => {
     return blobs.map(blob => {
       const overrides = resolvedMeta[blob.sha256];
@@ -151,31 +160,45 @@ export const BlobList: React.FC<BlobListProps> = ({
     });
   }, [blobs, resolvedMeta, baseUrl, requiresAuth, serverType]);
 
+  const audioMetadata = useAudioMetadataMap(decoratedBlobs);
+
+  const { previewTarget, openPreview, closePreview } = useBlobPreview({
+    defaultServerType: serverType,
+    defaultSignTemplate: signTemplate,
+  });
+  const [sortConfig, setSortConfig] = useState<SortConfig | null>(null);
+
+  const baseSortedBlobs = useMemo(() => {
+    if (decoratedBlobs.length <= 1) return decoratedBlobs;
+    return [...decoratedBlobs].sort((a, b) => {
+      const aUploaded = typeof a.uploaded === "number" ? a.uploaded : 0;
+      const bUploaded = typeof b.uploaded === "number" ? b.uploaded : 0;
+      if (aUploaded !== bUploaded) {
+        return bUploaded - aUploaded;
+      }
+      return deriveBlobSortName(a).localeCompare(deriveBlobSortName(b));
+    });
+  }, [decoratedBlobs]);
+
   const sortedBlobs = useMemo(() => {
     if (!sortConfig) {
-      return [...decoratedBlobs].sort((a, b) => {
-        const aUploaded = typeof a.uploaded === "number" ? a.uploaded : 0;
-        const bUploaded = typeof b.uploaded === "number" ? b.uploaded : 0;
-        if (aUploaded !== bUploaded) {
-          return bUploaded - aUploaded;
-        }
-        return deriveBlobSortName(a).localeCompare(deriveBlobSortName(b));
-      });
+      return baseSortedBlobs;
     }
 
     const { key, direction } = sortConfig;
-    const modifier = direction === "asc" ? 1 : -1;
+    if (key === "uploaded") {
+      if (direction === "desc") return baseSortedBlobs;
+      return [...baseSortedBlobs].reverse();
+    }
 
-    return [...decoratedBlobs].sort((a, b) => {
+    const modifier = direction === "asc" ? 1 : -1;
+    const working = [...decoratedBlobs];
+
+    working.sort((a, b) => {
       if (key === "size") {
         const aSize = typeof a.size === "number" ? a.size : -1;
         const bSize = typeof b.size === "number" ? b.size : -1;
         const diff = aSize - bSize;
-        if (diff !== 0) return diff * modifier;
-      } else if (key === "uploaded") {
-        const aUploaded = typeof a.uploaded === "number" ? a.uploaded : 0;
-        const bUploaded = typeof b.uploaded === "number" ? b.uploaded : 0;
-        const diff = aUploaded - bUploaded;
         if (diff !== 0) return diff * modifier;
       } else {
         const aValue = key === "name" ? deriveBlobSortName(a) : (a.type ?? "").toLowerCase();
@@ -186,18 +209,11 @@ export const BlobList: React.FC<BlobListProps> = ({
       const fallback = deriveBlobSortName(a).localeCompare(deriveBlobSortName(b));
       return fallback * modifier;
     });
-  }, [decoratedBlobs, sortConfig]);
 
-  const gridBlobs = useMemo(() => {
-    return [...decoratedBlobs].sort((a, b) => {
-      const aUploaded = typeof a.uploaded === "number" ? a.uploaded : 0;
-      const bUploaded = typeof b.uploaded === "number" ? b.uploaded : 0;
-      if (aUploaded !== bUploaded) {
-        return bUploaded - aUploaded;
-      }
-      return deriveBlobSortName(a).localeCompare(deriveBlobSortName(b));
-    });
-  }, [decoratedBlobs]);
+    return working;
+  }, [baseSortedBlobs, decoratedBlobs, sortConfig]);
+
+  const gridBlobs = baseSortedBlobs;
 
   const handleSortToggle = useCallback((key: SortKey) => {
     setSortConfig(current => {
@@ -315,31 +331,47 @@ export const BlobList: React.FC<BlobListProps> = ({
   );
 
   const listBlobs = useMemo(() => {
-    if (viewMode !== "list") return decoratedBlobs;
-    if (!sortConfig || sortConfig.key === "name") return sortedBlobs;
+    if (viewMode !== "list") return baseSortedBlobs;
+    if (!sortConfig || sortConfig.key === "name" || sortConfig.key === "size" || sortConfig.key === "uploaded") {
+      return sortedBlobs;
+    }
 
-    const sorted = [...decoratedBlobs].sort((a, b) => {
-      if (sortConfig.key === "size") {
-        const aSize = typeof a.size === "number" ? a.size : -1;
-        const bSize = typeof b.size === "number" ? b.size : -1;
-        const diff = aSize - bSize;
-        if (diff !== 0) return diff;
-      } else if (sortConfig.key === "uploaded") {
-        const aUploaded = typeof a.uploaded === "number" ? a.uploaded : 0;
-        const bUploaded = typeof b.uploaded === "number" ? b.uploaded : 0;
-        const diff = aUploaded - bUploaded;
-        if (diff !== 0) return diff;
-      } else if (sortConfig.key === "replicas") {
+    const sorted = [...baseSortedBlobs].sort((a, b) => {
+      if (sortConfig.key === "replicas") {
         const aCount = replicaInfo?.get(a.sha256)?.count ?? 0;
         const bCount = replicaInfo?.get(b.sha256)?.count ?? 0;
         const diff = aCount - bCount;
         if (diff !== 0) return diff;
+      } else if (sortConfig.key === "artist" || sortConfig.key === "album") {
+        const aMeta = audioMetadata.get(a.sha256);
+        const bMeta = audioMetadata.get(b.sha256);
+        const aValue = (sortConfig.key === "artist" ? aMeta?.artist : aMeta?.album)?.trim().toLowerCase() ?? "";
+        const bValue = (sortConfig.key === "artist" ? bMeta?.artist : bMeta?.album)?.trim().toLowerCase() ?? "";
+        if (aValue && !bValue) return -1;
+        if (!aValue && bValue) return 1;
+        if (aValue && bValue) {
+          const diff = aValue.localeCompare(bValue);
+          if (diff !== 0) return diff;
+        }
+      } else if (sortConfig.key === "duration") {
+        const aDuration = audioMetadata.get(a.sha256)?.durationSeconds;
+        const bDuration = audioMetadata.get(b.sha256)?.durationSeconds;
+        const aHas = typeof aDuration === "number" && aDuration > 0;
+        const bHas = typeof bDuration === "number" && bDuration > 0;
+        if (aHas && bHas) {
+          const diff = (aDuration ?? 0) - (bDuration ?? 0);
+          if (diff !== 0) return diff;
+        } else if (aHas && !bHas) {
+          return -1;
+        } else if (!aHas && bHas) {
+          return 1;
+        }
       }
       return deriveBlobSortName(a).localeCompare(deriveBlobSortName(b));
     });
 
     return sortConfig.direction === "asc" ? sorted : sorted.reverse();
-  }, [decoratedBlobs, replicaInfo, sortConfig, sortedBlobs, viewMode]);
+  }, [audioMetadata, baseSortedBlobs, replicaInfo, sortConfig, sortedBlobs, viewMode]);
 
   return (
     <div className="flex h-full flex-1 min-h-0 w-full flex-col overflow-hidden">
@@ -357,10 +389,10 @@ export const BlobList: React.FC<BlobListProps> = ({
           onDownload={handleDownload}
           onPreview={handlePreview}
           onPlay={onPlay}
-          onShare={onShare}
-          onRename={onRename}
-          currentTrackUrl={currentTrackUrl}
-          currentTrackStatus={currentTrackStatus}
+        onShare={onShare}
+        onRename={onRename}
+        currentTrackUrl={currentTrackUrl}
+        currentTrackStatus={currentTrackStatus}
         detectedKinds={detectedKinds}
         onDetect={handleDetect}
         sortConfig={sortConfig}
@@ -368,28 +400,33 @@ export const BlobList: React.FC<BlobListProps> = ({
         onBlobVisible={requestMetadata}
         requestMetadata={requestMetadata}
         replicaInfo={replicaInfo}
+        isMusicView={isMusicView}
+        audioMetadata={audioMetadata}
+        showPreviews={showListPreviews}
       />
     ) : (
       <GridLayout
         blobs={gridBlobs}
         baseUrl={baseUrl}
-          requiresAuth={requiresAuth}
-          signTemplate={signTemplate}
-          serverType={serverType}
-          selected={selected}
-          onToggle={onToggle}
-          onDelete={onDelete}
-          onDownload={handleDownload}
-          onPreview={handlePreview}
-          onPlay={onPlay}
-          onShare={onShare}
-          onRename={onRename}
-          currentTrackUrl={currentTrackUrl}
-          currentTrackStatus={currentTrackStatus}
+        requiresAuth={requiresAuth}
+        signTemplate={signTemplate}
+        serverType={serverType}
+        selected={selected}
+        onToggle={onToggle}
+        onDelete={onDelete}
+        onDownload={handleDownload}
+        onPreview={handlePreview}
+        onPlay={onPlay}
+        onShare={onShare}
+        onRename={onRename}
+        currentTrackUrl={currentTrackUrl}
+        currentTrackStatus={currentTrackStatus}
         detectedKinds={detectedKinds}
         onDetect={handleDetect}
         onBlobVisible={requestMetadata}
         replicaInfo={replicaInfo}
+        audioMetadata={audioMetadata}
+        showPreviews={showGridPreviews}
       />
     )}
       {previewTarget && (
@@ -432,6 +469,9 @@ const ListLayout: React.FC<{
   onBlobVisible: (sha: string) => void;
   requestMetadata: (sha: string) => void;
   replicaInfo?: Map<string, BlobReplicaSummary>;
+  isMusicView: boolean;
+  audioMetadata: Map<string, BlobAudioMetadata>;
+  showPreviews: boolean;
 }> = ({
   blobs,
   baseUrl,
@@ -456,11 +496,27 @@ const ListLayout: React.FC<{
   onBlobVisible,
   requestMetadata,
   replicaInfo,
+  isMusicView,
+  audioMetadata,
+  showPreviews,
 }) => {
   const selectAllRef = useRef<HTMLInputElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const listOuterRef = useRef<HTMLDivElement | null>(null);
   const [container, setContainer] = useState({ width: 0, height: 0 });
+  const [actionsColumnWidth, setActionsColumnWidth] = useState<number | null>(null);
+
+  const handleActionsWidthChange = useCallback((width: number) => {
+    if (!Number.isFinite(width) || width <= 0) return;
+    setActionsColumnWidth(previous => {
+      if (previous === null) return width;
+      return Math.abs(previous - width) > 1 ? width : previous;
+    });
+  }, []);
+
+  useEffect(() => {
+    setActionsColumnWidth(null);
+  }, [isMusicView]);
 
   const allSelected = blobs.length > 0 && blobs.every(blob => selected.has(blob.sha256));
   const partiallySelected = !allSelected && blobs.some(blob => selected.has(blob.sha256));
@@ -496,9 +552,18 @@ const ListLayout: React.FC<{
     const outer = listOuterRef.current;
     if (!outer) return;
     const previous = outer.style.overflowX;
+    const previousPaddingRight = outer.style.paddingRight;
+    const previousMarginRight = outer.style.marginRight;
+    const previousBoxSizing = outer.style.boxSizing;
     outer.style.overflowX = "hidden";
+    outer.style.paddingRight = "0.5rem";
+    outer.style.marginRight = "-0.5rem";
+    outer.style.boxSizing = "content-box";
     return () => {
       outer.style.overflowX = previous;
+      outer.style.paddingRight = previousPaddingRight;
+      outer.style.marginRight = previousMarginRight;
+      outer.style.boxSizing = previousBoxSizing;
     };
   }, [listWidth]);
   const estimatedHeight = (LIST_ROW_HEIGHT + LIST_ROW_GAP) * Math.min(blobs.length, 8);
@@ -565,6 +630,10 @@ const ListLayout: React.FC<{
           onDetect={onDetect}
           onBlobVisible={onBlobVisible}
           replicaSummary={replicaSummary}
+          isMusicListView={isMusicView}
+          audioMetadata={audioMetadata}
+          onActionsWidthChange={handleActionsWidthChange}
+          showPreviews={showPreviews}
         />
       );
     },
@@ -590,6 +659,10 @@ const ListLayout: React.FC<{
       requestMetadata,
       replicaInfo,
       listWidth,
+      isMusicView,
+      audioMetadata,
+      showPreviews,
+      handleActionsWidthChange,
     ]
   );
 
@@ -603,54 +676,111 @@ const ListLayout: React.FC<{
     [blobs, requestMetadata]
   );
 
-  return (
-    <div className="flex flex-1 min-h-0 w-full flex-col overflow-hidden overflow-x-hidden pb-1">
-      <div className="border-b border-slate-800 bg-slate-900/60 px-2 pb-2 pt-0 text-xs uppercase tracking-wide text-slate-200">
-        <div className="grid grid-cols-[40px,minmax(0,1fr)] md:grid-cols-[40px,minmax(0,1fr),6rem,10rem,6rem,16rem] items-center gap-2">
-          <div className="flex justify-center">
-            <input
-              ref={selectAllRef}
-              type="checkbox"
-              className="h-4 w-4 rounded border-slate-700 bg-slate-900 text-emerald-400 focus:outline-none focus:ring-1 focus:ring-emerald-500"
-              checked={allSelected}
-              onChange={handleSelectAll}
-              aria-label="Select all files"
-            />
-          </div>
+  const renderHeader = () => {
+    if (isMusicView) {
+      return (
+        <div className="grid grid-cols-[60px,minmax(0,1fr)] md:grid-cols-[60px,minmax(0,1fr),10rem,12rem,6rem,max-content] items-center gap-2 text-xs tracking-wide text-slate-200">
+          <div className="flex items-center justify-center font-semibold text-slate-300 normal-case">Cover</div>
           <button
             type="button"
             onClick={() => onSort("name")}
             className="flex items-center gap-1 text-left font-semibold text-slate-200 hover:text-slate-100"
           >
-            <span>Name</span>
+            <span>Title</span>
             <span aria-hidden="true">{headerIndicator("name")}</span>
           </button>
           <button
             type="button"
-            onClick={() => onSort("replicas")}
-            className="hidden items-center justify-center gap-1 font-semibold text-slate-200 hover:text-slate-100 md:flex"
+            onClick={() => onSort("artist")}
+            className="hidden items-center gap-1 font-semibold text-slate-200 hover:text-slate-100 md:flex"
           >
-            <span>Servers</span>
-            <span aria-hidden="true">{headerIndicator("replicas")}</span>
+            <span>Artist</span>
+            <span aria-hidden="true">{headerIndicator("artist")}</span>
           </button>
           <button
             type="button"
-            onClick={() => onSort("uploaded")}
-            className="hidden items-center gap-1 text-left font-semibold text-slate-200 hover:text-slate-100 md:flex"
+            onClick={() => onSort("album")}
+            className="hidden items-center gap-1 font-semibold text-slate-200 hover:text-slate-100 lg:flex"
           >
-            <span>Uploaded</span>
-            <span aria-hidden="true">{headerIndicator("uploaded")}</span>
+            <span>Album</span>
+            <span aria-hidden="true">{headerIndicator("album")}</span>
           </button>
           <button
             type="button"
-            onClick={() => onSort("size")}
-            className="flex items-center gap-1 text-left font-semibold text-slate-200 hover:text-slate-100"
+            onClick={() => onSort("duration")}
+            className="hidden items-center justify-end gap-1 font-semibold text-slate-200 hover:text-slate-100 lg:flex"
           >
-            <span>Size</span>
-            <span aria-hidden="true">{headerIndicator("size")}</span>
+            <span>Length</span>
+            <span aria-hidden="true">{headerIndicator("duration")}</span>
           </button>
-          <div className="hidden justify-center text-center font-semibold text-slate-200 md:flex">Actions</div>
+          <div
+            className="hidden w-full justify-center text-center font-semibold text-slate-200 md:flex normal-case"
+            style={actionsColumnWidth ? { width: actionsColumnWidth } : undefined}
+          >
+            Actions
+          </div>
         </div>
+      );
+    }
+
+    return (
+      <div className="grid grid-cols-[40px,minmax(0,1fr)] md:grid-cols-[40px,minmax(0,1fr),6rem,10rem,6rem,max-content] items-center gap-2 text-xs tracking-wide text-slate-200">
+        <div className="flex justify-center">
+          <input
+            ref={selectAllRef}
+            type="checkbox"
+            className="h-4 w-4 rounded border-slate-700 bg-slate-900 text-emerald-400 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+            checked={allSelected}
+            onChange={handleSelectAll}
+            aria-label="Select all files"
+          />
+        </div>
+        <button
+          type="button"
+          onClick={() => onSort("name")}
+          className="flex items-center gap-1 text-left font-semibold text-slate-200 hover:text-slate-100"
+        >
+          <span>Name</span>
+          <span aria-hidden="true">{headerIndicator("name")}</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => onSort("replicas")}
+          className="hidden items-center justify-center gap-1 font-semibold text-slate-200 hover:text-slate-100 md:flex"
+        >
+          <span>Servers</span>
+          <span aria-hidden="true">{headerIndicator("replicas")}</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => onSort("uploaded")}
+          className="hidden items-center gap-1 text-left font-semibold text-slate-200 hover:text-slate-100 md:flex"
+        >
+          <span>Uploaded</span>
+          <span aria-hidden="true">{headerIndicator("uploaded")}</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => onSort("size")}
+          className="flex items-center gap-1 text-left font-semibold text-slate-200 hover:text-slate-100"
+        >
+          <span>Size</span>
+          <span aria-hidden="true">{headerIndicator("size")}</span>
+        </button>
+        <div
+          className="hidden w-full justify-center text-center font-semibold text-slate-200 md:flex normal-case"
+          style={actionsColumnWidth ? { width: actionsColumnWidth } : undefined}
+        >
+          Actions
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div className="flex flex-1 min-h-0 w-full flex-col overflow-hidden overflow-x-hidden pb-1">
+      <div className="border-b border-slate-800 bg-slate-900/60 px-2 pb-2 pt-0 text-xs uppercase tracking-wide text-slate-200">
+        {renderHeader()}
       </div>
       <div ref={containerRef} className="flex-1 min-h-0 overflow-hidden overflow-x-hidden">
         {blobs.length === 0 ? (
@@ -681,7 +811,6 @@ const GridLayout: React.FC<{
   serverType?: "blossom" | "nip96" | "satellite";
   selected: Set<string>;
   onToggle: (sha: string) => void;
-  onSelectMany?: (shas: string[], value: boolean) => void;
   onDelete: (blob: BlossomBlob) => void;
   onDownload: (blob: BlossomBlob) => void;
   onPreview: (blob: BlossomBlob) => void;
@@ -694,6 +823,8 @@ const GridLayout: React.FC<{
   onDetect: (sha: string, kind: "image" | "video") => void;
   onBlobVisible: (sha: string) => void;
   replicaInfo?: Map<string, BlobReplicaSummary>;
+  audioMetadata: Map<string, BlobAudioMetadata>;
+  showPreviews: boolean;
 }> = ({
   blobs,
   baseUrl,
@@ -702,7 +833,6 @@ const GridLayout: React.FC<{
   serverType,
   selected,
   onToggle,
-  onSelectMany,
   onDelete,
   onDownload,
   onPreview,
@@ -715,12 +845,16 @@ const GridLayout: React.FC<{
   onDetect,
   onBlobVisible,
   replicaInfo,
+  audioMetadata,
+  showPreviews,
 }) => {
   const CARD_WIDTH = 220;
   const GAP = 16;
   const OVERSCAN_ROWS = 2;
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const [viewport, setViewport] = useState({ height: 0, width: 0, scrollTop: 0 });
+  const [openMenuBlob, setOpenMenuBlob] = useState<string | null>(null);
+  const dropdownRefs = useRef<Map<string, HTMLDivElement | null>>(new Map());
 
   useLayoutEffect(() => {
     const el = viewportRef.current;
@@ -748,6 +882,38 @@ const GridLayout: React.FC<{
     };
   }, [blobs.length]);
 
+  useEffect(() => {
+    if (!openMenuBlob) return;
+
+    const activeNode = dropdownRefs.current.get(openMenuBlob);
+    if (!activeNode) {
+      setOpenMenuBlob(null);
+      return;
+    }
+
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target as Node | null;
+      if (!target) return;
+      const node = dropdownRefs.current.get(openMenuBlob);
+      if (node && !node.contains(target)) {
+        setOpenMenuBlob(null);
+      }
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setOpenMenuBlob(null);
+      }
+    };
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [openMenuBlob]);
+
   const viewportHeight = viewport.height || 0;
   const viewportWidth = viewport.width || 0;
   const scrollTop = viewport.scrollTop;
@@ -774,7 +940,7 @@ const GridLayout: React.FC<{
     <div className="flex flex-1 min-h-0 w-full flex-col overflow-hidden">
       <div
         ref={viewportRef}
-        className="relative flex-1 min-h-0 w-full overflow-y-auto overflow-x-hidden px-2"
+        className="relative flex-1 min-h-0 w-full overflow-y-auto overflow-x-hidden pl-2 pr-2 -mr-2"
       >
         <div style={{ position: "relative", height: containerHeight }}>
           {items.map(({ blob, row, col }) => {
@@ -784,22 +950,241 @@ const GridLayout: React.FC<{
             const isActivePlaying = isActiveTrack && currentTrackStatus === "playing";
             const playButtonLabel = isActivePlaying ? "Pause" : "Play";
             const playButtonAria = isActivePlaying ? "Pause audio" : "Play audio";
-            const playButtonClass = `p-2 rounded-lg flex items-center justify-center transition focus:outline-none focus:ring-1 focus:ring-emerald-400 ${
-              isActivePlaying
-                ? "bg-emerald-500/80 text-slate-900 hover:bg-emerald-400"
-                : "bg-emerald-700/70 text-slate-100 hover:bg-emerald-600"
-            }`;
             const playPauseIcon = isActivePlaying ? <PauseIcon size={16} /> : <PlayIcon size={16} />;
             const displayName = buildDisplayName(blob);
             const effectiveServerType = blob.serverType ?? serverType;
             const previewRequiresAuth =
               effectiveServerType === "satellite" ? false : blob.requiresAuth ?? requiresAuth;
             const kind = decideFileKind(blob, detectedKinds[blob.sha256]);
+            const trackMetadata = audioMetadata.get(blob.sha256);
+            const disablePreview = shouldDisablePreview(kind);
+            const coverUrl = kind === "music" ? trackMetadata?.coverUrl : undefined;
             const previewUrl = buildPreviewUrl(blob, kind, baseUrl);
+            const blurhash = extractBlurhash(blob);
             const top = GAP + row * rowHeight;
             const left = GAP + col * (effectiveColumnWidth + GAP);
             const replicaSummary = replicaInfo?.get(blob.sha256);
             const showReplicaBadge = replicaSummary && replicaSummary.count > 1;
+            const coverAlt = trackMetadata?.title?.trim() || displayName;
+            const previewAllowed = showPreviews && !disablePreview;
+            const allowCoverArt = showPreviews && Boolean(coverUrl);
+            const primaryActionBaseClass =
+              "p-2 shrink-0 rounded-lg flex items-center justify-center transition focus:outline-none focus:ring-1 focus:ring-emerald-400 disabled:cursor-not-allowed disabled:opacity-40";
+            const playButtonClass = `${primaryActionBaseClass} ${
+              isActivePlaying
+                ? "bg-emerald-500/80 text-slate-900 hover:bg-emerald-400"
+                : "bg-emerald-700/70 text-slate-100 hover:bg-emerald-600"
+            }`;
+            const showButtonClass = `${primaryActionBaseClass} bg-emerald-700/70 text-slate-100 hover:bg-emerald-600`;
+            const primaryAction =
+              isAudio && onPlay && blob.url
+                ? (
+                    <button
+                      className={`${playButtonClass} aspect-square h-10 w-10`}
+                      onClick={event => {
+                        event.stopPropagation();
+                        onPlay?.(blob);
+                      }}
+                      aria-label={playButtonAria}
+                      aria-pressed={isActivePlaying}
+                      title={playButtonLabel}
+                      type="button"
+                    >
+                      {playPauseIcon}
+                    </button>
+                  )
+                : !isAudio
+                  ? (
+                      <button
+                        className={`${showButtonClass} h-10 w-10`}
+                        onClick={event => {
+                          event.stopPropagation();
+                          onPreview(blob);
+                        }}
+                        aria-label={disablePreview ? "Preview unavailable" : "Show blob"}
+                        title={disablePreview ? "Preview unavailable" : "Show"}
+                        type="button"
+                        disabled={disablePreview}
+                      >
+                        <PreviewIcon size={16} />
+                      </button>
+                    )
+                  : null;
+
+            const shareButton =
+              blob.url && onShare
+                ? (
+                    <button
+                      className="p-2 shrink-0 flex h-10 w-10 items-center justify-center rounded-lg bg-slate-800 text-slate-200 transition hover:bg-slate-700"
+                      onClick={event => {
+                        event.stopPropagation();
+                        onShare?.(blob);
+                      }}
+                      aria-label={isAudio ? "Share track" : "Share blob"}
+                      title="Share"
+                      type="button"
+                    >
+                      <ShareIcon size={16} />
+                    </button>
+                  )
+                : null;
+
+            type DropdownItem = {
+              key: string;
+              label: string;
+              icon: React.ReactNode;
+              onSelect: () => void;
+              ariaLabel?: string;
+              variant?: "destructive";
+            };
+
+            const dropdownItems: DropdownItem[] = [];
+
+            if (blob.url) {
+              dropdownItems.push({
+                key: "download",
+                label: "Download",
+                icon: <DownloadIcon size={14} />,
+                ariaLabel: isAudio ? "Download track" : "Download blob",
+                onSelect: () => onDownload(blob),
+              });
+            }
+
+            if (onRename) {
+              dropdownItems.push({
+                key: "rename",
+                label: "Edit Details",
+                icon: <EditIcon size={14} />,
+                ariaLabel: isAudio ? "Edit track details" : "Edit file details",
+                onSelect: () => onRename(blob),
+              });
+            }
+
+            dropdownItems.push({
+              key: "delete",
+              label: isAudio ? "Delete Track" : "Delete",
+              icon: <TrashIcon size={14} />,
+              ariaLabel: isAudio ? "Delete track" : "Delete blob",
+              onSelect: () => onDelete(blob),
+              variant: "destructive",
+            });
+
+            const menuOpen = openMenuBlob === blob.sha256;
+            const handleMenuToggle: React.MouseEventHandler<HTMLButtonElement> = event => {
+              event.stopPropagation();
+              setOpenMenuBlob(current => (current === blob.sha256 ? null : blob.sha256));
+            };
+
+            const registerDropdownRef = (node: HTMLDivElement | null) => {
+              if (node) {
+                dropdownRefs.current.set(blob.sha256, node);
+              } else {
+                dropdownRefs.current.delete(blob.sha256);
+              }
+            };
+
+            const dropdownMenu = dropdownItems.length === 0
+              ? null
+              : (
+                  <div className="relative" ref={registerDropdownRef}>
+                    <button
+                      className="p-2 shrink-0 flex h-10 w-10 items-center justify-center rounded-lg bg-slate-800 text-slate-200 transition hover:bg-slate-700"
+                      onClick={handleMenuToggle}
+                      aria-haspopup="true"
+                      aria-expanded={menuOpen}
+                      title="More actions"
+                      type="button"
+                    >
+                      <ChevronDownIcon size={16} />
+                    </button>
+                    {menuOpen ? (
+                      <div
+                        className="absolute right-0 z-50 mt-2 w-44 rounded-md border border-slate-700 bg-slate-900/95 p-1 shadow-xl"
+                        role="menu"
+                        aria-label="More actions"
+                      >
+                        {dropdownItems.map(item => (
+                          <a
+                            key={item.key}
+                            href="#"
+                            role="menuitem"
+                            aria-label={item.ariaLabel ?? item.label}
+                            className={`flex items-center gap-2 rounded-md px-3 py-1.5 text-sm transition focus:outline-none focus:ring-1 focus:ring-emerald-400 ${
+                              item.variant === "destructive"
+                                ? "text-red-300 hover:bg-red-900/40 focus:ring-offset-1 focus:ring-offset-slate-900"
+                                : "text-slate-200 hover:bg-slate-700 focus:ring-offset-1 focus:ring-offset-slate-900"
+                            }`}
+                            onClick={event => {
+                              event.preventDefault();
+                              event.stopPropagation();
+                              item.onSelect();
+                              setOpenMenuBlob(null);
+                            }}
+                          >
+                            {item.icon}
+                            <span>{item.label}</span>
+                          </a>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                );
+            const fallbackPreview = (
+              <div
+                className={`flex h-full w-full items-center justify-center rounded-lg border border-slate-800 bg-gradient-to-br ${
+                  kind === "music"
+                    ? "from-emerald-900/70 via-slate-900 to-slate-950"
+                    : kind === "video"
+                      ? "from-sky-900/70 via-slate-900 to-slate-950"
+                      : kind === "image"
+                        ? "from-cyan-900/70 via-slate-900 to-slate-950"
+                        : kind === "pdf"
+                          ? "from-red-900/70 via-slate-900 to-slate-950"
+                          : kind === "doc" || kind === "document"
+                            ? "from-purple-900/70 via-slate-900 to-slate-950"
+                            : "from-slate-900 via-slate-900 to-slate-950"
+                }`}
+              >
+                <FileTypeIcon
+                  kind={kind}
+                  size={Math.round(CARD_HEIGHT * 0.5)}
+                  className="text-slate-200"
+                  aria-hidden="true"
+                />
+              </div>
+            );
+
+            let previewPanel: React.ReactNode = fallbackPreview;
+            if (previewAllowed && previewUrl) {
+              previewPanel = (
+                <BlobPreview
+                  sha={blob.sha256}
+                  url={previewUrl}
+                  name={blob.name || blob.sha256}
+                  type={blob.type}
+                  serverUrl={blob.serverUrl ?? baseUrl}
+                  requiresAuth={previewRequiresAuth}
+                  signTemplate={previewRequiresAuth ? signTemplate : undefined}
+                  serverType={blob.serverType ?? serverType}
+                  onDetect={onDetect}
+                  fallbackIconSize={Math.round(CARD_HEIGHT * 0.5)}
+                  className="h-full w-full rounded-lg border border-slate-800 bg-slate-950/70"
+                  onVisible={onBlobVisible}
+                  blurhash={blurhash}
+                />
+              );
+            }
+
+            const previewContent = allowCoverArt
+              ? (
+                  <AudioCoverImage
+                    url={coverUrl!}
+                    alt={`${coverAlt} cover art`}
+                    className="h-full w-full rounded-lg border border-slate-800 object-cover"
+                    fallback={fallbackPreview}
+                  />
+                )
+              : previewPanel;
             return (
               <React.Fragment key={blob.sha256}>
                 <div
@@ -813,12 +1198,12 @@ const GridLayout: React.FC<{
                       onToggle(blob.sha256);
                     }
                   }}
-                  className={`absolute flex flex-col overflow-hidden rounded-xl border focus:outline-none focus:ring-2 focus:ring-emerald-500/70 focus:ring-offset-2 focus:ring-offset-slate-900 cursor-pointer transition ${
+                  className={`absolute flex flex-col overflow-visible rounded-xl border focus:outline-none focus:ring-2 focus:ring-emerald-500/70 focus:ring-offset-2 focus:ring-offset-slate-900 cursor-pointer transition ${
                     isSelected ? "border-emerald-500 bg-emerald-500/10" : "border-slate-800 bg-slate-900/60"
                   }`}
                   style={{ top, left, width: effectiveColumnWidth, height: CARD_HEIGHT }}
                 >
-                  <div className="relative flex-1" style={{ height: CARD_HEIGHT * 0.75 }}>
+                  <div className="relative flex-1 overflow-hidden" style={{ height: CARD_HEIGHT * 0.75 }}>
                     {showReplicaBadge ? (
                       <div className="pointer-events-none absolute inset-x-0 top-0 z-20 flex justify-start p-2">
                         <div
@@ -830,26 +1215,7 @@ const GridLayout: React.FC<{
                         </div>
                       </div>
                     ) : null}
-                    {previewUrl ? (
-                      <BlobPreview
-                        sha={blob.sha256}
-                        url={previewUrl}
-                        name={blob.name || blob.sha256}
-                        type={blob.type}
-                        serverUrl={blob.serverUrl ?? baseUrl}
-                        requiresAuth={previewRequiresAuth}
-                        signTemplate={previewRequiresAuth ? signTemplate : undefined}
-                        serverType={blob.serverType ?? serverType}
-                        onDetect={onDetect}
-                        fallbackIconSize={Math.round(CARD_HEIGHT * 0.5)}
-                        className="h-full rounded-none border-0 bg-transparent"
-                        onVisible={onBlobVisible}
-                      />
-                    ) : (
-                      <div className="flex h-full w-full items-center justify-center bg-slate-950/80">
-                        <FileTypeIcon kind={kind} size={Math.round(CARD_HEIGHT * 0.5)} className="text-slate-300" />
-                      </div>
-                    )}
+                    {previewContent}
                     <div className="pointer-events-none absolute inset-x-0 bottom-0 px-3 pb-2">
                       <div
                         className="w-full truncate rounded-md bg-slate-950/75 px-2 py-1 text-xs font-medium text-slate-100 text-center"
@@ -860,86 +1226,12 @@ const GridLayout: React.FC<{
                     </div>
                   </div>
                   <div
-                    className="grid grid-cols-5 items-center gap-1 border-t border-slate-800/80 bg-slate-950/90 px-2 py-3"
+                    className="flex items-center justify-center gap-2 border-t border-slate-800/80 bg-slate-950/90 px-2 py-3"
                     style={{ height: CARD_HEIGHT * 0.25 }}
                   >
-                    {!isAudio && (
-                      <button
-                        className={GRID_ACTION_BUTTON_CLASS}
-                        onClick={event => {
-                          event.stopPropagation();
-                          onPreview(blob);
-                        }}
-                        aria-label="Preview blob"
-                        title="Preview"
-                      >
-                        <PreviewIcon size={16} />
-                      </button>
-                    )}
-                    {isAudio && onPlay && blob.url && (
-                      <button
-                        className={`${playButtonClass} aspect-square w-full`}
-                        onClick={event => {
-                          event.stopPropagation();
-                          onPlay?.(blob);
-                        }}
-                        aria-label={playButtonAria}
-                        aria-pressed={isActivePlaying}
-                        title={playButtonLabel}
-                      >
-                        {playPauseIcon}
-                      </button>
-                    )}
-                    {blob.url && onShare && (
-                      <button
-                        className={GRID_ACTION_BUTTON_CLASS}
-                        onClick={event => {
-                          event.stopPropagation();
-                          onShare?.(blob);
-                        }}
-                        aria-label="Share blob"
-                        title="Share"
-                      >
-                        <ShareIcon size={16} />
-                      </button>
-                    )}
-                    {blob.url && (
-                      <button
-                        className={GRID_ACTION_BUTTON_CLASS}
-                        onClick={event => {
-                          event.stopPropagation();
-                          onDownload(blob);
-                        }}
-                        aria-label="Download blob"
-                        title="Download"
-                      >
-                        <DownloadIcon size={16} />
-                      </button>
-                    )}
-                    {onRename && (
-                      <button
-                        className={GRID_ACTION_BUTTON_CLASS}
-                        onClick={event => {
-                          event.stopPropagation();
-                          onRename(blob);
-                        }}
-                        aria-label="Edit file details"
-                        title="Edit details"
-                      >
-                        <EditIcon size={16} />
-                      </button>
-                    )}
-                    <button
-                      className={GRID_DELETE_BUTTON_CLASS}
-                      onClick={event => {
-                        event.stopPropagation();
-                        onDelete(blob);
-                      }}
-                      aria-label="Delete blob"
-                      title="Delete"
-                    >
-                      <TrashIcon size={16} />
-                    </button>
+                    {primaryAction}
+                    {shareButton}
+                    {dropdownMenu}
                   </div>
                 </div>
               </React.Fragment>
@@ -966,6 +1258,7 @@ const PreviewDialog: React.FC<{
 }> = ({ target, onClose, onDetect, onCopy, onBlobVisible }) => {
   const { blob, displayName, previewUrl, requiresAuth, signTemplate, serverType, disablePreview } = target;
   const derivedKind: FileKind = (target.kind as FileKind | undefined) ?? decideFileKind(blob, undefined);
+  const blurhash = extractBlurhash(blob);
   const sizeLabel = typeof blob.size === "number" ? prettyBytes(blob.size) : null;
   const uploadedLabel = typeof blob.uploaded === "number" ? prettyDate(blob.uploaded) : null;
   const typeLabel = blob.type || "Unknown";
@@ -1018,7 +1311,7 @@ const PreviewDialog: React.FC<{
         role="dialog"
         aria-modal="true"
         aria-label={`Preview ${displayName}`}
-        className="relative flex w-full max-w-4xl flex-col gap-4 rounded-2xl border border-slate-800 bg-slate-900/95 p-6 shadow-2xl"
+        className="relative flex w-full max-w-4xl flex-col gap-4 rounded-2xl border border-slate-800 bg-slate-900/95 p-6 shadow-2xl max-h-[calc(100vh-2rem)] overflow-hidden"
         onClick={event => event.stopPropagation()}
       >
         <button
@@ -1052,7 +1345,7 @@ const PreviewDialog: React.FC<{
             )}
           </div>
         </div>
-        <div className="relative flex min-h-[22rem] flex-1 items-center justify-center overflow-hidden rounded-xl border border-slate-800 bg-slate-950/60">
+        <div className="relative flex min-h-[18rem] flex-1 items-center justify-center overflow-hidden rounded-xl border border-slate-800 bg-slate-950/60 max-h-[calc(100vh-18rem)]">
           {previewUnavailable ? (
             <div className="flex h-full w-full flex-col items-center justify-center gap-4 p-6 text-sm text-slate-400">
               <FileTypeIcon kind={derivedKind} size={112} className="text-slate-500" />
@@ -1070,9 +1363,10 @@ const PreviewDialog: React.FC<{
               serverType={serverType}
               onDetect={onDetect}
               fallbackIconSize={160}
-              className="h-[28rem] w-full max-w-full"
+              className="h-full w-full max-h-[65vh] max-w-full"
               variant="dialog"
               onVisible={onBlobVisible}
+              blurhash={blurhash}
             />
           )}
         </div>
@@ -1109,6 +1403,8 @@ const ListThumbnail: React.FC<{
   serverType?: "blossom" | "nip96" | "satellite";
   onDetect?: (sha: string, kind: "image" | "video") => void;
   onVisible?: (sha: string) => void;
+  coverUrl?: string;
+  showPreview?: boolean;
 }> = ({
   blob,
   kind,
@@ -1118,334 +1414,138 @@ const ListThumbnail: React.FC<{
   serverType = "blossom",
   onDetect,
   onVisible,
+  coverUrl,
+  showPreview = true,
 }) => {
-  const [failed, setFailed] = useState(false);
-  const [src, setSrc] = useState<string | null>(null);
-  const [isLoaded, setIsLoaded] = useState(false);
-  const [textPreview, setTextPreview] = useState<{ content: string; truncated: boolean } | null>(null);
-  const objectUrlRef = useRef<string | null>(null);
-  const lastLoadedKeyRef = useRef<string | null>(null);
-  const lastFailureKeyRef = useRef<string | null>(null);
-  const activeRequestRef = useRef<{ key: string; controller: AbortController } | null>(null);
+  const containerClass =
+    "flex h-12 w-12 flex-shrink-0 overflow-hidden rounded-lg border border-slate-800 bg-slate-950/80 relative";
+  const blurhash = extractBlurhash(blob);
   const [observeTarget, isVisible] = useInViewport<HTMLDivElement>({ rootMargin: "200px" });
-  const hasReportedVisibilityRef = useRef(false);
 
-  const containerClass = "flex h-12 w-12 flex-shrink-0 overflow-hidden rounded-lg border border-slate-800 bg-slate-950/80 relative";
+  useEffect(() => {
+    if (!showPreview) return;
+    if (!blurhash) return;
+    if (!isVisible) return;
+    onVisible?.(blob.sha256);
+  }, [blurhash, blob.sha256, isVisible, onVisible, showPreview]);
+
+  useEffect(() => {
+    if (!showPreview) return;
+    if (!blurhash) return;
+    if (kind === "image" || kind === "video") {
+      onDetect?.(blob.sha256, kind === "image" ? "image" : "video");
+    }
+  }, [blurhash, blob.sha256, kind, onDetect, showPreview]);
+
+  if (showPreview && (kind === "image" || kind === "video") && blurhash) {
+    return (
+      <div ref={observeTarget} className={containerClass}>
+        <BlurhashThumbnail
+          hash={blurhash.hash}
+          width={blurhash.width}
+          height={blurhash.height}
+          alt={blob.name || blob.sha256}
+        />
+      </div>
+    );
+  }
+
+  const previewUrl = showPreview && kind === "image" ? buildPreviewUrl(blob, kind, baseUrl) : null;
   const effectiveServerType = blob.serverType ?? serverType;
-  const effectiveRequiresAuth = effectiveServerType === "satellite" ? false : blob.requiresAuth ?? requiresAuth;
-  const disablePreview = kind === "doc" || kind === "sheet" || kind === "pdf";
-  const previewUrl = disablePreview
-    ? undefined
-    : blob.url || (() => {
-    const fallback = blob.serverUrl ?? baseUrl;
-    if (!fallback) return undefined;
-    return `${fallback.replace(/\/$/, "")}/${blob.sha256}`;
-  })();
-  const previewKey = previewUrl ? `${blob.sha256}|${previewUrl}|${effectiveRequiresAuth ? "auth" : "anon"}` : null;
+  const effectiveRequiresAuth =
+    effectiveServerType === "satellite" ? false : blob.requiresAuth ?? requiresAuth;
 
-  const metaSuggestsText = useMemo(
-    () => !disablePreview && isPreviewableTextType({ mime: blob.type, name: blob.name, url: previewUrl }),
-    [disablePreview, blob.type, blob.name, previewUrl]
-  );
-
-  useEffect(() => {
-    return () => {
-      if (objectUrlRef.current) {
-        URL.revokeObjectURL(objectUrlRef.current);
-        objectUrlRef.current = null;
-      }
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!previewKey) {
-      if (objectUrlRef.current) {
-        URL.revokeObjectURL(objectUrlRef.current);
-        objectUrlRef.current = null;
-      }
-      lastLoadedKeyRef.current = null;
-      lastFailureKeyRef.current = null;
-      setSrc(null);
-      setIsLoaded(false);
-      setFailed(false);
-      setTextPreview(null);
-      return;
+  if (kind === "music") {
+    const fallbackContent = (
+      <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-emerald-900/70 via-slate-900 to-slate-950">
+        <MusicIcon size={18} className="text-emerald-200" aria-hidden="true" />
+      </div>
+    );
+    if (showPreview && coverUrl) {
+      return (
+        <div className={containerClass}>
+          <AudioCoverImage
+            url={coverUrl}
+            alt={`${blob.name || blob.sha256} cover art`}
+            className="h-full w-full object-cover"
+            fallback={fallbackContent}
+          />
+        </div>
+      );
     }
+    return (
+      <div
+        className={`${containerClass} items-center justify-center bg-gradient-to-br from-emerald-900/70 via-slate-900 to-slate-950`}
+      >
+        <MusicIcon size={18} className="text-emerald-200" aria-hidden="true" />
+      </div>
+    );
+  }
 
-    const hasLoadedCurrent = lastLoadedKeyRef.current === previewKey;
-    if (hasLoadedCurrent) {
-      return;
-    }
+  if (kind === "video") {
+    return (
+      <div
+        className={`${containerClass} items-center justify-center bg-gradient-to-br from-sky-900/70 via-slate-900 to-slate-950`}
+      >
+        <VideoIcon size={18} className="text-sky-200" aria-hidden="true" />
+      </div>
+    );
+  }
 
-    if (lastFailureKeyRef.current === previewKey) {
-      return;
-    }
+  if (kind === "image") {
+    return (
+      <div
+        className={`${containerClass} items-center justify-center bg-gradient-to-br from-cyan-900/70 via-slate-900 to-slate-950`}
+      >
+        <FileTypeIcon kind="image" size={18} className="text-cyan-200" aria-hidden="true" />
+      </div>
+    );
+  }
 
-    if (effectiveRequiresAuth && !signTemplate) {
-      lastFailureKeyRef.current = previewKey;
-      setFailed(true);
-      return;
-    }
+  if (kind === "document" || kind === "doc") {
+    return (
+      <div
+        className={`${containerClass} items-center justify-center bg-gradient-to-br from-purple-900/70 via-slate-900 to-slate-950`}
+      >
+        <DocumentIcon size={18} className="text-purple-200" aria-hidden="true" />
+      </div>
+    );
+  }
 
-    if (!previewUrl) {
-      return;
-    }
+  if (kind === "pdf") {
+    return (
+      <div
+        className={`${containerClass} items-center justify-center bg-gradient-to-br from-red-900/70 via-slate-900 to-slate-950`}
+      >
+        <FileTypeIcon kind="pdf" size={18} className="text-red-200" aria-hidden="true" />
+      </div>
+    );
+  }
 
-    const resolvedPreviewUrl = previewUrl;
-
-    const existingRequest = activeRequestRef.current;
-    if (existingRequest) {
-      if (existingRequest.key === previewKey) {
-        return;
-      }
-      existingRequest.controller.abort();
-      activeRequestRef.current = null;
-    }
-
-    const controller = new AbortController();
-    activeRequestRef.current = { key: previewKey, controller };
-    let cancelled = false;
-
-    lastFailureKeyRef.current = null;
-    setFailed(false);
-    setIsLoaded(false);
-    setSrc(null);
-    setTextPreview(null);
-
-    if (objectUrlRef.current) {
-      URL.revokeObjectURL(objectUrlRef.current);
-      objectUrlRef.current = null;
-    }
-
-    const finalizeRequest = () => {
-      if (activeRequestRef.current?.controller === controller) {
-        activeRequestRef.current = null;
-      }
-    };
-
-    const assignObjectUrl = (blobData: Blob) => {
-      if (cancelled) return;
-      if (objectUrlRef.current) {
-        URL.revokeObjectURL(objectUrlRef.current);
-        objectUrlRef.current = null;
-      }
-      setTextPreview(null);
-      const objectUrl = URL.createObjectURL(blobData);
-      objectUrlRef.current = objectUrl;
-      lastLoadedKeyRef.current = previewKey;
-      lastFailureKeyRef.current = null;
-      setSrc(objectUrl);
-    };
-
-    const useDirectUrl = () => {
-      if (cancelled) return;
-      if (objectUrlRef.current) {
-        URL.revokeObjectURL(objectUrlRef.current);
-        objectUrlRef.current = null;
-      }
-      setTextPreview(null);
-      lastLoadedKeyRef.current = previewKey;
-      lastFailureKeyRef.current = null;
-      setSrc(resolvedPreviewUrl);
-    };
-
-    const showTextPreview = async (blobData: Blob, mimeHint?: string | null) => {
-      const normalizedMime = mimeHint ?? blobData.type ?? blob.type;
-      const shouldRenderText =
-        isPreviewableTextType({ mime: normalizedMime, name: blob.name, url: resolvedPreviewUrl }) ||
-        (!normalizedMime && isPreviewableTextType({ name: blob.name, url: resolvedPreviewUrl })) ||
-        metaSuggestsText;
-      if (!shouldRenderText) return false;
-      try {
-        const preview = await buildTextPreview(blobData);
-        if (cancelled) return true;
-        if (objectUrlRef.current) {
-          URL.revokeObjectURL(objectUrlRef.current);
-          objectUrlRef.current = null;
-        }
-        setSrc(null);
-        setTextPreview(preview);
-        setIsLoaded(true);
-        setFailed(false);
-        lastLoadedKeyRef.current = previewKey;
-        lastFailureKeyRef.current = null;
-        return true;
-      } catch (error) {
-        return false;
-      }
-    };
-
-    const load = async () => {
-      try {
-        const cached = metaSuggestsText
-          ? null
-          : await getCachedPreviewBlob(blob.serverUrl ?? baseUrl, blob.sha256);
-        if (cancelled) return;
-        if (cached) {
-          assignObjectUrl(cached);
-          return;
-        }
-
-        const match = resolvedPreviewUrl.match(/[0-9a-f]{64}/i);
-
-        if (!effectiveRequiresAuth) {
-          try {
-            const response = await fetch(resolvedPreviewUrl, { mode: "cors", signal: controller.signal });
-            if (!response.ok || response.type === "opaqueredirect" || response.type === "opaque") {
-              throw new Error(`Preview fetch failed (${response.status})`);
-            }
-            const blobData = await response.blob();
-            if (cancelled) return;
-            const mime = response.headers.get("content-type") || blobData.type || blob.type || undefined;
-            const handled = await showTextPreview(blobData, mime);
-            if (handled) return;
-            assignObjectUrl(blobData);
-            await cachePreviewBlob(blob.serverUrl ?? baseUrl, blob.sha256, blobData);
-            return;
-          } catch (error) {
-            if (cancelled) return;
-            if (error instanceof DOMException && error.name === "AbortError") {
-              return;
-            }
-            if (!metaSuggestsText) {
-              useDirectUrl();
-            } else {
-              lastLoadedKeyRef.current = null;
-              if (previewKey) {
-                lastFailureKeyRef.current = previewKey;
-              }
-              setFailed(true);
-            }
-            return;
-          }
-        }
-
-        if (!signTemplate) {
-          if (!cancelled) {
-            setFailed(true);
-          }
-          return;
-        }
-
-        const headers: Record<string, string> = {};
-        if (effectiveRequiresAuth) {
-          if (effectiveServerType === "nip96") {
-            headers.Authorization = await buildNip98AuthHeader(signTemplate, {
-              url: resolvedPreviewUrl,
-              method: "GET",
-            });
-          } else {
-            let resource: URL | undefined;
-            try {
-              resource = new URL(resolvedPreviewUrl);
-            } catch (error) {
-              resource = undefined;
-            }
-            headers.Authorization = await buildAuthorizationHeader(signTemplate, "get", {
-              hash: match ? match[0] : undefined,
-              serverUrl: resource ? `${resource.protocol}//${resource.host}` : undefined,
-              urlPath: resource ? resource.pathname + (resource.search || "") : undefined,
-            });
-          }
-        }
-
-        const response = await fetch(resolvedPreviewUrl, { headers, signal: controller.signal });
-        if (!response.ok || response.type === "opaqueredirect" || response.type === "opaque") {
-          throw new Error(`Preview fetch failed (${response.status})`);
-        }
-
-        const blobData = await response.blob();
-        if (cancelled) return;
-        const mime = response.headers.get("content-type") || blobData.type || blob.type || undefined;
-        const handled = await showTextPreview(blobData, mime);
-        if (handled) return;
-        assignObjectUrl(blobData);
-        await cachePreviewBlob(blob.serverUrl ?? baseUrl, blob.sha256, blobData);
-      } catch (error) {
-        if (cancelled) return;
-        if (error instanceof DOMException && error.name === "AbortError") {
-          return;
-        }
-        setFailed(true);
-        lastLoadedKeyRef.current = null;
-        lastFailureKeyRef.current = previewKey;
-      }
-    };
-
-    void load().finally(finalizeRequest);
-
-    return () => {
-      cancelled = true;
-      controller.abort();
-      finalizeRequest();
-    };
-  }, [previewKey, isVisible, previewUrl, blob.serverUrl, baseUrl, effectiveRequiresAuth, effectiveServerType, signTemplate, blob.sha256]);
-
-  useEffect(() => {
-    if (!previewKey) return;
-    if (!isVisible && lastFailureKeyRef.current === previewKey) {
-      lastFailureKeyRef.current = null;
-    }
-  }, [isVisible, previewKey]);
-
-  useEffect(() => {
-    if (!previewKey) return;
-    if (effectiveRequiresAuth && signTemplate && lastFailureKeyRef.current === previewKey) {
-      lastFailureKeyRef.current = null;
-    }
-  }, [previewKey, effectiveRequiresAuth, signTemplate]);
-
-  useEffect(() => {
-    if (!isVisible || !onVisible || hasReportedVisibilityRef.current) return;
-    hasReportedVisibilityRef.current = true;
-    onVisible(blob.sha256);
-  }, [isVisible, onVisible, blob.sha256]);
-
-  const altText = blob.name || previewUrl?.split("/").pop() || blob.sha256;
-  const showText = Boolean(textPreview) && !failed;
-  const showMedia = Boolean(src) && !failed && Boolean(previewUrl);
-  const showOverlay = (!showMedia && !showText) || (showMedia && !isLoaded);
-  const fallbackIconSize = Math.round(LIST_THUMBNAIL_SIZE * 0.6);
+  if (previewUrl) {
+    return (
+      <div className={containerClass}>
+        <BlobPreview
+          sha={blob.sha256}
+          url={previewUrl}
+          name={blob.name || blob.sha256}
+          type={blob.type}
+          serverUrl={blob.serverUrl ?? baseUrl}
+          requiresAuth={effectiveRequiresAuth}
+          signTemplate={effectiveRequiresAuth ? signTemplate : undefined}
+          serverType={blob.serverType ?? serverType}
+          onDetect={onDetect ?? (() => undefined)}
+          fallbackIconSize={40}
+          className="h-full w-full rounded-none border-0 bg-transparent"
+          onVisible={onVisible}
+        />
+      </div>
+    );
+  }
 
   return (
-    <div ref={observeTarget} className={containerClass}>
-      {showText && textPreview && (
-        <div className="absolute inset-0 flex h-full w-full flex-col overflow-hidden bg-slate-950/85 px-2 py-1">
-          <pre className="flex-1 overflow-hidden whitespace-pre-wrap break-words font-mono text-[9px] leading-tight text-slate-200" title={textPreview.content}>
-            {textPreview.content}
-          </pre>
-        </div>
-      )}
-      {showMedia && (
-        <img
-          src={src!}
-          alt={altText}
-          className={`h-full w-full object-cover transition-opacity duration-150 ${isLoaded ? "opacity-100" : "opacity-0"}`}
-          loading="lazy"
-          onLoad={() => {
-            setIsLoaded(true);
-            onDetect?.(blob.sha256, "image");
-          }}
-          onError={() => {
-            if (objectUrlRef.current) {
-              URL.revokeObjectURL(objectUrlRef.current);
-              objectUrlRef.current = null;
-            }
-            lastLoadedKeyRef.current = null;
-            if (previewKey) {
-              lastFailureKeyRef.current = previewKey;
-            }
-            setSrc(null);
-            setIsLoaded(false);
-            setFailed(true);
-          }}
-        />
-      )}
-      {showOverlay && (
-        <div className="absolute inset-0 flex items-center justify-center bg-slate-950/70 pointer-events-none">
-          <FileTypeIcon kind={kind} size={fallbackIconSize} className="text-slate-300" />
-        </div>
-      )}
+    <div className={containerClass}>
+      <FileTypeIcon kind={kind} size={40} className="text-slate-300" />
     </div>
   );
 };
@@ -1471,6 +1571,10 @@ function ListRow({
   onDetect,
   onBlobVisible,
   replicaSummary,
+  isMusicListView,
+  audioMetadata,
+  onActionsWidthChange,
+  showPreviews,
 }: {
   style: React.CSSProperties;
   blob: BlossomBlob;
@@ -1492,6 +1596,10 @@ function ListRow({
   onDetect: (sha: string, kind: "image" | "video") => void;
   onBlobVisible: (sha: string) => void;
   replicaSummary?: BlobReplicaSummary;
+  isMusicListView: boolean;
+  audioMetadata: Map<string, BlobAudioMetadata>;
+  onActionsWidthChange: (width: number) => void;
+  showPreviews: boolean;
 }) {
   const kind = decideFileKind(blob, detectedKinds[blob.sha256]);
   const isAudio = blob.type?.startsWith("audio/");
@@ -1499,20 +1607,308 @@ function ListRow({
   const isActivePlaying = isActiveTrack && currentTrackStatus === "playing";
   const playButtonLabel = isActivePlaying ? "Pause" : "Play";
   const playButtonAria = isActivePlaying ? "Pause audio" : "Play audio";
-  const playButtonClass = `p-2 rounded-lg flex items-center justify-center transition focus:outline-none focus:ring-1 focus:ring-emerald-400 ${
+  const primaryActionBaseClass =
+    "p-2 shrink-0 rounded-lg flex items-center justify-center transition focus:outline-none focus:ring-1 focus:ring-emerald-400";
+  const playButtonClass = `${primaryActionBaseClass} ${
     isActivePlaying ? "bg-emerald-500/80 text-slate-900 hover:bg-emerald-400" : "bg-emerald-700/70 text-slate-100 hover:bg-emerald-600"
   }`;
+  const showButtonClass = `${primaryActionBaseClass} bg-emerald-700/70 text-slate-100 hover:bg-emerald-600`;
   const playPauseIcon = isActivePlaying ? <PauseIcon size={16} /> : <PlayIcon size={16} />;
   const displayName = buildDisplayName(blob);
   const isSelected = selected.has(blob.sha256);
+  const trackMetadata = audioMetadata.get(blob.sha256);
   const disablePreview = shouldDisablePreview(kind);
+  const { baseName } = splitNameAndExtension(displayName);
+  const trackTitle = trackMetadata?.title?.trim() || baseName;
+  const artistName = trackMetadata?.artist?.trim() || "";
+  const albumName = trackMetadata?.album?.trim() || "";
+  const durationLabel = formatDurationSeconds(trackMetadata?.durationSeconds);
+  const rowHighlightClass = isActiveTrack
+    ? isActivePlaying
+      ? "bg-emerald-950/40 ring-1 ring-emerald-400/60"
+      : "bg-emerald-950/30 ring-1 ring-emerald-400/40"
+    : isSelected
+      ? "bg-slate-800/50"
+      : "hover:bg-slate-800/40";
+  const allowThumbnailPreview = showPreviews && (!disablePreview || (kind === "music" && Boolean(trackMetadata?.coverUrl)));
+
+  const thumbnail = (
+    <div className="relative">
+      <ListThumbnail
+        blob={blob}
+        kind={kind}
+        baseUrl={baseUrl}
+        requiresAuth={requiresAuth}
+        signTemplate={signTemplate}
+        serverType={serverType}
+        onDetect={(sha, detectedKind) => onDetect(sha, detectedKind)}
+        onVisible={onBlobVisible}
+        coverUrl={trackMetadata?.coverUrl}
+        showPreview={allowThumbnailPreview}
+      />
+      {isActiveTrack ? (
+        <span
+          className={`absolute -bottom-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full border border-slate-900/80 text-xs ${
+            isActivePlaying ? "bg-emerald-500 text-slate-900" : "bg-slate-800 text-emerald-300"
+          }`}
+          aria-hidden="true"
+        >
+          {isActivePlaying ? <PauseIcon size={10} /> : <PlayIcon size={10} />}
+        </span>
+      ) : null}
+    </div>
+  );
+
+  const actionsContainerRef = useRef<HTMLDivElement | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  useLayoutEffect(() => {
+    const element = actionsContainerRef.current;
+    if (!element) return;
+
+    const notify = () => {
+      const width = element.offsetWidth;
+      if (width) onActionsWidthChange(width);
+    };
+
+    notify();
+
+    if (typeof ResizeObserver === "function") {
+      const observer = new ResizeObserver(() => notify());
+      observer.observe(element);
+      return () => observer.disconnect();
+    }
+
+    if (typeof window !== "undefined") {
+      const handleResize = () => notify();
+      window.addEventListener("resize", handleResize);
+      return () => window.removeEventListener("resize", handleResize);
+    }
+
+    return undefined;
+  }, [onActionsWidthChange, menuOpen]);
+  const dropdownRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    setMenuOpen(false);
+  }, [blob.sha256]);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    if (typeof document === "undefined") return;
+
+    const handlePointer = (event: Event) => {
+      const target = event.target as Node | null;
+      if (!target || !dropdownRef.current) return;
+      if (!dropdownRef.current.contains(target)) {
+        setMenuOpen(false);
+      }
+    };
+
+    const handleKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setMenuOpen(false);
+      }
+    };
+
+    document.addEventListener("pointerdown", handlePointer);
+    document.addEventListener("keydown", handleKey);
+
+    return () => {
+      document.removeEventListener("pointerdown", handlePointer);
+      document.removeEventListener("keydown", handleKey);
+    };
+  }, [menuOpen]);
+
+  const primaryAction =
+    isAudio && onPlay && blob.url ? (
+      <button
+        className={playButtonClass}
+        onClick={event => {
+          event.stopPropagation();
+          onPlay?.(blob);
+        }}
+        aria-label={playButtonAria}
+        aria-pressed={isActivePlaying}
+        title={playButtonLabel}
+        type="button"
+      >
+        {playPauseIcon}
+      </button>
+    ) : !isAudio ? (
+      <button
+        className={showButtonClass}
+        onClick={event => {
+          event.stopPropagation();
+          onPreview(blob);
+        }}
+        aria-label={disablePreview ? "Preview unavailable" : "Show blob"}
+        title={disablePreview ? "Preview unavailable" : "Show"}
+        type="button"
+      >
+        <PreviewIcon size={16} />
+      </button>
+    ) : null;
+
+  const shareButton =
+    blob.url && onShare
+      ? (
+          <button
+            className="p-2 shrink-0 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200"
+            onClick={event => {
+              event.stopPropagation();
+              onShare?.(blob);
+            }}
+            aria-label={isMusicListView ? "Share track" : "Share blob"}
+            title="Share"
+            type="button"
+          >
+            <ShareIcon size={16} />
+          </button>
+        )
+      : null;
+
+  type DropdownItem = {
+    key: string;
+    label: string;
+    icon: React.ReactNode;
+    onSelect: () => void;
+    ariaLabel?: string;
+    variant?: "destructive";
+  };
+
+  const dropdownItems: DropdownItem[] = [];
+
+  if (blob.url) {
+    dropdownItems.push({
+      key: "download",
+      label: "Download",
+      icon: <DownloadIcon size={14} />,
+      ariaLabel: isMusicListView ? "Download track" : "Download blob",
+      onSelect: () => onDownload(blob),
+    });
+  }
+
+  if (onRename) {
+    dropdownItems.push({
+      key: "rename",
+      label: "Edit Details",
+      icon: <EditIcon size={14} />,
+      ariaLabel: isMusicListView ? "Edit track details" : "Edit file details",
+      onSelect: () => onRename(blob),
+    });
+  }
+
+  dropdownItems.push({
+    key: "delete",
+    label: "Delete",
+    icon: <TrashIcon size={14} />,
+    ariaLabel: isMusicListView ? "Delete track" : "Delete blob",
+    onSelect: () => onDelete(blob),
+    variant: "destructive",
+  });
+
+  const showDropdown = dropdownItems.length > 0;
+
+  const handleMenuToggle: React.MouseEventHandler<HTMLButtonElement> = event => {
+    event.stopPropagation();
+    setMenuOpen(value => !value);
+  };
+
+  const dropdownMenu = !showDropdown
+    ? null
+    : (
+        <div className="relative" ref={dropdownRef}>
+          <button
+            className="p-2 shrink-0 rounded-lg bg-slate-800 text-slate-200 transition hover:bg-slate-700"
+            onClick={handleMenuToggle}
+            aria-haspopup="true"
+            aria-expanded={menuOpen}
+            title="More actions"
+            type="button"
+          >
+            <ChevronDownIcon size={16} />
+          </button>
+          {menuOpen ? (
+            <div
+              className="absolute right-0 z-30 mt-2 w-44 rounded-md border border-slate-700 bg-slate-900/95 p-1 shadow-xl"
+              role="menu"
+              aria-label="More actions"
+            >
+              {dropdownItems.map(item => (
+                <a
+                  key={item.key}
+                  href="#"
+                  role="menuitem"
+                  aria-label={item.ariaLabel ?? item.label}
+                  className={`flex items-center gap-2 rounded-md px-3 py-1.5 text-sm transition focus:outline-none focus:ring-1 focus:ring-emerald-400 ${
+                    item.variant === "destructive"
+                      ? "text-red-300 hover:bg-red-900/40 focus:ring-offset-1 focus:ring-offset-slate-900"
+                      : "text-slate-200 hover:bg-slate-700 focus:ring-offset-1 focus:ring-offset-slate-900"
+                  }`}
+                  onClick={event => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    item.onSelect();
+                    setMenuOpen(false);
+                  }}
+                >
+                  {item.icon}
+                  <span>{item.label}</span>
+                </a>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      );
+
+  if (isMusicListView) {
+    return (
+      <div
+        style={style}
+        className={`absolute left-0 right-0 grid grid-cols-[60px,minmax(0,1fr)] md:grid-cols-[60px,minmax(0,1fr),10rem,12rem,6rem,max-content] items-center gap-2 border-b border-slate-800 px-2 transition-colors ring-1 ring-transparent ${rowHighlightClass}`}
+        role="row"
+        aria-current={isActiveTrack ? "true" : undefined}
+      >
+        <div className="flex h-full items-center justify-center">
+          {thumbnail}
+        </div>
+        <div className="min-w-0">
+          <div className="truncate font-medium text-slate-100" title={displayName}>
+            {trackTitle}
+          </div>
+          <div className="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-slate-400 md:hidden">
+            <span className="truncate">{artistName || "—"}</span>
+            {durationLabel !== "—" && <span>{durationLabel}</span>}
+          </div>
+        </div>
+        <div className="hidden truncate text-sm text-slate-200 md:block" title={artistName}>
+          {artistName || "—"}
+        </div>
+        <div className="hidden truncate text-sm text-slate-200 lg:block" title={albumName}>
+          {albumName || "—"}
+        </div>
+        <div className="hidden justify-end text-sm text-slate-400 lg:flex">
+          {durationLabel}
+        </div>
+        <div
+          ref={actionsContainerRef}
+          className="col-span-2 flex shrink-0 items-center justify-center gap-2 px-2 md:col-span-1 md:justify-end"
+        >
+          {primaryAction}
+          {shareButton}
+          {dropdownMenu}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div
       style={style}
-      className={`absolute left-0 right-0 flex items-center gap-2 border-b border-slate-800 px-2 transition-colors ${
-        isSelected ? "bg-slate-800/50" : "hover:bg-slate-800/40"
-      }`}
+      className={`absolute left-0 right-0 flex items-center gap-2 border-b border-slate-800 px-2 transition-colors ring-1 ring-transparent ${rowHighlightClass}`}
       role="row"
+      aria-current={isActiveTrack ? "true" : undefined}
     >
       <div className="flex w-12 justify-center">
         <input
@@ -1525,16 +1921,7 @@ function ListRow({
         />
       </div>
       <div className="flex min-w-0 flex-[2] items-center gap-3">
-        <ListThumbnail
-          blob={blob}
-          kind={kind}
-          baseUrl={baseUrl}
-          requiresAuth={requiresAuth}
-          signTemplate={signTemplate}
-          serverType={serverType}
-          onDetect={(sha, detectedKind) => onDetect(sha, detectedKind)}
-          onVisible={onBlobVisible}
-        />
+        {thumbnail}
         <div className="truncate font-medium text-slate-100" title={displayName}>
           {displayName}
         </div>
@@ -1546,84 +1933,10 @@ function ListRow({
         {blob.uploaded ? prettyDate(blob.uploaded) : "—"}
       </div>
       <div className="w-24 shrink-0 px-3 text-sm text-slate-400">{prettyBytes(blob.size || 0)}</div>
-      <div className="flex shrink-0 flex-wrap items-center justify-center gap-2 px-2 md:w-64">
-        {!isAudio && (
-          <button
-            className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200"
-            onClick={event => {
-              event.stopPropagation();
-              onPreview(blob);
-            }}
-            aria-label={disablePreview ? "Preview unavailable" : "Preview blob"}
-            title={disablePreview ? "Preview unavailable" : "Preview"}
-          >
-            <PreviewIcon size={16} />
-          </button>
-        )}
-        {isAudio && onPlay && blob.url && (
-          <button
-            className={playButtonClass}
-            onClick={event => {
-              event.stopPropagation();
-              onPlay?.(blob);
-            }}
-            aria-label={playButtonAria}
-            aria-pressed={isActivePlaying}
-            title={playButtonLabel}
-          >
-            {playPauseIcon}
-          </button>
-        )}
-        {blob.url && onShare && (
-          <button
-            className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200"
-            onClick={event => {
-              event.stopPropagation();
-              onShare?.(blob);
-            }}
-            aria-label="Share blob"
-            title="Share"
-          >
-            <ShareIcon size={16} />
-          </button>
-        )}
-        {blob.url && (
-          <button
-            className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200"
-            onClick={event => {
-              event.stopPropagation();
-              onDownload(blob);
-            }}
-            aria-label="Download blob"
-            title="Download"
-          >
-            <DownloadIcon size={16} />
-          </button>
-        )}
-        {onRename && (
-          <button
-            className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200"
-            onClick={event => {
-              event.stopPropagation();
-              onRename(blob);
-            }}
-            aria-label="Edit file details"
-            title="Edit details"
-          >
-            <EditIcon size={16} />
-          </button>
-        )}
-        <button
-          className="p-2 rounded-lg bg-red-900/80 hover:bg-red-800 text-slate-100"
-          onClick={event => {
-            event.stopPropagation();
-            onDelete(blob);
-          }}
-          aria-label="Delete blob"
-          title="Delete"
-        >
-          <TrashIcon size={16} />
-        </button>
+      <div ref={actionsContainerRef} className="flex shrink-0 items-center justify-center gap-2 px-2 md:justify-end">
+        {primaryAction}
+        {shareButton}
+        {dropdownMenu}
       </div>
     </div>
   );
@@ -1644,6 +1957,7 @@ const BlobPreview: React.FC<{
   fallbackIconSize?: number;
   variant?: "inline" | "dialog";
   onVisible?: (sha: string) => void;
+  blurhash?: BlurhashInfo | null;
 }> = ({
   sha,
   url,
@@ -1658,25 +1972,35 @@ const BlobPreview: React.FC<{
   fallbackIconSize,
   variant = "inline",
   onVisible,
+  blurhash,
 }) => {
-  const [src, setSrc] = useState<string | null>(null);
+  const previewKey = `${serverType}|${sha}|${requiresAuth ? "auth" : "anon"}|${url}`;
+  const initialCachedSrc = getCachedPreviewSrc(previewKey);
+
+  const [src, setSrc] = useState<string | null>(initialCachedSrc);
   const [failed, setFailed] = useState(false);
   const [loading, setLoading] = useState(false);
   const [previewType, setPreviewType] = useState<"image" | "video" | "text" | "unknown">(() => {
     if (isPreviewableTextType({ mime: type, name, url })) return "text";
     return inferKind(type, url) ?? "unknown";
   });
-  const [isReady, setIsReady] = useState(false);
+  const [isReady, setIsReady] = useState(Boolean(initialCachedSrc));
   const [textPreview, setTextPreview] = useState<{ content: string; truncated: boolean } | null>(null);
-  const objectUrlRef = useRef<string | null>(null);
-  const lastLoadedKeyRef = useRef<string | null>(null);
+  const objectUrlRef = useRef<string | null>(initialCachedSrc ?? null);
+  const lastLoadedKeyRef = useRef<string | null>(initialCachedSrc ? previewKey : null);
   const lastFailureKeyRef = useRef<string | null>(null);
   const activeRequestRef = useRef<{ key: string; controller: AbortController } | null>(null);
   const [observeTarget, isVisible] = useInViewport<HTMLDivElement>({ rootMargin: "400px" });
   const hasReportedVisibilityRef = useRef(false);
 
+  const detectRef = useRef(onDetect);
+  useEffect(() => {
+    detectRef.current = onDetect;
+  }, [onDetect]);
+
   const fallbackIconKind = useMemo<FileKind>(() => {
     if (previewType === "image" || previewType === "video") return previewType;
+    if (isMusicType(type, name, url)) return "music";
     if (isSheetType(type, name || url)) return "sheet";
     if (isDocType(type, name || url)) return "doc";
     if (isPdfType(type, name || url)) return "pdf";
@@ -1686,10 +2010,17 @@ const BlobPreview: React.FC<{
 
   const releaseObjectUrl = useCallback(() => {
     if (objectUrlRef.current) {
-      URL.revokeObjectURL(objectUrlRef.current);
+      const cached = previewSrcCache.get(previewKey);
+      if (!cached || cached.url !== objectUrlRef.current) {
+        try {
+          URL.revokeObjectURL(objectUrlRef.current);
+        } catch (error) {
+          // ignore revoke failures
+        }
+      }
       objectUrlRef.current = null;
     }
-  }, []);
+  }, [previewKey]);
 
   const cacheServerHint = useMemo(() => {
     if (serverUrl) return serverUrl.replace(/\/+$/, "");
@@ -1703,7 +2034,11 @@ const BlobPreview: React.FC<{
 
   const metaSuggestsText = useMemo(() => isPreviewableTextType({ mime: type, name, url }), [type, name, url]);
 
-  const previewKey = `${sha}|${requiresAuth ? "auth" : "anon"}|${url}`;
+  useEffect(() => {
+    return () => {
+      releaseObjectUrl();
+    };
+  }, [releaseObjectUrl]);
 
   useEffect(() => {
     if (isPreviewableTextType({ mime: type, name, url })) {
@@ -1714,13 +2049,12 @@ const BlobPreview: React.FC<{
   }, [type, url, name]);
 
   useEffect(() => {
-    return () => {
-      releaseObjectUrl();
-    };
-  }, [releaseObjectUrl]);
+    if (!previewKey) return;
 
-  useEffect(() => {
-    if (lastLoadedKeyRef.current === previewKey) {
+    if (lastLoadedKeyRef.current === previewKey && src) {
+      setFailed(false);
+      setLoading(false);
+      setIsReady(true);
       return;
     }
 
@@ -1728,10 +2062,24 @@ const BlobPreview: React.FC<{
       return;
     }
 
+    const cachedSrc = getCachedPreviewSrc(previewKey);
+    if (cachedSrc) {
+      lastLoadedKeyRef.current = previewKey;
+      setSrc(cachedSrc);
+      objectUrlRef.current = cachedSrc;
+      setFailed(false);
+      setLoading(false);
+      setIsReady(true);
+      if (previewType === "image") detectRef.current?.(sha, "image");
+      if (previewType === "video") detectRef.current?.(sha, "video");
+      return;
+    }
+
     if (requiresAuth && !signTemplate) {
       lastFailureKeyRef.current = previewKey;
       setFailed(true);
       setLoading(false);
+      setIsReady(false);
       return;
     }
 
@@ -1748,19 +2096,10 @@ const BlobPreview: React.FC<{
     activeRequestRef.current = { key: previewKey, controller };
     let cancelled = false;
 
-    lastFailureKeyRef.current = null;
     setFailed(false);
     setLoading(true);
-    setIsReady(false);
-    setSrc(null);
+    setIsReady(Boolean(src));
     setTextPreview(null);
-    releaseObjectUrl();
-
-    const existingKind = inferKind(type, url);
-    if (!requiresAuth && existingKind) {
-      setPreviewType(existingKind);
-      onDetect(sha, existingKind);
-    }
 
     const finalizeRequest = () => {
       if (activeRequestRef.current?.controller === controller) {
@@ -1770,26 +2109,25 @@ const BlobPreview: React.FC<{
 
     const assignObjectUrl = (blobData: Blob) => {
       if (cancelled) return;
+      clearCachedPreviewSrc(previewKey);
       releaseObjectUrl();
-      setTextPreview(null);
-      setIsReady(false);
       const objectUrl = URL.createObjectURL(blobData);
       objectUrlRef.current = objectUrl;
+      setCachedPreviewSrc(previewKey, objectUrl);
       lastLoadedKeyRef.current = previewKey;
       lastFailureKeyRef.current = null;
       setSrc(objectUrl);
-      setLoading(false);
+      setIsReady(true);
     };
 
     const useDirectUrl = () => {
       if (cancelled) return;
+      clearCachedPreviewSrc(previewKey);
       releaseObjectUrl();
-      setTextPreview(null);
-      setIsReady(false);
       lastLoadedKeyRef.current = previewKey;
       lastFailureKeyRef.current = null;
       setSrc(url);
-      setLoading(false);
+      setIsReady(true);
     };
 
     const showTextPreview = async (blobData: Blob, mimeHint?: string | null) => {
@@ -1799,234 +2137,271 @@ const BlobPreview: React.FC<{
         (!normalizedMime && isPreviewableTextType({ name, url })) ||
         metaSuggestsText;
       if (!shouldRenderText) return false;
-
-      let preview: { content: string; truncated: boolean };
       try {
-        preview = await buildTextPreview(blobData);
+        const preview = await buildTextPreview(blobData);
+        if (cancelled) return true;
+        clearCachedPreviewSrc(previewKey);
+        releaseObjectUrl();
+        setSrc(null);
+        setTextPreview(preview);
+        setIsReady(true);
+        lastLoadedKeyRef.current = previewKey;
+        lastFailureKeyRef.current = null;
+        return true;
       } catch (error) {
         return false;
       }
-      if (cancelled) return true;
-      releaseObjectUrl();
-      setSrc(null);
-      setPreviewType("text");
-      setTextPreview(preview);
-      setIsReady(true);
-      setLoading(false);
-      setFailed(false);
-      lastLoadedKeyRef.current = previewKey;
-      lastFailureKeyRef.current = null;
-      return true;
     };
 
     const load = async () => {
       try {
-        const cached = metaSuggestsText ? null : await getCachedPreviewBlob(cacheServerHint, sha);
+        const cachedBlob = metaSuggestsText ? null : await getCachedPreviewBlob(cacheServerHint, sha);
         if (cancelled) return;
-        if (cached) {
-          assignObjectUrl(cached);
+        if (cachedBlob) {
+          assignObjectUrl(cachedBlob);
+          setLoading(false);
+          finalizeRequest();
           return;
         }
 
-        const match = url.match(/[0-9a-f]{64}/i);
-
-        if (!requiresAuth) {
-          try {
-            const response = await fetch(url, { mode: "cors", signal: controller.signal });
-            if (!response.ok || response.type === "opaqueredirect" || response.type === "opaque") {
-              throw new Error(`Preview fetch failed (${response.status})`);
-            }
-            const blobData = await response.blob();
-            if (cancelled) return;
-            const mime = response.headers.get("content-type") || blobData.type || type || "";
-            const handled = await showTextPreview(blobData, mime);
-            if (handled) return;
-            assignObjectUrl(blobData);
-            await cachePreviewBlob(cacheServerHint, sha, blobData);
-          } catch (error) {
-            if (cancelled) return;
-            if (error instanceof DOMException && error.name === "AbortError") {
-              return;
-            }
-            if (!metaSuggestsText) {
-              useDirectUrl();
-            } else {
-              lastLoadedKeyRef.current = null;
-              lastFailureKeyRef.current = previewKey;
-              setFailed(true);
-              setLoading(false);
-            }
-          }
+        if (previewType === "video" && url && !requiresAuth) {
+          setSrc(url);
+          setLoading(false);
+          setIsReady(true);
+          finalizeRequest();
           return;
         }
 
         const headers: Record<string, string> = {};
-        if (serverType === "nip96") {
-          headers.Authorization = await buildNip98AuthHeader(signTemplate!, {
-            url,
-            method: "GET",
+        if (requiresAuth && signTemplate) {
+          const parsed = new URL(url, window.location.href);
+          headers.Authorization = await buildAuthorizationHeader(signTemplate, "get", {
+            hash: sha,
+            serverUrl: `${parsed.protocol}//${parsed.host}`,
+            urlPath: `${parsed.pathname}${parsed.search}`,
+            expiresInSeconds: 120,
           });
-        } else if (serverType === "satellite") {
-          // Satellite previews do not need authorization headers.
-        } else {
-          let resource: URL | undefined;
-          try {
-            resource = new URL(url);
-          } catch (error) {
-            resource = undefined;
+        }
+
+        const response = await fetch(url, {
+          method: metaSuggestsText ? "GET" : "GET",
+          headers,
+          signal: controller.signal,
+        });
+        if (!response.ok) {
+          if (!controller.signal.aborted) {
+            clearCachedPreviewSrc(previewKey);
+            lastFailureKeyRef.current = previewKey;
+            setFailed(true);
+            setIsReady(false);
           }
-          headers.Authorization = await buildAuthorizationHeader(signTemplate!, "get", {
-            hash: match ? match[0] : undefined,
-            serverUrl: resource ? `${resource.protocol}//${resource.host}` : undefined,
-            urlPath: resource ? resource.pathname + (resource.search || "") : undefined,
-          });
-        }
-
-        const response = await fetch(url, { headers, signal: controller.signal });
-        if (!response.ok || response.type === "opaqueredirect" || response.type === "opaque") {
-          throw new Error(`Preview fetch failed (${response.status})`);
-        }
-
-        const blobData = await response.blob();
-        if (cancelled) return;
-        const mime = response.headers.get("content-type") || blobData.type || type || "";
-        const handled = await showTextPreview(blobData, mime);
-        if (handled) return;
-        const detectedType = mime.startsWith("video/") ? "video" : mime.startsWith("image/") ? "image" : previewType;
-        setPreviewType(detectedType);
-        if (detectedType === "image" || detectedType === "video") {
-          onDetect(sha, detectedType);
-        }
-        assignObjectUrl(blobData);
-        await cachePreviewBlob(cacheServerHint, sha, blobData);
-      } catch (error) {
-        if (cancelled) return;
-        if (error instanceof DOMException && error.name === "AbortError") {
           return;
         }
-        lastLoadedKeyRef.current = null;
-        lastFailureKeyRef.current = previewKey;
-        setFailed(true);
+
+        const mimeHint = response.headers.get("content-type");
+        const blobData = await response.blob();
+        if (cancelled) return;
+
+        if (await showTextPreview(blobData, mimeHint)) {
+          setLoading(false);
+          finalizeRequest();
+          return;
+        }
+
+        if (!requiresAuth) {
+          useDirectUrl();
+          setLoading(false);
+          finalizeRequest();
+          return;
+        }
+
+        if (!metaSuggestsText && cacheServerHint) {
+          void cachePreviewBlob(cacheServerHint, sha, blobData).catch(() => undefined);
+        }
+        assignObjectUrl(blobData);
         setLoading(false);
+      } catch (error) {
+        if (!controller.signal.aborted && !cancelled) {
+          clearCachedPreviewSrc(previewKey);
+          lastFailureKeyRef.current = previewKey;
+          setFailed(true);
+          setIsReady(false);
+        }
+        setLoading(false);
+      } finally {
+        finalizeRequest();
       }
     };
 
-    void load().finally(finalizeRequest);
+    if (!isVisible && variant === "inline") {
+      setLoading(false);
+      activeRequestRef.current = null;
+      return;
+    }
+
+    load();
 
     return () => {
       cancelled = true;
       controller.abort();
-      finalizeRequest();
     };
-  }, [previewKey, isVisible, requiresAuth, signTemplate, releaseObjectUrl, cacheServerHint, sha, type, url, serverType, onDetect]);
+  }, [
+    cacheServerHint,
+    isVisible,
+    metaSuggestsText,
+    previewKey,
+    releaseObjectUrl,
+    requiresAuth,
+    sha,
+    signTemplate,
+    src,
+    type,
+    url,
+    variant,
+  ]);
 
   useEffect(() => {
-    if (!isVisible && lastFailureKeyRef.current === previewKey) {
-      lastFailureKeyRef.current = null;
+    if (!previewKey) return;
+    if (isVisible) {
+      if (!hasReportedVisibilityRef.current) {
+        hasReportedVisibilityRef.current = true;
+        onVisible?.(sha);
+      }
+    } else {
+      hasReportedVisibilityRef.current = false;
     }
-  }, [isVisible, previewKey]);
+  }, [isVisible, onVisible, previewKey, sha]);
 
-  useEffect(() => {
-    if (requiresAuth && signTemplate && lastFailureKeyRef.current === previewKey) {
-      lastFailureKeyRef.current = null;
-    }
-  }, [requiresAuth, signTemplate, previewKey]);
-
-  useEffect(() => {
-    if (!isVisible || !onVisible || hasReportedVisibilityRef.current) return;
-    hasReportedVisibilityRef.current = true;
-    onVisible(sha);
-  }, [isVisible, onVisible, sha]);
-
-  const handlePreviewError = () => {
-    releaseObjectUrl();
-    lastLoadedKeyRef.current = null;
-    lastFailureKeyRef.current = previewKey;
-    setSrc(null);
-    setTextPreview(null);
-    setIsReady(false);
-    setLoading(false);
-    setFailed(true);
-  };
-
-  const showText = Boolean(textPreview) && !failed;
-  const showMedia = Boolean(src) && !failed;
+  const showMedia = Boolean(src) && !failed && Boolean(url);
   const isVideo = showMedia && previewType === "video";
   const isImage = showMedia && previewType !== "video";
-  const showLoading = loading || (showMedia && !isReady);
-  const showUnavailable = !loading && !showText && !showMedia && failed;
+  const showLoading = loading && !showMedia && !textPreview;
+  const showUnavailable = failed || (!showMedia && !textPreview && !loading);
 
-  const containerClass =
-    "relative flex w-full items-center justify-center overflow-hidden rounded-lg border border-slate-800 bg-slate-950/80";
+  const classNames = `relative flex h-full w-full items-center justify-center overflow-hidden bg-slate-950/80 ${
+    className ?? ""
+  }`;
 
-  const videoControls = variant === "dialog";
-  const videoAutoPlay = variant === "inline";
-  const videoLoop = variant === "inline";
-  const videoMuted = variant === "inline";
+  const blurhashPlaceholder = blurhash ? (
+    <BlurhashThumbnail
+      hash={blurhash.hash}
+      width={blurhash.width}
+      height={blurhash.height}
+      alt={name}
+    />
+  ) : null;
+
+  const content = textPreview ? (
+    <div className="px-4 py-3 text-xs text-slate-200">
+      <pre className="line-clamp-6 whitespace-pre-wrap break-words text-[11px] leading-snug">
+        {textPreview.content}
+        {textPreview.truncated ? " …" : ""}
+      </pre>
+    </div>
+  ) : isImage ? (
+    <img
+      src={src ?? undefined}
+      alt={name}
+      className={`max-h-full max-w-full object-contain transition-opacity duration-200 ${
+        isReady ? "opacity-100" : "opacity-0"
+      }`}
+      loading="lazy"
+      onLoad={() => {
+        setIsReady(true);
+        setLoading(false);
+        setFailed(false);
+        detectRef.current?.(sha, "image");
+      }}
+      onError={() => {
+        clearCachedPreviewSrc(previewKey);
+        releaseObjectUrl();
+        setFailed(true);
+      }}
+    />
+  ) : isVideo ? (
+    <video
+      src={src ?? undefined}
+      className={`max-h-full max-w-full transition-opacity duration-200 ${
+        isReady ? "opacity-100" : "opacity-0"
+      }`}
+      controls={variant === "dialog"}
+      muted
+      onCanPlay={() => {
+        setIsReady(true);
+        setLoading(false);
+        setFailed(false);
+        detectRef.current?.(sha, "video");
+      }}
+      onError={() => {
+        clearCachedPreviewSrc(previewKey);
+        releaseObjectUrl();
+        setFailed(true);
+      }}
+    />
+  ) : null;
+
+  const overlayConfig = useMemo(() => {
+    const baseSize = fallbackIconSize ?? (variant === "dialog" ? 96 : 48);
+    switch (fallbackIconKind) {
+      case "music":
+        return {
+          background: "bg-gradient-to-br from-emerald-900/70 via-slate-900 to-slate-950",
+          icon: <MusicIcon size={baseSize} className="text-emerald-200" aria-hidden="true" />,
+        };
+      case "video":
+        return {
+          background: "bg-gradient-to-br from-sky-900/70 via-slate-900 to-slate-950",
+          icon: <VideoIcon size={baseSize} className="text-sky-200" aria-hidden="true" />,
+        };
+      case "pdf":
+        return {
+          background: "bg-gradient-to-br from-red-900/70 via-slate-900 to-slate-950",
+          icon: <FileTypeIcon kind="pdf" size={baseSize} className="text-red-200" aria-hidden="true" />,
+        };
+      case "doc":
+      case "document":
+        return {
+          background: "bg-gradient-to-br from-purple-900/70 via-slate-900 to-slate-950",
+          icon: <DocumentIcon size={baseSize} className="text-purple-200" aria-hidden="true" />,
+        };
+      default:
+        return {
+          background: "bg-slate-950/70",
+          icon: <FileTypeIcon kind={fallbackIconKind} size={baseSize} className="text-slate-300" aria-hidden="true" />,
+        };
+    }
+  }, [fallbackIconKind, fallbackIconSize, variant]);
+
+  const showBlurhashPlaceholder = Boolean(blurhashPlaceholder && !textPreview && !showMedia);
+  const showLoadingOverlay = showLoading && !showBlurhashPlaceholder;
+  const showUnavailableOverlay = showUnavailable && !showBlurhashPlaceholder;
 
   return (
-    <div ref={observeTarget} className={`${containerClass} ${className ?? "h-40"}`}>
-      {showText && textPreview && (
-        <div className="absolute inset-0 flex h-full w-full flex-col overflow-hidden bg-slate-950/85 px-3 py-2">
-          <pre className="flex-1 overflow-hidden whitespace-pre-wrap break-words font-mono text-[11px] leading-snug text-slate-200" title={textPreview.content}>
-            {textPreview.content}
-          </pre>
+    <div ref={observeTarget} className={classNames}>
+      {showBlurhashPlaceholder ? (
+        <div className="absolute inset-0">
+          {blurhashPlaceholder}
         </div>
-      )}
-      {isVideo && (
-        <video
-          src={src!}
-          className={`max-h-full max-w-full transition-opacity duration-200 ${
-            isReady ? "opacity-100" : "opacity-0"
-          }`}
-          controls={videoControls}
-          autoPlay={videoAutoPlay}
-          muted={videoMuted}
-          loop={videoLoop}
-          playsInline
-          onLoadedData={() => {
-            setPreviewType("video");
-            setIsReady(true);
-            setLoading(false);
-            onDetect(sha, "video");
-          }}
-          onError={handlePreviewError}
-        />
-      )}
-      {isImage && (
-        <img
-          src={src!}
-          alt={name}
-          className={`max-h-full max-w-full object-contain transition-opacity duration-200 ${
-            isReady ? "opacity-100" : "opacity-0"
-          }`}
-          loading="lazy"
-          onLoad={() => {
-            setPreviewType("image");
-            setIsReady(true);
-            setLoading(false);
-            onDetect(sha, "image");
-          }}
-          onError={handlePreviewError}
-        />
-      )}
-      {showLoading && (
+      ) : null}
+      {content}
+      {showLoadingOverlay && (
         <div className="absolute inset-0 flex items-center justify-center bg-slate-950/70 text-xs text-slate-300 pointer-events-none">
           Loading preview…
         </div>
       )}
-      {showUnavailable && (
-        <div className="absolute inset-0 flex items-center justify-center bg-slate-950/70">
-          <FileTypeIcon
-            kind={fallbackIconKind}
-            size={fallbackIconSize ?? 96}
-            className="text-slate-300"
-          />
+      {showUnavailableOverlay && (
+        <div
+          className={`absolute inset-0 flex items-center justify-center rounded-2xl border border-slate-800/80 ${overlayConfig.background} ${
+            variant === "dialog" ? "mx-4 my-4" : ""
+          }`}
+        >
+          {overlayConfig.icon}
         </div>
       )}
     </div>
   );
 };
+
 
 function deriveFilename(disposition?: string) {
   if (!disposition) return undefined;
@@ -2044,17 +2419,8 @@ function deriveFilename(disposition?: string) {
   return undefined;
 }
 
-function isSameOrigin(url: string) {
-  try {
-    const target = new URL(url, window.location.href);
-    return target.origin === window.location.origin;
-  } catch (error) {
-    return false;
-  }
-}
-
 function shouldDisablePreview(kind: FileKind) {
-  return kind === "doc" || kind === "sheet" || kind === "pdf";
+  return kind !== "image" && kind !== "video";
 }
 
 function buildPreviewUrl(blob: BlossomBlob, kind: FileKind, baseUrl?: string | null) {
@@ -2065,11 +2431,43 @@ function buildPreviewUrl(blob: BlossomBlob, kind: FileKind, baseUrl?: string | n
   return `${fallback.replace(/\/$/, "")}/${blob.sha256}`;
 }
 
+function extractBlurhash(blob: BlossomBlob): BlurhashInfo | null {
+  const tags = Array.isArray(blob.nip94) ? blob.nip94 : null;
+  if (!tags) return null;
+  let hash: string | null = null;
+  let width: number | undefined;
+  let height: number | undefined;
+
+  for (const tag of tags) {
+    if (!Array.isArray(tag) || tag.length < 2) continue;
+    const [key, value] = tag;
+    if (key === "blurhash" && typeof value === "string" && value.trim()) {
+      hash = value.trim();
+    } else if (key === "dim" && typeof value === "string") {
+      const [w, h] = value.trim().toLowerCase().split("x");
+      const parsedWidth = Number(w);
+      const parsedHeight = Number(h);
+      if (Number.isFinite(parsedWidth) && parsedWidth > 0) width = parsedWidth;
+      if (Number.isFinite(parsedHeight) && parsedHeight > 0) height = parsedHeight;
+    } else if (key === "width" && typeof value === "string") {
+      const parsedWidth = Number(value);
+      if (Number.isFinite(parsedWidth) && parsedWidth > 0) width = parsedWidth;
+    } else if (key === "height" && typeof value === "string") {
+      const parsedHeight = Number(value);
+      if (Number.isFinite(parsedHeight) && parsedHeight > 0) height = parsedHeight;
+    }
+  }
+
+  if (!hash) return null;
+  return { hash, width, height };
+}
+
 function decideFileKind(blob: BlossomBlob, detected?: "image" | "video"): FileKind {
   if (detected) return detected;
   if (isSheetType(blob.type, blob.name || blob.url)) return "sheet";
   if (isDocType(blob.type, blob.name || blob.url)) return "doc";
   if (isPdfType(blob.type, blob.name || blob.url)) return "pdf";
+  if (isMusicType(blob.type, blob.name, blob.url)) return "music";
   const inferred = inferKind(blob.type, blob.name || blob.url);
   if (inferred) return inferred;
   return "document";
@@ -2081,6 +2479,20 @@ function inferKind(type?: string, ref?: string | null): "image" | "video" | unde
   if (mime.startsWith("image/") || /\.(png|jpe?g|gif|webp|bmp|svg|heic)$/.test(name)) return "image";
   if (mime.startsWith("video/") || /\.(mp4|mov|webm|mkv|avi|hevc)$/.test(name)) return "video";
   return undefined;
+}
+
+function hasMusicExtension(value?: string | null) {
+  if (!value) return false;
+  return MUSIC_EXTENSION_REGEX.test(value.toLowerCase());
+}
+
+function isMusicType(type?: string, name?: string | null, url?: string | null) {
+  const normalizedMime = normalizeMime(type);
+  if (normalizedMime?.startsWith("audio/")) return true;
+  if (normalizedMime && ADDITIONAL_AUDIO_MIME_TYPES.has(normalizedMime)) return true;
+  if (hasMusicExtension(name)) return true;
+  if (hasMusicExtension(url)) return true;
+  return false;
 }
 
 function isPdfType(type?: string, ref?: string | null) {
@@ -2150,6 +2562,130 @@ const TEXT_PREVIEW_EXTENSION_ALLOWLIST = new Set([
 const TEXT_PREVIEW_MAX_BYTES = 32 * 1024;
 const TEXT_PREVIEW_MAX_LINES = 40;
 const TEXT_PREVIEW_MAX_CHARS = 2000;
+
+const PREVIEW_OBJECT_URL_TTL_MS = 60_000;
+const previewSrcCache = new Map<string, { url: string; expiresAt: number }>();
+
+const getCachedPreviewSrc = (key: string): string | null => {
+  const entry = previewSrcCache.get(key);
+  if (!entry) return null;
+  if (entry.expiresAt <= Date.now()) {
+    URL.revokeObjectURL(entry.url);
+    previewSrcCache.delete(key);
+    return null;
+  }
+  entry.expiresAt = Date.now() + PREVIEW_OBJECT_URL_TTL_MS;
+  previewSrcCache.set(key, entry);
+  return entry.url;
+};
+
+const setCachedPreviewSrc = (key: string, url: string) => {
+  previewSrcCache.set(key, { url, expiresAt: Date.now() + PREVIEW_OBJECT_URL_TTL_MS });
+};
+
+const clearCachedPreviewSrc = (key: string) => {
+  const entry = previewSrcCache.get(key);
+  if (entry) {
+    URL.revokeObjectURL(entry.url);
+    previewSrcCache.delete(key);
+  }
+};
+
+const AudioCoverImage: React.FC<{ url: string; alt: string; className?: string; fallback: React.ReactNode }> = ({
+  url,
+  alt,
+  className,
+  fallback,
+}) => {
+  const [failed, setFailed] = useState(false);
+
+  if (!url || failed) {
+    return <>{fallback}</>;
+  }
+
+  return (
+    <img
+      src={url}
+      alt={alt}
+      className={className}
+      loading="lazy"
+      onError={() => setFailed(true)}
+      draggable={false}
+    />
+  );
+};
+
+const blurhashDataUrlCache = new Map<string, string>();
+
+const buildBlurhashCacheKey = (hash: string, width?: number, height?: number) =>
+  `${hash}|${width ?? ""}|${height ?? ""}`;
+
+const decodeBlurhashToDataUrl = (hash: string, width?: number, height?: number): string | null => {
+  if (typeof window === "undefined") return null;
+  try {
+    const aspectRatio = width && height && height > 0 ? width / height : 1;
+    const baseSize = 32;
+    const maxSize = 64;
+    let decodeWidth = baseSize;
+    let decodeHeight = baseSize;
+    if (aspectRatio > 1) {
+      decodeWidth = Math.min(maxSize, Math.max(8, Math.round(baseSize * aspectRatio)));
+      decodeHeight = Math.max(8, Math.round(decodeWidth / aspectRatio));
+    } else if (aspectRatio > 0 && aspectRatio < 1) {
+      decodeHeight = Math.min(maxSize, Math.max(8, Math.round(baseSize / Math.max(aspectRatio, 0.01))));
+      decodeWidth = Math.max(8, Math.round(decodeHeight * aspectRatio));
+    }
+    decodeWidth = Math.max(4, Math.min(maxSize, decodeWidth));
+    decodeHeight = Math.max(4, Math.min(maxSize, decodeHeight));
+
+    const pixels = decode(hash, decodeWidth, decodeHeight);
+    const canvas = document.createElement("canvas");
+    canvas.width = decodeWidth;
+    canvas.height = decodeHeight;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return null;
+    const imageData = ctx.createImageData(decodeWidth, decodeHeight);
+    imageData.data.set(pixels);
+    ctx.putImageData(imageData, 0, 0);
+    return canvas.toDataURL();
+  } catch (error) {
+    console.warn("Failed to decode blurhash preview", error);
+    return null;
+  }
+};
+
+type BlurhashThumbnailProps = {
+  hash: string;
+  width?: number;
+  height?: number;
+  alt: string;
+};
+
+function BlurhashThumbnail({ hash, width, height, alt }: BlurhashThumbnailProps) {
+  const cacheKey = useMemo(() => buildBlurhashCacheKey(hash, width, height), [hash, width, height]);
+  const [dataUrl, setDataUrl] = useState<string | null>(() => blurhashDataUrlCache.get(cacheKey) ?? null);
+
+  useEffect(() => {
+    const cached = blurhashDataUrlCache.get(cacheKey);
+    if (cached) {
+      setDataUrl(cached);
+      return;
+    }
+    const result = decodeBlurhashToDataUrl(hash, width, height);
+    if (result) {
+      blurhashDataUrlCache.set(cacheKey, result);
+      setDataUrl(result);
+    } else {
+      setDataUrl(null);
+    }
+  }, [cacheKey, hash, width, height]);
+
+  if (!dataUrl) {
+    return <div className="h-full w-full bg-slate-900/70" />;
+  }
+
+  return <img src={dataUrl} alt={alt} className="h-full w-full object-cover" loading="lazy" draggable={false} />;
+}
 
 type TextPreviewMeta = {
   mime?: string | null;
@@ -2273,6 +2809,14 @@ function buildDisplayName(blob: BlossomBlob) {
   const displayBase = shouldKeepFullName ? baseName : truncateMiddle(baseName, 12, 12);
 
   return inferredExtension ? `${displayBase}.${inferredExtension}` : displayBase;
+}
+
+function formatDurationSeconds(value?: number | null) {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) return "—";
+  const total = Math.max(0, Math.floor(value));
+  const minutes = Math.floor(total / 60);
+  const seconds = total % 60;
+  return `${minutes}:${seconds.toString().padStart(2, "0")}`;
 }
 
 function splitNameAndExtension(filename: string) {

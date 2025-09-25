@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import { visualizer } from "rollup-plugin-visualizer";
 
 const vendorChunkGroups = [
   { name: "ndk", test: /[\\/]node_modules[\\/]@nostr-dev-kit[\\/]/ },
@@ -11,12 +12,18 @@ const vendorChunkGroups = [
 ];
 
 const projectRoot = path.dirname(fileURLToPath(import.meta.url));
+const shouldAnalyze = process.env.ANALYZE === "true";
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), shouldAnalyze ? visualizer({
+    filename: path.resolve(projectRoot, "dist/bundle-visualizer.html"),
+    template: "treemap",
+    gzipSize: true,
+    brotliSize: true,
+  }) : null].filter(Boolean),
   resolve: {
     alias: {
-      tseep: path.resolve(projectRoot, "src/lib/tseep.ts"),
+      tseep: path.resolve(projectRoot, "src/shims/tseep.ts"),
     },
   },
   server: {

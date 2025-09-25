@@ -466,16 +466,16 @@ export const useServerData = (servers: ManagedServer[], options?: UseServerDataO
   }, [snapshots, cachedSnapshots]);
 
   const { distribution, aggregated } = useMemo(() => {
-    const dict: BlobDistribution = {};
-    const aggregatedShas: string[] = [];
+    const entryMap = new Map<string, { blob: BlossomBlob; servers: string[] }>();
 
     snapshots.forEach(snapshot => {
       snapshot.blobs.forEach(blob => {
-        let entry = dict[blob.sha256];
+        let entry = entryMap.get(blob.sha256);
         if (!entry) {
-          entry = { blob, servers: [snapshot.server.url] };
-          dict[blob.sha256] = entry;
-          aggregatedShas.push(blob.sha256);
+          entryMap.set(blob.sha256, {
+            blob,
+            servers: [snapshot.server.url],
+          });
           return;
         }
 
@@ -483,7 +483,6 @@ export const useServerData = (servers: ManagedServer[], options?: UseServerDataO
           entry.servers.push(snapshot.server.url);
         }
 
-        // Prefer the blob with richer metadata (name/type) when encountering duplicates.
         const currentScore = (entry.blob.name ? 1 : 0) + (entry.blob.type ? 1 : 0);
         const incomingScore = (blob.name ? 1 : 0) + (blob.type ? 1 : 0);
         if (incomingScore > currentScore) {
@@ -495,13 +494,13 @@ export const useServerData = (servers: ManagedServer[], options?: UseServerDataO
     let totalSize = 0;
     let lastChange = 0;
     const aggregatedBlobs: BlossomBlob[] = [];
-    aggregatedShas.forEach(sha => {
-      const entry = dict[sha];
-      if (!entry) return;
-      const blob = entry.blob;
-      aggregatedBlobs.push(blob);
-      totalSize += blob.size || 0;
-      lastChange = Math.max(lastChange, blob.uploaded || 0);
+    const dict: BlobDistribution = {};
+
+    entryMap.forEach((entry, sha) => {
+      dict[sha] = entry;
+      aggregatedBlobs.push(entry.blob);
+      totalSize += entry.blob.size || 0;
+      lastChange = Math.max(lastChange, entry.blob.uploaded || 0);
     });
 
     return {

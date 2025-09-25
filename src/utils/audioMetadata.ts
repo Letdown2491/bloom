@@ -1,4 +1,4 @@
-import { parseBlob, type IAudioMetadata } from "music-metadata";
+import type { IAudioMetadata } from "music-metadata";
 
 export type ExtractedAudioMetadata = {
   title?: string;
@@ -13,9 +13,19 @@ export type ExtractedAudioMetadata = {
 
 const MAX_PARSE_BYTES = 16 * 1024 * 1024; // 16 MB is plenty for metadata parsing.
 
+let musicMetadataModule: Promise<typeof import("music-metadata")> | null = null;
+
+const loadMusicMetadata = async () => {
+  if (!musicMetadataModule) {
+    musicMetadataModule = import("music-metadata");
+  }
+  return musicMetadataModule;
+};
+
 export async function extractAudioMetadata(file: File): Promise<ExtractedAudioMetadata | null> {
   try {
     const slice = file.slice(0, Math.min(file.size, MAX_PARSE_BYTES));
+    const { parseBlob } = await loadMusicMetadata();
     const metadata = await parseBlob(slice);
     return normalizeAudioMetadata(metadata);
   } catch (error) {

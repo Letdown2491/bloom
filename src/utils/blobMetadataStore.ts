@@ -11,6 +11,7 @@ type StoredAudioMetadata = {
   durationSeconds?: number;
   genre?: string;
   year?: number;
+  coverUrl?: string;
 };
 
 export type BlobAudioMetadata = StoredAudioMetadata;
@@ -290,17 +291,51 @@ export function rememberBlobMetadata(serverUrl: string | undefined, blob: Blosso
 export function rememberAudioMetadata(
   serverUrl: string | undefined,
   sha256: string,
-  metadata: StoredAudioMetadata | null
+  metadata: StoredAudioMetadata | null,
+  options?: { updatedAt?: number }
 ) {
   if (!sha256) return;
+
   const normalized = normalizeStoredAudio(metadata ?? undefined);
-  if (normalized) {
-    const payload: StoredMetadata = { audio: normalized, updatedAt: Date.now() };
+  const requestedUpdatedAt = options?.updatedAt;
+  const nextUpdatedAt =
+    typeof requestedUpdatedAt === "number" && Number.isFinite(requestedUpdatedAt)
+      ? Math.max(0, Math.trunc(requestedUpdatedAt))
+      : Date.now();
+
+  const existingGlobal = getStoredBlobMetadata(undefined, sha256);
+  const existingServer = serverUrl ? getStoredBlobMetadata(serverUrl, sha256) : undefined;
+
+  const shouldUpdate = (existing: StoredMetadata | undefined) => {
+    if (!existing) return true;
+    const currentUpdatedAt = typeof existing.updatedAt === "number" && Number.isFinite(existing.updatedAt)
+      ? existing.updatedAt
+      : 0;
+    if (currentUpdatedAt > nextUpdatedAt) {
+      return false;
+    }
+    if (currentUpdatedAt === nextUpdatedAt) {
+      return !isAudioEqual(existing.audio, normalized);
+    }
+    return true;
+  };
+
+  const payload: StoredMetadata = normalized
+    ? { audio: normalized, updatedAt: nextUpdatedAt }
+    : { audio: null, updatedAt: nextUpdatedAt };
+
+  const shouldUpdateGlobal = shouldUpdate(existingGlobal);
+  const shouldUpdateServer = serverUrl ? shouldUpdate(existingServer) : false;
+
+  if (!shouldUpdateGlobal && !shouldUpdateServer) {
+    return;
+  }
+
+  if (shouldUpdateServer && serverUrl) {
     setStoredBlobMetadata(serverUrl, sha256, payload);
+  }
+  if (shouldUpdateGlobal) {
     setStoredBlobMetadata(undefined, sha256, payload);
-  } else {
-    setStoredBlobMetadata(serverUrl, sha256, { audio: null, updatedAt: Date.now() });
-    setStoredBlobMetadata(undefined, sha256, { audio: null, updatedAt: Date.now() });
   }
 }
 
@@ -324,10 +359,14 @@ export function applyAliasUpdate(
     return false;
   }
   const normalizedAlias = alias === null ? null : alias;
-  setStoredBlobMetadata(undefined, sha256, {
+  const payload: StoredMetadata = {
     name: normalizedAlias,
     updatedAt,
-  });
+  };
+  setStoredBlobMetadata(undefined, sha256, payload);
+  if (serverUrl) {
+    setStoredBlobMetadata(serverUrl, sha256, payload);
+  }
   return true;
 }
 
@@ -370,6 +409,8 @@ function normalizeStoredAudio(audio?: StoredAudioMetadata | null): StoredAudioMe
   if (isPositiveInteger(audio.durationSeconds)) normalized.durationSeconds = Math.trunc(audio.durationSeconds!);
   if (typeof audio.genre === "string" && audio.genre.trim()) normalized.genre = audio.genre.trim();
   if (isPositiveInteger(audio.year)) normalized.year = Math.trunc(audio.year!);
+  const coverUrl = sanitizeCoverUrl(audio.coverUrl);
+  if (coverUrl) normalized.coverUrl = coverUrl;
   return Object.keys(normalized).length > 0 ? normalized : undefined;
 }
 
@@ -390,6 +431,22 @@ function isAudioEqual(a?: StoredAudioMetadata | null, b?: StoredAudioMetadata | 
     normalizedA.trackTotal === normalizedB.trackTotal &&
     normalizedA.durationSeconds === normalizedB.durationSeconds &&
     normalizedA.genre === normalizedB.genre &&
-    normalizedA.year === normalizedB.year
+    normalizedA.year === normalizedB.year &&
+    normalizedA.coverUrl === normalizedB.coverUrl
   );
+}
+
+export function sanitizeCoverUrl(value?: string | null): string | undefined {
+  if (!value) return undefined;
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.protocol === "http:" || parsed.protocol === "https:") {
+      return trimmed;
+    }
+  } catch {
+    return undefined;
+  }
+  return undefined;
 }

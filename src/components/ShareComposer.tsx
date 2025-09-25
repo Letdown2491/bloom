@@ -1,5 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { NDKEvent, NDKPublishError, NDKRelaySet, NDKRelayStatus, NDKUser, normalizeRelayUrl } from "@nostr-dev-kit/ndk";
+import {
+  NDKEvent,
+  NDKPublishError,
+  NDKRelay,
+  NDKRelaySet,
+  NDKRelayStatus,
+  NDKUser,
+  normalizeRelayUrl,
+} from "@nostr-dev-kit/ndk";
 import { useCurrentPubkey, useNdk } from "../context/NdkContext";
 import { DEFAULT_PUBLIC_RELAYS, extractPreferredRelays, sanitizeRelayUrl } from "../utils/relays";
 import { giftWrap } from "@nostr-dev-kit/ndk";
@@ -695,7 +703,7 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
     setProfileInfo(emptyProfileInfo());
     ndk
       .fetchEvent({ kinds: [0], authors: [pubkey] })
-      .then(evt => {
+      .then((evt: NDKEvent | null) => {
         if (ignore) return;
         if (!evt?.content) {
           setPreferredRelays([]);
@@ -743,7 +751,7 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
   const poolRelays = useMemo(() => {
     if (!ndk?.pool) return [] as string[];
     const urls = new Set<string>();
-    ndk.pool.relays.forEach(relay => {
+    ndk.pool.relays.forEach((relay: NDKRelay) => {
       const url = sanitizeRelayUrl(relay.url);
       if (url) urls.add(url);
     });

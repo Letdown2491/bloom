@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import type { NDKRelay } from "@nostr-dev-kit/ndk";
 import { useCurrentPubkey, useNdk } from "../context/NdkContext";
 import { DEFAULT_PUBLIC_RELAYS, extractPreferredRelays, normalizeRelayOrigin, sanitizeRelayUrl } from "../utils/relays";
 
@@ -112,7 +113,7 @@ export const usePreferredRelays = () => {
   const poolRelays = useMemo(() => {
     if (!ndk?.pool) return [] as string[];
     const urls = new Set<string>();
-    ndk.pool.relays.forEach(relay => {
+    ndk.pool.relays.forEach((relay: NDKRelay) => {
       const normalized = normalizeRelayOrigin(relay.url);
       if (normalized) urls.add(normalized);
     });

@@ -5,6 +5,7 @@ export type EditDialogAudioFields = {
   title: string;
   artist: string;
   album: string;
+  coverUrl: string;
   trackNumber: string;
   trackTotal: string;
   durationSeconds: string;
@@ -65,6 +66,7 @@ export const EditDialog: React.FC<EditDialogProps> = ({
       title: "",
       artist: "",
       album: "",
+      coverUrl: "",
       trackNumber: "",
       trackTotal: "",
       durationSeconds: "",
@@ -114,6 +116,19 @@ export const EditDialog: React.FC<EditDialogProps> = ({
               disabled={busy}
               className="mt-2 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 focus:border-emerald-500 focus:outline-none"
               placeholder="Album name"
+            />
+          </label>
+          <label className="block text-sm text-slate-300 sm:col-span-2">
+            Cover URL
+            <input
+              type="url"
+              value={fields.coverUrl}
+              onChange={handleAudioChange("coverUrl")}
+              disabled={busy}
+              className="mt-2 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 focus:border-emerald-500 focus:outline-none"
+              placeholder="https://example.com/cover.jpg"
+              inputMode="url"
+              pattern="https?://.*"
             />
           </label>
           <label className="block text-sm text-slate-300">

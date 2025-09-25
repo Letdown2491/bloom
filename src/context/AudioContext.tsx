@@ -5,12 +5,14 @@ export type Track = {
   url: string;
   title?: string;
   artist?: string;
+  coverUrl?: string;
+  year?: number | string;
 };
 
 type AudioStatus = "idle" | "playing" | "paused";
 type RepeatMode = "all" | "track";
 
-type AudioContextValue = {
+export type AudioContextValue = {
   current?: Track;
   status: AudioStatus;
   queue: Track[];
@@ -19,6 +21,7 @@ type AudioContextValue = {
   hasPrevious: boolean;
   currentTime: number;
   duration: number;
+  volume: number;
   play: (track: Track, queue?: Track[]) => void;
   pause: () => void;
   toggle: (track: Track, queue?: Track[]) => void;
@@ -29,22 +32,22 @@ type AudioContextValue = {
   seek: (time: number) => void;
   getFrequencyData: () => Uint8Array | null;
   visualizerAvailable: boolean;
+  replaceQueue: (tracks: Track[]) => void;
+  shuffleQueue: () => void;
+  setVolume: (value: number) => void;
 };
 
 const AudioCtx = createContext<AudioContextValue | undefined>(undefined);
 
-const getTrackSortKey = (track: Track) => (track.title?.trim().toLowerCase() || track.url.toLowerCase());
-
 const normalizeQueue = (tracks: Track[]): Track[] => {
-  const map = new Map<string, Track>();
+  const seen = new Set<string>();
+  const list: Track[] = [];
   tracks.forEach(track => {
     if (!track?.url) return;
-    if (!map.has(track.url)) {
-      map.set(track.url, track);
-    }
+    if (seen.has(track.url)) return;
+    seen.add(track.url);
+    list.push(track);
   });
-  const list = Array.from(map.values());
-  list.sort((a, b) => getTrackSortKey(a).localeCompare(getTrackSortKey(b)));
   return list;
 };
 
@@ -53,6 +56,19 @@ const prepareQueue = (tracks: Track[], focus: Track): { queue: Track[]; index: n
   const queue = normalizeQueue(focus.url ? [...source, focus] : source);
   const index = focus.url ? queue.findIndex(item => item.url === focus.url) : -1;
   return { queue, index };
+};
+
+const shuffleArray = <T,>(items: T[]): T[] => {
+  const list = [...items];
+  for (let i = list.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    const current = list[i];
+    const target = list[j];
+    if (current === undefined || target === undefined) continue;
+    list[i] = target;
+    list[j] = current;
+  }
+  return list;
 };
 
 export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -64,12 +80,14 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [repeatMode, setRepeatMode] = useState<RepeatMode>("all");
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
+  const [volume, setVolumeState] = useState(1);
   const audioContextRef = useRef<AudioContext | null>(null);
   const mediaSourceRef = useRef<MediaElementAudioSourceNode | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const analyserDataRef = useRef<Uint8Array | null>(null);
   const graphConnectedRef = useRef(false);
   const visualizerEnabledRef = useRef(true);
+  const volumeRef = useRef(1);
 
   const ensureAudio = useCallback(() => {
     if (!audioRef.current) {
@@ -77,6 +95,7 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       audio.controls = false;
       audio.crossOrigin = "anonymous";
       audio.preload = "metadata";
+      audio.volume = volumeRef.current;
       audioRef.current = audio;
     }
     if (audioRef.current) {
@@ -256,6 +275,53 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     };
   }, [ensureAudio, queue, currentIndex, repeatMode, playTrackAtIndex]);
 
+  const replaceQueue = useCallback(
+    (tracks: Track[]) => {
+      const normalized = normalizeQueue(tracks);
+      setQueue(normalized);
+      if (!normalized.length) {
+        setCurrent(undefined);
+        setCurrentIndex(null);
+        return;
+      }
+
+      if (current?.url) {
+        const nextIndex = normalized.findIndex(item => item.url === current.url);
+        if (nextIndex === -1) {
+          setCurrent(undefined);
+          setCurrentIndex(null);
+        } else {
+          setCurrentIndex(nextIndex);
+        }
+      }
+    },
+    [current?.url]
+  );
+
+  const shuffleQueue = useCallback(() => {
+    setQueue(prev => {
+      if (prev.length <= 1) return prev;
+      const currentUrl = current?.url;
+      const currentTrack = currentUrl ? prev.find(track => track.url === currentUrl) : undefined;
+      const remaining = currentTrack ? prev.filter(track => track.url !== currentTrack.url) : prev;
+      const shuffled = shuffleArray(remaining);
+      const nextQueue = currentTrack ? [currentTrack, ...shuffled] : shuffled;
+
+      if (currentTrack) {
+        setCurrent(currentTrack);
+        setCurrentIndex(0);
+      } else if (nextQueue.length) {
+        setCurrent(nextQueue[0]);
+        setCurrentIndex(0);
+      } else {
+        setCurrent(undefined);
+        setCurrentIndex(null);
+      }
+
+      return nextQueue;
+    });
+  }, [current?.url]);
+
   const play = useCallback(
     (track: Track, queueTracks?: Track[]) => {
       if (!track?.url) return;
@@ -371,6 +437,39 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const visualizerAvailable = visualizerEnabledRef.current && Boolean(analyserRef.current);
 
+  const setVolume = useCallback(
+    (value: number) => {
+      const clamped = Math.max(0, Math.min(1, Number.isFinite(value) ? value : 0));
+      volumeRef.current = clamped;
+      setVolumeState(clamped);
+      const audio = ensureAudio();
+      if (Math.abs(audio.volume - clamped) > 0.002) {
+        audio.volume = clamped;
+      }
+    },
+    [ensureAudio]
+  );
+
+  useEffect(() => {
+    const audio = ensureAudio();
+    if (Math.abs(audio.volume - volume) > 0.002) {
+      audio.volume = volume;
+    }
+  }, [ensureAudio, volume]);
+
+  useEffect(() => {
+    const audio = ensureAudio();
+    const handleVolumeChange = () => {
+      const nextVolume = audio.volume;
+      volumeRef.current = nextVolume;
+      setVolumeState(nextVolume);
+    };
+    audio.addEventListener("volumechange", handleVolumeChange);
+    return () => {
+      audio.removeEventListener("volumechange", handleVolumeChange);
+    };
+  }, [ensureAudio]);
+
   const value = useMemo<AudioContextValue>(
     () => ({
       current,
@@ -381,6 +480,7 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       hasPrevious,
       currentTime,
       duration,
+      volume,
       play,
       pause,
       toggle,
@@ -390,7 +490,10 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       toggleRepeatMode,
       seek,
       getFrequencyData,
+      replaceQueue,
+      shuffleQueue,
       visualizerAvailable,
+      setVolume,
     }),
     [
       current,
@@ -401,6 +504,7 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       hasPrevious,
       currentTime,
       duration,
+      volume,
       play,
       pause,
       toggle,
@@ -410,7 +514,10 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       toggleRepeatMode,
       seek,
       getFrequencyData,
+      replaceQueue,
+      shuffleQueue,
       visualizerAvailable,
+      setVolume,
     ]
   );
 

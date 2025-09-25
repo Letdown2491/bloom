@@ -40,7 +40,8 @@ export const useBlobPreview = (options?: PreviewOptions) => {
       const baseUrl = context.baseUrl ?? blob.serverUrl;
       const requiresAuth = serverType === "satellite" ? false : context.requiresAuth;
       const signTemplate = requiresAuth ? defaultSignTemplate : undefined;
-      const disablePreview = context.disablePreview ?? shouldDisablePreview(blob, context.detectedKind);
+      const disablePreview =
+        context.disablePreview ?? shouldDisablePreview(blob, context.detectedKind, context.kind);
       const rawUrl = context.previewUrl ?? blob.url ?? (baseUrl ? `${baseUrl.replace(/\/$/, "")}/${blob.sha256}` : null);
       const previewUrl = disablePreview ? null : rawUrl;
 
@@ -73,9 +74,69 @@ export const useBlobPreview = (options?: PreviewOptions) => {
   );
 };
 
-function shouldDisablePreview(blob: BlossomBlob, detectedKind?: "image" | "video") {
+function shouldDisablePreview(
+  blob: BlossomBlob,
+  detectedKind?: "image" | "video",
+  declaredKind?: string
+) {
+  const normalizedKind = normalizeKind(declaredKind);
+  const effectiveKind = detectedKind ?? normalizedKind;
+  if (effectiveKind === "image" || effectiveKind === "video") {
+    return false;
+  }
+
   const mime = blob.type?.split(";")[0]?.toLowerCase() ?? "";
-  if (detectedKind === "image" || mime.startsWith("image/")) return false;
-  if (detectedKind === "video" || mime.startsWith("video/")) return false;
+  if (mime.startsWith("image/") || mime.startsWith("video/")) {
+    return false;
+  }
+
+  const nipMime = readNip94Value(blob, "m")?.toLowerCase() ?? "";
+  if (nipMime.startsWith("image/") || nipMime.startsWith("video/")) {
+    return false;
+  }
+
+  const candidates = collectFilenameCandidates(blob);
+  if (candidates.some(value => IMAGE_EXTENSION_REGEX.test(value))) {
+    return false;
+  }
+  if (candidates.some(value => VIDEO_EXTENSION_REGEX.test(value))) {
+    return false;
+  }
+
   return true;
 }
+
+function normalizeKind(kind?: string): "image" | "video" | undefined {
+  if (!kind) return undefined;
+  const lower = kind.toLowerCase();
+  if (lower === "image" || lower === "video") {
+    return lower;
+  }
+  return undefined;
+}
+
+function collectFilenameCandidates(blob: BlossomBlob) {
+  const candidates: string[] = [];
+  const primaryRefs = [blob.name, blob.url, readNip94Value(blob, "name"), readNip94Value(blob, "url")];
+  for (const value of primaryRefs) {
+    if (typeof value === "string" && value) {
+      candidates.push(value.toLowerCase());
+    }
+  }
+  return candidates;
+}
+
+function readNip94Value(blob: BlossomBlob, key: string) {
+  const tags = Array.isArray(blob.nip94) ? blob.nip94 : null;
+  if (!tags) return undefined;
+  for (const tag of tags) {
+    if (!Array.isArray(tag) || tag.length < 2) continue;
+    if (tag[0] === key && typeof tag[1] === "string") {
+      return tag[1];
+    }
+  }
+  return undefined;
+}
+
+const IMAGE_EXTENSION_REGEX = /\.(png|jpe?g|gif|webp|bmp|svg|heic|heif)$/i;
+const VIDEO_EXTENSION_REGEX = /\.(mp4|m4v|mov|webm|mkv|avi|hevc|mpe?g|mpg|ogv|3gp|3g2|ts|m2ts)$/i;

@@ -15,6 +15,7 @@ import {
   rememberBlobMetadata,
   applyAliasUpdate,
   rememberAudioMetadata,
+  sanitizeCoverUrl,
   type BlobAudioMetadata,
 } from "../utils/blobMetadataStore";
 import { buildNip94EventTemplate } from "../lib/nip94";
@@ -40,6 +41,7 @@ type AudioMetadataFormState = {
   title: string;
   artist: string;
   album: string;
+  coverUrl: string;
   trackNumber: string;
   trackTotal: string;
   durationSeconds: string;
@@ -59,6 +61,7 @@ type AudioMetadataOverrides = {
   durationSeconds?: number;
   genre?: string;
   year?: number;
+  coverUrl?: string;
 };
 
 type UploadEntry = {
@@ -664,6 +667,18 @@ const AudioMetadataForm: React.FC<AudioMetadataFormProps> = ({ metadata, onChang
           placeholder="Album"
         />
       </label>
+      <label className="block text-xs uppercase text-slate-400 md:col-span-2">
+        Cover URL
+        <input
+          className={inputClasses}
+          value={metadata.coverUrl}
+          onChange={event => onChange({ coverUrl: event.target.value })}
+          placeholder="https://example.com/cover.jpg"
+          type="url"
+          inputMode="url"
+          pattern="https?://.*"
+        />
+      </label>
     </div>
     <div className="grid gap-3 md:grid-cols-3">
       <label className="block text-xs uppercase text-slate-400">
@@ -744,6 +759,7 @@ const buildAudioEventDetails = (
   const durationSeconds = normalizePositiveInteger(overrides?.durationSeconds ?? metadata?.durationSeconds);
   const genre = sanitizePart(overrides?.genre ?? metadata?.genre);
   const year = normalizePositiveInteger(overrides?.year ?? metadata?.year);
+  const coverUrl = sanitizeCoverUrl(overrides?.coverUrl);
 
   let alias = overrides?.alias;
   if (alias === undefined || alias === null) {
@@ -782,6 +798,10 @@ const buildAudioEventDetails = (
   if (year) {
     tags.push(["year", String(year)]);
     stored.year = year;
+  }
+  if (coverUrl) {
+    tags.push(["cover", coverUrl]);
+    stored.coverUrl = coverUrl;
   }
 
   return { alias, tags, stored };
@@ -851,6 +871,7 @@ const createAudioMetadataFormState = (
     title: extracted?.title ?? "",
     artist: artist ?? "",
     album: extracted?.album ?? "",
+    coverUrl: "",
     trackNumber: extracted?.trackNumber ? String(extracted.trackNumber) : "",
     trackTotal: extracted?.trackTotal ? String(extracted.trackTotal) : "",
     durationSeconds: extracted?.durationSeconds ? String(extracted.durationSeconds) : "",
@@ -900,6 +921,8 @@ const createAudioOverridesFromForm = (form: AudioMetadataFormState): AudioMetada
   if (genre) overrides.genre = genre;
   const year = parsePositiveIntegerInput(form.year);
   if (year) overrides.year = year;
+  const coverUrl = sanitizeCoverUrl(form.coverUrl);
+  if (coverUrl) overrides.coverUrl = coverUrl;
   return overrides;
 };
 

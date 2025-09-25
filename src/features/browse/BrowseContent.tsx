@@ -1,7 +1,8 @@
 import React from "react";
 import type { BlossomBlob, SignTemplate } from "../../lib/blossomClient";
 import type { ServerSnapshot } from "../../hooks/useServerData";
-import { BlobList, type BlobReplicaSummary } from "../../components/BlobList";
+import type { BlobListProps, BlobReplicaSummary } from "../../components/BlobList";
+import type { FilterMode } from "../../types/filter";
 
 export type BrowseContentProps = {
   viewMode: "grid" | "list";
@@ -21,6 +22,10 @@ export type BrowseContentProps = {
   onPlay: (blob: BlossomBlob) => void;
   currentTrackUrl?: string;
   currentTrackStatus?: "idle" | "playing" | "paused";
+  filterMode: FilterMode;
+  showGridPreviews: boolean;
+  showListPreviews: boolean;
+  renderBlobList: (props: BlobListProps) => React.ReactNode;
 };
 
 export const BrowseContent: React.FC<BrowseContentProps> = ({
@@ -41,8 +46,29 @@ export const BrowseContent: React.FC<BrowseContentProps> = ({
   onPlay,
   currentTrackUrl,
   currentTrackStatus,
+  filterMode,
+  showGridPreviews,
+  showListPreviews,
+  renderBlobList,
 }) => {
-  const commonProps = {
+  const isMusicView = filterMode === "music";
+  const commonProps: Pick<
+    BlobListProps,
+    | "selected"
+    | "viewMode"
+    | "onToggle"
+    | "onSelectMany"
+    | "onDelete"
+    | "onCopy"
+    | "onShare"
+    | "onRename"
+    | "onPlay"
+    | "currentTrackUrl"
+    | "currentTrackStatus"
+    | "isMusicView"
+    | "showGridPreviews"
+    | "showListPreviews"
+  > = {
     selected: selectedBlobs,
     viewMode,
     onToggle,
@@ -54,12 +80,22 @@ export const BrowseContent: React.FC<BrowseContentProps> = ({
     onPlay,
     currentTrackUrl,
     currentTrackStatus,
-  } as const;
+    isMusicView,
+    showGridPreviews,
+    showListPreviews,
+  };
 
   if (browsingAllServers) {
     return (
       <div className={`flex flex-1 min-h-0 flex-col overflow-hidden ${viewMode === "grid" ? "pr-1" : ""}`}>
-        <BlobList blobs={aggregatedBlobs} signTemplate={signTemplate} replicaInfo={replicaInfo} {...commonProps} />
+        {renderBlobList({
+          blobs: aggregatedBlobs,
+          signTemplate,
+          replicaInfo,
+          showGridPreviews,
+          showListPreviews,
+          ...commonProps,
+        })}
       </div>
     );
   }
@@ -76,15 +112,17 @@ export const BrowseContent: React.FC<BrowseContentProps> = ({
 
   return (
     <div className={`flex flex-1 min-h-0 flex-col overflow-hidden ${viewMode === "grid" ? "pr-1" : ""}`}>
-      <BlobList
-        blobs={effectiveBlobs}
-        baseUrl={currentSnapshot.server.url}
-        requiresAuth={currentSnapshot.server.requiresAuth}
-        signTemplate={currentSnapshot.server.requiresAuth ? signTemplate : undefined}
-        serverType={currentSnapshot.server.type}
-        replicaInfo={replicaInfo}
-        {...commonProps}
-      />
+      {renderBlobList({
+        blobs: effectiveBlobs,
+        baseUrl: currentSnapshot.server.url,
+        requiresAuth: currentSnapshot.server.requiresAuth,
+        signTemplate: currentSnapshot.server.requiresAuth ? signTemplate : undefined,
+        serverType: currentSnapshot.server.type,
+        replicaInfo,
+        showGridPreviews,
+        showListPreviews,
+        ...commonProps,
+      })}
     </div>
   );
 };

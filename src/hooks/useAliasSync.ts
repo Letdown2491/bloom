@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef } from "react";
 import NDK, { NDKRelaySet, type NDKEvent, NDKSubscription } from "@nostr-dev-kit/ndk";
 import { useCurrentPubkey, useNdk } from "../context/NdkContext";
 import { parseNip94Event } from "../lib/nip94";
-import { applyAliasUpdate, rememberAudioMetadata, type BlobAudioMetadata } from "../utils/blobMetadataStore";
+import { applyAliasUpdate, rememberAudioMetadata, sanitizeCoverUrl, type BlobAudioMetadata } from "../utils/blobMetadataStore";
 import { normalizeRelayOrigin } from "../utils/relays";
 
 const normalizeAliasValue = (value: string | null | undefined) => {
@@ -23,7 +23,8 @@ const applyAliasFromEvent = (event: NDKEvent) => {
   applyAliasUpdate(undefined, parsed.sha256, alias, parsed.createdAt);
   const audioMetadata = extractAudioMetadataFromEvent(event);
   if (audioMetadata) {
-    rememberAudioMetadata(undefined, parsed.sha256, audioMetadata);
+    const updatedAt = typeof event.created_at === "number" ? event.created_at * 1000 : undefined;
+    rememberAudioMetadata(undefined, parsed.sha256, audioMetadata, { updatedAt });
   }
 };
 
@@ -74,7 +75,7 @@ export const useAliasSync = (relayUrls: string[], enabled = true) => {
     const fetchHistory = async () => {
       try {
         const events = await ndk.fetchEvents(aliasFilterForAuthor(pubkey), { closeOnEose: true }, relaySet);
-        events.forEach(event => handleEvent(event));
+        events.forEach((event: NDKEvent) => handleEvent(event));
       } catch (error) {
         // Silently ignore history fetch errors; live subscription will still capture future updates.
       }
@@ -140,6 +141,9 @@ const extractAudioMetadataFromEvent = (event: NDKEvent): BlobAudioMetadata | nul
   const yearValue = map.get("year");
   const year = parsePositiveIntegerString(yearValue);
   if (year) metadata.year = year;
+
+  const cover = sanitizeCoverUrl(map.get("cover"));
+  if (cover) metadata.coverUrl = cover;
 
   return metadata;
 };

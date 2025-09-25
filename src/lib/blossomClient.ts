@@ -182,7 +182,88 @@ function encodeAuthHeader(event: SignedEvent) {
   return `Nostr ${base64}`;
 }
 
+const CACHEABLE_AUTH_KINDS = new Set<AuthKind>(["get", "list"]);
+const AUTH_CACHE_MAX_TTL_MS = 15_000;
+const AUTH_CACHE_MIN_TTL_MS = 1_000;
+
+type AuthCacheRecord = {
+  header?: string;
+  expiresAt?: number;
+  promise?: Promise<string>;
+};
+
+const authHeaderCache = new WeakMap<SignTemplate, Map<string, AuthCacheRecord>>();
+
+const normalizeServerUrl = (url: string | undefined) => {
+  if (!url) return "";
+  return url.replace(/\/$/, "");
+};
+
+const buildAuthCacheKey = (kind: AuthKind, data?: AuthData): string | null => {
+  if (!CACHEABLE_AUTH_KINDS.has(kind)) return null;
+  if (data?.file) return null;
+  const parts: string[] = [`kind:${kind}`];
+  if (data?.serverUrl) parts.push(`server:${normalizeServerUrl(data.serverUrl)}`);
+  if (data?.urlPath) parts.push(`path:${data.urlPath}`);
+  if (data?.hash) parts.push(`hash:${data.hash}`);
+  if (data?.sourceUrl) parts.push(`source:${data.sourceUrl}`);
+  if (typeof data?.expiresInSeconds === "number") parts.push(`expires:${data.expiresInSeconds}`);
+  if (typeof data?.sizeOverride === "number") parts.push(`sizeOverride:${data.sizeOverride}`);
+  if (typeof data?.skipSizeTag === "boolean") parts.push(`skipSize:${data.skipSizeTag ? 1 : 0}`);
+  return parts.join("|");
+};
+
+const resolveCacheTtl = (data?: AuthData) => {
+  const seconds = typeof data?.expiresInSeconds === "number" ? data.expiresInSeconds : 300;
+  const ttlMs = seconds * 1000;
+  return Math.max(AUTH_CACHE_MIN_TTL_MS, Math.min(ttlMs, AUTH_CACHE_MAX_TTL_MS));
+};
+
 export async function buildAuthorizationHeader(signTemplate: SignTemplate, kind: AuthKind, data?: AuthData) {
+  const cacheKey = buildAuthCacheKey(kind, data);
+  const ttlMs = cacheKey ? resolveCacheTtl(data) : null;
+
+  if (cacheKey && ttlMs && ttlMs > 0) {
+    let cache = authHeaderCache.get(signTemplate);
+    if (!cache) {
+      cache = new Map();
+      authHeaderCache.set(signTemplate, cache);
+    }
+
+    const now = Date.now();
+    const existing = cache.get(cacheKey);
+    if (existing) {
+      if (existing.header && existing.expiresAt && existing.expiresAt > now) {
+        return existing.header;
+      }
+      if (existing.promise) {
+        return existing.promise;
+      }
+    }
+
+    const buildPromise = async () => {
+      const event = await createAuthEvent(signTemplate, kind, data);
+      const header = encodeAuthHeader(event);
+      cache!.set(cacheKey, {
+        header,
+        expiresAt: Date.now() + ttlMs,
+      });
+      return header;
+    };
+
+    let pendingPromise: Promise<string>;
+    pendingPromise = buildPromise().catch(error => {
+      const current = cache!.get(cacheKey);
+      if (current?.promise === pendingPromise) {
+        cache!.delete(cacheKey);
+      }
+      throw error;
+    });
+
+    cache.set(cacheKey, { promise: pendingPromise });
+    return pendingPromise;
+  }
+
   const event = await createAuthEvent(signTemplate, kind, data);
   return encodeAuthHeader(event);
 }
@@ -231,11 +312,10 @@ export async function listUserBlobs(
       request: { url, method: "GET" },
       source: "blossom",
     });
-    const auth = await createAuthEvent(options.signTemplate, "list", {
+    headers.Authorization = await buildAuthorizationHeader(options.signTemplate, "list", {
       serverUrl,
       urlPath: path,
     });
-    headers.Authorization = encodeAuthHeader(auth);
   }
 
   const normalizedServer = serverUrl.replace(/\/$/, "");
