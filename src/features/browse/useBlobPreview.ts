@@ -41,7 +41,7 @@ export const useBlobPreview = (options?: PreviewOptions) => {
       const requiresAuth = serverType === "satellite" ? false : context.requiresAuth;
       const signTemplate = requiresAuth ? defaultSignTemplate : undefined;
       const disablePreview =
-        context.disablePreview ?? shouldDisablePreview(blob, context.detectedKind, context.kind);
+        context.disablePreview ?? shouldDisableBlobPreview(blob, context.detectedKind, context.kind);
       const rawUrl = context.previewUrl ?? blob.url ?? (baseUrl ? `${baseUrl.replace(/\/$/, "")}/${blob.sha256}` : null);
       const previewUrl = disablePreview ? null : rawUrl;
 
@@ -74,7 +74,13 @@ export const useBlobPreview = (options?: PreviewOptions) => {
   );
 };
 
-function shouldDisablePreview(
+export const canBlobPreview = (
+  blob: BlossomBlob,
+  detectedKind?: "image" | "video",
+  declaredKind?: string
+) => !shouldDisableBlobPreview(blob, detectedKind, declaredKind);
+
+function shouldDisableBlobPreview(
   blob: BlossomBlob,
   detectedKind?: "image" | "video",
   declaredKind?: string

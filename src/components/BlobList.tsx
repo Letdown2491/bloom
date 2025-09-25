@@ -24,7 +24,7 @@ import type { FileKind } from "./icons";
 import type { BlobAudioMetadata } from "../utils/blobMetadataStore";
 import { cachePreviewBlob, getCachedPreviewBlob } from "../utils/blobPreviewCache";
 import { useBlobMetadata } from "../features/browse/useBlobMetadata";
-import { useBlobPreview, type PreviewTarget } from "../features/browse/useBlobPreview";
+import { useBlobPreview, type PreviewTarget, canBlobPreview } from "../features/browse/useBlobPreview";
 import { useInViewport } from "../hooks/useInViewport";
 import { useAudioMetadataMap } from "../features/browse/useAudioMetadata";
 
@@ -247,8 +247,9 @@ export const BlobList: React.FC<BlobListProps> = ({
       const fallbackBaseUrl = blob.serverUrl ?? baseUrl;
       const effectiveRequiresAuth =
         effectiveServerType === "satellite" ? false : blob.requiresAuth ?? requiresAuth;
-      const previewUrl = buildPreviewUrl(blob, kind, fallbackBaseUrl);
-      const disablePreview = shouldDisablePreview(kind);
+      const canPreview = canBlobPreview(blob, detectedKind, kind);
+      const previewUrl = canPreview ? buildPreviewUrl(blob, fallbackBaseUrl) : null;
+      const disablePreview = !canPreview;
 
       openPreview(blob, {
         displayName,
@@ -955,18 +956,20 @@ const GridLayout: React.FC<{
             const effectiveServerType = blob.serverType ?? serverType;
             const previewRequiresAuth =
               effectiveServerType === "satellite" ? false : blob.requiresAuth ?? requiresAuth;
-            const kind = decideFileKind(blob, detectedKinds[blob.sha256]);
+            const detectedKind = detectedKinds[blob.sha256];
+            const kind = decideFileKind(blob, detectedKind);
             const trackMetadata = audioMetadata.get(blob.sha256);
-            const disablePreview = shouldDisablePreview(kind);
+            const canPreview = canBlobPreview(blob, detectedKind, kind);
+            const disablePreview = !canPreview;
             const coverUrl = kind === "music" ? trackMetadata?.coverUrl : undefined;
-            const previewUrl = buildPreviewUrl(blob, kind, baseUrl);
+            const previewUrl = canPreview ? buildPreviewUrl(blob, baseUrl) : null;
             const blurhash = extractBlurhash(blob);
             const top = GAP + row * rowHeight;
             const left = GAP + col * (effectiveColumnWidth + GAP);
             const replicaSummary = replicaInfo?.get(blob.sha256);
             const showReplicaBadge = replicaSummary && replicaSummary.count > 1;
             const coverAlt = trackMetadata?.title?.trim() || displayName;
-            const previewAllowed = showPreviews && !disablePreview;
+            const previewAllowed = showPreviews && canPreview;
             const allowCoverArt = showPreviews && Boolean(coverUrl);
             const primaryActionBaseClass =
               "p-2 shrink-0 rounded-lg flex items-center justify-center transition focus:outline-none focus:ring-1 focus:ring-emerald-400 disabled:cursor-not-allowed disabled:opacity-40";
@@ -1405,6 +1408,8 @@ const ListThumbnail: React.FC<{
   onVisible?: (sha: string) => void;
   coverUrl?: string;
   showPreview?: boolean;
+  canPreview?: boolean;
+  previewUrl?: string | null;
 }> = ({
   blob,
   kind,
@@ -1416,41 +1421,12 @@ const ListThumbnail: React.FC<{
   onVisible,
   coverUrl,
   showPreview = true,
+  canPreview = false,
+  previewUrl,
 }) => {
   const containerClass =
     "flex h-12 w-12 flex-shrink-0 overflow-hidden rounded-lg border border-slate-800 bg-slate-950/80 relative";
   const blurhash = extractBlurhash(blob);
-  const [observeTarget, isVisible] = useInViewport<HTMLDivElement>({ rootMargin: "200px" });
-
-  useEffect(() => {
-    if (!showPreview) return;
-    if (!blurhash) return;
-    if (!isVisible) return;
-    onVisible?.(blob.sha256);
-  }, [blurhash, blob.sha256, isVisible, onVisible, showPreview]);
-
-  useEffect(() => {
-    if (!showPreview) return;
-    if (!blurhash) return;
-    if (kind === "image" || kind === "video") {
-      onDetect?.(blob.sha256, kind === "image" ? "image" : "video");
-    }
-  }, [blurhash, blob.sha256, kind, onDetect, showPreview]);
-
-  if (showPreview && (kind === "image" || kind === "video") && blurhash) {
-    return (
-      <div ref={observeTarget} className={containerClass}>
-        <BlurhashThumbnail
-          hash={blurhash.hash}
-          width={blurhash.width}
-          height={blurhash.height}
-          alt={blob.name || blob.sha256}
-        />
-      </div>
-    );
-  }
-
-  const previewUrl = showPreview && kind === "image" ? buildPreviewUrl(blob, kind, baseUrl) : null;
   const effectiveServerType = blob.serverType ?? serverType;
   const effectiveRequiresAuth =
     effectiveServerType === "satellite" ? false : blob.requiresAuth ?? requiresAuth;
@@ -1478,6 +1454,28 @@ const ListThumbnail: React.FC<{
         className={`${containerClass} items-center justify-center bg-gradient-to-br from-emerald-900/70 via-slate-900 to-slate-950`}
       >
         <MusicIcon size={18} className="text-emerald-200" aria-hidden="true" />
+      </div>
+    );
+  }
+
+  if (showPreview && canPreview && previewUrl) {
+    return (
+      <div className={containerClass}>
+        <BlobPreview
+          sha={blob.sha256}
+          url={previewUrl}
+          name={blob.name || blob.sha256}
+          type={blob.type}
+          serverUrl={blob.serverUrl ?? baseUrl}
+          requiresAuth={effectiveRequiresAuth}
+          signTemplate={effectiveRequiresAuth ? signTemplate : undefined}
+          serverType={blob.serverType ?? serverType}
+          onDetect={onDetect ?? (() => undefined)}
+          fallbackIconSize={40}
+          className="h-full w-full rounded-none border-0 bg-transparent"
+          onVisible={onVisible}
+          blurhash={blurhash}
+        />
       </div>
     );
   }
@@ -1518,27 +1516,6 @@ const ListThumbnail: React.FC<{
         className={`${containerClass} items-center justify-center bg-gradient-to-br from-red-900/70 via-slate-900 to-slate-950`}
       >
         <FileTypeIcon kind="pdf" size={18} className="text-red-200" aria-hidden="true" />
-      </div>
-    );
-  }
-
-  if (previewUrl) {
-    return (
-      <div className={containerClass}>
-        <BlobPreview
-          sha={blob.sha256}
-          url={previewUrl}
-          name={blob.name || blob.sha256}
-          type={blob.type}
-          serverUrl={blob.serverUrl ?? baseUrl}
-          requiresAuth={effectiveRequiresAuth}
-          signTemplate={effectiveRequiresAuth ? signTemplate : undefined}
-          serverType={blob.serverType ?? serverType}
-          onDetect={onDetect ?? (() => undefined)}
-          fallbackIconSize={40}
-          className="h-full w-full rounded-none border-0 bg-transparent"
-          onVisible={onVisible}
-        />
       </div>
     );
   }
@@ -1601,7 +1578,8 @@ function ListRow({
   onActionsWidthChange: (width: number) => void;
   showPreviews: boolean;
 }) {
-  const kind = decideFileKind(blob, detectedKinds[blob.sha256]);
+  const detectedKind = detectedKinds[blob.sha256];
+  const kind = decideFileKind(blob, detectedKind);
   const isAudio = blob.type?.startsWith("audio/");
   const isActiveTrack = Boolean(currentTrackUrl && blob.url && currentTrackUrl === blob.url);
   const isActivePlaying = isActiveTrack && currentTrackStatus === "playing";
@@ -1617,7 +1595,9 @@ function ListRow({
   const displayName = buildDisplayName(blob);
   const isSelected = selected.has(blob.sha256);
   const trackMetadata = audioMetadata.get(blob.sha256);
-  const disablePreview = shouldDisablePreview(kind);
+  const canPreview = canBlobPreview(blob, detectedKind, kind);
+  const disablePreview = !canPreview;
+  const previewUrl = canPreview ? buildPreviewUrl(blob, baseUrl) : null;
   const { baseName } = splitNameAndExtension(displayName);
   const trackTitle = trackMetadata?.title?.trim() || baseName;
   const artistName = trackMetadata?.artist?.trim() || "";
@@ -1630,7 +1610,8 @@ function ListRow({
     : isSelected
       ? "bg-slate-800/50"
       : "hover:bg-slate-800/40";
-  const allowThumbnailPreview = showPreviews && (!disablePreview || (kind === "music" && Boolean(trackMetadata?.coverUrl)));
+  const allowThumbnailPreview =
+    showPreviews && (canPreview || (kind === "music" && Boolean(trackMetadata?.coverUrl)));
 
   const thumbnail = (
     <div className="relative">
@@ -1645,6 +1626,8 @@ function ListRow({
         onVisible={onBlobVisible}
         coverUrl={trackMetadata?.coverUrl}
         showPreview={allowThumbnailPreview}
+        canPreview={canPreview}
+        previewUrl={previewUrl}
       />
       {isActiveTrack ? (
         <span
@@ -2419,12 +2402,7 @@ function deriveFilename(disposition?: string) {
   return undefined;
 }
 
-function shouldDisablePreview(kind: FileKind) {
-  return kind !== "image" && kind !== "video";
-}
-
-function buildPreviewUrl(blob: BlossomBlob, kind: FileKind, baseUrl?: string | null) {
-  if (shouldDisablePreview(kind)) return null;
+function buildPreviewUrl(blob: BlossomBlob, baseUrl?: string | null) {
   if (blob.url) return blob.url;
   const fallback = blob.serverUrl ?? baseUrl;
   if (!fallback) return null;
