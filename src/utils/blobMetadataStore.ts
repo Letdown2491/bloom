@@ -1,6 +1,6 @@
 import type { BlossomBlob } from "../lib/blossomClient";
 
-const METADATA_STORAGE_VERSION = "v2";
+const METADATA_STORAGE_VERSION = "v3";
 
 type StoredAudioMetadata = {
   title?: string;
@@ -19,6 +19,7 @@ export type BlobAudioMetadata = StoredAudioMetadata;
 type StoredMetadata = {
   name?: string | null;
   type?: string | null;
+  folderPath?: string | null;
   audio?: StoredAudioMetadata | null;
   updatedAt?: number;
   lastCheckedAt?: number;
@@ -166,6 +167,7 @@ export function setStoredBlobMetadata(serverUrl: string | undefined, sha256: str
   const current = serverStore[sha256] ?? {};
   const nameProvided = Object.prototype.hasOwnProperty.call(metadata, "name");
   const typeProvided = Object.prototype.hasOwnProperty.call(metadata, "type");
+  const folderProvided = Object.prototype.hasOwnProperty.call(metadata, "folderPath");
   const audioProvided = Object.prototype.hasOwnProperty.call(metadata, "audio");
   const updatedProvided = Object.prototype.hasOwnProperty.call(metadata, "updatedAt");
   const checkedProvided = Object.prototype.hasOwnProperty.call(metadata, "lastCheckedAt");
@@ -174,6 +176,7 @@ export function setStoredBlobMetadata(serverUrl: string | undefined, sha256: str
 
   const rawName = nameProvided ? metadata.name : current.name;
   const rawType = typeProvided ? metadata.type : current.type;
+  const rawFolder = folderProvided ? metadata.folderPath : current.folderPath;
   const rawAudio = audioProvided ? metadata.audio : current.audio;
 
   if (typeof rawName === "string") {
@@ -190,6 +193,17 @@ export function setStoredBlobMetadata(serverUrl: string | undefined, sha256: str
     // Explicit removal requested; leave type undefined.
   } else if (typeof current.type === "string" && !typeProvided) {
     next.type = current.type;
+  }
+
+  if (folderProvided) {
+    const normalizedFolder = normalizeFolderPathInput(rawFolder);
+    if (normalizedFolder) {
+      next.folderPath = normalizedFolder;
+    } else if (rawFolder === null || (typeof rawFolder === "string" && rawFolder.length === 0)) {
+      next.folderPath = null;
+    }
+  } else if (Object.prototype.hasOwnProperty.call(current, "folderPath")) {
+    next.folderPath = current.folderPath ?? null;
   }
 
   if (audioProvided) {
@@ -267,6 +281,11 @@ export function mergeBlobWithStoredMetadata(serverUrl: string | undefined, blob:
   if (stored?.type && !merged.type) {
     merged.type = stored.type;
   }
+  if (Object.prototype.hasOwnProperty.call(stored ?? {}, "folderPath")) {
+    merged.folderPath = normalizeFolderPathInput(stored?.folderPath) ?? null;
+  } else if (typeof merged.folderPath === "string") {
+    queueStoredBlobMetadata(serverUrl, blob.sha256, { folderPath: merged.folderPath });
+  }
   if (merged.name && merged.name !== stored?.name) {
     queueStoredBlobMetadata(serverUrl, blob.sha256, { name: merged.name });
   }
@@ -280,12 +299,22 @@ export function mergeBlobsWithStoredMetadata(serverUrl: string | undefined, blob
   return blobs.map(blob => combineGlobalAlias(blob, mergeBlobWithStoredMetadata(serverUrl, blob)));
 }
 
-export function rememberBlobMetadata(serverUrl: string | undefined, blob: BlossomBlob) {
+export function rememberBlobMetadata(
+  serverUrl: string | undefined,
+  blob: BlossomBlob,
+  options?: { folderPath?: string | null }
+) {
   if (!blob.sha256) return;
-  setStoredBlobMetadata(serverUrl, blob.sha256, {
+  const payload: StoredMetadata = {
     name: blob.name,
     type: blob.type,
-  });
+  };
+  if (options && Object.prototype.hasOwnProperty.call(options, "folderPath")) {
+    payload.folderPath = options.folderPath ?? null;
+  } else if (Object.prototype.hasOwnProperty.call(blob, "folderPath")) {
+    payload.folderPath = blob.folderPath ?? null;
+  }
+  setStoredBlobMetadata(serverUrl, blob.sha256, payload);
 }
 
 export function rememberAudioMetadata(
@@ -343,6 +372,11 @@ export function getStoredAudioMetadata(serverUrl: string | undefined, sha256: st
   return getStoredBlobMetadata(serverUrl, sha256)?.audio;
 }
 
+export function getStoredFolderPath(serverUrl: string | undefined, sha256: string) {
+  const stored = getStoredBlobMetadata(serverUrl, sha256);
+  return normalizeFolderPathInput(stored?.folderPath);
+}
+
 export function applyAliasUpdate(
   serverUrl: string | undefined,
   sha256: string,
@@ -395,6 +429,9 @@ function combineGlobalAlias(original: BlossomBlob, merged: BlossomBlob): Blossom
   if (!combined.type && typeof global.type === "string") {
     combined.type = global.type;
   }
+  if (Object.prototype.hasOwnProperty.call(global, "folderPath")) {
+    combined.folderPath = normalizeFolderPathInput(global.folderPath) ?? null;
+  }
   return combined;
 }
 
@@ -440,6 +477,9 @@ export function sanitizeCoverUrl(value?: string | null): string | undefined {
   if (!value) return undefined;
   const trimmed = value.trim();
   if (!trimmed) return undefined;
+  if (trimmed.startsWith("data:image/")) {
+    return trimmed;
+  }
   try {
     const parsed = new URL(trimmed);
     if (parsed.protocol === "http:" || parsed.protocol === "https:") {
@@ -449,4 +489,70 @@ export function sanitizeCoverUrl(value?: string | null): string | undefined {
     return undefined;
   }
   return undefined;
+}
+
+export function normalizeFolderPathInput(value?: string | null): string | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const segments = trimmed
+    .split("/")
+    .map(segment => segment.trim())
+    .filter(segment => segment.length > 0);
+  if (segments.length === 0) return null;
+  return segments.join("/");
+}
+
+export function rememberFolderPath(
+  serverUrl: string | undefined,
+  sha256: string,
+  folderPath: string | null,
+  options?: { updatedAt?: number }
+) {
+  if (!sha256) return;
+  const normalized = normalizeFolderPathInput(folderPath);
+  const updatedAt =
+    typeof options?.updatedAt === "number" && Number.isFinite(options.updatedAt)
+      ? Math.max(0, Math.trunc(options.updatedAt))
+      : Date.now();
+  const payload: StoredMetadata = {
+    folderPath: normalized ?? null,
+    updatedAt,
+  };
+  if (serverUrl) {
+    setStoredBlobMetadata(serverUrl, sha256, payload);
+  }
+  setStoredBlobMetadata(undefined, sha256, payload);
+}
+
+export function applyFolderUpdate(
+  serverUrl: string | undefined,
+  sha256: string,
+  folderPath: string | null,
+  createdAtSeconds: number | undefined
+): boolean {
+  if (!sha256) return false;
+  const updatedAt = typeof createdAtSeconds === "number" && Number.isFinite(createdAtSeconds)
+    ? Math.max(0, createdAtSeconds) * 1000
+    : Date.now();
+  const existing = getStoredBlobMetadata(undefined, sha256);
+  const existingUpdatedAt = existing?.updatedAt ?? 0;
+  if (existingUpdatedAt > updatedAt) {
+    return false;
+  }
+  const normalized = normalizeFolderPathInput(folderPath) ?? null;
+  const existingFolder = normalizeFolderPathInput(existing?.folderPath) ?? null;
+  if (existingUpdatedAt === updatedAt && existingFolder === normalized) {
+    return false;
+  }
+  const payload: StoredMetadata = {
+    folderPath: normalized,
+    updatedAt,
+  };
+  setStoredBlobMetadata(undefined, sha256, payload);
+  if (serverUrl) {
+    setStoredBlobMetadata(serverUrl, sha256, payload);
+  }
+  return true;
 }

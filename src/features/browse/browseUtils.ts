@@ -26,13 +26,15 @@ const deriveTrackTitle = (blob: BlossomBlob) => {
 
 export const createAudioTrack = (
   blob: BlossomBlob,
-  metadata: BlobAudioMetadata | null | undefined
+  metadata: BlobAudioMetadata | null | undefined,
+  overrideUrl?: string
 ): Track | null => {
-  if (!blob.url) return null;
+  const sourceUrl = overrideUrl ?? blob.url;
+  if (!sourceUrl) return null;
   const title = metadata?.title || deriveTrackTitle(blob);
   const track: Track = {
     id: blob.sha256,
-    url: blob.url,
+    url: sourceUrl,
     title,
   };
   if (metadata?.artist) track.artist = metadata.artist;

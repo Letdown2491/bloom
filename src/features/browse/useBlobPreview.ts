@@ -91,7 +91,8 @@ function shouldDisableBlobPreview(
     return false;
   }
 
-  const mime = blob.type?.split(";")[0]?.toLowerCase() ?? "";
+  const privateMime = blob.privateData?.metadata?.type;
+  const mime = (privateMime ?? blob.type ?? "").split(";")[0]?.toLowerCase() ?? "";
   if (mime.startsWith("image/") || mime.startsWith("video/")) {
     return false;
   }
@@ -123,7 +124,13 @@ function normalizeKind(kind?: string): "image" | "video" | undefined {
 
 function collectFilenameCandidates(blob: BlossomBlob) {
   const candidates: string[] = [];
-  const primaryRefs = [blob.name, blob.url, readNip94Value(blob, "name"), readNip94Value(blob, "url")];
+  const primaryRefs = [
+    blob.name,
+    blob.url,
+    blob.privateData?.metadata?.name,
+    readNip94Value(blob, "name"),
+    readNip94Value(blob, "url"),
+  ];
   for (const value of primaryRefs) {
     if (typeof value === "string" && value) {
       candidates.push(value.toLowerCase());

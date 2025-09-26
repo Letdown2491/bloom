@@ -2,8 +2,9 @@ import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useSta
 import { decode } from "blurhash";
 import { FixedSizeList as VirtualList } from "react-window";
 import { prettyBytes, prettyDate } from "../utils/format";
-import { buildAuthorizationHeader, type BlossomBlob, type SignTemplate } from "../lib/blossomClient";
+import { buildAuthorizationHeader, extractSha256FromUrl, type BlossomBlob, type SignTemplate } from "../lib/blossomClient";
 import { buildNip98AuthHeader } from "../lib/nip98";
+import { decryptPrivateBlob, type PrivateEncryptionMetadata } from "../lib/privateEncryption";
 import {
   DownloadIcon,
   EditIcon,
@@ -19,7 +20,9 @@ import {
   MusicIcon,
   VideoIcon,
   DocumentIcon,
+  LockIcon,
 } from "./icons";
+import { PRIVATE_PLACEHOLDER_SHA } from "../constants/private";
 import type { FileKind } from "./icons";
 import type { BlobAudioMetadata } from "../utils/blobMetadataStore";
 import { cachePreviewBlob, getCachedPreviewBlob } from "../utils/blobPreviewCache";
@@ -27,6 +30,9 @@ import { useBlobMetadata } from "../features/browse/useBlobMetadata";
 import { useBlobPreview, type PreviewTarget, canBlobPreview } from "../features/browse/useBlobPreview";
 import { useInViewport } from "../hooks/useInViewport";
 import { useAudioMetadataMap } from "../features/browse/useAudioMetadata";
+import { usePrivateLibrary } from "../context/PrivateLibraryContext";
+import type { PrivateListEntry } from "../lib/privateList";
+import type { DefaultSortOption } from "../context/UserPreferencesContext";
 
 export type BlobReplicaSummary = {
   count: number;
@@ -50,10 +56,12 @@ export type BlobListProps = {
   onPlay?: (blob: BlossomBlob) => void;
   onShare?: (blob: BlossomBlob) => void;
   onRename?: (blob: BlossomBlob) => void;
+  onOpenList?: (blob: BlossomBlob) => void;
   currentTrackUrl?: string;
   currentTrackStatus?: "idle" | "playing" | "paused";
   showGridPreviews?: boolean;
   showListPreviews?: boolean;
+  defaultSortOption: DefaultSortOption;
 };
 
 type DetectedKindMap = Record<string, "image" | "video">;
@@ -67,19 +75,98 @@ const ADDITIONAL_AUDIO_MIME_TYPES = new Set(
   )
 );
 
+const LIST_WORD_REGEX = /(?:^|[+./-])list(?:$|[+./-])/;
+
+const isDirectoryLikeMime = (value?: string | null) => {
+  const normalized = normalizeMime(value);
+  const raw = value?.toLowerCase() ?? "";
+  if (!normalized) return false;
+  if (normalized === "application/x-directory" || normalized === "inode/directory") return true;
+  if (normalized.startsWith("application/")) {
+    if (normalized.includes("directory") || normalized.includes("folder")) return true;
+    if (LIST_WORD_REGEX.test(normalized) && (normalized.includes("nostr") || normalized.includes("bloom"))) {
+      return true;
+    }
+  }
+  if (raw.includes("type=list") || raw.includes("category=list")) return true;
+  return false;
+};
+
+const isListLikeBlob = (blob: BlossomBlob) => {
+  if (isDirectoryLikeMime(blob.type)) return true;
+  const metadataType = blob.privateData?.metadata?.type;
+  if (isDirectoryLikeMime(metadataType)) return true;
+  return false;
+};
+
+const prioritizeListBlobs = (items: readonly BlossomBlob[]): BlossomBlob[] => {
+  if (items.length <= 1) {
+    return Array.isArray(items) ? (items as BlossomBlob[]).slice() : Array.from(items);
+  }
+  const lists: BlossomBlob[] = [];
+  const files: BlossomBlob[] = [];
+  let seenFile = false;
+  let requiresReorder = false;
+
+  for (const item of items) {
+    if (isListLikeBlob(item)) {
+      if (seenFile) {
+        requiresReorder = true;
+      }
+      lists.push(item);
+    } else {
+      seenFile = true;
+      files.push(item);
+    }
+  }
+
+  if (!requiresReorder) {
+    return Array.isArray(items) ? (items as BlossomBlob[]).slice() : Array.from(items);
+  }
+
+  return [...lists, ...files];
+};
+
 type BlurhashInfo = {
   hash: string;
   width?: number;
   height?: number;
 };
 
-type SortKey = "name" | "replicas" | "size" | "uploaded" | "artist" | "album" | "duration";
+type SortKey = "name" | "replicas" | "size" | "updated" | "artist" | "album" | "duration";
 
 type SortConfig = { key: SortKey; direction: "asc" | "desc" };
 
 const CARD_HEIGHT = 260;
 
-const ReplicaBadge: React.FC<{ info: BlobReplicaSummary; variant: "grid" | "list" }> = ({ info, variant }) => {
+const ReplicaBadge: React.FC<{
+  info?: BlobReplicaSummary;
+  variant: "grid" | "list";
+  privateIndicator?: boolean;
+  privateLabel?: string;
+}> = ({ info, variant, privateIndicator = false, privateLabel }) => {
+  if (privateIndicator) {
+    const label = privateLabel ?? "Private";
+    const baseClass =
+      variant === "grid"
+        ? "bg-amber-900/70 text-amber-100 shadow-lg"
+        : "bg-amber-900/75 text-amber-100 shadow";
+    const paddingClass = variant === "grid" ? "px-2 py-1" : "px-2.5 py-0.5";
+    return (
+      <span
+        className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border border-amber-500/60 ${baseClass} ${paddingClass} font-semibold text-[11px] cursor-default select-none z-10`}
+        title={label}
+        aria-label={label}
+        onMouseDown={event => event.stopPropagation()}
+        onClick={event => event.stopPropagation()}
+        onKeyDown={event => event.stopPropagation()}
+      >
+        <LockIcon size={variant === "grid" ? 14 : 13} className="text-amber-200" aria-hidden="true" />
+      </span>
+    );
+  }
+
+  if (!info) return null;
   const title = info.servers.length
     ? `Available on ${info.servers.map(server => server.name).join(", ")}`
     : `Available on ${info.count} ${info.count === 1 ? "server" : "servers"}`;
@@ -92,7 +179,7 @@ const ReplicaBadge: React.FC<{ info: BlobReplicaSummary; variant: "grid" | "list
 
   return (
     <span
-      className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border border-emerald-500/60 ${baseClass} ${paddingClass} font-semibold text-[11px] tabular-nums cursor-default select-none`}
+      className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border border-emerald-500/60 ${baseClass} ${paddingClass} font-semibold text-[11px] tabular-nums cursor-default select-none z-10`}
       title={title}
       aria-label={title}
       onMouseDown={event => event.stopPropagation()}
@@ -132,10 +219,12 @@ export const BlobList: React.FC<BlobListProps> = ({
   onPlay,
   onShare,
   onRename,
+  onOpenList,
   currentTrackUrl,
   currentTrackStatus,
   showGridPreviews = true,
   showListPreviews = true,
+  defaultSortOption = "updated",
 }) => {
   const { resolvedMeta, detectedKinds, requestMetadata, reportDetectedKind } = useBlobMetadata(blobs, {
     baseUrl,
@@ -148,10 +237,13 @@ export const BlobList: React.FC<BlobListProps> = ({
       const overrides = resolvedMeta[blob.sha256];
       const base = blob.serverUrl ?? baseUrl;
       const normalizedBase = base ? base.replace(/\/$/, "") : undefined;
+      const privateMeta = blob.privateData?.metadata;
+      const mergedType = overrides?.type ?? privateMeta?.type ?? blob.type;
+      const mergedName = overrides?.name ?? privateMeta?.name ?? blob.name;
       return {
         ...blob,
-        type: overrides?.type ?? blob.type,
-        name: overrides?.name ?? blob.name,
+        type: mergedType,
+        name: mergedName,
         url: blob.url || (normalizedBase ? `${normalizedBase}/${blob.sha256}` : undefined),
         serverUrl: normalizedBase ?? blob.serverUrl,
         requiresAuth: blob.requiresAuth ?? requiresAuth,
@@ -161,6 +253,43 @@ export const BlobList: React.FC<BlobListProps> = ({
   }, [blobs, resolvedMeta, baseUrl, requiresAuth, serverType]);
 
   const audioMetadata = useAudioMetadataMap(decoratedBlobs);
+  const { entriesBySha } = usePrivateLibrary();
+
+  const resolveCoverEntry = useCallback(
+    (coverUrl?: string | null) => {
+      if (!coverUrl) return null;
+      const coverSha = extractSha256FromUrl(coverUrl);
+      return coverSha ? entriesBySha.get(coverSha) ?? null : null;
+    },
+    [entriesBySha]
+  );
+
+  const deriveReplicaCount = useCallback(
+    (blob: BlossomBlob): number => {
+      const summary = replicaInfo?.get(blob.sha256);
+      if (summary) {
+        return summary.count;
+      }
+
+      const servers = new Set<string>();
+      const addServer = (value?: string | null) => {
+        if (typeof value !== "string") return;
+        const normalized = value.trim().replace(/\/+$/, "");
+        if (!normalized) return;
+        servers.add(normalized);
+      };
+
+      addServer(blob.serverUrl ?? null);
+
+      const privateServers = blob.privateData?.servers;
+      if (Array.isArray(privateServers)) {
+        privateServers.forEach(server => addServer(server));
+      }
+
+      return servers.size || (blob.serverUrl ? 1 : 0);
+    },
+    [replicaInfo]
+  );
 
   const { previewTarget, openPreview, closePreview } = useBlobPreview({
     defaultServerType: serverType,
@@ -168,17 +297,65 @@ export const BlobList: React.FC<BlobListProps> = ({
   });
   const [sortConfig, setSortConfig] = useState<SortConfig | null>(null);
 
+  useEffect(() => {
+    setSortConfig(current => (current ? null : current));
+  }, [defaultSortOption]);
+
   const baseSortedBlobs = useMemo(() => {
-    if (decoratedBlobs.length <= 1) return decoratedBlobs;
-    return [...decoratedBlobs].sort((a, b) => {
+    if (decoratedBlobs.length <= 1) {
+      return decoratedBlobs;
+    }
+
+    const compareByUpdatedDesc = (a: BlossomBlob, b: BlossomBlob) => {
       const aUploaded = typeof a.uploaded === "number" ? a.uploaded : 0;
       const bUploaded = typeof b.uploaded === "number" ? b.uploaded : 0;
       if (aUploaded !== bUploaded) {
         return bUploaded - aUploaded;
       }
       return deriveBlobSortName(a).localeCompare(deriveBlobSortName(b));
-    });
-  }, [decoratedBlobs]);
+    };
+
+    const compareByNameAsc = (a: BlossomBlob, b: BlossomBlob) => {
+      const diff = deriveBlobSortName(a).localeCompare(deriveBlobSortName(b));
+      if (diff !== 0) return diff;
+      return compareByUpdatedDesc(a, b);
+    };
+
+    const compareByServersDesc = (a: BlossomBlob, b: BlossomBlob) => {
+      const aCount = deriveReplicaCount(a);
+      const bCount = deriveReplicaCount(b);
+      if (aCount !== bCount) {
+        return bCount - aCount;
+      }
+      return compareByNameAsc(a, b);
+    };
+
+    const compareBySizeDesc = (a: BlossomBlob, b: BlossomBlob) => {
+      const aSize = typeof a.size === "number" ? a.size : -1;
+      const bSize = typeof b.size === "number" ? b.size : -1;
+      if (aSize !== bSize) {
+        return bSize - aSize;
+      }
+      return compareByNameAsc(a, b);
+    };
+
+    const comparator = (a: BlossomBlob, b: BlossomBlob) => {
+      switch (defaultSortOption) {
+        case "name":
+          return compareByNameAsc(a, b);
+        case "servers":
+          return compareByServersDesc(a, b);
+        case "size":
+          return compareBySizeDesc(a, b);
+        case "updated":
+        default:
+          return compareByUpdatedDesc(a, b);
+      }
+    };
+
+    const sorted = [...decoratedBlobs].sort(comparator);
+    return prioritizeListBlobs(sorted);
+  }, [decoratedBlobs, defaultSortOption, deriveReplicaCount]);
 
   const sortedBlobs = useMemo(() => {
     if (!sortConfig) {
@@ -186,9 +363,9 @@ export const BlobList: React.FC<BlobListProps> = ({
     }
 
     const { key, direction } = sortConfig;
-    if (key === "uploaded") {
+    if (key === "updated") {
       if (direction === "desc") return baseSortedBlobs;
-      return [...baseSortedBlobs].reverse();
+      return prioritizeListBlobs([...baseSortedBlobs].reverse());
     }
 
     const modifier = direction === "asc" ? 1 : -1;
@@ -210,7 +387,7 @@ export const BlobList: React.FC<BlobListProps> = ({
       return fallback * modifier;
     });
 
-    return working;
+    return prioritizeListBlobs(working);
   }, [baseSortedBlobs, decoratedBlobs, sortConfig]);
 
   const gridBlobs = baseSortedBlobs;
@@ -246,7 +423,9 @@ export const BlobList: React.FC<BlobListProps> = ({
       const effectiveServerType = blob.serverType ?? serverType;
       const fallbackBaseUrl = blob.serverUrl ?? baseUrl;
       const effectiveRequiresAuth =
-        effectiveServerType === "satellite" ? false : blob.requiresAuth ?? requiresAuth;
+        effectiveServerType === "satellite"
+          ? false
+          : Boolean((blob.requiresAuth ?? requiresAuth) || blob.privateData?.encryption);
       const canPreview = canBlobPreview(blob, detectedKind, kind);
       const previewUrl = canPreview ? buildPreviewUrl(blob, fallbackBaseUrl) : null;
       const disablePreview = !canPreview;
@@ -301,15 +480,45 @@ export const BlobList: React.FC<BlobListProps> = ({
           throw new Error(`Download failed with status ${response.status}`);
         }
 
-        const data = await response.blob();
         const disposition = response.headers.get("content-disposition") || undefined;
+        const mimeHint = response.headers.get("content-type") || undefined;
+        const privateEncryption = blob.privateData?.encryption;
+        const privateMetadata = blob.privateData?.metadata;
+
+        let downloadBlob: Blob;
+        if (privateEncryption) {
+          const encryptedBuffer = await response.arrayBuffer();
+          if (privateEncryption.algorithm !== "AES-GCM") {
+            throw new Error(`Unsupported encryption algorithm: ${privateEncryption.algorithm}`);
+          }
+          const decryptionMetadata: PrivateEncryptionMetadata = {
+            algorithm: "AES-GCM",
+            key: privateEncryption.key,
+            iv: privateEncryption.iv,
+            originalName: privateMetadata?.name,
+            originalType: privateMetadata?.type,
+            originalSize: privateMetadata?.size,
+          };
+          try {
+            const decryptedBuffer = await decryptPrivateBlob(encryptedBuffer, decryptionMetadata);
+            const resolvedType = privateMetadata?.type || blob.type || mimeHint || "application/octet-stream";
+            downloadBlob = new Blob([decryptedBuffer], { type: resolvedType });
+          } catch (decryptError) {
+            throw new Error(
+              decryptError instanceof Error ? decryptError.message : "Failed to decrypt private file."
+            );
+          }
+        } else {
+          downloadBlob = await response.blob();
+        }
+
         const inferredName = deriveFilename(disposition);
-        const baseName = sanitizeFilename(inferredName || blob.name || blob.sha256);
-        const typeHint = blob.type || data.type;
+        const baseName = sanitizeFilename(privateMetadata?.name || inferredName || blob.name || blob.sha256);
+        const typeHint = privateMetadata?.type || downloadBlob.type || blob.type || mimeHint;
         const extension = inferExtensionFromType(typeHint);
         const filename = ensureExtension(baseName, extension);
 
-        objectUrl = URL.createObjectURL(data);
+        objectUrl = URL.createObjectURL(downloadBlob);
         const anchor = document.createElement("a");
         anchor.href = objectUrl;
         anchor.download = filename;
@@ -333,7 +542,7 @@ export const BlobList: React.FC<BlobListProps> = ({
 
   const listBlobs = useMemo(() => {
     if (viewMode !== "list") return baseSortedBlobs;
-    if (!sortConfig || sortConfig.key === "name" || sortConfig.key === "size" || sortConfig.key === "uploaded") {
+    if (!sortConfig || sortConfig.key === "name" || sortConfig.key === "size" || sortConfig.key === "updated") {
       return sortedBlobs;
     }
 
@@ -371,7 +580,8 @@ export const BlobList: React.FC<BlobListProps> = ({
       return deriveBlobSortName(a).localeCompare(deriveBlobSortName(b));
     });
 
-    return sortConfig.direction === "asc" ? sorted : sorted.reverse();
+    const directed = sortConfig.direction === "asc" ? sorted : sorted.reverse();
+    return prioritizeListBlobs(directed);
   }, [audioMetadata, baseSortedBlobs, replicaInfo, sortConfig, sortedBlobs, viewMode]);
 
   return (
@@ -390,20 +600,22 @@ export const BlobList: React.FC<BlobListProps> = ({
           onDownload={handleDownload}
           onPreview={handlePreview}
           onPlay={onPlay}
-        onShare={onShare}
-        onRename={onRename}
-        currentTrackUrl={currentTrackUrl}
-        currentTrackStatus={currentTrackStatus}
-        detectedKinds={detectedKinds}
-        onDetect={handleDetect}
-        sortConfig={sortConfig}
-        onSort={handleSortToggle}
-        onBlobVisible={requestMetadata}
-        requestMetadata={requestMetadata}
-        replicaInfo={replicaInfo}
-        isMusicView={isMusicView}
+          onShare={onShare}
+          onRename={onRename}
+          onOpenList={onOpenList}
+          currentTrackUrl={currentTrackUrl}
+          currentTrackStatus={currentTrackStatus}
+          detectedKinds={detectedKinds}
+          onDetect={handleDetect}
+          sortConfig={sortConfig}
+          onSort={handleSortToggle}
+          onBlobVisible={requestMetadata}
+          requestMetadata={requestMetadata}
+          replicaInfo={replicaInfo}
+          isMusicView={isMusicView}
         audioMetadata={audioMetadata}
         showPreviews={showListPreviews}
+        resolveCoverEntry={resolveCoverEntry}
       />
     ) : (
       <GridLayout
@@ -420,6 +632,7 @@ export const BlobList: React.FC<BlobListProps> = ({
         onPlay={onPlay}
         onShare={onShare}
         onRename={onRename}
+        onOpenList={onOpenList}
         currentTrackUrl={currentTrackUrl}
         currentTrackStatus={currentTrackStatus}
         detectedKinds={detectedKinds}
@@ -428,6 +641,7 @@ export const BlobList: React.FC<BlobListProps> = ({
         replicaInfo={replicaInfo}
         audioMetadata={audioMetadata}
         showPreviews={showGridPreviews}
+        resolveCoverEntry={resolveCoverEntry}
       />
     )}
       {previewTarget && (
@@ -461,6 +675,7 @@ const ListLayout: React.FC<{
   onPlay?: (blob: BlossomBlob) => void;
   onShare?: (blob: BlossomBlob) => void;
   onRename?: (blob: BlossomBlob) => void;
+  onOpenList?: (blob: BlossomBlob) => void;
   currentTrackUrl?: string;
   currentTrackStatus?: "idle" | "playing" | "paused";
   detectedKinds: DetectedKindMap;
@@ -473,6 +688,7 @@ const ListLayout: React.FC<{
   isMusicView: boolean;
   audioMetadata: Map<string, BlobAudioMetadata>;
   showPreviews: boolean;
+  resolveCoverEntry: (coverUrl?: string | null) => PrivateListEntry | null;
 }> = ({
   blobs,
   baseUrl,
@@ -488,6 +704,7 @@ const ListLayout: React.FC<{
   onPlay,
   onShare,
   onRename,
+  onOpenList,
   currentTrackUrl,
   currentTrackStatus,
   detectedKinds,
@@ -500,6 +717,7 @@ const ListLayout: React.FC<{
   isMusicView,
   audioMetadata,
   showPreviews,
+  resolveCoverEntry,
 }) => {
   const selectAllRef = useRef<HTMLInputElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -607,6 +825,9 @@ const ListLayout: React.FC<{
         height: LIST_ROW_HEIGHT,
       };
       const replicaSummary = replicaInfo?.get(blob.sha256);
+      const isPrivateBlob = Boolean(blob.privateData);
+      const trackMetadata = audioMetadata.get(blob.sha256);
+      const coverEntry = resolveCoverEntry(trackMetadata?.coverUrl);
 
       return (
         <ListRow
@@ -625,6 +846,7 @@ const ListLayout: React.FC<{
           onPlay={onPlay}
           onShare={onShare}
           onRename={onRename}
+          onOpenList={onOpenList}
           currentTrackUrl={currentTrackUrl}
           currentTrackStatus={currentTrackStatus}
           detectedKinds={detectedKinds}
@@ -635,6 +857,8 @@ const ListLayout: React.FC<{
           audioMetadata={audioMetadata}
           onActionsWidthChange={handleActionsWidthChange}
           showPreviews={showPreviews}
+          isPrivateBlob={isPrivateBlob}
+          coverEntry={coverEntry}
         />
       );
     },
@@ -664,6 +888,8 @@ const ListLayout: React.FC<{
       audioMetadata,
       showPreviews,
       handleActionsWidthChange,
+      onOpenList,
+      resolveCoverEntry,
     ]
   );
 
@@ -754,11 +980,11 @@ const ListLayout: React.FC<{
         </button>
         <button
           type="button"
-          onClick={() => onSort("uploaded")}
+          onClick={() => onSort("updated")}
           className="hidden items-center gap-1 text-left font-semibold text-slate-200 hover:text-slate-100 md:flex"
         >
-          <span>Uploaded</span>
-          <span aria-hidden="true">{headerIndicator("uploaded")}</span>
+          <span>Updated</span>
+          <span aria-hidden="true">{headerIndicator("updated")}</span>
         </button>
         <button
           type="button"
@@ -818,6 +1044,7 @@ const GridLayout: React.FC<{
   onPlay?: (blob: BlossomBlob) => void;
   onShare?: (blob: BlossomBlob) => void;
   onRename?: (blob: BlossomBlob) => void;
+  onOpenList?: (blob: BlossomBlob) => void;
   currentTrackUrl?: string;
   currentTrackStatus?: "idle" | "playing" | "paused";
   detectedKinds: DetectedKindMap;
@@ -826,6 +1053,7 @@ const GridLayout: React.FC<{
   replicaInfo?: Map<string, BlobReplicaSummary>;
   audioMetadata: Map<string, BlobAudioMetadata>;
   showPreviews: boolean;
+  resolveCoverEntry: (coverUrl?: string | null) => PrivateListEntry | null;
 }> = ({
   blobs,
   baseUrl,
@@ -840,6 +1068,7 @@ const GridLayout: React.FC<{
   onPlay,
   onShare,
   onRename,
+  onOpenList,
   currentTrackUrl,
   currentTrackStatus,
   detectedKinds,
@@ -848,6 +1077,7 @@ const GridLayout: React.FC<{
   replicaInfo,
   audioMetadata,
   showPreviews,
+  resolveCoverEntry,
 }) => {
   const CARD_WIDTH = 220;
   const GAP = 16;
@@ -955,18 +1185,25 @@ const GridLayout: React.FC<{
             const displayName = buildDisplayName(blob);
             const effectiveServerType = blob.serverType ?? serverType;
             const previewRequiresAuth =
-              effectiveServerType === "satellite" ? false : blob.requiresAuth ?? requiresAuth;
+              effectiveServerType === "satellite"
+                ? false
+                : Boolean((blob.requiresAuth ?? requiresAuth) || blob.privateData?.encryption);
             const detectedKind = detectedKinds[blob.sha256];
             const kind = decideFileKind(blob, detectedKind);
             const trackMetadata = audioMetadata.get(blob.sha256);
             const canPreview = canBlobPreview(blob, detectedKind, kind);
             const disablePreview = !canPreview;
             const coverUrl = kind === "music" ? trackMetadata?.coverUrl : undefined;
+            const coverEntry = resolveCoverEntry(coverUrl);
             const previewUrl = canPreview ? buildPreviewUrl(blob, baseUrl) : null;
             const blurhash = extractBlurhash(blob);
             const top = GAP + row * rowHeight;
             const left = GAP + col * (effectiveColumnWidth + GAP);
             const replicaSummary = replicaInfo?.get(blob.sha256);
+            const isListBlob = isListLikeBlob(blob);
+            const isPrivateList = isListBlob && blob.sha256 === PRIVATE_PLACEHOLDER_SHA;
+            const isPrivateBlob = Boolean(blob.privateData);
+            const isPrivateItem = isPrivateList || isPrivateBlob;
             const showReplicaBadge = replicaSummary && replicaSummary.count > 1;
             const coverAlt = trackMetadata?.title?.trim() || displayName;
             const previewAllowed = showPreviews && canPreview;
@@ -980,39 +1217,54 @@ const GridLayout: React.FC<{
             }`;
             const showButtonClass = `${primaryActionBaseClass} bg-emerald-700/70 text-slate-100 hover:bg-emerald-600`;
             const primaryAction =
-              isAudio && onPlay && blob.url
+              isListBlob && onOpenList
                 ? (
                     <button
-                      className={`${playButtonClass} aspect-square h-10 w-10`}
+                      className={`${showButtonClass} h-10 w-10`}
                       onClick={event => {
                         event.stopPropagation();
-                        onPlay?.(blob);
+                        onOpenList(blob);
                       }}
-                      aria-label={playButtonAria}
-                      aria-pressed={isActivePlaying}
-                      title={playButtonLabel}
+                      aria-label="Open list"
+                      title="Open"
                       type="button"
                     >
-                      {playPauseIcon}
+                      <PreviewIcon size={16} />
                     </button>
                   )
-                : !isAudio
+                : isAudio && onPlay && blob.url
                   ? (
                       <button
-                        className={`${showButtonClass} h-10 w-10`}
+                        className={`${playButtonClass} aspect-square h-10 w-10`}
                         onClick={event => {
                           event.stopPropagation();
-                          onPreview(blob);
+                          onPlay?.(blob);
                         }}
-                        aria-label={disablePreview ? "Preview unavailable" : "Show blob"}
-                        title={disablePreview ? "Preview unavailable" : "Show"}
+                        aria-label={playButtonAria}
+                        aria-pressed={isActivePlaying}
+                        title={playButtonLabel}
                         type="button"
-                        disabled={disablePreview}
                       >
-                        <PreviewIcon size={16} />
+                        {playPauseIcon}
                       </button>
                     )
-                  : null;
+                  : !isAudio
+                    ? (
+                        <button
+                          className={`${showButtonClass} h-10 w-10`}
+                          onClick={event => {
+                            event.stopPropagation();
+                            onPreview(blob);
+                          }}
+                          aria-label={disablePreview ? "Preview unavailable" : "Show blob"}
+                          title={disablePreview ? "Preview unavailable" : "Show"}
+                          type="button"
+                          disabled={disablePreview}
+                        >
+                          <PreviewIcon size={16} />
+                        </button>
+                      )
+                    : null;
 
             const shareButton =
               blob.url && onShare
@@ -1043,7 +1295,7 @@ const GridLayout: React.FC<{
 
             const dropdownItems: DropdownItem[] = [];
 
-            if (blob.url) {
+            if (blob.url && !isListBlob) {
               dropdownItems.push({
                 key: "download",
                 label: "Download",
@@ -1053,7 +1305,7 @@ const GridLayout: React.FC<{
               });
             }
 
-            if (onRename) {
+            if (onRename && !isPrivateList) {
               dropdownItems.push({
                 key: "rename",
                 label: "Edit Details",
@@ -1065,9 +1317,13 @@ const GridLayout: React.FC<{
 
             dropdownItems.push({
               key: "delete",
-              label: isAudio ? "Delete Track" : "Delete",
+              label: isListBlob ? "Delete Folder" : isAudio ? "Delete Track" : "Delete",
               icon: <TrashIcon size={14} />,
-              ariaLabel: isAudio ? "Delete track" : "Delete blob",
+              ariaLabel: isListBlob
+                ? "Delete folder"
+                : isAudio
+                  ? "Delete track"
+                  : "Delete blob",
               onSelect: () => onDelete(blob),
               variant: "destructive",
             });
@@ -1145,13 +1401,15 @@ const GridLayout: React.FC<{
                           ? "from-red-900/70 via-slate-900 to-slate-950"
                           : kind === "doc" || kind === "document"
                             ? "from-purple-900/70 via-slate-900 to-slate-950"
-                            : "from-slate-900 via-slate-900 to-slate-950"
+                            : kind === "folder"
+                              ? "from-amber-900/70 via-slate-900 to-slate-950"
+                              : "from-slate-900 via-slate-900 to-slate-950"
                 }`}
               >
                 <FileTypeIcon
                   kind={kind}
                   size={Math.round(CARD_HEIGHT * 0.5)}
-                  className="text-slate-200"
+                  className={kind === "folder" ? "text-amber-200" : "text-slate-200"}
                   aria-hidden="true"
                 />
               </div>
@@ -1174,6 +1432,7 @@ const GridLayout: React.FC<{
                   className="h-full w-full rounded-lg border border-slate-800 bg-slate-950/70"
                   onVisible={onBlobVisible}
                   blurhash={blurhash}
+                  blob={blob}
                 />
               );
             }
@@ -1185,6 +1444,11 @@ const GridLayout: React.FC<{
                     alt={`${coverAlt} cover art`}
                     className="h-full w-full rounded-lg border border-slate-800 object-cover"
                     fallback={fallbackPreview}
+                    requiresAuth={previewRequiresAuth}
+                    signTemplate={previewRequiresAuth ? signTemplate : undefined}
+                    serverType={blob.serverType ?? serverType}
+                    blob={blob}
+                    coverEntry={coverEntry}
                   />
                 )
               : previewPanel;
@@ -1208,23 +1472,22 @@ const GridLayout: React.FC<{
                 >
                   <div className="relative flex-1 overflow-hidden" style={{ height: CARD_HEIGHT * 0.75 }}>
                     {showReplicaBadge ? (
-                      <div className="pointer-events-none absolute inset-x-0 top-0 z-20 flex justify-start p-2">
-                        <div
-                          className="pointer-events-auto"
-                          onClick={event => event.stopPropagation()}
-                          onKeyDown={event => event.stopPropagation()}
-                        >
-                          <ReplicaBadge info={replicaSummary!} variant="grid" />
-                        </div>
+                      <div className="pointer-events-none absolute right-2 top-2 z-20">
+                        <ReplicaBadge info={replicaSummary!} variant="grid" />
                       </div>
                     ) : null}
                     {previewContent}
                     <div className="pointer-events-none absolute inset-x-0 bottom-0 px-3 pb-2">
                       <div
-                        className="w-full truncate rounded-md bg-slate-950/75 px-2 py-1 text-xs font-medium text-slate-100 text-center"
+                        className="w-full rounded-md bg-slate-950/75 px-2 py-1 text-xs font-medium text-slate-100 text-center"
                         title={displayName}
                       >
-                        {displayName}
+                        <span className="flex max-w-full items-center justify-center gap-1">
+                          <span className="truncate">{displayName}</span>
+                          {isPrivateItem ? (
+                            <LockIcon size={12} className="text-amber-300" aria-hidden="true" />
+                          ) : null}
+                        </span>
                       </div>
                     </div>
                   </div>
@@ -1263,7 +1526,7 @@ const PreviewDialog: React.FC<{
   const derivedKind: FileKind = (target.kind as FileKind | undefined) ?? decideFileKind(blob, undefined);
   const blurhash = extractBlurhash(blob);
   const sizeLabel = typeof blob.size === "number" ? prettyBytes(blob.size) : null;
-  const uploadedLabel = typeof blob.uploaded === "number" ? prettyDate(blob.uploaded) : null;
+  const updatedLabel = typeof blob.uploaded === "number" ? prettyDate(blob.uploaded) : null;
   const typeLabel = blob.type || "Unknown";
   const originLabel = target.baseUrl ?? blob.serverUrl ?? null;
   const previewUnavailable = disablePreview || !previewUrl;
@@ -1333,11 +1596,11 @@ const PreviewDialog: React.FC<{
                 <span className="text-slate-300">Size:</span> {sizeLabel}
               </span>
             )}
-            {uploadedLabel && (
-              <span>
-                <span className="text-slate-300">Uploaded:</span> {uploadedLabel}
-              </span>
-            )}
+          {updatedLabel && (
+            <span>
+              <span className="text-slate-300">Updated:</span> {updatedLabel}
+            </span>
+          )}
             <span>
               <span className="text-slate-300">Type:</span> {typeLabel}
             </span>
@@ -1370,6 +1633,7 @@ const PreviewDialog: React.FC<{
               variant="dialog"
               onVisible={onBlobVisible}
               blurhash={blurhash}
+              blob={blob}
             />
           )}
         </div>
@@ -1410,6 +1674,7 @@ const ListThumbnail: React.FC<{
   showPreview?: boolean;
   canPreview?: boolean;
   previewUrl?: string | null;
+  coverEntry?: PrivateListEntry | null;
 }> = ({
   blob,
   kind,
@@ -1423,13 +1688,17 @@ const ListThumbnail: React.FC<{
   showPreview = true,
   canPreview = false,
   previewUrl,
+  coverEntry,
 }) => {
   const containerClass =
     "flex h-12 w-12 flex-shrink-0 overflow-hidden rounded-lg border border-slate-800 bg-slate-950/80 relative";
   const blurhash = extractBlurhash(blob);
   const effectiveServerType = blob.serverType ?? serverType;
+  const coverEncryption = coverEntry?.encryption;
   const effectiveRequiresAuth =
-    effectiveServerType === "satellite" ? false : blob.requiresAuth ?? requiresAuth;
+    effectiveServerType === "satellite"
+      ? false
+      : Boolean((blob.requiresAuth ?? requiresAuth) || coverEncryption);
 
   if (kind === "music") {
     const fallbackContent = (
@@ -1445,6 +1714,11 @@ const ListThumbnail: React.FC<{
             alt={`${blob.name || blob.sha256} cover art`}
             className="h-full w-full object-cover"
             fallback={fallbackContent}
+            requiresAuth={effectiveRequiresAuth}
+            signTemplate={effectiveRequiresAuth ? signTemplate : undefined}
+            serverType={effectiveServerType}
+            blob={blob}
+            coverEntry={coverEntry}
           />
         </div>
       );
@@ -1475,6 +1749,7 @@ const ListThumbnail: React.FC<{
           className="h-full w-full rounded-none border-0 bg-transparent"
           onVisible={onVisible}
           blurhash={blurhash}
+          blob={blob}
         />
       </div>
     );
@@ -1496,6 +1771,16 @@ const ListThumbnail: React.FC<{
         className={`${containerClass} items-center justify-center bg-gradient-to-br from-cyan-900/70 via-slate-900 to-slate-950`}
       >
         <FileTypeIcon kind="image" size={18} className="text-cyan-200" aria-hidden="true" />
+      </div>
+    );
+  }
+
+  if (kind === "folder") {
+    return (
+      <div
+        className={`${containerClass} items-center justify-center bg-gradient-to-br from-amber-900/70 via-slate-900 to-slate-950`}
+      >
+        <FileTypeIcon kind="folder" size={18} className="text-amber-200" aria-hidden="true" />
       </div>
     );
   }
@@ -1542,6 +1827,7 @@ function ListRow({
   onPlay,
   onShare,
   onRename,
+  onOpenList,
   currentTrackUrl,
   currentTrackStatus,
   detectedKinds,
@@ -1552,6 +1838,8 @@ function ListRow({
   audioMetadata,
   onActionsWidthChange,
   showPreviews,
+  isPrivateBlob,
+  coverEntry,
 }: {
   style: React.CSSProperties;
   blob: BlossomBlob;
@@ -1567,6 +1855,7 @@ function ListRow({
   onPlay?: (blob: BlossomBlob) => void;
   onShare?: (blob: BlossomBlob) => void;
   onRename?: (blob: BlossomBlob) => void;
+  onOpenList?: (blob: BlossomBlob) => void;
   currentTrackUrl?: string;
   currentTrackStatus?: "idle" | "playing" | "paused";
   detectedKinds: DetectedKindMap;
@@ -1577,6 +1866,8 @@ function ListRow({
   audioMetadata: Map<string, BlobAudioMetadata>;
   onActionsWidthChange: (width: number) => void;
   showPreviews: boolean;
+  isPrivateBlob?: boolean;
+  coverEntry?: PrivateListEntry | null;
 }) {
   const detectedKind = detectedKinds[blob.sha256];
   const kind = decideFileKind(blob, detectedKind);
@@ -1598,6 +1889,12 @@ function ListRow({
   const canPreview = canBlobPreview(blob, detectedKind, kind);
   const disablePreview = !canPreview;
   const previewUrl = canPreview ? buildPreviewUrl(blob, baseUrl) : null;
+  const isListBlob = isListLikeBlob(blob);
+  const isPrivateListEntry = isListBlob && blob.sha256 === PRIVATE_PLACEHOLDER_SHA;
+  const isPrivateItem = isPrivateListEntry || isPrivateBlob;
+  const handleOpenList = useCallback(() => {
+    if (onOpenList) onOpenList(blob);
+  }, [blob, onOpenList]);
   const { baseName } = splitNameAndExtension(displayName);
   const trackTitle = trackMetadata?.title?.trim() || baseName;
   const artistName = trackMetadata?.artist?.trim() || "";
@@ -1610,8 +1907,11 @@ function ListRow({
     : isSelected
       ? "bg-slate-800/50"
       : "hover:bg-slate-800/40";
-  const allowThumbnailPreview =
-    showPreviews && (canPreview || (kind === "music" && Boolean(trackMetadata?.coverUrl)));
+  const coverUrl = kind === "music" ? trackMetadata?.coverUrl : undefined;
+  const resolvedCoverEntry = coverEntry ?? null;
+  const allowThumbnailPreview = showPreviews && (canPreview || (kind === "music" && Boolean(coverUrl)));
+
+  const updatedLabel = blob.uploaded ? prettyDate(blob.uploaded) : "—";
 
   const thumbnail = (
     <div className="relative">
@@ -1624,10 +1924,11 @@ function ListRow({
         serverType={serverType}
         onDetect={(sha, detectedKind) => onDetect(sha, detectedKind)}
         onVisible={onBlobVisible}
-        coverUrl={trackMetadata?.coverUrl}
+        coverUrl={coverUrl}
         showPreview={allowThumbnailPreview}
         canPreview={canPreview}
         previewUrl={previewUrl}
+        coverEntry={resolvedCoverEntry}
       />
       {isActiveTrack ? (
         <span
@@ -1703,8 +2004,20 @@ function ListRow({
     };
   }, [menuOpen]);
 
-  const primaryAction =
-    isAudio && onPlay && blob.url ? (
+  const primaryAction = isListBlob && onOpenList ? (
+    <button
+      className={showButtonClass}
+      onClick={event => {
+        event.stopPropagation();
+        handleOpenList();
+      }}
+      aria-label="Open list"
+      title="Open"
+      type="button"
+    >
+      <PreviewIcon size={16} />
+    </button>
+  ) : isAudio && onPlay && blob.url ? (
       <button
         className={playButtonClass}
         onClick={event => {
@@ -1723,10 +2036,14 @@ function ListRow({
         className={showButtonClass}
         onClick={event => {
           event.stopPropagation();
+          if (isListBlob && onOpenList) {
+            handleOpenList();
+            return;
+          }
           onPreview(blob);
         }}
-        aria-label={disablePreview ? "Preview unavailable" : "Show blob"}
-        title={disablePreview ? "Preview unavailable" : "Show"}
+        aria-label={isListBlob ? "Open list" : disablePreview ? "Preview unavailable" : "Show blob"}
+        title={isListBlob ? "Open" : disablePreview ? "Preview unavailable" : "Show"}
         type="button"
       >
         <PreviewIcon size={16} />
@@ -1762,7 +2079,7 @@ function ListRow({
 
   const dropdownItems: DropdownItem[] = [];
 
-  if (blob.url) {
+  if (!isListBlob && blob.url) {
     dropdownItems.push({
       key: "download",
       label: "Download",
@@ -1772,7 +2089,7 @@ function ListRow({
     });
   }
 
-  if (onRename) {
+  if (onRename && !isPrivateListEntry) {
     dropdownItems.push({
       key: "rename",
       label: "Edit Details",
@@ -1784,9 +2101,9 @@ function ListRow({
 
   dropdownItems.push({
     key: "delete",
-    label: "Delete",
+    label: isListBlob ? "Delete Folder" : isMusicListView ? "Delete track" : "Delete",
     icon: <TrashIcon size={14} />,
-    ariaLabel: isMusicListView ? "Delete track" : "Delete blob",
+    ariaLabel: isListBlob ? "Delete folder" : isMusicListView ? "Delete track" : "Delete blob",
     onSelect: () => onDelete(blob),
     variant: "destructive",
   });
@@ -1845,6 +2162,15 @@ function ListRow({
         </div>
       );
 
+  const handleRowClick: React.MouseEventHandler<HTMLDivElement> = event => {
+    if (!isListBlob || !onOpenList) return;
+    if (event.target instanceof HTMLElement && event.target.closest("button, input, a")) {
+      return;
+    }
+    event.stopPropagation();
+    handleOpenList();
+  };
+
   if (isMusicListView) {
     return (
       <div
@@ -1852,6 +2178,7 @@ function ListRow({
         className={`absolute left-0 right-0 grid grid-cols-[60px,minmax(0,1fr)] md:grid-cols-[60px,minmax(0,1fr),10rem,12rem,6rem,max-content] items-center gap-2 border-b border-slate-800 px-2 transition-colors ring-1 ring-transparent ${rowHighlightClass}`}
         role="row"
         aria-current={isActiveTrack ? "true" : undefined}
+        onClick={handleRowClick}
       >
         <div className="flex h-full items-center justify-center">
           {thumbnail}
@@ -1892,6 +2219,7 @@ function ListRow({
       className={`absolute left-0 right-0 flex items-center gap-2 border-b border-slate-800 px-2 transition-colors ring-1 ring-transparent ${rowHighlightClass}`}
       role="row"
       aria-current={isActiveTrack ? "true" : undefined}
+      onClick={handleRowClick}
     >
       <div className="flex w-12 justify-center">
         <input
@@ -1905,17 +2233,28 @@ function ListRow({
       </div>
       <div className="flex min-w-0 flex-[2] items-center gap-3">
         {thumbnail}
-        <div className="truncate font-medium text-slate-100" title={displayName}>
-          {displayName}
+        <div className="min-w-0" title={displayName}>
+          <div className="flex min-w-0 items-center gap-2 font-medium text-slate-100">
+            <span className="truncate">{displayName}</span>
+            {isPrivateItem ? (
+              <LockIcon size={14} className="text-amber-300 flex-shrink-0" aria-hidden="true" />
+            ) : null}
+          </div>
         </div>
       </div>
       <div className="hidden w-20 shrink-0 items-center justify-center text-sm text-slate-200 md:flex">
-        {replicaSummary?.count ? <ReplicaBadge info={replicaSummary} variant="list" /> : "—"}
+        {(() => {
+          if (isListBlob) return "—";
+          if (replicaSummary && replicaSummary.count > 0) {
+            return <ReplicaBadge info={replicaSummary} variant="list" />;
+          }
+          return "—";
+        })()}
       </div>
-      <div className="hidden w-40 shrink-0 px-3 text-xs text-slate-400 md:block">
-        {blob.uploaded ? prettyDate(blob.uploaded) : "—"}
+      <div className="hidden w-40 shrink-0 px-3 text-xs text-slate-400 md:block" title={updatedLabel !== "—" ? updatedLabel : undefined}>
+        {updatedLabel}
       </div>
-      <div className="w-24 shrink-0 px-3 text-sm text-slate-400">{prettyBytes(blob.size || 0)}</div>
+      <div className="w-24 shrink-0 px-3 text-sm text-slate-400">{isListBlob ? "—" : prettyBytes(blob.size || 0)}</div>
       <div ref={actionsContainerRef} className="flex shrink-0 items-center justify-center gap-2 px-2 md:justify-end">
         {primaryAction}
         {shareButton}
@@ -1941,6 +2280,7 @@ const BlobPreview: React.FC<{
   variant?: "inline" | "dialog";
   onVisible?: (sha: string) => void;
   blurhash?: BlurhashInfo | null;
+  blob?: BlossomBlob;
 }> = ({
   sha,
   url,
@@ -1956,16 +2296,22 @@ const BlobPreview: React.FC<{
   variant = "inline",
   onVisible,
   blurhash,
+  blob,
 }) => {
-  const previewKey = `${serverType}|${sha}|${requiresAuth ? "auth" : "anon"}|${url}`;
+  const privateMeta = blob?.privateData?.metadata;
+  const privateEncryption = blob?.privateData?.encryption;
+  const isPrivate = Boolean(privateEncryption);
+  const effectiveName = privateMeta?.name ?? name;
+  const effectiveType = privateMeta?.type ?? type;
+  const previewKey = `${serverType}|${sha}|${requiresAuth ? "auth" : "anon"}|${url}|${isPrivate ? "private" : "public"}`;
   const initialCachedSrc = getCachedPreviewSrc(previewKey);
 
   const [src, setSrc] = useState<string | null>(initialCachedSrc);
   const [failed, setFailed] = useState(false);
   const [loading, setLoading] = useState(false);
   const [previewType, setPreviewType] = useState<"image" | "video" | "text" | "unknown">(() => {
-    if (isPreviewableTextType({ mime: type, name, url })) return "text";
-    return inferKind(type, url) ?? "unknown";
+    if (isPreviewableTextType({ mime: effectiveType, name: effectiveName, url })) return "text";
+    return inferKind(effectiveType, effectiveName) ?? "unknown";
   });
   const [isReady, setIsReady] = useState(Boolean(initialCachedSrc));
   const [textPreview, setTextPreview] = useState<{ content: string; truncated: boolean } | null>(null);
@@ -1983,13 +2329,13 @@ const BlobPreview: React.FC<{
 
   const fallbackIconKind = useMemo<FileKind>(() => {
     if (previewType === "image" || previewType === "video") return previewType;
-    if (isMusicType(type, name, url)) return "music";
-    if (isSheetType(type, name || url)) return "sheet";
-    if (isDocType(type, name || url)) return "doc";
-    if (isPdfType(type, name || url)) return "pdf";
-    if (isPreviewableTextType({ mime: type, name, url })) return "document";
+    if (isMusicType(effectiveType, effectiveName, url)) return "music";
+    if (isSheetType(effectiveType, effectiveName || url)) return "sheet";
+    if (isDocType(effectiveType, effectiveName || url)) return "doc";
+    if (isPdfType(effectiveType, effectiveName || url)) return "pdf";
+    if (isPreviewableTextType({ mime: effectiveType, name: effectiveName, url })) return "document";
     return "document";
-  }, [previewType, type, name, url]);
+  }, [previewType, effectiveType, effectiveName, url]);
 
   const releaseObjectUrl = useCallback(() => {
     if (objectUrlRef.current) {
@@ -2015,7 +2361,10 @@ const BlobPreview: React.FC<{
     }
   }, [serverUrl, url]);
 
-  const metaSuggestsText = useMemo(() => isPreviewableTextType({ mime: type, name, url }), [type, name, url]);
+  const metaSuggestsText = useMemo(
+    () => isPreviewableTextType({ mime: effectiveType, name: effectiveName, url }),
+    [effectiveType, effectiveName, url]
+  );
 
   useEffect(() => {
     return () => {
@@ -2024,12 +2373,12 @@ const BlobPreview: React.FC<{
   }, [releaseObjectUrl]);
 
   useEffect(() => {
-    if (isPreviewableTextType({ mime: type, name, url })) {
+    if (isPreviewableTextType({ mime: effectiveType, name: effectiveName, url })) {
       setPreviewType("text");
     } else {
-      setPreviewType(inferKind(type, url) ?? "unknown");
+      setPreviewType(inferKind(effectiveType, effectiveName) ?? "unknown");
     }
-  }, [type, url, name]);
+  }, [effectiveType, url, effectiveName]);
 
   useEffect(() => {
     if (!previewKey) return;
@@ -2114,10 +2463,10 @@ const BlobPreview: React.FC<{
     };
 
     const showTextPreview = async (blobData: Blob, mimeHint?: string | null) => {
-      const normalizedMime = mimeHint ?? blobData.type ?? type;
+      const normalizedMime = mimeHint ?? blobData.type ?? effectiveType;
       const shouldRenderText =
-        isPreviewableTextType({ mime: normalizedMime, name, url }) ||
-        (!normalizedMime && isPreviewableTextType({ name, url })) ||
+        isPreviewableTextType({ mime: normalizedMime, name: effectiveName, url }) ||
+        (!normalizedMime && isPreviewableTextType({ name: effectiveName, url })) ||
         metaSuggestsText;
       if (!shouldRenderText) return false;
       try {
@@ -2138,7 +2487,8 @@ const BlobPreview: React.FC<{
 
     const load = async () => {
       try {
-        const cachedBlob = metaSuggestsText ? null : await getCachedPreviewBlob(cacheServerHint, sha);
+        const allowPersistentCache = !isPrivate && !metaSuggestsText;
+        const cachedBlob = allowPersistentCache ? await getCachedPreviewBlob(cacheServerHint, sha) : null;
         if (cancelled) return;
         if (cachedBlob) {
           assignObjectUrl(cachedBlob);
@@ -2147,7 +2497,7 @@ const BlobPreview: React.FC<{
           return;
         }
 
-        if (previewType === "video" && url && !requiresAuth) {
+        if (!isPrivate && previewType === "video" && url && !requiresAuth) {
           setSrc(url);
           setLoading(false);
           setIsReady(true);
@@ -2182,6 +2532,53 @@ const BlobPreview: React.FC<{
         }
 
         const mimeHint = response.headers.get("content-type");
+
+        if (isPrivate && privateEncryption) {
+          const encryptedBuffer = await response.arrayBuffer();
+          if (cancelled) return;
+          try {
+            if (privateEncryption.algorithm !== "AES-GCM") {
+              throw new Error(`Unsupported encryption algorithm: ${privateEncryption.algorithm}`);
+            }
+            const decryptedBuffer = await decryptPrivateBlob(encryptedBuffer, {
+              algorithm: "AES-GCM",
+              key: privateEncryption.key,
+              iv: privateEncryption.iv,
+              originalName: privateMeta?.name,
+              originalType: privateMeta?.type,
+              originalSize: privateMeta?.size,
+            });
+            const mimeType = effectiveType || mimeHint || "application/octet-stream";
+            const decryptedBlob = new Blob([decryptedBuffer], { type: mimeType });
+            if (await showTextPreview(decryptedBlob, mimeType)) {
+              setLoading(false);
+              finalizeRequest();
+              return;
+            }
+            assignObjectUrl(decryptedBlob);
+            const inferred =
+              inferKind(effectiveType ?? mimeType, effectiveName ?? url) ??
+              inferKind(mimeType, effectiveName ?? url);
+            if (inferred && inferred !== previewType) {
+              if (inferred === "image" || inferred === "video") {
+                setPreviewType(inferred);
+              }
+            }
+            setLoading(false);
+          } catch (error) {
+            if (!controller.signal.aborted && !cancelled) {
+              clearCachedPreviewSrc(previewKey);
+              lastFailureKeyRef.current = previewKey;
+              setFailed(true);
+              setIsReady(false);
+            }
+            setLoading(false);
+          } finally {
+            finalizeRequest();
+          }
+          return;
+        }
+
         const blobData = await response.blob();
         if (cancelled) return;
 
@@ -2198,7 +2595,7 @@ const BlobPreview: React.FC<{
           return;
         }
 
-        if (!metaSuggestsText && cacheServerHint) {
+        if (allowPersistentCache && cacheServerHint) {
           void cachePreviewBlob(cacheServerHint, sha, blobData).catch(() => undefined);
         }
         assignObjectUrl(blobData);
@@ -2238,9 +2635,12 @@ const BlobPreview: React.FC<{
     sha,
     signTemplate,
     src,
-    type,
+    effectiveType,
+    effectiveName,
     url,
     variant,
+    isPrivate,
+    privateEncryption,
   ]);
 
   useEffect(() => {
@@ -2270,7 +2670,7 @@ const BlobPreview: React.FC<{
       hash={blurhash.hash}
       width={blurhash.width}
       height={blurhash.height}
-      alt={name}
+      alt={effectiveName}
     />
   ) : null;
 
@@ -2284,7 +2684,7 @@ const BlobPreview: React.FC<{
   ) : isImage ? (
     <img
       src={src ?? undefined}
-      alt={name}
+      alt={effectiveName}
       className={`max-h-full max-w-full object-contain transition-opacity duration-200 ${
         isReady ? "opacity-100" : "opacity-0"
       }`}
@@ -2340,6 +2740,11 @@ const BlobPreview: React.FC<{
         return {
           background: "bg-gradient-to-br from-red-900/70 via-slate-900 to-slate-950",
           icon: <FileTypeIcon kind="pdf" size={baseSize} className="text-red-200" aria-hidden="true" />,
+        };
+      case "folder":
+        return {
+          background: "bg-gradient-to-br from-amber-900/70 via-slate-900 to-slate-950",
+          icon: <FileTypeIcon kind="folder" size={baseSize} className="text-amber-200" aria-hidden="true" />,
         };
       case "doc":
       case "document":
@@ -2442,6 +2847,7 @@ function extractBlurhash(blob: BlossomBlob): BlurhashInfo | null {
 
 function decideFileKind(blob: BlossomBlob, detected?: "image" | "video"): FileKind {
   if (detected) return detected;
+  if (isListLikeBlob(blob)) return "folder";
   if (isSheetType(blob.type, blob.name || blob.url)) return "sheet";
   if (isDocType(blob.type, blob.name || blob.url)) return "doc";
   if (isPdfType(blob.type, blob.name || blob.url)) return "pdf";
@@ -2569,21 +2975,158 @@ const clearCachedPreviewSrc = (key: string) => {
   }
 };
 
-const AudioCoverImage: React.FC<{ url: string; alt: string; className?: string; fallback: React.ReactNode }> = ({
+const AudioCoverImage: React.FC<{
+  url: string;
+  alt: string;
+  className?: string;
+  fallback: React.ReactNode;
+  requiresAuth?: boolean;
+  signTemplate?: SignTemplate;
+  serverType?: "blossom" | "nip96" | "satellite";
+  blob?: BlossomBlob;
+  coverEntry?: PrivateListEntry | null;
+}> = ({
   url,
   alt,
   className,
   fallback,
+  requiresAuth = false,
+  signTemplate,
+  serverType = "blossom",
+  blob,
+  coverEntry,
 }) => {
   const [failed, setFailed] = useState(false);
+  const coverEncryption = coverEntry?.encryption;
+  const coverMetadata = coverEntry?.metadata;
+  const [src, setSrc] = useState<string | null>(requiresAuth || coverEncryption ? null : url);
+  const objectUrlRef = useRef<string | null>(null);
 
-  if (!url || failed) {
+  useEffect(() => {
+    let cancelled = false;
+    const controller = new AbortController();
+
+    if (!url) {
+      setSrc(null);
+      setFailed(true);
+      return () => {
+        controller.abort();
+        if (objectUrlRef.current) {
+          URL.revokeObjectURL(objectUrlRef.current);
+          objectUrlRef.current = null;
+        }
+      };
+    }
+
+    const isDataUrl = url.startsWith("data:");
+    const needsFetch = (requiresAuth || Boolean(coverEncryption)) && !isDataUrl;
+    if (!needsFetch) {
+      setSrc(url);
+      setFailed(false);
+      return () => {
+        controller.abort();
+        if (objectUrlRef.current) {
+          URL.revokeObjectURL(objectUrlRef.current);
+          objectUrlRef.current = null;
+        }
+      };
+    }
+
+    setFailed(false);
+    setSrc(null);
+
+    const loadCover = async () => {
+      try {
+        const headers: Record<string, string> = {};
+        if (requiresAuth && signTemplate) {
+          if (serverType === "nip96") {
+            headers.Authorization = await buildNip98AuthHeader(signTemplate, {
+              url,
+              method: "GET",
+            });
+          } else if (serverType !== "satellite") {
+            let resource: URL | null = null;
+            try {
+              resource = new URL(url, window.location.href);
+            } catch {
+              resource = null;
+            }
+            headers.Authorization = await buildAuthorizationHeader(signTemplate, "get", {
+              hash: coverEntry?.sha256,
+              serverUrl: resource ? `${resource.protocol}//${resource.host}` : blob?.serverUrl,
+              urlPath: resource ? resource.pathname + (resource.search || "") : undefined,
+              expiresInSeconds: 300,
+            });
+          }
+        }
+
+        const response = await fetch(url, {
+          headers,
+          signal: controller.signal,
+          mode: "cors",
+        });
+        if (!response.ok) {
+          throw new Error(`Cover fetch failed (${response.status})`);
+        }
+
+        let imageBlob: Blob;
+        if (coverEncryption) {
+          try {
+            if (coverEncryption.algorithm !== "AES-GCM") {
+              throw new Error(`Unsupported encryption algorithm: ${coverEncryption.algorithm}`);
+            }
+            const encryptedBuffer = await response.arrayBuffer();
+            const decryptedBuffer = await decryptPrivateBlob(encryptedBuffer, {
+              algorithm: "AES-GCM",
+              key: coverEncryption.key,
+              iv: coverEncryption.iv,
+              originalName: coverMetadata?.name,
+              originalType: coverMetadata?.type,
+              originalSize: coverMetadata?.size,
+            });
+            const mimeType = coverMetadata?.type || response.headers.get("content-type") || "image/jpeg";
+            imageBlob = new Blob([decryptedBuffer], { type: mimeType });
+          } catch (error) {
+            if (!cancelled) {
+              console.warn("Cover fetch decrypt failed", error);
+              setFailed(true);
+            }
+            return;
+          }
+        } else {
+          imageBlob = await response.blob();
+        }
+
+        if (cancelled) return;
+        const objectUrl = URL.createObjectURL(imageBlob);
+        objectUrlRef.current = objectUrl;
+        setSrc(objectUrl);
+      } catch (error) {
+        if (!cancelled) {
+          setFailed(true);
+        }
+      }
+    };
+
+    loadCover();
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+      if (objectUrlRef.current) {
+        URL.revokeObjectURL(objectUrlRef.current);
+        objectUrlRef.current = null;
+      }
+    };
+  }, [coverEncryption, coverMetadata, requiresAuth, serverType, signTemplate, url]);
+
+  if (!src || failed) {
     return <>{fallback}</>;
   }
 
   return (
     <img
-      src={url}
+      src={src}
       alt={alt}
       className={className}
       loading="lazy"

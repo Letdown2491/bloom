@@ -1,4 +1,4 @@
-import React, { Suspense } from "react";
+import React, { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import type { FilterMode } from "../../types/filter";
 import { BrowseContent, type BrowseContentProps } from "./BrowseContent";
 import { useAudio, type AudioContextValue } from "../../context/AudioContext";
@@ -21,10 +21,6 @@ import {
   StopIcon,
 } from "../../components/icons";
 
-const AudioVisualizerLazy = React.lazy(() =>
-  import("../../components/AudioVisualizer").then(module => ({ default: module.AudioVisualizer }))
-);
-
 const BlobListPanelLazy = React.lazy(() =>
   import("./BlobListPanel").then(module => ({ default: module.BlobListPanel }))
 );
@@ -38,7 +34,7 @@ type FilterOption = {
 const BASE_FILTER_OPTIONS: FilterOption[] = [
   { id: "documents", label: "Documents", icon: DocumentIcon },
   { id: "images", label: "Images", icon: ImageIcon },
-  { id: "music", label: "Music", icon: MusicIcon },
+  { id: "music", label: "Audio", icon: MusicIcon },
   { id: "pdfs", label: "PDFs", icon: DocumentIcon },
   { id: "videos", label: "Videos", icon: VideoIcon },
 ];
@@ -78,52 +74,121 @@ export const BrowseControls: React.FC<BrowseControlsProps> = ({
   filterMode,
   filterMenuRef,
 }) => {
+  const viewMenuRef = useRef<HTMLDivElement | null>(null);
+  const [viewMenuOpen, setViewMenuOpen] = useState(false);
+
+  useEffect(() => {
+    if (!viewMenuOpen) return;
+
+    const handlePointerDown = (event: PointerEvent) => {
+      if (!viewMenuRef.current || viewMenuRef.current.contains(event.target as Node)) {
+        return;
+      }
+      setViewMenuOpen(false);
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setViewMenuOpen(false);
+      }
+    };
+
+    document.addEventListener("pointerdown", handlePointerDown, true);
+    document.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown, true);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [viewMenuOpen]);
+
+  useEffect(() => {
+    if (disabled) {
+      setViewMenuOpen(false);
+    }
+  }, [disabled]);
+
+  useEffect(() => {
+    setViewMenuOpen(false);
+  }, [viewMode]);
+
+  const viewOptions = useMemo(
+    () => [
+      { id: "grid" as const, label: "Icons", Icon: GridIcon, disabled: gridDisabled },
+      { id: "list" as const, label: "List", Icon: ListIcon, disabled: listDisabled },
+    ],
+    [gridDisabled, listDisabled]
+  );
+
+  const currentView = viewOptions.find(option => option.id === viewMode) ?? viewOptions[0];
+
   return (
     <>
-      <button
-        onClick={() => onViewModeChange("grid")}
-        disabled={gridDisabled}
-        className={`rounded-xl border px-3 py-2 text-sm flex items-center gap-2 disabled:cursor-not-allowed disabled:opacity-60 ${
-          viewMode === "grid"
-            ? "border-emerald-500 bg-emerald-500/10 text-emerald-200"
-            : "border-slate-800 bg-slate-900/70 text-slate-300 hover:border-slate-700"
-        }`}
-        title="Icon view"
-      >
-        <GridIcon size={18} />
-        <span className="hidden sm:inline">Icons</span>
-      </button>
-      <button
-        onClick={() => onViewModeChange("list")}
-        disabled={listDisabled}
-        className={`rounded-xl border px-3 py-2 text-sm flex items-center gap-2 disabled:cursor-not-allowed disabled:opacity-60 ${
-          viewMode === "list"
-            ? "border-emerald-500 bg-emerald-500/10 text-emerald-200"
-            : "border-slate-800 bg-slate-900/70 text-slate-300 hover:border-slate-700"
-        }`}
-        title="List view"
-      >
-        <ListIcon size={18} />
-        <span className="hidden sm:inline">List</span>
-      </button>
+      <div className="relative" ref={viewMenuRef}>
+        <button
+          type="button"
+          onClick={() => setViewMenuOpen(prev => !prev)}
+          disabled={disabled}
+          aria-haspopup="menu"
+          aria-expanded={viewMenuOpen}
+          className={`flex items-center gap-2 rounded-xl border px-2.5 py-2 text-sm text-slate-300 transition focus:outline-none focus:ring-1 focus:ring-emerald-500 disabled:cursor-not-allowed disabled:opacity-60 ${
+            viewMenuOpen
+              ? "border-emerald-500 bg-emerald-500/10"
+              : "border-slate-800 bg-slate-900/70 hover:border-slate-700"
+          }`}
+        >
+          {currentView ? <currentView.Icon size={18} /> : <GridIcon size={18} />}
+        </button>
+        {viewMenuOpen && (
+          <div
+            role="menu"
+            className="absolute z-20 mt-2 w-40 rounded-xl border border-slate-800 bg-slate-950/95 p-1 shadow-lg backdrop-blur"
+          >
+            {viewOptions.map(option => {
+              const isActive = option.id === viewMode;
+              return (
+                <button
+                  key={option.id}
+                  role="menuitemradio"
+                  aria-checked={isActive}
+                  disabled={option.disabled}
+                  onClick={() => {
+                    if (option.disabled) return;
+                    onViewModeChange(option.id);
+                    setViewMenuOpen(false);
+                  }}
+                  className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm transition disabled:cursor-not-allowed disabled:opacity-50 ${
+                    isActive
+                      ? "bg-emerald-500/15 text-emerald-200"
+                      : "text-slate-300 hover:bg-slate-800/70"
+                  }`}
+                >
+                  <option.Icon size={16} />
+                  <span>{option.label}</span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
       <div className="relative" ref={filterMenuRef}>
         <button
           type="button"
-        onClick={onToggleFilterMenu}
-        disabled={disabled}
-        aria-label={filterButtonAriaLabel}
-        aria-pressed={filterButtonActive}
-        aria-haspopup="menu"
-        aria-expanded={isFilterMenuOpen}
-        title={filterButtonAriaLabel}
-        className={`rounded-xl border px-3 py-2 text-sm flex items-center gap-2 disabled:cursor-not-allowed disabled:opacity-60 ${
-          filterButtonActive
-            ? "border-emerald-500 bg-emerald-500/10 text-emerald-200"
-            : "border-slate-800 bg-slate-900/70 text-slate-300 hover:border-slate-700"
-        }`}
-      >
+          onClick={onToggleFilterMenu}
+          disabled={disabled}
+          aria-label={filterButtonAriaLabel}
+          aria-pressed={filterButtonActive}
+          aria-haspopup="menu"
+          aria-expanded={isFilterMenuOpen}
+          title={filterButtonLabel}
+          className={`rounded-xl border px-2.5 py-2 text-sm flex items-center gap-2 disabled:cursor-not-allowed disabled:opacity-60 ${
+            filterButtonActive
+              ? "border-emerald-500 bg-emerald-500/10 text-emerald-200"
+              : "border-slate-800 bg-slate-900/70 text-slate-300 hover:border-slate-700"
+          }`}
+        >
           <FilterIcon size={18} />
-          <span className="hidden sm:inline">{filterButtonLabel}</span>
+          <span className="sr-only">{filterButtonAriaLabel}</span>
         </button>
         {isFilterMenuOpen && (
           <div
@@ -450,13 +515,6 @@ export const AudioPlayerCard: React.FC<AudioPlayerCardProps> = ({ audio, variant
             {audio.duration > 0 ? formatTime(audio.duration) : "--:--"}
           </span>
         </div>
-        {audio.status === "playing" && audio.visualizerAvailable && (
-          <div className="h-16 rounded-lg border border-slate-800 bg-slate-900/60 px-1 py-2">
-            <Suspense fallback={<div className="h-full w-full rounded-md bg-slate-900/40" />}>
-              <AudioVisualizerLazy className="h-full w-full" />
-            </Suspense>
-          </div>
-        )}
         {renderControls("floating")}
       </div>
     </div>

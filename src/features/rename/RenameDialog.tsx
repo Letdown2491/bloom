@@ -6,14 +6,20 @@ import { buildNip94EventTemplate } from "../../lib/nip94";
 import {
   applyAliasUpdate,
   getStoredAudioMetadata,
+  getStoredFolderPath,
+  normalizeFolderPathInput,
   rememberAudioMetadata,
   sanitizeCoverUrl,
+  applyFolderUpdate,
   type BlobAudioMetadata,
 } from "../../utils/blobMetadataStore";
 import { isMusicBlob } from "../../utils/blobClassification";
 import { EditDialog, type EditDialogAudioFields } from "../../components/RenameDialog";
 import type { NdkContextValue } from "../../context/NdkContext";
 import type { StatusMessageTone } from "../../types/status";
+import { usePrivateLibrary } from "../../context/PrivateLibraryContext";
+import type { PrivateListEntry } from "../../lib/privateList";
+import { useFolderLists } from "../../context/FolderListContext";
 
 type NdkInstance = NdkContextValue["ndk"];
 type NdkSigner = NdkContextValue["signer"];
@@ -72,8 +78,18 @@ export type RenameDialogProps = {
 };
 
 export const RenameDialog: React.FC<RenameDialogProps> = ({ blob, ndk, signer, relays, onClose, onStatus }) => {
+  const { entriesBySha, upsertEntries } = usePrivateLibrary();
+  const privateEntry = entriesBySha.get(blob.sha256) ?? null;
+  const isPrivate = Boolean(privateEntry);
+  const { addBlobToFolder, removeBlobFromFolder, resolveFolderPath } = useFolderLists();
   const storedAudio = useMemo(
-    () => getStoredAudioMetadata(blob.serverUrl, blob.sha256) ?? getStoredAudioMetadata(undefined, blob.sha256),
+    () => {
+      const stored =
+        getStoredAudioMetadata(blob.serverUrl, blob.sha256) ?? getStoredAudioMetadata(undefined, blob.sha256);
+      if (stored) return stored;
+      const privateAudio = blob.privateData?.metadata?.audio ?? undefined;
+      return privateAudio ? { ...privateAudio } : undefined;
+    },
     [blob]
   );
 
@@ -82,6 +98,7 @@ export const RenameDialog: React.FC<RenameDialogProps> = ({ blob, ndk, signer, r
   const [isMusic, setIsMusic] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [folder, setFolder] = useState("");
 
   useEffect(() => {
     const music = isMusicBlob(blob) || Boolean(storedAudio);
@@ -107,7 +124,13 @@ export const RenameDialog: React.FC<RenameDialogProps> = ({ blob, ndk, signer, r
       setAudioFields(emptyAudioFields());
       setAlias(blob.name ?? "");
     }
-  }, [blob, storedAudio]);
+
+    const storedFolderPath =
+      getStoredFolderPath(blob.serverUrl, blob.sha256) ??
+      normalizeFolderPathInput(blob.folderPath ?? privateEntry?.metadata?.folderPath ?? undefined) ??
+      null;
+    setFolder(storedFolderPath ?? "");
+  }, [blob, privateEntry, storedAudio]);
 
   const handleAliasChange = useCallback(
     (next: string) => {
@@ -140,25 +163,31 @@ export const RenameDialog: React.FC<RenameDialogProps> = ({ blob, ndk, signer, r
 
   const handleSubmit = useCallback(async () => {
     if (busy) return;
-    if (!ndk || !signer) {
-      onStatus("Connect your signer to edit file details.", "error", 4000);
-      return;
-    }
 
     const relayList = normalizeRelays(relays);
-    if (relayList.length === 0) {
-      onStatus("No relays available to publish the update.", "error", 4000);
-      return;
-    }
+
+    const storedFolderPath = getStoredFolderPath(blob.serverUrl, blob.sha256);
+    const desiredFolderRaw = normalizeFolderPathInput(folder) ?? null;
+    const desiredFolder = desiredFolderRaw ? resolveFolderPath(desiredFolderRaw) : null;
+    const baseFolderSource =
+      storedFolderPath !== undefined
+        ? storedFolderPath
+        : blob.folderPath ?? privateEntry?.metadata?.folderPath ?? undefined;
+    const currentFolderRaw = normalizeFolderPathInput(baseFolderSource) ?? null;
+    const currentFolder = currentFolderRaw ? resolveFolderPath(currentFolderRaw) : null;
+    const folderChanged = desiredFolder !== currentFolder;
 
     const existingStoredAudio =
-      getStoredAudioMetadata(blob.serverUrl, blob.sha256) ?? getStoredAudioMetadata(undefined, blob.sha256);
+      getStoredAudioMetadata(blob.serverUrl, blob.sha256) ??
+      getStoredAudioMetadata(undefined, blob.sha256) ??
+      (blob.privateData?.metadata?.audio ?? undefined);
     const treatAsMusic = isMusic && (isMusicBlob(blob) || Boolean(existingStoredAudio));
 
-    let aliasForEvent: string;
-    let aliasForStore: string | null;
+    let aliasForEvent: string | null = null;
+    let aliasForStore: string | null = null;
     let extraTags: string[][] | undefined;
     let audioMetadata: BlobAudioMetadata | null = null;
+    let needsAliasUpdate = false;
 
     if (treatAsMusic) {
       const title = audioFields.title.trim();
@@ -175,12 +204,14 @@ export const RenameDialog: React.FC<RenameDialogProps> = ({ blob, ndk, signer, r
       const year = parsePositiveIntegerString(audioFields.year);
       const coverUrl = sanitizeCoverUrl(audioFields.coverUrl);
 
-      aliasForEvent = computeMusicAlias(title, artist) || title;
-      if (aliasForEvent.length > 120) {
+      const computedAlias = computeMusicAlias(title, artist) || title;
+      if (computedAlias.length > 120) {
         setError("Display name is too long (max 120 characters).");
         return;
       }
-      aliasForStore = aliasForEvent;
+      aliasForEvent = computedAlias;
+      aliasForStore = computedAlias;
+      needsAliasUpdate = true;
 
       const tags: string[][] = [["title", title]];
       const metadata: BlobAudioMetadata = { title };
@@ -222,60 +253,174 @@ export const RenameDialog: React.FC<RenameDialogProps> = ({ blob, ndk, signer, r
     } else {
       const trimmed = alias.trim();
       const currentAlias = (blob.name ?? "").trim();
-      if (trimmed === currentAlias) {
-        onClose();
-        return;
-      }
       if (trimmed.length > 120) {
         setError("Display name is too long (max 120 characters).");
         return;
       }
       aliasForStore = trimmed.length > 0 ? trimmed : null;
-      aliasForEvent = aliasForStore ?? "";
+      const aliasChanged = trimmed !== currentAlias;
+      if (aliasChanged) {
+        aliasForEvent = aliasForStore ?? "";
+        needsAliasUpdate = true;
+      } else if (folderChanged) {
+        aliasForEvent = aliasForStore ?? "";
+        needsAliasUpdate = true;
+      } else {
+        onClose();
+        return;
+      }
+    }
+
+    if (folderChanged) {
+      needsAliasUpdate = true;
+    }
+
+    if (desiredFolder !== null) {
+      if (!extraTags) {
+        extraTags = [];
+      }
+      extraTags.push(["folder", desiredFolder]);
+    } else if (folderChanged) {
+      if (!extraTags) {
+        extraTags = [];
+      }
+      extraTags.push(["folder", ""]);
+    }
+
+    const applyLocalUpdates = (timestampSeconds: number) => {
+      applyAliasUpdate(undefined, blob.sha256, aliasForStore, timestampSeconds);
+      applyFolderUpdate(blob.serverUrl, blob.sha256, desiredFolder, timestampSeconds);
+      if (treatAsMusic) {
+        rememberAudioMetadata(blob.serverUrl, blob.sha256, audioMetadata ?? null, {
+          updatedAt: timestampSeconds * 1000,
+        });
+      } else if (!treatAsMusic && existingStoredAudio && blob.serverUrl) {
+        rememberAudioMetadata(blob.serverUrl, blob.sha256, existingStoredAudio ?? null, {
+          updatedAt: timestampSeconds * 1000,
+        });
+      }
+    };
+
+    const canPublish = Boolean(ndk && signer);
+
+    if (!isPrivate && needsAliasUpdate && (!canPublish || relayList.length === 0)) {
+      const timestampSeconds = Math.floor(Date.now() / 1000);
+      applyLocalUpdates(timestampSeconds);
+      const message = !canPublish
+        ? "Details updated locally. Connect your signer to sync changes."
+        : "Details updated locally. Add a relay to sync changes.";
+      onStatus(message, "info", 3500);
+      onClose();
+      return;
+    }
+
+    if (!ndk || !signer) {
+      onStatus("Connect your signer to edit file details.", "error", 4000);
+      return;
+    }
+
+    if (needsAliasUpdate && relayList.length === 0) {
+      onStatus("No relays available to publish the update.", "error", 4000);
+      return;
     }
 
     setBusy(true);
     setError(null);
     try {
-      const template = buildNip94EventTemplate({
-        blob,
-        alias: aliasForEvent,
-        extraTags,
-      });
-      const event = new NDKEvent(ndk, template);
-      if (!event.created_at) {
-        event.created_at = Math.floor(Date.now() / 1000);
+      const nowSeconds = Math.floor(Date.now() / 1000);
+      if (!isPrivate) {
+        applyLocalUpdates(nowSeconds);
       }
-      await event.sign();
+      if (isPrivate) {
+        if (!privateEntry) {
+          throw new Error("Private file details not found.");
+        }
+        const existingMeta = privateEntry.metadata ?? {};
+        const serverForMetadata = blob.serverUrl ?? privateEntry.servers?.[0];
+        const nextAudioMetadata = treatAsMusic ? audioMetadata ?? null : existingMeta.audio ?? null;
+        const updatedEntry: PrivateListEntry = {
+          sha256: privateEntry.sha256,
+          encryption: privateEntry.encryption,
+          metadata: {
+            name: aliasForStore ?? existingMeta.name ?? blob.name ?? blob.sha256,
+            type: existingMeta.type ?? blob.type,
+            size: existingMeta.size ?? blob.size,
+            audio: nextAudioMetadata === undefined ? undefined : nextAudioMetadata,
+            folderPath: desiredFolder,
+          },
+          servers: privateEntry.servers,
+          updatedAt: nowSeconds,
+        };
+        await upsertEntries([updatedEntry]);
+        applyAliasUpdate(undefined, blob.sha256, aliasForStore, nowSeconds);
+        applyFolderUpdate(serverForMetadata, blob.sha256, desiredFolder, nowSeconds);
+        if (treatAsMusic) {
+          rememberAudioMetadata(serverForMetadata, blob.sha256, audioMetadata ?? null, {
+            updatedAt: nowSeconds * 1000,
+          });
+        }
+        if (!treatAsMusic && existingMeta.audio && serverForMetadata) {
+          rememberAudioMetadata(serverForMetadata, blob.sha256, existingMeta.audio ?? null, {
+            updatedAt: nowSeconds * 1000,
+          });
+        }
+        onStatus("Details updated.", "success", 2500);
+        onClose();
+        return;
+      }
 
-      let successes = 0;
-      let lastError: Error | null = null;
-      for (const relayUrl of relayList) {
-        try {
-          const relaySet = NDKRelaySet.fromRelayUrls([relayUrl], ndk);
-          await event.publish(relaySet, 7000, 1);
-          successes += 1;
-        } catch (publishError) {
-          if (publishError instanceof NDKPublishError) {
-            lastError = new Error(publishError.relayErrors || publishError.message || "Update failed");
-          } else if (publishError instanceof Error) {
-            lastError = publishError;
-          } else {
-            lastError = new Error("Update failed");
+      let aliasEventTimestamp: number | undefined;
+      if (needsAliasUpdate) {
+        const template = buildNip94EventTemplate({
+          blob,
+          alias: aliasForEvent ?? "",
+          extraTags,
+        });
+        const event = new NDKEvent(ndk, template);
+        if (!event.created_at) {
+          event.created_at = nowSeconds;
+        }
+        await event.sign();
+
+        let successes = 0;
+        let lastError: Error | null = null;
+        for (const relayUrl of relayList) {
+          try {
+            const relaySet = NDKRelaySet.fromRelayUrls([relayUrl], ndk);
+            await event.publish(relaySet, 7000, 1);
+            successes += 1;
+          } catch (publishError) {
+            if (publishError instanceof NDKPublishError) {
+              lastError = new Error(publishError.relayErrors || publishError.message || "Update failed");
+            } else if (publishError instanceof Error) {
+              lastError = publishError;
+            } else {
+              lastError = new Error("Update failed");
+            }
           }
         }
-      }
 
-      if (successes === 0) {
-        throw lastError ?? new Error("No relays accepted the update.");
-      }
+        if (successes === 0) {
+          throw lastError ?? new Error("No relays accepted the update.");
+        }
 
-      applyAliasUpdate(undefined, blob.sha256, aliasForStore, event.created_at);
-      if (treatAsMusic) {
-        const updatedAt = typeof event.created_at === "number" ? event.created_at * 1000 : undefined;
-        rememberAudioMetadata(blob.serverUrl, blob.sha256, audioMetadata ?? null, {
-          updatedAt,
-        });
+        aliasEventTimestamp = event.created_at ?? nowSeconds;
+        applyAliasUpdate(undefined, blob.sha256, aliasForStore, aliasEventTimestamp);
+        applyFolderUpdate(blob.serverUrl, blob.sha256, desiredFolder, aliasEventTimestamp);
+        if (treatAsMusic) {
+          const updatedAt = typeof aliasEventTimestamp === "number" ? aliasEventTimestamp * 1000 : undefined;
+          rememberAudioMetadata(blob.serverUrl, blob.sha256, audioMetadata ?? null, {
+            updatedAt,
+          });
+        }
+        if (!isPrivate && folderChanged) {
+          if (currentFolder) {
+            await removeBlobFromFolder(currentFolder, blob.sha256);
+          }
+          if (desiredFolder) {
+            await addBlobToFolder(desiredFolder, blob.sha256);
+          }
+        }
       }
 
       onStatus("Details updated.", "success", 2500);
@@ -292,12 +437,18 @@ export const RenameDialog: React.FC<RenameDialogProps> = ({ blob, ndk, signer, r
     audioFields,
     blob,
     busy,
+    folder,
     ndk,
     signer,
     relays,
     onClose,
     onStatus,
     isMusic,
+    upsertEntries,
+    isPrivate,
+    privateEntry,
+    addBlobToFolder,
+    removeBlobFromFolder,
   ]);
 
   return (
@@ -312,6 +463,8 @@ export const RenameDialog: React.FC<RenameDialogProps> = ({ blob, ndk, signer, r
       onCancel={handleCancel}
       audioFields={isMusic ? audioFields : undefined}
       onAudioFieldChange={isMusic ? handleAudioFieldChange : undefined}
+      folder={folder}
+      onFolderChange={setFolder}
     />
   );
 };

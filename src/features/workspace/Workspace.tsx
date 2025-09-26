@@ -5,8 +5,10 @@ import type { SharePayload } from "../../components/ShareComposer";
 import type { StatusMessageTone } from "../../types/status";
 import type { TabId } from "../../types/tabs";
 import type { TransferState } from "../../components/UploadPanel";
+import type { DefaultSortOption } from "../../context/UserPreferencesContext";
 import { WorkspaceProvider } from "./WorkspaceContext";
 import { BrowseTabContainer } from "./BrowseTabContainer";
+import type { BrowseNavigationState } from "./BrowseTabContainer";
 import type { FilterMode } from "../../types/filter";
 import { useBrowseControls } from "../browse/useBrowseControls";
 import { BrowseControls } from "../browse/BrowseTab";
@@ -21,10 +23,12 @@ type WorkspaceProps = {
   servers: ManagedServer[];
   selectedServer: string | null;
   onSelectServer: (value: string | null) => void;
+  homeNavigationKey: number;
   onStatusMetricsChange: (metrics: { count: number; size: number }) => void;
   onSyncStateChange: (snapshot: SyncStateSnapshot) => void;
   onProvideSyncStarter: (runner: () => void) => void;
   onRequestRename: (blob: BlossomBlob) => void;
+  onRequestFolderRename: (path: string) => void;
   onRequestShare: (payload: SharePayload) => void;
   onSetTab: (tab: TabId) => void;
   onUploadCompleted: (success: boolean) => void;
@@ -33,6 +37,9 @@ type WorkspaceProps = {
   onFilterModeChange?: (mode: FilterMode) => void;
   showGridPreviews: boolean;
   showListPreviews: boolean;
+  defaultSortOption: DefaultSortOption;
+  onProvideBrowseNavigation?: (navigation: BrowseNavigationState | null) => void;
+  searchQuery: string;
 };
 
 export const Workspace: React.FC<WorkspaceProps> = ({
@@ -41,17 +48,22 @@ export const Workspace: React.FC<WorkspaceProps> = ({
   selectedServer,
   showGridPreviews,
   showListPreviews,
+  defaultSortOption,
   onSelectServer,
   onStatusMetricsChange,
   onSyncStateChange,
   onProvideSyncStarter,
   onRequestRename,
+  onRequestFolderRename,
   onRequestShare,
   onSetTab,
+  homeNavigationKey,
   onUploadCompleted,
   showStatusMessage,
   onProvideBrowseControls,
   onFilterModeChange,
+  onProvideBrowseNavigation,
+  searchQuery,
 }) => {
   const browseControls = useBrowseControls();
   const {
@@ -124,23 +136,28 @@ export const Workspace: React.FC<WorkspaceProps> = ({
   return (
     <WorkspaceProvider servers={servers} selectedServer={selectedServer} onSelectServer={onSelectServer}>
       {tab === "browse" && (
-      <BrowseTabContainer
-        active
-        onStatusMetricsChange={onStatusMetricsChange}
-        onRequestRename={onRequestRename}
-        onRequestShare={onRequestShare}
-        onSetTab={onSetTab}
-        showStatusMessage={showStatusMessage}
-        viewMode={viewMode}
-        filterMode={filterMode}
-        filterMenuRef={filterMenuRef}
-        isFilterMenuOpen={isFilterMenuOpen}
-        onCloseFilterMenu={closeFilterMenu}
-        onBrowseTabChange={handleTabChange}
-        showGridPreviews={showGridPreviews}
-        showListPreviews={showListPreviews}
-      />
-    )}
+        <BrowseTabContainer
+          active
+          onStatusMetricsChange={onStatusMetricsChange}
+          onRequestRename={onRequestRename}
+          onRequestFolderRename={onRequestFolderRename}
+          onRequestShare={onRequestShare}
+          onSetTab={onSetTab}
+          showStatusMessage={showStatusMessage}
+          viewMode={viewMode}
+          filterMode={filterMode}
+          filterMenuRef={filterMenuRef}
+          isFilterMenuOpen={isFilterMenuOpen}
+          onCloseFilterMenu={closeFilterMenu}
+          onBrowseTabChange={handleTabChange}
+          showGridPreviews={showGridPreviews}
+          showListPreviews={showListPreviews}
+          homeResetKey={homeNavigationKey}
+          defaultSortOption={defaultSortOption}
+          onNavigationChange={onProvideBrowseNavigation}
+          searchTerm={searchQuery}
+        />
+      )}
       {tab === "transfer" && (
         <TransferTabContainer
           active

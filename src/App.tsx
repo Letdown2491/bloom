@@ -8,19 +8,21 @@ import { useAliasSync } from "./hooks/useAliasSync";
 import { useSelection } from "./features/selection/SelectionContext";
 import { useShareWorkflow } from "./features/share/useShareWorkflow";
 import { useAudio } from "./context/AudioContext";
-import { useUserPreferences } from "./context/UserPreferencesContext";
+import { useUserPreferences, type DefaultSortOption } from "./context/UserPreferencesContext";
 
 import type { ShareCompletion, SharePayload } from "./components/ShareComposer";
 import type { BlossomBlob } from "./lib/blossomClient";
 import type { StatusMessageTone } from "./types/status";
 import type { TabId } from "./types/tabs";
 import type { SyncStateSnapshot } from "./features/workspace/TransferTabContainer";
+import type { BrowseNavigationState } from "./features/workspace/BrowseTabContainer";
 import type { FilterMode } from "./types/filter";
 
 import { prettyBytes } from "./utils/format";
 import { deriveServerNameFromUrl } from "./utils/serverName";
 
-import { HomeIcon, TransferIcon, UploadIcon } from "./components/icons";
+import { ChevronRightIcon, CloseIcon, HomeIcon, SearchIcon, TransferIcon, UploadIcon } from "./components/icons";
+import { FolderRenameDialog } from "./components/FolderRenameDialog";
 
 const WorkspaceLazy = React.lazy(() =>
   import("./features/workspace/Workspace").then(module => ({ default: module.Workspace }))
@@ -54,10 +56,7 @@ const SettingsPanelLazy = React.lazy(() =>
   import("./features/settings/SettingsPanel").then(module => ({ default: module.SettingsPanel }))
 );
 
-const NAV_TABS = [
-  { id: "browse" as const, label: "Home", icon: HomeIcon },
-  { id: "upload" as const, label: "Upload", icon: UploadIcon },
-];
+const NAV_TABS = [{ id: "upload" as const, label: "Upload", icon: UploadIcon }];
 
 const ALL_SERVERS_VALUE = "__all__";
 
@@ -108,6 +107,7 @@ export default function App() {
     setDefaultServerUrl,
     setDefaultViewMode,
     setDefaultFilterMode,
+    setDefaultSortOption,
     setShowGridPreviews,
     setShowListPreviews,
   } = useUserPreferences();
@@ -124,6 +124,10 @@ export default function App() {
   const [tab, setTab] = useState<TabId>("browse");
   const [browseHeaderControls, setBrowseHeaderControls] = useState<React.ReactNode | null>(null);
   const [activeBrowseFilter, setActiveBrowseFilter] = useState<FilterMode>(preferences.defaultFilterMode);
+  const [homeNavigationKey, setHomeNavigationKey] = useState(0);
+  const [browseNavigationState, setBrowseNavigationState] = useState<BrowseNavigationState | null>(null);
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
 
   const { selected: selectedBlobs } = useSelection();
   const {
@@ -157,9 +161,11 @@ export default function App() {
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const [connectSignerOpen, setConnectSignerOpen] = useState(false);
   const [renameTarget, setRenameTarget] = useState<BlossomBlob | null>(null);
+  const [folderRenamePath, setFolderRenamePath] = useState<string | null>(null);
 
   const userMenuRef = useRef<HTMLDivElement | null>(null);
   const mainWidgetRef = useRef<HTMLDivElement | null>(null);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
 
   const syncEnabledServerUrls = useMemo(
     () => localServers.filter(server => server.sync).map(server => server.url),
@@ -337,9 +343,23 @@ export default function App() {
     setRenameTarget(blob);
   }, []);
 
+  const handleRequestFolderRename = useCallback((path: string) => {
+    setFolderRenamePath(path);
+  }, []);
+
   const handleRenameDialogClose = useCallback(() => {
     setRenameTarget(null);
   }, []);
+
+  const handleFolderRenameClose = useCallback(() => {
+    setFolderRenamePath(null);
+  }, []);
+
+  const handleBreadcrumbHome = useCallback(() => {
+    setHomeNavigationKey(value => value + 1);
+    setTab("browse");
+    browseNavigationState?.onNavigateHome();
+  }, [browseNavigationState]);
 
   const handleSyncSelectedServers = useCallback(() => {
     if (syncEnabledServerUrls.length < 2) {
@@ -381,6 +401,14 @@ export default function App() {
     [preferences.defaultFilterMode, setDefaultFilterMode]
   );
 
+  const handleSetDefaultSortOption = useCallback(
+    (option: DefaultSortOption) => {
+      if (preferences.defaultSortOption === option) return;
+      setDefaultSortOption(option);
+    },
+    [preferences.defaultSortOption, setDefaultSortOption]
+  );
+
   const handleSetShowPreviewsInGrid = useCallback(
     (value: boolean) => {
       setShowGridPreviews(value);
@@ -394,6 +422,58 @@ export default function App() {
     },
     [setShowListPreviews]
   );
+
+  const handleToggleSearch = useCallback(() => {
+    setIsSearchOpen(prev => {
+      const next = !prev;
+      if (next) {
+        setTab("browse");
+      } else {
+        setSearchQuery("");
+      }
+      return next;
+    });
+  }, [setTab]);
+
+  const handleSearchChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
+    setSearchQuery(event.target.value);
+  }, []);
+
+  const handleClearSearch = useCallback(() => {
+    setSearchQuery("");
+    searchInputRef.current?.focus();
+  }, []);
+
+  const handleSearchKeyDown = useCallback((event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === "Escape") {
+      setIsSearchOpen(false);
+      setSearchQuery("");
+    }
+  }, []);
+
+  useEffect(() => {
+    if (isSearchOpen) {
+      const id = window.setTimeout(() => {
+        searchInputRef.current?.focus();
+      }, 0);
+      return () => window.clearTimeout(id);
+    }
+    return undefined;
+  }, [isSearchOpen]);
+
+  useEffect(() => {
+    if (showAuthPrompt) {
+      setIsSearchOpen(false);
+      setSearchQuery("");
+    }
+  }, [showAuthPrompt]);
+
+  useEffect(() => {
+    if (tab !== "browse" && isSearchOpen) {
+      setIsSearchOpen(false);
+      setSearchQuery("");
+    }
+  }, [isSearchOpen, tab]);
 
   const handleAddServer = (server: ManagedServer) => {
     const normalized = normalizeManagedServer(server);
@@ -616,7 +696,6 @@ export default function App() {
             <img
               src="/bloom.png"
               alt="Bloom logo"
-              fetchPriority="high"
               className="h-10 w-10 rounded-xl object-cover"
             />
             <div>
@@ -712,40 +791,111 @@ export default function App() {
             className={`flex flex-1 min-h-0 flex-col ${showAuthPrompt ? "pointer-events-none opacity-40" : ""}`}
             aria-hidden={showAuthPrompt || undefined}
           >
-            <nav className="flex flex-wrap items-center gap-3 px-4 py-3 border-b border-slate-800 box-border w-full">
-              <div className="flex gap-3">
-                {NAV_TABS.map(item => {
-                  const selectedCount = selectedBlobs.size;
-                  const isUploadTab = item.id === "upload";
-                  const isTransferView = tab === "transfer";
-                  const showTransfer = isUploadTab && selectedCount > 0;
-                  const isActive = tab === item.id || (isUploadTab && isTransferView);
-                  const IconComponent = showTransfer ? TransferIcon : item.icon;
-                  const label = showTransfer ? "Transfer" : item.label;
-                  const hideLabelOnMobile = item.id === "browse" || isUploadTab;
-                  return (
-                    <button
-                      key={item.id}
-                      onClick={() => setTab(showTransfer ? "transfer" : item.id)}
-                      disabled={showAuthPrompt}
-                      aria-label={label}
-                      className={`px-3 py-2 text-sm rounded-xl border flex items-center gap-2 transition disabled:cursor-not-allowed disabled:opacity-60 ${
-                        isActive
-                          ? "border-emerald-500 bg-emerald-500/10 text-emerald-200"
-                          : "border-slate-800 bg-slate-900/70 text-slate-300 hover:border-slate-700"
-                      }`}
-                    >
-                      <IconComponent size={16} />
-                      <span className={hideLabelOnMobile ? "hidden sm:inline" : undefined}>{label}</span>
-                    </button>
-                  );
-                })}
+            <nav className="flex flex-wrap items-center gap-3 px-4 py-3 border-b border-slate-800 bg-slate-900/60">
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleBreadcrumbHome}
+                  disabled={showAuthPrompt}
+                  className="px-3 py-2 text-sm rounded-xl border flex items-center gap-2 transition disabled:cursor-not-allowed disabled:opacity-60 border-slate-800 bg-slate-900/70 text-slate-300 hover:border-slate-700"
+                >
+                  <HomeIcon size={16} />
+                  <span>Home</span>
+                </button>
               </div>
-              {browseHeaderControls ? (
-                <div className="flex items-center gap-3 ml-auto">{browseHeaderControls}</div>
-              ) : null}
+              <div className="min-w-0 flex-1">
+                {isSearchOpen ? (
+                  <div className="relative w-full">
+                    <input
+                      ref={searchInputRef}
+                      type="search"
+                      value={searchQuery}
+                      onChange={handleSearchChange}
+                      onKeyDown={handleSearchKeyDown}
+                      placeholder="Search files"
+                      className="w-full rounded-xl border border-slate-800 bg-slate-900/70 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                    />
+                    {searchQuery ? (
+                      <button
+                        type="button"
+                        onClick={handleClearSearch}
+                        className="absolute right-2 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-full text-slate-400 transition hover:text-slate-200"
+                        aria-label="Clear search"
+                      >
+                        <CloseIcon size={14} />
+                      </button>
+                    ) : null}
+                  </div>
+                ) : browseNavigationState && browseNavigationState.segments.length > 0 ? (
+                  <div
+                    className="flex min-w-0 items-center gap-1 overflow-x-auto whitespace-nowrap text-sm text-slate-200"
+                    title={`/${browseNavigationState.segments.map(segment => segment.label).join("/")}`}
+                  >
+                    {browseNavigationState.segments.map((segment, index) => (
+                      <React.Fragment key={segment.id}>
+                        {index > 0 && <ChevronRightIcon size={14} className="text-slate-600 flex-shrink-0" />}
+                        <button
+                          type="button"
+                          onClick={segment.onNavigate}
+                          disabled={showAuthPrompt}
+                          className="max-w-[10rem] truncate rounded-lg border border-slate-800 bg-slate-900/70 px-2 py-1 text-left transition hover:border-slate-700 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          {segment.label}
+                        </button>
+                      </React.Fragment>
+                    ))}
+                  </div>
+                ) : (
+                  <span className="text-sm text-slate-500">/</span>
+                )}
+              </div>
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={handleToggleSearch}
+                  disabled={showAuthPrompt}
+                  aria-label="Search files"
+                  aria-pressed={isSearchOpen}
+                  className="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-800 bg-slate-900/70 text-slate-300 transition hover:border-slate-700 focus:outline-none focus:ring-1 focus:ring-emerald-500 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <SearchIcon size={16} />
+                </button>
+                {browseHeaderControls ? (
+                  <div className="flex items-center gap-3">{browseHeaderControls}</div>
+                ) : null}
+                <div className="flex gap-3 ml-3">
+                  {NAV_TABS.map(item => {
+                    const selectedCount = selectedBlobs.size;
+                    const isUploadTab = item.id === "upload";
+                    const isTransferView = tab === "transfer";
+                    const showTransfer = isUploadTab && selectedCount > 0;
+                    const isActive = tab === item.id || (isUploadTab && isTransferView);
+                    const IconComponent = showTransfer ? TransferIcon : item.icon;
+                    const label = showTransfer ? "Transfer" : item.label;
+                    const hideLabelOnMobile = isUploadTab;
+                    return (
+                      <button
+                        key={item.id}
+                        onClick={() => {
+                          const nextTab = showTransfer ? "transfer" : item.id;
+                          setTab(nextTab);
+                        }}
+                        disabled={showAuthPrompt}
+                        aria-label={label}
+                        className={`px-3 py-2 text-sm rounded-xl border flex items-center gap-2 transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                          isActive
+                            ? "border-emerald-500 bg-emerald-500/10 text-emerald-200"
+                            : "border-slate-800 bg-slate-900/70 text-slate-300 hover:border-slate-700"
+                        }`}
+                      >
+                        <IconComponent size={16} />
+                        <span className={hideLabelOnMobile ? "hidden sm:inline" : undefined}>{label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
             </nav>
-
             <div
               className={`flex flex-1 min-h-0 flex-col box-border p-4 ${
                 tab === "browse" || tab === "share" ? "overflow-hidden" : "overflow-y-auto"
@@ -758,25 +908,30 @@ export default function App() {
                   </div>
                 }
               >
-                <WorkspaceLazy
-                  tab={tab}
-                  servers={localServers}
-                  selectedServer={selectedServer}
-                  onSelectServer={setSelectedServer}
-                  showGridPreviews={preferences.showGridPreviews}
-                  showListPreviews={preferences.showListPreviews}
-                  onStatusMetricsChange={handleStatusMetricsChange}
-                  onSyncStateChange={handleSyncStateChange}
-                  onProvideSyncStarter={handleProvideSyncStarter}
-                  onRequestRename={handleRequestRename}
-                  onRequestShare={handleShareBlob}
-                  onSetTab={setTab}
-                  onUploadCompleted={handleUploadCompleted}
-                  showStatusMessage={showStatusMessage}
-                  onProvideBrowseControls={setBrowseHeaderControls}
-                  onFilterModeChange={handleFilterModeChange}
-                />
-              </Suspense>
+              <WorkspaceLazy
+                tab={tab}
+                servers={localServers}
+                selectedServer={selectedServer}
+                onSelectServer={setSelectedServer}
+                homeNavigationKey={homeNavigationKey}
+                showGridPreviews={preferences.showGridPreviews}
+                showListPreviews={preferences.showListPreviews}
+                defaultSortOption={preferences.defaultSortOption}
+                onStatusMetricsChange={handleStatusMetricsChange}
+                onSyncStateChange={handleSyncStateChange}
+                onProvideSyncStarter={handleProvideSyncStarter}
+                onRequestRename={handleRequestRename}
+                onRequestFolderRename={handleRequestFolderRename}
+                onRequestShare={handleShareBlob}
+                onSetTab={setTab}
+                onUploadCompleted={handleUploadCompleted}
+                showStatusMessage={showStatusMessage}
+                onProvideBrowseControls={setBrowseHeaderControls}
+                onProvideBrowseNavigation={setBrowseNavigationState}
+                onFilterModeChange={handleFilterModeChange}
+                searchQuery={searchQuery}
+              />
+            </Suspense>
 
               {tab === "share" && (
                 <div className="flex flex-1 min-h-0">
@@ -846,8 +1001,10 @@ export default function App() {
                     showListPreviews={preferences.showListPreviews}
                     defaultViewMode={preferences.defaultViewMode}
                     defaultFilterMode={preferences.defaultFilterMode}
+                    defaultSortOption={preferences.defaultSortOption}
                     onSetDefaultViewMode={handleSetDefaultViewMode}
                     onSetDefaultFilterMode={handleSetDefaultFilterMode}
+                    onSetDefaultSortOption={handleSetDefaultSortOption}
                     onSetDefaultServer={handleSetDefaultServer}
                     onSetShowIconsPreviews={handleSetShowPreviewsInGrid}
                     onSetShowListPreviews={handleSetShowPreviewsInList}
@@ -935,6 +1092,14 @@ export default function App() {
                 onStatus={showStatusMessage}
               />
             </Suspense>
+          )}
+
+          {folderRenamePath && (
+            <FolderRenameDialog
+              path={folderRenamePath}
+              onClose={handleFolderRenameClose}
+              onStatus={showStatusMessage}
+            />
           )}
 
           <Suspense fallback={null}>

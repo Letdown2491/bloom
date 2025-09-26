@@ -24,6 +24,8 @@ export type EditDialogProps = {
   onCancel: () => void;
   audioFields?: EditDialogAudioFields;
   onAudioFieldChange?: (field: keyof EditDialogAudioFields, value: string) => void;
+  folder: string;
+  onFolderChange: (value: string) => void;
 };
 
 export const EditDialog: React.FC<EditDialogProps> = ({
@@ -37,6 +39,8 @@ export const EditDialog: React.FC<EditDialogProps> = ({
   onCancel,
   audioFields,
   onAudioFieldChange,
+  folder,
+  onFolderChange,
 }) => {
   const aliasInputRef = useRef<HTMLInputElement | null>(null);
   const titleInputRef = useRef<HTMLInputElement | null>(null);
@@ -105,6 +109,17 @@ export const EditDialog: React.FC<EditDialogProps> = ({
               disabled={busy}
               className="mt-2 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 focus:border-emerald-500 focus:outline-none"
               placeholder="Primary artist"
+            />
+          </label>
+          <label className="block text-sm text-slate-300">
+            Folder
+            <input
+              type="text"
+              value={folder}
+              onChange={event => onFolderChange(event.target.value)}
+              disabled={busy}
+              className="mt-2 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 focus:border-emerald-500 focus:outline-none"
+              placeholder="e.g. Videos/Chernobyl"
             />
           </label>
           <label className="block text-sm text-slate-300">
@@ -229,6 +244,20 @@ export const EditDialog: React.FC<EditDialogProps> = ({
             />
           </label>
         )}
+        {!isMusic && (
+          <label className="mt-4 block text-sm text-slate-300">
+            Folder
+            <input
+              type="text"
+              value={folder}
+              onChange={event => onFolderChange(event.target.value)}
+              disabled={busy}
+              className="mt-2 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 focus:border-emerald-500 focus:outline-none"
+              placeholder="e.g. Pictures/2024"
+            />
+          </label>
+        )}
+
         {error && <div className="mt-2 text-sm text-red-400">{error}</div>}
         <div className="mt-6 flex justify-end gap-3">
           <button

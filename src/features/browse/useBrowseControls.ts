@@ -10,7 +10,7 @@ type FilterOption = {
 const BASE_FILTER_OPTIONS: FilterOption[] = [
   { id: "documents", label: "Documents" },
   { id: "images", label: "Images" },
-  { id: "music", label: "Music" },
+  { id: "music", label: "Audio" },
   { id: "pdfs", label: "PDFs" },
   { id: "videos", label: "Videos" },
 ];

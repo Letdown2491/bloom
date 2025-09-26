@@ -4,6 +4,11 @@ import { useServerData } from "../../hooks/useServerData";
 import type { ServerSnapshot, BlobDistribution } from "../../hooks/useServerData";
 import type { BlobReplicaSummary } from "../../components/BlobList";
 import { deriveServerNameFromUrl } from "../../utils/serverName";
+import { normalizeFolderPathInput } from "../../utils/blobMetadataStore";
+import { usePrivateLibrary } from "../../context/PrivateLibraryContext";
+import type { PrivateListEntry } from "../../lib/privateList";
+import type { BlossomBlob } from "../../lib/blossomClient";
+import { PRIVATE_SERVER_NAME } from "../../constants/private";
 
 type ServerDataResult = ReturnType<typeof useServerData>;
 
@@ -22,6 +27,8 @@ type WorkspaceContextValue = {
   syncEnabledServerUrls: string[];
   browsingAllServers: boolean;
   currentSnapshot?: ServerSnapshot;
+  privateEntries: PrivateListEntry[];
+  privateBlobs: BlossomBlob[];
 };
 
 type WorkspaceProviderProps = {
@@ -39,6 +46,7 @@ export const WorkspaceProvider: React.FC<WorkspaceProviderProps> = ({
   onSelectServer,
   children,
 }) => {
+  const { entries: privateEntries } = usePrivateLibrary();
   const syncEnabledServers = useMemo(() => servers.filter(server => server.sync), [servers]);
   const syncEnabledServerUrls = useMemo(() => syncEnabledServers.map(server => server.url), [syncEnabledServers]);
 
@@ -47,7 +55,10 @@ export const WorkspaceProvider: React.FC<WorkspaceProviderProps> = ({
   const eagerServerUrls = useMemo(() => {
     const urls = new Set<string>();
     if (selectedServer) {
-      urls.add(selectedServer);
+      const hasMatchingServer = servers.some(server => server.url === selectedServer);
+      if (hasMatchingServer) {
+        urls.add(selectedServer);
+      }
     } else {
       servers.forEach(server => urls.add(server.url));
     }
@@ -79,6 +90,44 @@ export const WorkspaceProvider: React.FC<WorkspaceProviderProps> = ({
     return map;
   }, [distribution, serverNameByUrl]);
 
+  const privateServerMap = useMemo(() => new Map(servers.map(server => [server.url, server])), [servers]);
+
+  const privateBlobs = useMemo(() => {
+    return privateEntries.map(entry => {
+      const [primaryServer] = entry.servers ?? [];
+      const server = primaryServer ? privateServerMap.get(primaryServer) : null;
+      const normalizedServerUrl = primaryServer ? primaryServer.replace(/\/$/, "") : undefined;
+      const downloadUrl = normalizedServerUrl ? `${normalizedServerUrl}/${entry.sha256}` : undefined;
+      const metadata = entry.metadata;
+      const encryption = entry.encryption;
+      const normalizedFolder = normalizeFolderPathInput(metadata?.folderPath ?? undefined) ?? null;
+      const displayName = metadata?.name
+        ? metadata.name
+        : encryption
+          ? `Encrypted ${entry.sha256.slice(0, 8)}`
+          : `Private ${entry.sha256.slice(0, 8)}`;
+      const privateData = {
+        metadata: metadata ? { ...metadata, folderPath: normalizedFolder } : undefined,
+        servers: entry.servers,
+        ...(encryption ? { encryption } : {}),
+      };
+      return {
+        sha256: entry.sha256,
+        size: metadata?.size,
+        type: metadata?.type,
+        uploaded: entry.updatedAt,
+        url: downloadUrl,
+        name: displayName,
+        serverUrl: normalizedServerUrl,
+        requiresAuth: server ? Boolean(server.requiresAuth) : false,
+        serverType: server?.type ?? "blossom",
+        folderPath: normalizedFolder,
+        privateData,
+        label: PRIVATE_SERVER_NAME,
+      } as BlossomBlob;
+    });
+  }, [privateEntries, privateServerMap]);
+
   const value = useMemo<WorkspaceContextValue>(
     () => ({
       servers,
@@ -93,6 +142,8 @@ export const WorkspaceProvider: React.FC<WorkspaceProviderProps> = ({
       syncEnabledServerUrls,
       browsingAllServers,
       currentSnapshot,
+      privateEntries,
+      privateBlobs,
     }),
     [
       servers,
@@ -107,6 +158,8 @@ export const WorkspaceProvider: React.FC<WorkspaceProviderProps> = ({
       syncEnabledServerUrls,
       browsingAllServers,
       currentSnapshot,
+      privateEntries,
+      privateBlobs,
     ]
   );
 

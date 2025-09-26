@@ -1,27 +1,37 @@
 import React from "react";
 import type { FilterMode } from "../../types/filter";
 import type { ManagedServer } from "../../hooks/useServers";
+import type { DefaultSortOption } from "../../context/UserPreferencesContext";
 
 const BASE_FILTER_OPTIONS: { id: FilterMode; label: string }[] = [
   { id: "all", label: "All Files" },
   { id: "documents", label: "Documents" },
   { id: "images", label: "Images" },
-  { id: "music", label: "Music" },
+  { id: "music", label: "Audio" },
   { id: "pdfs", label: "PDFs" },
   { id: "videos", label: "Videos" },
 ];
 
 const FILTER_OPTIONS = [...BASE_FILTER_OPTIONS].sort((a, b) => a.label.localeCompare(b.label));
 
+const SORT_OPTIONS: { id: DefaultSortOption; label: string }[] = [
+  { id: "name", label: "Name" },
+  { id: "servers", label: "Servers" },
+  { id: "updated", label: "Updated" },
+  { id: "size", label: "Size" },
+];
+
 type SettingsPanelProps = {
   servers: ManagedServer[];
   defaultServerUrl: string | null;
   defaultViewMode: "grid" | "list";
   defaultFilterMode: FilterMode;
+  defaultSortOption: DefaultSortOption;
   showIconsPreviews: boolean;
   showListPreviews: boolean;
   onSetDefaultViewMode: (mode: "grid" | "list") => void;
   onSetDefaultFilterMode: (mode: FilterMode) => void;
+  onSetDefaultSortOption: (option: DefaultSortOption) => void;
   onSetDefaultServer: (url: string | null) => void;
   onSetShowIconsPreviews: (value: boolean) => void;
   onSetShowListPreviews: (value: boolean) => void;
@@ -32,10 +42,12 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   defaultServerUrl,
   defaultViewMode,
   defaultFilterMode,
+  defaultSortOption,
   showIconsPreviews,
   showListPreviews,
   onSetDefaultViewMode,
   onSetDefaultFilterMode,
+  onSetDefaultSortOption,
   onSetDefaultServer,
   onSetShowIconsPreviews,
   onSetShowListPreviews,
@@ -111,6 +123,26 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 onClick={() => onSetDefaultFilterMode(option.id)}
                 className={`rounded-lg border px-3 py-1.5 text-xs transition ${
                   defaultFilterMode === option.id
+                    ? "border-emerald-500 bg-emerald-500/10 text-emerald-200"
+                    : "border-slate-400 text-white hover:border-slate-500"
+                }`}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="text-[11px] font-semibold uppercase tracking-wide text-white">Default sorting</span>
+          <div className="flex flex-wrap gap-2">
+            {SORT_OPTIONS.map(option => (
+              <button
+                key={option.id}
+                type="button"
+                onClick={() => onSetDefaultSortOption(option.id)}
+                className={`rounded-lg border px-3 py-1.5 text-xs transition ${
+                  defaultSortOption === option.id
                     ? "border-emerald-500 bg-emerald-500/10 text-emerald-200"
                     : "border-slate-400 text-white hover:border-slate-500"
                 }`}

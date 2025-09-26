@@ -4,10 +4,13 @@ import type { FilterMode } from "../types/filter";
 
 type ViewMode = "grid" | "list";
 
+export type DefaultSortOption = "name" | "servers" | "updated" | "size";
+
 type UserPreferences = {
   defaultServerUrl: string | null;
   defaultViewMode: ViewMode;
   defaultFilterMode: FilterMode;
+  defaultSortOption: DefaultSortOption;
   showGridPreviews: boolean;
   showListPreviews: boolean;
 };
@@ -16,6 +19,7 @@ const DEFAULT_PREFERENCES: UserPreferences = {
   defaultServerUrl: null,
   defaultViewMode: "list",
   defaultFilterMode: "all",
+  defaultSortOption: "updated",
   showGridPreviews: true,
   showListPreviews: true,
 };
@@ -33,6 +37,9 @@ const readStoredPreferences = (): UserPreferences => {
     const parsed = JSON.parse(raw) as (Partial<UserPreferences> & { showPreviews?: boolean }) | null;
     const defaultViewMode: ViewMode = parsed?.defaultViewMode === "grid" ? "grid" : "list";
     const defaultFilterMode: FilterMode = isFilterMode(parsed?.defaultFilterMode) ? parsed.defaultFilterMode! : "all";
+    const defaultSortOption: DefaultSortOption = isSortOption(parsed?.defaultSortOption)
+      ? parsed.defaultSortOption!
+      : "updated";
     const legacyShowPreviews = typeof parsed?.showPreviews === "boolean" ? parsed.showPreviews : undefined;
     const showGridPreviews = typeof parsed?.showGridPreviews === "boolean"
       ? parsed.showGridPreviews
@@ -47,6 +54,7 @@ const readStoredPreferences = (): UserPreferences => {
       defaultServerUrl,
       defaultViewMode,
       defaultFilterMode,
+      defaultSortOption,
       showGridPreviews,
       showListPreviews,
     };
@@ -58,11 +66,15 @@ const readStoredPreferences = (): UserPreferences => {
 const isFilterMode = (value: unknown): value is FilterMode =>
   value === "all" || value === "music" || value === "documents" || value === "images" || value === "pdfs" || value === "videos";
 
+const isSortOption = (value: unknown): value is DefaultSortOption =>
+  value === "name" || value === "servers" || value === "updated" || value === "size";
+
 type UserPreferencesContextValue = {
   preferences: UserPreferences;
   setDefaultServerUrl: (url: string | null) => void;
   setDefaultViewMode: (mode: ViewMode) => void;
   setDefaultFilterMode: (mode: FilterMode) => void;
+  setDefaultSortOption: (option: DefaultSortOption) => void;
   setShowGridPreviews: (value: boolean) => void;
   setShowListPreviews: (value: boolean) => void;
 };
@@ -102,6 +114,13 @@ export const UserPreferencesProvider: React.FC<{ children: React.ReactNode }> = 
     });
   }, []);
 
+  const setDefaultSortOption = useCallback((option: DefaultSortOption) => {
+    setPreferences(prev => {
+      if (prev.defaultSortOption === option) return prev;
+      return { ...prev, defaultSortOption: option };
+    });
+  }, []);
+
   const setShowGridPreviews = useCallback((value: boolean) => {
     setPreferences(prev => {
       if (prev.showGridPreviews === value) return prev;
@@ -122,6 +141,7 @@ export const UserPreferencesProvider: React.FC<{ children: React.ReactNode }> = 
       setDefaultServerUrl,
       setDefaultViewMode,
       setDefaultFilterMode,
+      setDefaultSortOption,
       setShowGridPreviews,
       setShowListPreviews,
     }),
@@ -130,6 +150,7 @@ export const UserPreferencesProvider: React.FC<{ children: React.ReactNode }> = 
       setDefaultServerUrl,
       setDefaultViewMode,
       setDefaultFilterMode,
+      setDefaultSortOption,
       setShowGridPreviews,
       setShowListPreviews,
     ]

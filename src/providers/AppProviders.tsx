@@ -5,6 +5,8 @@ import { AudioProvider } from "../context/AudioContext";
 import { SelectionProvider } from "../features/selection/SelectionContext";
 import { Nip46Provider } from "../context/Nip46Context";
 import { UserPreferencesProvider } from "../context/UserPreferencesContext";
+import { PrivateLibraryProvider } from "../context/PrivateLibraryContext";
+import { FolderListProvider } from "../context/FolderListContext";
 
 const client = new QueryClient({
   defaultOptions: {
@@ -22,7 +24,11 @@ export const AppProviders: React.FC<{ children: React.ReactNode }> = ({ children
         <Nip46Provider>
           <AudioProvider>
             <UserPreferencesProvider>
-              <SelectionProvider>{children}</SelectionProvider>
+              <PrivateLibraryProvider>
+                <FolderListProvider>
+                  <SelectionProvider>{children}</SelectionProvider>
+                </FolderListProvider>
+              </PrivateLibraryProvider>
             </UserPreferencesProvider>
           </AudioProvider>
         </Nip46Provider>

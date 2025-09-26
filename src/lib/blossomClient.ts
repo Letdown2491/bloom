@@ -1,6 +1,32 @@
 import axios, { type AxiosProgressEvent } from "axios";
 import { BloomHttpError, fromAxiosError, httpRequest, requestJson } from "./httpService";
 
+export type PrivateBlobEncryption = {
+  algorithm: string;
+  key: string;
+  iv: string;
+};
+
+export type PrivateBlobAudioMetadata = {
+  title?: string;
+  artist?: string;
+  album?: string;
+  trackNumber?: number;
+  trackTotal?: number;
+  durationSeconds?: number;
+  genre?: string;
+  year?: number;
+  coverUrl?: string;
+};
+
+export type PrivateBlobMetadata = {
+  name?: string;
+  type?: string;
+  size?: number;
+  folderPath?: string | null;
+  audio?: PrivateBlobAudioMetadata | null;
+};
+
 export type BlossomBlob = {
   sha256: string;
   size?: number;
@@ -15,6 +41,16 @@ export type BlossomBlob = {
   infohash?: string;
   magnet?: string;
   nip94?: string[][];
+  privateData?: {
+    encryption: PrivateBlobEncryption;
+    metadata?: PrivateBlobMetadata;
+    servers?: string[];
+  };
+  folderPath?: string | null;
+  __bloomFolderPlaceholder?: boolean;
+  __bloomFolderTargetPath?: string | null;
+  __bloomFolderScope?: "aggregated" | "server" | "private";
+  __bloomFolderIsParentLink?: boolean;
 };
 
 export type EventTemplate = {
@@ -75,7 +111,7 @@ const toHex = (bytes: ArrayLike<number>) =>
 
 const HEX_256_REGEX = /^[0-9a-fA-F]{64}$/;
 
-const extractSha256FromUrl = (value: string): string | undefined => {
+export const extractSha256FromUrl = (value: string): string | undefined => {
   try {
     const parsed = new URL(value);
     const segments = parsed.pathname.split("/").filter(Boolean);

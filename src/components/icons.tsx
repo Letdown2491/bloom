@@ -34,12 +34,12 @@ export const GridIcon = createIcon(
 
 export const ListIcon = createIcon(
   <>
-    <path d="M4 6h16" />
-    <path d="M4 12h16" />
-    <path d="M4 18h16" />
-    <circle cx="5" cy="6" r="1.5" fill="currentColor" />
-    <circle cx="5" cy="12" r="1.5" fill="currentColor" />
-    <circle cx="5" cy="18" r="1.5" fill="currentColor" />
+    <circle cx="6" cy="7" r="1.5" fill="currentColor" stroke="none" />
+    <path d="M10 7h9" strokeLinecap="round" />
+    <circle cx="6" cy="12" r="1.5" fill="currentColor" stroke="none" />
+    <path d="M10 12h9" strokeLinecap="round" />
+    <circle cx="6" cy="17" r="1.5" fill="currentColor" stroke="none" />
+    <path d="M10 17h9" strokeLinecap="round" />
   </>
 );
 
@@ -57,9 +57,35 @@ export const ChevronDownIcon = createIcon(
   </>
 );
 
+export const ChevronRightIcon = createIcon(
+  <>
+    <path d="M9 6.5 15 12l-6 5.5" />
+  </>
+);
+
+export const ChevronLeftIcon = createIcon(
+  <>
+    <path d="M15 6.5 9 12l6 5.5" />
+  </>
+);
+
 export const FilterIcon = createIcon(
   <>
     <path d="M4 5h16l-6.5 8v6.5L10.5 21v-8L4 5Z" />
+  </>
+);
+
+export const SearchIcon = createIcon(
+  <>
+    <circle cx="11" cy="11" r="6" />
+    <path d="m20 20-3.5-3.5" />
+  </>
+);
+
+export const CloseIcon = createIcon(
+  <>
+    <path d="m8 8 8 8" />
+    <path d="m16 8-8 8" />
   </>
 );
 
@@ -129,7 +155,14 @@ export const StopIcon = createIcon(
 
 export const FolderIcon = createIcon(
   <>
-    <path d="M3.5 7.5v9a1.5 1.5 0 0 0 1.5 1.5h14a1.5 1.5 0 0 0 1.5-1.5v-7a1.5 1.5 0 0 0-1.5-1.5h-6l-1.5-2h-6c-.828 0-1.5.672-1.5 1.5Z" />
+    <path
+      d="M3.5 8.25v8.25c0 .828.672 1.5 1.5 1.5h14c.828 0 1.5-.672 1.5-1.5V10c0-.828-.672-1.5-1.5-1.5h-6l-1.5-2h-6c-.828 0-1.5.672-1.5 1.5Z"
+      fill="none"
+      stroke="white"
+      strokeWidth={1.5}
+      strokeLinejoin="round"
+    />
+    <path d="M3.5 9h17" stroke="white" strokeWidth={1.5} strokeLinecap="round" />
   </>
 );
 
@@ -214,6 +247,14 @@ export const SyncIndicatorIcon = createIcon(
     <path d="M17.5 3.5H21V7" />
     <path d="M20 12a8 8 0 0 1-13.66 5.66" />
     <path d="m6.5 20.5H3V17" />
+  </>
+);
+
+export const LockIcon = createIcon(
+  <>
+    <rect x="6.5" y="11" width="11" height="9.5" rx="2" />
+    <path d="M8.5 11V8.5a3.5 3.5 0 0 1 7 0V11" />
+    <circle cx="12" cy="15.5" r="1.2" />
   </>
 );
 

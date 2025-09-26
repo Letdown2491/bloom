@@ -16,10 +16,15 @@ import {
   applyAliasUpdate,
   rememberAudioMetadata,
   sanitizeCoverUrl,
+  normalizeFolderPathInput,
   type BlobAudioMetadata,
 } from "../utils/blobMetadataStore";
 import { buildNip94EventTemplate } from "../lib/nip94";
 import { extractAudioMetadata, type ExtractedAudioMetadata } from "../utils/audioMetadata";
+import { encryptFileForPrivateUpload } from "../lib/privateEncryption";
+import { usePrivateLibrary } from "../context/PrivateLibraryContext";
+import type { PrivateListEntry } from "../lib/privateList";
+import { useFolderLists } from "../context/FolderListContext";
 
 const RESIZE_OPTIONS = [
   { id: 0, label: "Original" },
@@ -33,11 +38,13 @@ type UploadEntryKind = "audio" | "image" | "other";
 type GenericMetadataFormState = {
   kind: "generic";
   alias: string;
+  folder: string;
 };
 
 type AudioMetadataFormState = {
   kind: "audio";
   alias: string;
+  folder: string;
   title: string;
   artist: string;
   album: string;
@@ -71,6 +78,20 @@ type UploadEntry = {
   metadata: UploadMetadataFormState;
   extractedAudioMetadata?: ExtractedAudioMetadata | null;
   showMetadata: boolean;
+  isPrivate: boolean;
+};
+
+type PrivatePreparedInfo = {
+  algorithm: string;
+  key: string;
+  iv: string;
+  name?: string;
+  type?: string;
+  size?: number;
+  servers: Set<string>;
+  sha256?: string;
+  audioMetadata?: BlobAudioMetadata | null;
+  folderPath?: string | null;
 };
 
 export type TransferState = {
@@ -112,8 +133,10 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const pendingSelectionRef = useRef(0);
   const queryClient = useQueryClient();
-  const { signEventTemplate, ndk } = useNdk();
+  const { signEventTemplate, ndk, signer, user } = useNdk();
+  const { upsertEntries: upsertPrivateEntries } = usePrivateLibrary();
   const pubkey = useCurrentPubkey();
+  const { addBlobToFolder, resolveFolderPath } = useFolderLists();
 
   const serverMap = useMemo(() => new Map(servers.map(server => [server.url, server])), [servers]);
 
@@ -127,7 +150,8 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
     [selectedServers, serverMap]
   );
 
-  const canUpload = requiresAuthSelected ? Boolean(ndk?.signer) : true;
+  const activeSigner = ndk?.signer ?? signer ?? null;
+  const canUpload = requiresAuthSelected ? Boolean(activeSigner) : true;
   const hasImageEntries = useMemo(() => entries.some(entry => entry.kind === "image"), [entries]);
 
   React.useEffect(() => {
@@ -182,6 +206,7 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
           metadata,
           extractedAudioMetadata: extracted ?? null,
           showMetadata: false,
+          isPrivate: false,
         });
       } else {
         nextEntries.push({
@@ -191,6 +216,7 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
           metadata: createGenericMetadataFormState(file),
           extractedAudioMetadata: null,
           showMetadata: false,
+          isPrivate: false,
         });
       }
     }
@@ -232,6 +258,12 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
     });
   };
 
+  const setEntryPrivacy = (id: string, value: boolean) => {
+    setEntries(prev =>
+      prev.map(entry => (entry.id === id ? { ...entry, isPrivate: value } : entry))
+    );
+  };
+
   const publishMetadata = async (
     blob: BlossomBlob,
     options: {
@@ -240,7 +272,7 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
       extraTags?: string[][];
     } = {}
   ) => {
-    if (!ndk || !ndk.signer) return;
+    if (!ndk || !activeSigner) return;
     const template = buildNip94EventTemplate({
       blob,
       alias: typeof options.alias === "string" ? options.alias : undefined,
@@ -254,13 +286,21 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
 
   const handleUpload = async () => {
     if (!entries.length || !selectedServers.length) return;
-    if (requiresAuthSelected && !ndk?.signer) {
+    if (requiresAuthSelected && !activeSigner) {
       alert("Connect your NIP-07 signer to upload to servers that require auth.");
       return;
     }
+    const privateEntries = entries.filter(entry => entry.isPrivate);
+    if (privateEntries.length > 0) {
+      if (!ndk || !activeSigner || !user) {
+        alert("Marking files as private requires a connected Nostr signer.");
+        return;
+      }
+    }
+
     setBusy(true);
     const limit = pLimit(2);
-    const preparedUploads: { entry: UploadEntry; file: File; buffer: ArrayBuffer }[] = [];
+    const preparedUploads: { entry: UploadEntry; file: File; buffer: ArrayBuffer; privateInfo?: PrivatePreparedInfo }[] = [];
 
     for (const entry of entries) {
       let processed = entry.file;
@@ -271,15 +311,39 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
       if (resize && entry.kind === "image") {
         processed = await resizeImage(processed, resize.size!, resize.size!);
       }
-      const buffer = await processed.arrayBuffer();
-      preparedUploads.push({ entry, file: processed, buffer });
+
+      if (entry.isPrivate) {
+        const encrypted = await encryptFileForPrivateUpload(processed);
+        const privateInfo: PrivatePreparedInfo = {
+          algorithm: encrypted.metadata.algorithm,
+          key: encrypted.metadata.key,
+          iv: encrypted.metadata.iv,
+          name: encrypted.metadata.originalName,
+          type: encrypted.metadata.originalType,
+          size: encrypted.metadata.originalSize,
+          servers: new Set<string>(),
+          folderPath: normalizeFolderPathInput(entry.metadata.folder) ?? null,
+        };
+        preparedUploads.push({ entry, file: encrypted.file, buffer: encrypted.buffer, privateInfo });
+      } else {
+        const buffer = await processed.arrayBuffer();
+        preparedUploads.push({ entry, file: processed, buffer });
+      }
     }
 
     const blurhashCache = new Map<string, { hash: string; width: number; height: number } | undefined>();
+    const pendingPrivateUpdates = new Map<string, PrivateListEntry>();
+    const pendingFolderUpdates = new Map<string, string>();
 
     let encounteredError = false;
 
-    const performUpload = async (entry: UploadEntry, file: File, buffer: ArrayBuffer, serverUrl: string) => {
+    const performUpload = async (
+      entry: UploadEntry,
+      file: File,
+      buffer: ArrayBuffer,
+      serverUrl: string,
+      privateInfo?: PrivatePreparedInfo
+    ) => {
       const server = serverMap.get(serverUrl);
       if (!server) return;
       const clonedBuffer = buffer.slice(0);
@@ -302,11 +366,15 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
         },
       ]);
       try {
+        const isPrivate = entry.isPrivate && Boolean(privateInfo);
+        if (entry.isPrivate && !privateInfo) {
+          console.warn("Missing private metadata for entry", entry.id);
+        }
         const blurHash =
           entry.kind === "image"
             ? blurhashCache.get(entry.id) ?? (await computeBlurhash(serverFile))
             : undefined;
-        if (!blurhashCache.has(entry.id)) {
+        if (!blurhashCache.has(entry.id) && blurHash) {
           blurhashCache.set(entry.id, blurHash);
         }
         const requiresAuthForServer = server.type === "satellite" || Boolean(server.requiresAuth);
@@ -356,8 +424,19 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
           type: uploaded.type || serverFile.type || entry.file.type,
         };
 
+        const normalizedFolder = normalizeFolderPathInput(entry.metadata.folder);
+        const folderPathValue = normalizedFolder ? resolveFolderPath(normalizedFolder) : null;
+        if (normalizedFolder !== undefined) {
+          blob.folderPath = folderPathValue;
+        }
+        if (privateInfo && normalizedFolder !== undefined) {
+          privateInfo.folderPath = folderPathValue;
+        }
+
         let aliasForEvent: string | undefined;
         let extraTags: string[][] | undefined;
+
+        const aliasTimestamp = Math.floor(Date.now() / 1000);
 
         if (entry.metadata.kind === "audio") {
           const overrides = createAudioOverridesFromForm(entry.metadata);
@@ -369,23 +448,67 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
           );
           aliasForEvent = audioDetails.alias ?? undefined;
           extraTags = audioDetails.tags;
-          if (audioDetails.alias) {
-            blob.name = audioDetails.alias;
-          }
           rememberAudioMetadata(server.url, blob.sha256, audioDetails.stored ?? null);
           if (audioDetails.alias) {
-            applyAliasUpdate(undefined, blob.sha256, audioDetails.alias, Math.floor(Date.now() / 1000));
+            blob.name = audioDetails.alias;
+            applyAliasUpdate(undefined, blob.sha256, audioDetails.alias, aliasTimestamp);
+            if (privateInfo) {
+              privateInfo.name = audioDetails.alias;
+            }
+          }
+          if (privateInfo) {
+            privateInfo.audioMetadata = audioDetails.stored ?? null;
           }
         } else if (entry.metadata.kind === "generic") {
           const alias = sanitizePart(entry.metadata.alias);
           if (alias) {
             aliasForEvent = alias;
             blob.name = alias;
-            applyAliasUpdate(undefined, blob.sha256, alias, Math.floor(Date.now() / 1000));
+            applyAliasUpdate(undefined, blob.sha256, alias, aliasTimestamp);
+            if (privateInfo) {
+              privateInfo.name = alias;
+            }
           }
+        } else if (privateInfo && !privateInfo.name) {
+          privateInfo.name = entry.file.name;
         }
 
-        rememberBlobMetadata(server.url, blob);
+        if (privateInfo) {
+          privateInfo.name = privateInfo.name ?? entry.file.name;
+          const resolvedType = privateInfo.type ?? entry.file.type ?? blob.type;
+          privateInfo.type = resolvedType;
+          privateInfo.size = privateInfo.size ?? entry.file.size;
+          privateInfo.servers.add(server.url);
+          blob.type = resolvedType ?? blob.type;
+          blob.privateData = {
+            encryption: {
+              algorithm: privateInfo.algorithm,
+              key: privateInfo.key,
+              iv: privateInfo.iv,
+            },
+            metadata: {
+              name: privateInfo.name,
+              type: privateInfo.type,
+              size: privateInfo.size,
+              audio:
+                privateInfo.audioMetadata === undefined ? undefined : privateInfo.audioMetadata,
+              folderPath: privateInfo.folderPath ?? null,
+            },
+            servers: Array.from(privateInfo.servers),
+          };
+        }
+
+        if (folderPathValue !== null) {
+          if (!extraTags) {
+            extraTags = [];
+          }
+          extraTags.push(["folder", folderPathValue]);
+        }
+
+        rememberBlobMetadata(server.url, blob, { folderPath: folderPathValue });
+        if (!isPrivate && folderPathValue) {
+          pendingFolderUpdates.set(blob.sha256, folderPathValue);
+        }
         if (pubkey) {
           queryClient.setQueryData<BlossomBlob[]>(["server-blobs", server.url, pubkey, server.type], prev => {
             if (!prev) return [blob];
@@ -401,11 +524,33 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
         setTransfers(prev =>
           prev.map(item => (item.id === transferKey ? { ...item, transferred: item.total, status: "success" } : item))
         );
-        await publishMetadata(blob, {
-          blurHash,
-          alias: aliasForEvent ?? null,
-          extraTags,
-        });
+        if (!isPrivate) {
+          await publishMetadata(blob, {
+            blurHash,
+            alias: aliasForEvent ?? null,
+            extraTags,
+          });
+        } else if (privateInfo) {
+          privateInfo.sha256 = blob.sha256;
+          pendingPrivateUpdates.set(entry.id, {
+            sha256: blob.sha256,
+            encryption: {
+              algorithm: privateInfo.algorithm,
+              key: privateInfo.key,
+              iv: privateInfo.iv,
+            },
+            metadata: {
+              name: privateInfo.name,
+              type: privateInfo.type,
+              size: privateInfo.size,
+              audio:
+                privateInfo.audioMetadata === undefined ? undefined : privateInfo.audioMetadata,
+              folderPath: privateInfo.folderPath ?? null,
+            },
+            servers: Array.from(privateInfo.servers),
+            updatedAt: blob.uploaded ?? Math.floor(Date.now() / 1000),
+          });
+        }
         queryClient.invalidateQueries({ queryKey: ["server-blobs", server.url, pubkey, server.type] });
       } catch (err: any) {
         encounteredError = true;
@@ -424,14 +569,32 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
     };
 
     await Promise.all(
-      preparedUploads.map(({ entry, file, buffer }) =>
+      preparedUploads.map(({ entry, file, buffer, privateInfo }) =>
         (async () => {
           for (const serverUrl of selectedServers) {
-            await limit(() => performUpload(entry, file, buffer, serverUrl));
+            await limit(() => performUpload(entry, file, buffer, serverUrl, privateInfo));
           }
         })()
       )
     );
+
+    if (pendingFolderUpdates.size > 0) {
+      for (const [sha, path] of pendingFolderUpdates) {
+        try {
+          await addBlobToFolder(path, sha);
+        } catch (error) {
+          console.warn("Failed to update folder list after upload", error);
+        }
+      }
+    }
+
+    if (pendingPrivateUpdates.size > 0 && ndk && activeSigner && user) {
+      try {
+        await upsertPrivateEntries(Array.from(pendingPrivateUpdates.values()));
+      } catch (error) {
+        console.warn("Failed to update private list", error);
+      }
+    }
 
     setBusy(false);
     onUploaded(!encounteredError);
@@ -482,13 +645,30 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
                         {file.type ? ` • ${file.type}` : ""}
                       </div>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => toggleMetadataVisibility(entry.id)}
-                      className="rounded-lg border border-slate-700 px-3 py-1 text-xs font-medium uppercase tracking-wide text-slate-200 hover:border-emerald-500 hover:text-emerald-400"
-                    >
-                      {showMetadata ? "Hide metadata" : "Edit metadata"}
-                    </button>
+                    <div className="flex flex-col items-end gap-3">
+                      <button
+                        type="button"
+                        onClick={() => toggleMetadataVisibility(entry.id)}
+                        className="rounded-lg border border-slate-700 px-3 py-1 text-xs font-medium uppercase tracking-wide text-slate-200 hover:border-emerald-500 hover:text-emerald-400"
+                      >
+                        {showMetadata ? "Hide metadata" : "Edit metadata"}
+                      </button>
+                    </div>
+                  </div>
+                  <div className="rounded-xl border border-amber-600/40 bg-amber-900/10 px-4 py-3">
+                    <label className="flex items-center gap-3 text-sm text-amber-200">
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4 rounded border-amber-500 bg-slate-950 text-amber-400 focus:outline-none focus:ring-1 focus:ring-amber-400"
+                        checked={entry.isPrivate}
+                        onChange={event => setEntryPrivacy(entry.id, event.target.checked)}
+                        disabled={busy}
+                      />
+                      <span>Mark as Private</span>
+                    </label>
+                    <p className="mt-2 text-xs leading-relaxed text-amber-200/80">
+                      Marking an upload as private will encrypt the file on the client-side and cannot be reversed. If you would like to share the file publicly, you will have to download it, then reupload without checking this option.
+                    </p>
                   </div>
                   {showMetadata ? (
                     <div className="space-y-3">
@@ -619,6 +799,15 @@ const GenericMetadataForm: React.FC<GenericMetadataFormProps> = ({ metadata, onC
         placeholder="Friendly name"
       />
     </label>
+    <label className="block text-xs uppercase text-slate-400">
+      Folder
+      <input
+        className={inputClasses}
+        value={metadata.folder}
+        onChange={event => onChange({ folder: event.target.value })}
+        placeholder="e.g. Pictures/2024"
+      />
+    </label>
     <p className="text-xs text-slate-500">The display name will be included in the metadata event.</p>
   </div>
 );
@@ -638,6 +827,15 @@ const AudioMetadataForm: React.FC<AudioMetadataFormProps> = ({ metadata, onChang
           value={metadata.alias}
           onChange={event => onChange({ alias: event.target.value })}
           placeholder="Artist - Title"
+        />
+      </label>
+      <label className="block text-xs uppercase text-slate-400">
+        Folder
+        <input
+          className={inputClasses}
+          value={metadata.folder}
+          onChange={event => onChange({ folder: event.target.value })}
+          placeholder="e.g. Videos/Chernobyl"
         />
       </label>
       <label className="block text-xs uppercase text-slate-400">
@@ -854,6 +1052,7 @@ const createGenericMetadataFormState = (file: File): GenericMetadataFormState =>
   return {
     kind: "generic",
     alias,
+    folder: "",
   };
 };
 
@@ -868,6 +1067,7 @@ const createAudioMetadataFormState = (
   return {
     kind: "audio",
     alias,
+    folder: "",
     title: extracted?.title ?? "",
     artist: artist ?? "",
     album: extracted?.album ?? "",
