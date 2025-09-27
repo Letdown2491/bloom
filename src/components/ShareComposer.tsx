@@ -21,7 +21,7 @@ export type SharePayload = {
   size?: number | null;
 };
 
-export type ShareMode = "note" | "dm";
+export type ShareMode = "note" | "dm" | "dm-private";
 
 export type ShareCompletion = {
   mode: ShareMode;
@@ -429,6 +429,10 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
   const [globalError, setGlobalError] = useState<string | null>(null);
   const [profileInfo, setProfileInfo] = useState<ProfileInfo>(() => emptyProfileInfo());
 
+  const isLegacyDmMode = shareMode === "dm";
+  const isPrivateDmMode = shareMode === "dm-private";
+  const isDmMode = isLegacyDmMode || isPrivateDmMode;
+
   const ensureRecipientProfile = useCallback(
     async (targetPubkey: string): Promise<RecipientProfile> => {
       const existing = profileCacheRef.current.get(targetPubkey);
@@ -534,7 +538,7 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
   }, []);
 
   useEffect(() => {
-    if (shareMode !== "dm") return;
+    if (shareMode === "note") return;
     let ignore = false;
     const run = async () => {
       const trimmed = recipientQuery.trim();
@@ -884,7 +888,7 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
       return;
     }
 
-    if (shareMode === "dm" && !selectedRecipient) {
+    if (isDmMode && !selectedRecipient) {
       setGlobalError("Choose a DM recipient before sending.");
       return;
     }
@@ -900,7 +904,90 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
     const createdAt = Math.floor(Date.now() / 1000);
     const finalContent = composedContent || payload.url || "";
 
-    if (shareMode === "dm") {
+    if (isLegacyDmMode) {
+      if (!signer.encryptionEnabled || !signer.encryptionEnabled("nip04")) {
+        setGlobalError("Connected signer does not support encrypted DMs (NIP-04).");
+        setPublishing(false);
+        return;
+      }
+      const recipientProfile = selectedRecipient!;
+      const recipientUser = new NDKUser({ pubkey: recipientProfile.pubkey });
+      const dmEvent = new NDKEvent(ndk);
+      dmEvent.kind = 4;
+      dmEvent.created_at = createdAt;
+      dmEvent.tags = [["p", recipientProfile.pubkey]];
+      dmEvent.content = finalContent;
+      dmEvent.pubkey = pubkey;
+
+      try {
+        await dmEvent.encrypt(recipientUser, signer, "nip04");
+        await dmEvent.sign(signer);
+        let dmSuccessCount = 0;
+        let dmFailureCount = 0;
+
+        for (const relayUrl of relays) {
+          try {
+            const relaySet = NDKRelaySet.fromRelayUrls([relayUrl], ndk);
+            await dmEvent.publish(relaySet, 7000, 1);
+            dmSuccessCount += 1;
+            setRelayStatuses(prev => ({ ...prev, [relayUrl]: { status: "success" } }));
+          } catch (error) {
+            dmFailureCount += 1;
+            let message = "Failed to send DM.";
+            if (error instanceof NDKPublishError) {
+              message = error.relayErrors || error.message;
+            } else if (error instanceof Error) {
+              message = error.message;
+            }
+            setRelayStatuses(prev => ({ ...prev, [relayUrl]: { status: "error", message } }));
+          }
+        }
+
+        const dmResult: ShareCompletion = {
+          mode: shareMode,
+          success: dmSuccessCount > 0,
+          recipient: {
+            pubkey: recipientProfile.pubkey,
+            npub: recipientProfile.npub,
+            displayName: recipientProfile.displayName,
+            username: recipientProfile.username,
+            nip05: recipientProfile.nip05,
+          },
+          successes: dmSuccessCount,
+          failures: dmFailureCount,
+          message:
+            dmFailureCount > 0 && dmSuccessCount > 0
+              ? `${dmFailureCount} relay${dmFailureCount === 1 ? "" : "s"} reported errors.`
+              : dmSuccessCount === 0
+              ? "All relay deliveries failed."
+              : null,
+        };
+
+        const nextRecent = [recipientProfile, ...recentRecipients.filter(item => item.pubkey !== recipientProfile.pubkey)].slice(0, 10);
+        setRecentRecipients(nextRecent);
+        storeRecipients(nextRecent);
+        onShareComplete?.(dmResult);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Sending DM failed.";
+        setGlobalError(message);
+        onShareComplete?.({
+          mode: shareMode,
+          success: false,
+          recipient: {
+            pubkey: recipientProfile.pubkey,
+            npub: recipientProfile.npub,
+            displayName: recipientProfile.displayName,
+            username: recipientProfile.username,
+            nip05: recipientProfile.nip05,
+          },
+          successes: 0,
+          failures: relays.length,
+          message,
+        });
+      } finally {
+        setPublishing(false);
+      }
+    } else if (isPrivateDmMode) {
       if (!signer.encryptionEnabled || !signer.encryptionEnabled("nip44")) {
         setGlobalError("Connected signer does not support encrypted DMs (NIP-44).");
         setPublishing(false);
@@ -942,7 +1029,7 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
         }
 
         const dmResult: ShareCompletion = {
-          mode: "dm",
+          mode: shareMode,
           success: dmSuccessCount > 0,
           recipient: {
             pubkey: recipientProfile.pubkey,
@@ -969,7 +1056,7 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
         const message = error instanceof Error ? error.message : "Sending DM failed.";
         setGlobalError(message);
         onShareComplete?.({
-          mode: "dm",
+          mode: shareMode,
           success: false,
           recipient: {
             pubkey: recipientProfile.pubkey,
@@ -1083,9 +1170,9 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
 
   const shareAppendix = useMemo(() => {
     if (!payload) return null;
-    if (shareMode === "dm") return buildMetadataBlock(payload);
+    if (isDmMode) return buildMetadataBlock(payload);
     return payload.url ?? null;
-  }, [payload, shareMode]);
+  }, [payload, isDmMode]);
 
   const composedContent = useMemo(() => combineContent(noteContent, shareAppendix), [noteContent, shareAppendix]);
 
@@ -1113,8 +1200,8 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
 
   const data = payload!;
 
-  const relayLabel = shareMode === "dm"
-    ? "Relays for DM delivery"
+  const relayLabel = isDmMode
+    ? "Using connected relays"
     : usingFallbackRelays
     ? usingDefaultFallback
       ? "Using default Bloom relays"
@@ -1141,12 +1228,12 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
                     onClick={() => setShareMode("note")}
                     disabled={publishing}
                   >
-                    Share note
+                    Share as note
                   </button>
                   <button
                     type="button"
                     className={`rounded-xl px-3 py-1 font-medium transition-colors ${
-                      shareMode === "dm"
+                      isLegacyDmMode
                         ? "bg-emerald-600 text-white shadow"
                         : "text-slate-300 hover:text-white"
                     }`}
@@ -1155,20 +1242,32 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
                   >
                     Share via DM
                   </button>
+                  <button
+                    type="button"
+                    className={`rounded-xl px-3 py-1 font-medium transition-colors ${
+                      isPrivateDmMode
+                        ? "bg-emerald-600 text-white shadow"
+                        : "text-slate-300 hover:text-white"
+                    }`}
+                    onClick={() => setShareMode("dm-private")}
+                    disabled={publishing}
+                  >
+                    Share via Private DM
+                  </button>
                 </div>
                 <span className="w-full text-xs text-slate-400">
-                  {shareMode === "dm"
-                    ? "Send an encrypted direct message with download details."
-                    : "Publish a note with the shared link to your relays."}
+                  {shareMode === "note"
+                    ? "Publish a public note with a share link to your file directly to Nostr."
+                    : ""}
                 </span>
               </div>
             </header>
-        
-            <div className="flex-1 overflow-auto space-y-6 pr-1">
-              {shareMode === "dm" && (
-                <section className="space-y-3">
+
+            <div className="flex-1 overflow-auto pr-1">
+              {isDmMode && (
+                <section className="space-y-3 mb-[7px]">
                   <div className="flex items-center justify-between text-xs font-semibold uppercase tracking-wide text-slate-400">
-                    
+
                     {isSearchingRecipients && <span className="text-emerald-300">Searching…</span>}
                   </div>
                   <div className="relative">
@@ -1245,42 +1344,29 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
                 </section>
               )}
 
-              <section className="space-y-3">
+              <section className={`space-y-[7px] ${isDmMode ? "" : "mt-6"}`}>
+                {isLegacyDmMode && (
+                  <div className="text-xs text-slate-400">
+                    Send a DM with file summary and download details to another user.
+                  </div>
+                )}
+                {isPrivateDmMode && (
+                  <div className="text-xs text-slate-400">
+                    Send an encrypted DM with file summary and download details. NOTE: Not all Nostr clients support private DMs. If you're unsure, please choose Share via DM instead.
+                  </div>
+                )}
                 <textarea
                   id="share-note"
                   className="min-h-[160px] w-full resize-none rounded-xl border border-slate-800 bg-slate-950/80 px-3 py-2 text-sm text-slate-200 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                  placeholder={shareMode === "dm" ? "Add a message to include with the DM…" : "Write something about this file…"}
+                  placeholder={isDmMode ? "Add a message to include with the DM…" : "Write something about this file…"}
                   value={noteContent}
                   onChange={event => setNoteContent(event.target.value)}
                   disabled={publishing}
                 />
-                {shareMode === "dm" ? (
-                  <div className="space-y-2 text-xs text-slate-300">
-                    <div>DM will include this file summary:</div>
-                    {shareAppendix ? (
-                      <pre className="whitespace-pre-wrap rounded-lg border border-slate-800 bg-slate-950/80 px-3 py-2 text-left text-[11px] text-slate-200">
-                        {shareAppendix}
-                      </pre>
-                    ) : (
-                      <div className="rounded-lg border border-slate-800 bg-slate-950/80 px-3 py-2 text-[11px] text-slate-400">
-                        File metadata unavailable.
-                      </div>
-                    )}
-                  </div>
-                ) : (
-                  <div className="text-xs text-slate-400">
-                    Shared file will be appended automatically:
-                    <div className="mt-1 truncate text-slate-200">
-                      <a href={data.url} target="_blank" rel="noopener noreferrer" className="hover:text-emerald-300">
-                        {data.url}
-                      </a>
-                    </div>
-                  </div>
-                )}
               </section>
 
-              <section className="space-y-2">
-                <div className="flex items-center justify-between text-xs uppercase tracking-wide text-slate-400">
+              <section className="mt-[7px] space-y-1">
+                <div className="flex items-center justify-between text-xs tracking-wide text-slate-400">
                   <span>{relayLabel}</span>
                   {!metadataLoaded && <span className="text-slate-500">Loading…</span>}
                 </div>
@@ -1289,10 +1375,10 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
                     {metadataError}
                   </div>
                 )}
-                <ul className="space-y-2 rounded-xl border border-slate-800 bg-slate-950/60 p-3 text-sm">
+                <ul className="space-y-1 text-xs text-slate-400">
                   {effectiveRelays.map(url => (
-                    <li key={url} className="flex flex-wrap items-center justify-between gap-2">
-                      <span className="font-mono text-xs text-slate-200 sm:text-sm">{url}</span>
+                    <li key={url} className="flex items-center justify-between gap-3 text-slate-300">
+                      <span className="font-mono text-[11px] text-slate-200 sm:text-xs">{url}</span>
                       {renderRelayStatus(url)}
                     </li>
                   ))}
@@ -1300,20 +1386,20 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
               </section>
 
               {globalError && (
-                <div className="rounded-lg border border-red-500/50 bg-red-500/10 px-3 py-2 text-sm text-red-300">
+                <div className="mt-4 rounded-lg border border-red-500/50 bg-red-500/10 px-3 py-2 text-sm text-red-300">
                   {globalError}
                 </div>
               )}
 
               {allComplete && (
-                <div className="rounded-lg border border-emerald-500/50 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-200">
+                <div className="mt-3 rounded-lg border border-emerald-500/50 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-200">
                   {failures.length === 0
-                    ? `${shareMode === "dm" ? "Successfully delivered" : "Successfully published"} to ${successes.length} relay${
+                    ? `${isDmMode ? "Successfully delivered" : "Successfully published"} to ${successes.length} relay${
                         successes.length === 1 ? "" : "s"
                       }.`
-                    : `${shareMode === "dm" ? "Delivered" : "Published"} to ${successes.length} relay${
+                    : `${isDmMode ? "Delivered" : "Published"} to ${successes.length} relay${
                         successes.length === 1 ? "" : "s"
-                      }. ${failures.length} ${shareMode === "dm" ? "delivery" : "publish"} failure${
+                      }. ${failures.length} ${isDmMode ? "delivery" : "publish"} failure${
                         failures.length === 1 ? "" : "s"
                       }.`}
                 </div>
@@ -1343,13 +1429,13 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
                   type="button"
                   onClick={handleShare}
                   className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-60"
-                  disabled={publishing || !data.url || (shareMode === "dm" && !selectedRecipient)}
+                  disabled={publishing || !data.url || (isDmMode && !selectedRecipient)}
                 >
                   {publishing
-                    ? shareMode === "dm"
+                    ? isDmMode
                       ? "Sending…"
                       : "Publishing…"
-                    : shareMode === "dm"
+                    : isDmMode
                     ? "Send DM"
                     : "Publish note"}
                 </button>
@@ -1361,7 +1447,7 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
         <aside className={previewCardClasses}>
           <div className="flex flex-col gap-5 p-5">
             <div>
-              <h1 className="text-xl font-semibold text-slate-100">{shareMode === "dm" ? "DM Preview" : "Note Preview"}</h1>
+              <h1 className="text-xl font-semibold text-slate-100">{shareMode === "note" ? "Note Preview" : isPrivateDmMode ? "Private DM Preview" : "DM Preview"}</h1>
             </div>
 
             <div className="flex-1 overflow-auto">
@@ -1391,18 +1477,19 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
                   </div>
 
                   {mediaType && (
-                    <div className="overflow-hidden rounded-xl border border-slate-800 bg-slate-950/80">
+                    <div className="flex max-h-72 w-full items-center justify-center overflow-hidden rounded-xl border border-slate-800 bg-slate-950/80">
                       {mediaType === "image" ? (
                         <img
                           src={data.url}
                           alt={data.name ? `Preview of ${data.name}` : "Shared media preview"}
-                          className="w-full object-cover"
+                          className="max-h-72 w-full object-contain"
                           onError={() => setMediaError(true)}
                         />
                       ) : (
                         <video
                           src={data.url}
-                          className="w-full bg-black"
+                          className="max-h-72 w-full bg-black"
+                          style={{ objectFit: "contain" }}
                           controls
                           playsInline
                           muted
@@ -1412,19 +1499,21 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
                     </div>
                   )}
 
-                  <div className="pt-1">
-                    <div className="flex items-center justify-between text-slate-500">
-                      {PREVIEW_ACTIONS.map(action => (
-                        <span
-                          key={action.key}
-                          className="flex h-9 w-9 items-center justify-center rounded-full bg-slate-900/60"
-                          title={action.label}
-                        >
-                          <action.icon className="h-4 w-4" />
-                        </span>
-                      ))}
+                  {shareMode === "note" && (
+                    <div className="pt-1">
+                      <div className="flex items-center justify-between text-slate-500">
+                        {PREVIEW_ACTIONS.map(action => (
+                          <span
+                            key={action.key}
+                            className="flex h-9 w-9 items-center justify-center rounded-full bg-slate-900/60"
+                            title={action.label}
+                          >
+                            <action.icon className="h-4 w-4" />
+                          </span>
+                        ))}
+                      </div>
                     </div>
-                  </div>
+                  )}
                 </div>
               </div>
             </div>

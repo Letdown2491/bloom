@@ -22,7 +22,19 @@ import type { FilterMode } from "./types/filter";
 import { prettyBytes } from "./utils/format";
 import { deriveServerNameFromUrl } from "./utils/serverName";
 
-import { ChevronRightIcon, CloseIcon, HomeIcon, SearchIcon, TransferIcon, UploadIcon } from "./components/icons";
+import {
+  ChevronRightIcon,
+  ChevronLeftIcon,
+  CloseIcon,
+  HomeIcon,
+  SearchIcon,
+  TransferIcon,
+  UploadIcon,
+  ServersIcon,
+  RelayIcon,
+  SettingsIcon,
+  LogoutIcon,
+} from "./components/icons";
 import { FolderRenameDialog } from "./components/FolderRenameDialog";
 
 const WorkspaceLazy = React.lazy(() =>
@@ -112,9 +124,12 @@ export default function App() {
     setDefaultSortOption,
     setShowGridPreviews,
     setShowListPreviews,
+    setKeepSearchExpanded,
   } = useUserPreferences();
   const { effectiveRelays } = usePreferredRelays();
   useAliasSync(effectiveRelays, Boolean(pubkey));
+
+  const keepSearchExpanded = preferences.keepSearchExpanded;
 
   const [localServers, setLocalServers] = useState<ManagedServer[]>(servers);
   const [selectedServer, setSelectedServer] = useState<string | null>(() => {
@@ -128,7 +143,7 @@ export default function App() {
   const [activeBrowseFilter, setActiveBrowseFilter] = useState<FilterMode>(preferences.defaultFilterMode);
   const [homeNavigationKey, setHomeNavigationKey] = useState(0);
   const [browseNavigationState, setBrowseNavigationState] = useState<BrowseNavigationState | null>(null);
-  const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [isSearchOpen, setIsSearchOpen] = useState(() => keepSearchExpanded);
   const [searchQuery, setSearchQuery] = useState("");
 
   const { selected: selectedBlobs } = useSelection();
@@ -443,7 +458,19 @@ export default function App() {
     [setShowListPreviews]
   );
 
+  const handleSetKeepSearchExpanded = useCallback(
+    (value: boolean) => {
+      setKeepSearchExpanded(value);
+    },
+    [setKeepSearchExpanded]
+  );
+
   const handleToggleSearch = useCallback(() => {
+    if (keepSearchExpanded) {
+      setTab(prev => (prev === "browse" ? prev : "browse"));
+      setIsSearchOpen(true);
+      return;
+    }
     setIsSearchOpen(prev => {
       const next = !prev;
       if (next) {
@@ -453,7 +480,7 @@ export default function App() {
       }
       return next;
     });
-  }, [setTab]);
+  }, [keepSearchExpanded, setTab]);
 
   const handleSearchChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
     setSearchQuery(event.target.value);
@@ -464,12 +491,15 @@ export default function App() {
     searchInputRef.current?.focus();
   }, []);
 
-  const handleSearchKeyDown = useCallback((event: React.KeyboardEvent<HTMLInputElement>) => {
-    if (event.key === "Escape") {
-      setIsSearchOpen(false);
-      setSearchQuery("");
-    }
-  }, []);
+  const handleSearchKeyDown = useCallback(
+    (event: React.KeyboardEvent<HTMLInputElement>) => {
+      if (event.key === "Escape" && !keepSearchExpanded) {
+        setIsSearchOpen(false);
+        setSearchQuery("");
+      }
+    },
+    [keepSearchExpanded]
+  );
 
   useEffect(() => {
     if (isSearchOpen) {
@@ -489,11 +519,21 @@ export default function App() {
   }, [showAuthPrompt]);
 
   useEffect(() => {
-    if (tab !== "browse" && isSearchOpen) {
+    if (keepSearchExpanded && !showAuthPrompt) {
+      setIsSearchOpen(true);
+      setTab(prev => (prev === "browse" ? prev : "browse"));
+    } else if (!keepSearchExpanded) {
+      setIsSearchOpen(prev => (prev ? false : prev));
+      setSearchQuery("");
+    }
+  }, [keepSearchExpanded, setTab, showAuthPrompt]);
+
+  useEffect(() => {
+    if (!keepSearchExpanded && tab !== "browse" && isSearchOpen) {
       setIsSearchOpen(false);
       setSearchQuery("");
     }
-  }, [isSearchOpen, tab]);
+  }, [isSearchOpen, keepSearchExpanded, tab]);
 
   const handleAddServer = (server: ManagedServer) => {
     const normalized = normalizeManagedServer(server);
@@ -580,21 +620,25 @@ export default function App() {
   const handleShareComplete = useCallback(
     (result: ShareCompletion) => {
       const label = completeShareInternal(result);
-      if (result.mode !== "dm") {
+      const isDm = result.mode === "dm" || result.mode === "dm-private";
+      const isPrivateDm = result.mode === "dm-private";
+      if (!isDm) {
         if (!result.success && result.message) {
           showStatusMessage(result.message, "error", 5000);
         }
         return;
       }
       if (result.success) {
-        let message = label ? `DM sent to ${label}.` : "DM sent.";
+        const dmLabel = isPrivateDm ? "Private DM" : "DM";
+        let message = label ? `${dmLabel} sent to ${label}.` : `${dmLabel} sent.`;
         if (result.failures && result.failures > 0) {
           message += ` ${result.failures} relay${result.failures === 1 ? "" : "s"} reported errors.`;
         }
         showStatusMessage(message, result.failures && result.failures > 0 ? "info" : "success", 5000);
         setTab("browse");
       } else {
-        const message = result.message || (label ? `Failed to send DM to ${label}.` : "Failed to send DM.");
+        const dmLabel = isPrivateDm ? "private DM" : "DM";
+        const message = result.message || (label ? `Failed to send ${dmLabel} to ${label}.` : `Failed to send ${dmLabel}.`);
         showStatusMessage(message, "error", 6000);
       }
     },
@@ -747,7 +791,7 @@ export default function App() {
                   )}
                 </button>
                 {isUserMenuOpen && (
-                  <div className="absolute right-0 z-10 mt-2 min-w-[8rem] rounded-md bg-slate-900 px-2 py-1 text-sm shadow-lg">
+                  <div className="absolute right-0 z-50 mt-2 min-w-[10rem] rounded-md bg-slate-900 px-2 py-2 text-sm shadow-lg">
                     <ul className="flex flex-col gap-1 text-slate-200">
                       <li>
                         <a
@@ -756,9 +800,10 @@ export default function App() {
                             event.preventDefault();
                             handleSelectServers();
                           }}
-                          className="block px-1 py-1 hover:text-emerald-300"
+                          className="flex items-center gap-2 rounded-lg px-2 py-1 transition hover:bg-slate-800/70 hover:text-emerald-300"
                         >
-                          Servers
+                          <ServersIcon size={16} />
+                          <span>Servers</span>
                         </a>
                       </li>
                       <li>
@@ -768,9 +813,10 @@ export default function App() {
                             event.preventDefault();
                             handleSelectRelays();
                           }}
-                          className="block px-1 py-1 hover:text-emerald-300"
+                          className="flex items-center gap-2 rounded-lg px-2 py-1 transition hover:bg-slate-800/70 hover:text-emerald-300"
                         >
-                          Relays
+                          <RelayIcon size={16} />
+                          <span>Relays</span>
                         </a>
                       </li>
                       <li>
@@ -780,9 +826,10 @@ export default function App() {
                             event.preventDefault();
                             handleSelectSettings();
                           }}
-                          className="block px-1 py-1 hover:text-emerald-300"
+                          className="flex items-center gap-2 rounded-lg px-2 py-1 transition hover:bg-slate-800/70 hover:text-emerald-300"
                         >
-                          Settings
+                          <SettingsIcon size={16} />
+                          <span>Settings</span>
                         </a>
                       </li>
                       <li>
@@ -792,9 +839,10 @@ export default function App() {
                             event.preventDefault();
                             handleDisconnectClick();
                           }}
-                          className="block px-1 py-1 hover:text-emerald-300"
+                          className="flex items-center gap-2 rounded-lg px-2 py-1 transition hover:bg-slate-800/70 hover:text-emerald-300"
                         >
-                          Disconnect
+                          <LogoutIcon size={16} />
+                          <span>Disconnect</span>
                         </a>
                       </li>
                     </ul>
@@ -822,6 +870,17 @@ export default function App() {
                   <HomeIcon size={16} />
                   <span>Home</span>
                 </button>
+                {keepSearchExpanded && (
+                  <button
+                    type="button"
+                    onClick={() => browseNavigationState?.onNavigateUp?.()}
+                    disabled={showAuthPrompt || !browseNavigationState?.canNavigateUp}
+                    className="px-3 py-2 text-sm rounded-xl border flex items-center gap-2 transition disabled:cursor-not-allowed disabled:opacity-40 border-slate-800 bg-slate-900/70 text-slate-300 hover:border-slate-700"
+                    aria-label="Go back"
+                  >
+                    <ChevronLeftIcon size={16} />
+                  </button>
+                )}
               </div>
               <div className="min-w-0 flex-1">
                 {isSearchOpen ? (
@@ -873,7 +932,7 @@ export default function App() {
                 <button
                   type="button"
                   onClick={handleToggleSearch}
-                  disabled={showAuthPrompt}
+                  disabled={showAuthPrompt || keepSearchExpanded}
                   aria-label="Search files"
                   aria-pressed={isSearchOpen}
                   className="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-800 bg-slate-900/70 text-slate-300 transition hover:border-slate-700 focus:outline-none focus:ring-1 focus:ring-emerald-500 disabled:cursor-not-allowed disabled:opacity-60"
@@ -1022,12 +1081,14 @@ export default function App() {
                     defaultViewMode={preferences.defaultViewMode}
                     defaultFilterMode={preferences.defaultFilterMode}
                     defaultSortOption={preferences.defaultSortOption}
+                    keepSearchExpanded={keepSearchExpanded}
                     onSetDefaultViewMode={handleSetDefaultViewMode}
                     onSetDefaultFilterMode={handleSetDefaultFilterMode}
                     onSetDefaultSortOption={handleSetDefaultSortOption}
                     onSetDefaultServer={handleSetDefaultServer}
                     onSetShowIconsPreviews={handleSetShowPreviewsInGrid}
                     onSetShowListPreviews={handleSetShowPreviewsInList}
+                    onSetKeepSearchExpanded={handleSetKeepSearchExpanded}
                   />
                 </Suspense>
               )}

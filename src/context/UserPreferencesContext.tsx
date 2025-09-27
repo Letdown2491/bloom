@@ -13,6 +13,7 @@ type UserPreferences = {
   defaultSortOption: DefaultSortOption;
   showGridPreviews: boolean;
   showListPreviews: boolean;
+  keepSearchExpanded: boolean;
 };
 
 const DEFAULT_PREFERENCES: UserPreferences = {
@@ -22,6 +23,7 @@ const DEFAULT_PREFERENCES: UserPreferences = {
   defaultSortOption: "updated",
   showGridPreviews: true,
   showListPreviews: true,
+  keepSearchExpanded: false,
 };
 
 const STORAGE_KEY = "bloom:user-preferences";
@@ -47,6 +49,7 @@ const readStoredPreferences = (): UserPreferences => {
     const showListPreviews = typeof parsed?.showListPreviews === "boolean"
       ? parsed.showListPreviews
       : legacyShowPreviews ?? true;
+    const keepSearchExpanded = typeof parsed?.keepSearchExpanded === "boolean" ? parsed.keepSearchExpanded : false;
     const defaultServerUrl = typeof parsed?.defaultServerUrl === "string" && parsed.defaultServerUrl.trim()
       ? parsed.defaultServerUrl.trim()
       : null;
@@ -57,6 +60,7 @@ const readStoredPreferences = (): UserPreferences => {
       defaultSortOption,
       showGridPreviews,
       showListPreviews,
+      keepSearchExpanded,
     };
   } catch {
     return DEFAULT_PREFERENCES;
@@ -77,6 +81,7 @@ type UserPreferencesContextValue = {
   setDefaultSortOption: (option: DefaultSortOption) => void;
   setShowGridPreviews: (value: boolean) => void;
   setShowListPreviews: (value: boolean) => void;
+  setKeepSearchExpanded: (value: boolean) => void;
 };
 
 const UserPreferencesContext = createContext<UserPreferencesContextValue | undefined>(undefined);
@@ -135,6 +140,13 @@ export const UserPreferencesProvider: React.FC<{ children: React.ReactNode }> = 
     });
   }, []);
 
+  const setKeepSearchExpanded = useCallback((value: boolean) => {
+    setPreferences(prev => {
+      if (prev.keepSearchExpanded === value) return prev;
+      return { ...prev, keepSearchExpanded: value };
+    });
+  }, []);
+
   const value = useMemo(
     () => ({
       preferences,
@@ -144,6 +156,7 @@ export const UserPreferencesProvider: React.FC<{ children: React.ReactNode }> = 
       setDefaultSortOption,
       setShowGridPreviews,
       setShowListPreviews,
+      setKeepSearchExpanded,
     }),
     [
       preferences,
@@ -153,6 +166,7 @@ export const UserPreferencesProvider: React.FC<{ children: React.ReactNode }> = 
       setDefaultSortOption,
       setShowGridPreviews,
       setShowListPreviews,
+      setKeepSearchExpanded,
     ]
   );
 

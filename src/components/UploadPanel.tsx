@@ -627,7 +627,7 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
             </div>
           )}
         </div>
-        {entries.length > 0 && (
+        {entries.length > 0 && !busy && (
           <div className="space-y-3">
             {entries.map(entry => {
               const { file, metadata, kind, showMetadata } = entry;
@@ -696,7 +696,7 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
             })}
           </div>
         )}
-        {hasImageEntries && (
+        {entries.length > 0 && hasImageEntries && !busy && (
           <div className="flex flex-wrap gap-4 text-sm text-slate-300">
             <label className="flex items-center gap-2">
               <input type="checkbox" checked={cleanMetadata} onChange={e => setCleanMetadata(e.target.checked)} />

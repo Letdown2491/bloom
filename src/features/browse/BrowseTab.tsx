@@ -114,8 +114,8 @@ export const BrowseControls: React.FC<BrowseControlsProps> = ({
 
   const viewOptions = useMemo(
     () => [
-      { id: "grid" as const, label: "Icons", Icon: GridIcon, disabled: gridDisabled },
-      { id: "list" as const, label: "List", Icon: ListIcon, disabled: listDisabled },
+      { id: "grid" as const, label: "Grid View", Icon: GridIcon, disabled: gridDisabled },
+      { id: "list" as const, label: "List View", Icon: ListIcon, disabled: listDisabled },
     ],
     [gridDisabled, listDisabled]
   );
@@ -142,30 +142,43 @@ export const BrowseControls: React.FC<BrowseControlsProps> = ({
         {viewMenuOpen && (
           <div
             role="menu"
-            className="absolute z-20 mt-2 w-40 rounded-xl border border-slate-800 bg-slate-950/95 p-1 shadow-lg backdrop-blur"
+            className="absolute z-50 mt-2 w-40 rounded-xl border border-slate-800 bg-slate-950/95 p-1 shadow-lg backdrop-blur"
           >
             {viewOptions.map(option => {
               const isActive = option.id === viewMode;
               return (
-                <button
+                <a
                   key={option.id}
                   role="menuitemradio"
                   aria-checked={isActive}
-                  disabled={option.disabled}
-                  onClick={() => {
+                  aria-disabled={option.disabled || undefined}
+                  tabIndex={option.disabled ? -1 : 0}
+                  href="#"
+                  onClick={event => {
+                    event.preventDefault();
                     if (option.disabled) return;
                     onViewModeChange(option.id);
                     setViewMenuOpen(false);
                   }}
-                  className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm transition disabled:cursor-not-allowed disabled:opacity-50 ${
-                    isActive
-                      ? "bg-emerald-500/15 text-emerald-200"
+                  onKeyDown={event => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      if (option.disabled) return;
+                      onViewModeChange(option.id);
+                      setViewMenuOpen(false);
+                    }
+                  }}
+                  className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm transition ${
+                    option.disabled
+                      ? "pointer-events-none opacity-50"
+                      : isActive
+                      ? "bg-emerald-500/15 text-emerald-200 hover:bg-emerald-500/20"
                       : "text-slate-300 hover:bg-slate-800/70"
                   }`}
                 >
                   <option.Icon size={16} />
                   <span>{option.label}</span>
-                </button>
+                </a>
               );
             })}
           </div>
@@ -193,7 +206,7 @@ export const BrowseControls: React.FC<BrowseControlsProps> = ({
         {isFilterMenuOpen && (
           <div
             role="menu"
-            className="absolute right-0 z-20 mt-2 w-48 rounded-xl border border-slate-800 bg-slate-950/95 p-1 shadow-lg backdrop-blur"
+            className="absolute right-0 z-50 mt-2 w-48 rounded-xl border border-slate-800 bg-slate-950/95 p-1 shadow-lg backdrop-blur"
           >
             {FILTER_OPTIONS.map(option => {
               const isActive = filterMode === option.id;

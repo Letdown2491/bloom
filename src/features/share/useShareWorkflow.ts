@@ -21,7 +21,8 @@ export const useShareWorkflow = () => {
 
   const handleShareComplete = useCallback(
     (result: ShareCompletion) => {
-      if (result.mode !== "dm") {
+      const isDm = result.mode === "dm" || result.mode === "dm-private";
+      if (!isDm) {
         if (result.success) {
           clearShareState();
         }

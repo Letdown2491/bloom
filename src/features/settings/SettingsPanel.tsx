@@ -14,6 +14,8 @@ const BASE_FILTER_OPTIONS: { id: FilterMode; label: string }[] = [
 
 const FILTER_OPTIONS = [...BASE_FILTER_OPTIONS].sort((a, b) => a.label.localeCompare(b.label));
 
+const LABEL_CLASSES = "w-52 shrink-0 text-[11px] font-semibold uppercase tracking-wide text-white";
+
 const SORT_OPTIONS: { id: DefaultSortOption; label: string }[] = [
   { id: "name", label: "Name" },
   { id: "servers", label: "Servers" },
@@ -29,12 +31,14 @@ type SettingsPanelProps = {
   defaultSortOption: DefaultSortOption;
   showIconsPreviews: boolean;
   showListPreviews: boolean;
+  keepSearchExpanded: boolean;
   onSetDefaultViewMode: (mode: "grid" | "list") => void;
   onSetDefaultFilterMode: (mode: FilterMode) => void;
   onSetDefaultSortOption: (option: DefaultSortOption) => void;
   onSetDefaultServer: (url: string | null) => void;
   onSetShowIconsPreviews: (value: boolean) => void;
   onSetShowListPreviews: (value: boolean) => void;
+  onSetKeepSearchExpanded: (value: boolean) => void;
 };
 
 export const SettingsPanel: React.FC<SettingsPanelProps> = ({
@@ -45,12 +49,14 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   defaultSortOption,
   showIconsPreviews,
   showListPreviews,
+  keepSearchExpanded,
   onSetDefaultViewMode,
   onSetDefaultFilterMode,
   onSetDefaultSortOption,
   onSetDefaultServer,
   onSetShowIconsPreviews,
   onSetShowListPreviews,
+  onSetKeepSearchExpanded,
 }) => {
   const showIconsToggleId = React.useId();
   const showListToggleId = React.useId();
@@ -67,7 +73,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
       <h2 className="text-lg font-semibold text-slate-100">Settings</h2>
       <div className="mt-4 space-y-5 text-sm text-slate-300">
         <div className="flex flex-wrap items-center gap-3">
-          <span className="text-[11px] font-semibold uppercase tracking-wide text-white">Default server</span>
+          <span className={LABEL_CLASSES}>Default server:</span>
           <select
             value={defaultServerSelectValue}
             onChange={event => {
@@ -86,7 +92,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
-          <span className="text-[11px] font-semibold uppercase tracking-wide text-white">Default browse view</span>
+          <span className={LABEL_CLASSES}>Default layout:</span>
           <div className="flex gap-2">
             <button
               type="button"
@@ -97,7 +103,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                   : "border-slate-400 text-white hover:border-slate-500"
               }`}
             >
-              Icons
+              Grid View
             </button>
             <button
               type="button"
@@ -108,13 +114,13 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                   : "border-slate-400 text-white hover:border-slate-500"
               }`}
             >
-              List
+              List View
             </button>
           </div>
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
-          <span className="text-[11px] font-semibold uppercase tracking-wide text-white">Default filter</span>
+          <span className={LABEL_CLASSES}>Default filter:</span>
           <div className="flex flex-wrap gap-2">
             {FILTER_OPTIONS.map(option => (
               <button
@@ -134,7 +140,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
-          <span className="text-[11px] font-semibold uppercase tracking-wide text-white">Default sorting</span>
+          <span className={LABEL_CLASSES}>Default sorting:</span>
           <div className="flex flex-wrap gap-2">
             {SORT_OPTIONS.map(option => (
               <button
@@ -154,8 +160,8 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
-          <span className="text-[11px] font-semibold uppercase tracking-wide text-white" id={showIconsToggleId}>
-            Previews in Icons view
+          <span className={LABEL_CLASSES} id={showIconsToggleId}>
+            Previews in Icons view:
           </span>
           <div className="flex gap-2">
             <button
@@ -188,8 +194,8 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
-          <span className="text-[11px] font-semibold uppercase tracking-wide text-white" id={showListToggleId}>
-            Previews in List view
+          <span className={LABEL_CLASSES} id={showListToggleId}>
+            Previews in List view:
           </span>
           <div className="flex gap-2">
             <button
@@ -217,6 +223,34 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
               }`}
             >
               Hide
+            </button>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-3">
+          <span className={LABEL_CLASSES}>Keep search bar expanded:</span>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => onSetKeepSearchExpanded(true)}
+              className={`rounded-lg border px-3 py-1.5 text-xs transition ${
+                keepSearchExpanded
+                  ? "border-emerald-500 bg-emerald-500/10 text-emerald-200"
+                  : "border-slate-400 text-white hover:border-slate-500"
+              }`}
+            >
+              Yes
+            </button>
+            <button
+              type="button"
+              onClick={() => onSetKeepSearchExpanded(false)}
+              className={`rounded-lg border px-3 py-1.5 text-xs transition ${
+                !keepSearchExpanded
+                  ? "border-emerald-500 bg-emerald-500/10 text-emerald-200"
+                  : "border-slate-400 text-white hover:border-slate-500"
+              }`}
+            >
+              No
             </button>
           </div>
         </div>

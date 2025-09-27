@@ -810,23 +810,22 @@ export const ServerList: React.FC<ServerListProps> = ({
                   className={`border-t border-slate-800 first:border-t-0 cursor-pointer transition-colors focus:outline-none focus:ring-2 focus:ring-emerald-500/60 focus:ring-offset-2 focus:ring-offset-slate-900 ${rowHighlightClass}`}
                 >
                   <td className="py-3 px-3 text-center">
-                    {isDefault ? (
-                      <span className="rounded-lg border border-emerald-500/60 bg-emerald-500/10 px-2 py-1 text-[10px] uppercase tracking-wide text-emerald-200">
-                        Default
-                      </span>
-                    ) : (
-                      <button
-                        type="button"
-                        className="text-xs rounded-lg border border-slate-700 px-2 py-1 text-slate-200 transition hover:border-emerald-500 hover:text-emerald-200"
-                        onClick={event => {
-                          event.stopPropagation();
-                          onSetDefaultServer(server.url);
-                          onSelect(server.url);
-                        }}
-                      >
-                        Set default
-                      </button>
-                    )}
+                    <button
+                      type="button"
+                      className={`text-xs rounded-lg border px-2 py-1 transition ${
+                        isDefault
+                          ? "border-emerald-500/70 bg-emerald-500/10 text-emerald-200"
+                          : "border-slate-700 text-slate-200 hover:border-emerald-500 hover:text-emerald-200"
+                      }`}
+                      onClick={event => {
+                        event.stopPropagation();
+                        const nextDefault = isDefault ? null : server.url;
+                        onSetDefaultServer(nextDefault);
+                        onSelect(nextDefault);
+                      }}
+                    >
+                      {isDefault ? "Default" : "Set default"}
+                    </button>
                   </td>
                   <td className="py-3 px-3 font-medium text-slate-100">
                     <div className="flex items-center gap-2">

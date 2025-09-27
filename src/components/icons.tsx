@@ -316,6 +316,31 @@ export const ServersIcon = createIcon(
   </>
 );
 
+export const RelayIcon = createIcon(
+  <>
+    <circle cx="6" cy="8" r="2" />
+    <circle cx="18" cy="6" r="2" />
+    <circle cx="18" cy="18" r="2" />
+    <path d="M7.9 9.2 16.1 7.2" />
+    <path d="M7.5 10.4l8.8 5.6" />
+  </>
+);
+
+export const SettingsIcon = createIcon(
+  <>
+    <circle cx="12" cy="12" r="3" />
+    <path d="M19.4 15a2 2 0 0 0 .4 2.2l.1.1a1.8 1.8 0 1 1-2.5 2.5l-.1-.1a2 2 0 0 0-2.2-.4 2 2 0 0 0-1.2 1.8V21a1.8 1.8 0 1 1-3.6 0v-.1a2 2 0 0 0-1.2-1.8 2 2 0 0 0-2.2.4l-.1.1a1.8 1.8 0 1 1-2.5-2.5l.1-.1a2 2 0 0 0 .4-2.2 2 2 0 0 0-1.8-1.2H3a1.8 1.8 0 1 1 0-3.6h.1a2 2 0 0 0 1.8-1.2 2 2 0 0 0-.4-2.2l-.1-.1A1.8 1.8 0 0 1 7 3.9l.1.1a2 2 0 0 0 2.2.4A2 2 0 0 0 10.3 3V3a1.8 1.8 0 1 1 3.6 0v.1a2 2 0 0 0 1.2 1.8 2 2 0 0 0 2.2-.4l.1-.1a1.8 1.8 0 1 1 2.5 2.5l-.1.1a2 2 0 0 0-.4 2.2 2 2 0 0 0 1.8 1.2H21a1.8 1.8 0 1 1 0 3.6h-.1a2 2 0 0 0-1.5 1.2Z" />
+  </>
+);
+
+export const LogoutIcon = createIcon(
+  <>
+    <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+    <path d="M16 17l5-5-5-5" />
+    <path d="M21 12H9" />
+  </>
+);
+
 export const FileTypeIcon: React.FC<{ kind: FileKind; size?: number; className?: string }> = ({ kind, size = 20, className }) => {
   switch (kind) {
     case "folder":
