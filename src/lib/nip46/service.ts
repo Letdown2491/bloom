@@ -4,8 +4,11 @@ import {
   createSessionFromUri,
   CreateSessionFromUriOptions,
   CreatedSessionResult,
+  RemoteSignerMetadata,
+  ParsedNostrConnectToken,
 } from "./session";
-import { Nip46Method } from "./types";
+import { generateKeypair } from "./keys";
+import { Nip46Method, Nip46EncryptionAlgorithm } from "./types";
 import { RequestQueue } from "./transport/requestQueue";
 import { TransportConfig } from "./transport";
 
@@ -51,6 +54,37 @@ export class Nip46Service {
     }
 
     return result;
+  }
+
+  async createInvitation(options?: CreateInvitationOptions): Promise<Nip46Invitation> {
+    const keypair = generateKeypair();
+    const relays = normalizeRelays(options?.relays);
+    const secret = options?.secret ?? generateSecret();
+    const permissions = options?.permissions ?? [];
+    const metadata = options?.metadata;
+
+    const token = createTokenFromInvitation({
+      clientPubkey: keypair.publicKey,
+      relays,
+      secret,
+      permissions,
+      metadata,
+    });
+
+    const result = await this.options.sessionManager.createSession({
+      token,
+      keypair,
+      metadata,
+      algorithm: options?.algorithm,
+    });
+
+    await this.init();
+
+    const uri = buildNostrConnectUri(token);
+    return {
+      ...result,
+      uri,
+    };
   }
 
   async sendRequest(
@@ -121,4 +155,94 @@ export class Nip46Service {
       });
     }
   }
+}
+
+interface InvitationTokenInput {
+  clientPubkey: string;
+  relays: string[];
+  secret?: string;
+  permissions: string[];
+  metadata?: RemoteSignerMetadata;
+}
+
+const createTokenFromInvitation = (input: InvitationTokenInput): ParsedNostrConnectToken => {
+  const { clientPubkey, relays, secret, permissions, metadata } = input;
+  const rawParams: Record<string, string | string[]> = {};
+  if (relays.length) rawParams.relay = [...relays];
+  if (secret) rawParams.secret = secret;
+  if (permissions.length) rawParams.perms = permissions.join(",");
+  if (metadata?.name) rawParams.name = metadata.name;
+  if (metadata?.url) rawParams.url = metadata.url;
+  if (metadata?.image) rawParams.image = metadata.image;
+  if (metadata) rawParams.metadata = JSON.stringify(metadata);
+
+  return {
+    type: "nostrconnect",
+    clientPubkey,
+    relays,
+    secret,
+    permissions,
+    metadata,
+    rawParams,
+  };
+};
+
+const normalizeRelays = (relays?: string[]): string[] => {
+  if (!relays?.length) return [];
+  const unique = new Set<string>();
+  relays.forEach(relay => {
+    if (typeof relay !== "string") return;
+    const trimmed = relay.trim();
+    if (!trimmed) return;
+    unique.add(trimmed);
+  });
+  return Array.from(unique);
+};
+
+const generateSecret = (byteLength = 16): string => {
+  const bytes = new Uint8Array(byteLength);
+  if (typeof crypto !== "undefined" && typeof crypto.getRandomValues === "function") {
+    crypto.getRandomValues(bytes);
+  } else {
+    for (let i = 0; i < byteLength; i += 1) {
+      bytes[i] = Math.floor(Math.random() * 256);
+    }
+  }
+  return bytesToHex(bytes);
+};
+
+const bytesToHex = (bytes: Uint8Array): string =>
+  Array.from(bytes)
+    .map(byte => byte.toString(16).padStart(2, "0"))
+    .join("");
+
+const buildNostrConnectUri = (token: ParsedNostrConnectToken): string => {
+  const params = new URLSearchParams();
+  token.relays.forEach(relay => {
+    params.append("relay", relay);
+  });
+  if (token.secret) {
+    params.set("secret", token.secret);
+  }
+  if (token.permissions.length) {
+    params.set("perms", token.permissions.join(","));
+  }
+  if (token.metadata) {
+    params.set("metadata", JSON.stringify(token.metadata));
+  }
+  const query = params.toString();
+  const encodedPubkey = encodeURIComponent(token.clientPubkey);
+  return query ? `nostrconnect://${encodedPubkey}?${query}` : `nostrconnect://${encodedPubkey}`;
+};
+
+export interface CreateInvitationOptions {
+  relays?: string[];
+  metadata?: RemoteSignerMetadata;
+  permissions?: string[];
+  secret?: string;
+  algorithm?: Nip46EncryptionAlgorithm;
+}
+
+export interface Nip46Invitation extends CreatedSessionResult {
+  uri: string;
 }

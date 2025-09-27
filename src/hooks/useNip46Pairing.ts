@@ -1,6 +1,11 @@
 import { useCallback } from "react";
 import { useNip46 } from "../context/Nip46Context";
-import { CreateSessionFromUriOptions, CreatedSessionResult } from "../lib/nip46";
+import {
+  CreateSessionFromUriOptions,
+  CreatedSessionResult,
+  CreateInvitationOptions,
+  Nip46Invitation,
+} from "../lib/nip46";
 
 export const useNip46Pairing = () => {
   const { service } = useNip46();
@@ -12,7 +17,15 @@ export const useNip46Pairing = () => {
     [service]
   );
 
+  const createInvitation = useCallback(
+    async (options?: CreateInvitationOptions): Promise<Nip46Invitation> => {
+      return service.createInvitation(options);
+    },
+    [service]
+  );
+
   return {
     pairWithUri,
+    createInvitation,
   };
 };

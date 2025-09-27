@@ -2,6 +2,7 @@ import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState } fr
 import { useQueryClient } from "@tanstack/react-query";
 
 import { useNdk, useCurrentPubkey } from "./context/NdkContext";
+import { useNip46 } from "./context/Nip46Context";
 import { useServers, ManagedServer, sortServersByName } from "./hooks/useServers";
 import { usePreferredRelays } from "./hooks/usePreferredRelays";
 import { useAliasSync } from "./hooks/useAliasSync";
@@ -100,6 +101,7 @@ const validateManagedServers = (servers: ManagedServer[]): string | null => {
 export default function App() {
   const queryClient = useQueryClient();
   const { connect, disconnect, user, signer, ndk } = useNdk();
+  const { snapshot: nip46Snapshot } = useNip46();
   const pubkey = useCurrentPubkey();
   const { servers, saveServers, saving } = useServers();
   const {
@@ -338,6 +340,24 @@ export default function App() {
     },
     []
   );
+
+  const hasActiveRemoteSigner = useMemo(() => {
+    if (signer) return true;
+    return nip46Snapshot.sessions.some(session => session.userPubkey && !session.lastError);
+  }, [signer, nip46Snapshot.sessions]);
+
+  const handleConnectSignerClick = useCallback(() => {
+    if (hasActiveRemoteSigner) {
+      showStatusMessage("Remote signer already connected", "info", 2500);
+      return;
+    }
+    setConnectSignerOpen(true);
+  }, [hasActiveRemoteSigner, showStatusMessage]);
+
+  useEffect(() => {
+    if (!hasActiveRemoteSigner) return;
+    setConnectSignerOpen(false);
+  }, [hasActiveRemoteSigner]);
 
   const handleRequestRename = useCallback((blob: BlossomBlob) => {
     setRenameTarget(blob);
@@ -1066,10 +1086,10 @@ export default function App() {
                   Connect With Browser Extension
                 </button>
                 <button
-                  onClick={() => setConnectSignerOpen(true)}
+                  onClick={handleConnectSignerClick}
                   className="px-3 py-2 rounded-xl border border-emerald-500/60 bg-transparent text-emerald-300 hover:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-slate-900"
                 >
-                  Connect With Signer
+                  Connect With Remote Signer
                 </button>
               </div>
             </div>
@@ -1106,7 +1126,6 @@ export default function App() {
             <ConnectSignerDialogLazy
               open={connectSignerOpen}
               onClose={() => setConnectSignerOpen(false)}
-              onPaired={() => showStatusMessage("Amber signer connected", "success")}
             />
           </Suspense>
         </div>

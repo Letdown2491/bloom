@@ -122,7 +122,11 @@ export const createNdkTransport = (ndk: NDK): TransportConfig => {
     subscribe: (filters, handler) => {
       const ndkFilters = filters.map(convertFilter);
       const subscription = ndk.subscribe(ndkFilters, { closeOnEose: false }, {
-        onEvent: (ndkEvent: NDKEvent) => handler(ndkEvent.rawEvent()),
+        onEvent: (ndkEvent: NDKEvent) => {
+          const raw = ndkEvent.rawEvent();
+          console.debug("NIP-46 raw event", raw);
+          handler(raw);
+        },
       });
       return () => {
         subscription.removeAllListeners();

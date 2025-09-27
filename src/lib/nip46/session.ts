@@ -173,7 +173,7 @@ export class SessionManager {
   }
 
   async createSession(input: CreateSessionInput): Promise<CreatedSessionResult> {
-    const keypair = generateKeypair();
+    const keypair = input.keypair ?? generateKeypair();
     const now = Date.now();
     const baseId =
       input.token.type === "nostrconnect" ? input.token.clientPubkey : input.token.remoteSignerPubkey;
@@ -256,6 +256,7 @@ export interface CreateSessionInput {
   token: ParsedNostrConnectToken | ParsedBunkerToken;
   algorithm?: Nip46EncryptionAlgorithm;
   metadata?: RemoteSignerMetadata;
+  keypair?: Nip46Keypair;
 }
 
 export interface CreatedSessionResult {

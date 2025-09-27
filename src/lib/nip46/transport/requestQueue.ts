@@ -3,7 +3,7 @@ import { finalizeEvent } from "nostr-tools";
 import { Nip46Codec } from "../codec";
 import { RemoteSignerSession, SessionManager } from "../session";
 import { hexToBytes } from "../keys";
-import { Nip46AnyResponse, Nip46CodecError, Nip46RequestPayload } from "../types";
+import { Nip46AnyResponse, Nip46CodecError, Nip46RequestPayload, Nip46ResponsePayload } from "../types";
 import { PendingRequest, TransportConfig, NostrEvent, NostrFilter } from "./types";
 
 const REQUEST_KIND = 24133;
@@ -243,13 +243,29 @@ export class RequestQueue {
     try {
       payload = await this.options.codec.decodeResponse(event.content, context);
     } catch (error) {
-      throw new Error(
-        error instanceof Nip46CodecError ? error.message : "Failed to decode NIP-46 response payload"
-      );
+      if (error instanceof Nip46CodecError) {
+        try {
+          const requestPayload = await this.options.codec.decodeRequest(event.content, context);
+          await this.handleIncomingRequest(session, requestPayload, event);
+          return;
+        } catch (innerError) {
+          throw new Error(
+            innerError instanceof Nip46CodecError
+              ? innerError.message
+              : "Failed to decode NIP-46 response payload"
+          );
+        }
+      }
+      throw new Error(error instanceof Error ? error.message : "Failed to decode NIP-46 response payload");
     }
 
     const pendingRequest = this.requests.get(payload.id);
     const inflight = this.inflight.get(payload.id);
+    console.debug("NIP-46 response", {
+      sessionId: session.id,
+      method: pendingRequest?.method ?? "<none>",
+      payload,
+    });
 
     const pendingMethod = pendingRequest?.method;
 
@@ -366,5 +382,116 @@ export class RequestQueue {
     }
 
     inflight.resolve(responseRecord);
+  }
+
+  private async handleIncomingRequest(
+    session: RemoteSignerSession,
+    request: Nip46RequestPayload,
+    event: NostrEvent
+  ): Promise<void> {
+    if (request.method !== "connect") {
+      await this.publishResponse(session, event.pubkey, {
+        id: request.id,
+        error: "unsupported_method",
+      });
+      return;
+    }
+
+    const update: Partial<RemoteSignerSession> = {
+      lastSeenAt: Date.now(),
+      authChallengeUrl: null,
+      pendingRelays: null,
+    };
+
+    const remoteSignerPubkey = event.pubkey;
+    if (!session.remoteSignerPubkey) {
+      update.remoteSignerPubkey = remoteSignerPubkey;
+    }
+
+    const providedSecret = request.params[1]?.trim();
+    let responseResult: string | undefined = undefined;
+    let responseError: string | undefined = undefined;
+
+    const expectSecret = Boolean(session.nostrConnectSecret);
+    if (expectSecret && providedSecret && providedSecret !== session.nostrConnectSecret) {
+      update.status = "revoked";
+      update.lastError = "Signer failed secret validation";
+      responseError = "invalid_secret";
+    } else {
+      update.status = "active";
+      update.lastError = null;
+      update.nostrConnectSecret = undefined;
+      responseResult = session.nostrConnectSecret ?? "ack";
+    }
+
+    await this.options.sessionManager.updateSession(session.id, update);
+
+    if (!responseError) {
+      void this.options.sessionManager.setActiveSession(session.id).catch(() => undefined);
+      const refreshed = this.options.sessionManager.getSession(session.id);
+      if (
+        refreshed &&
+        !refreshed.userPubkey &&
+        refreshed.permissions.includes("get_public_key") &&
+        refreshed.remoteSignerPubkey
+      ) {
+        const requestPayload = this.options.codec.createRequest("get_public_key", []);
+        void this.enqueue(refreshed, requestPayload).catch(error => {
+          console.warn("Failed to auto-fetch user public key", error);
+        });
+      }
+    }
+
+    await this.publishResponse(session, remoteSignerPubkey, {
+      id: request.id,
+      result: responseResult,
+      error: responseError,
+    });
+  }
+
+  private async publishResponse(
+    session: RemoteSignerSession,
+    remotePubkey: string,
+    payload: Nip46ResponsePayload
+  ): Promise<void> {
+    const privateKey = hexToBytes(session.clientPrivateKey);
+    const context = {
+      localPrivateKey: privateKey,
+      remotePublicKey: remotePubkey,
+      algorithm: session.algorithm,
+    } as const;
+
+    let ciphertext: string;
+    try {
+      ciphertext = await this.options.codec.encodeResponse(payload, context);
+    } catch (error) {
+      throw new Error(
+        error instanceof Nip46CodecError ? error.message : "Failed to encode NIP-46 response payload"
+      );
+    }
+
+    const tags = [[TAG_P, remotePubkey]] as string[][];
+    const created_at = seconds();
+    const unsigned = {
+      kind: REQUEST_KIND,
+      content: ciphertext,
+      tags,
+      created_at,
+    } as const;
+
+    let signed;
+    try {
+      signed = finalizeEvent(unsigned, privateKey);
+    } catch (error) {
+      throw new Error(error instanceof Error ? error.message : "Failed to sign NIP-46 response event");
+    }
+
+    const event = {
+      ...signed,
+      relays: session.relays.length ? session.relays : undefined,
+      sessionId: session.id,
+    } as NostrEvent;
+
+    await this.options.transport.publish(event);
   }
 }
