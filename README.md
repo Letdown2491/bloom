@@ -1,19 +1,19 @@
 # Bloom
-make 
-Bloom is a simple to use and intuitive file manager utilizing Blossom and NIP-96 servers to store files in a distributed way. 
+Bloom is a simple to use and intuitive file manager interface for Blossom and NIP-96 servers, alowing users to store files in a distributed way easily.
 
 ## What can Bloom do?
-- **No accounts, no passwords:** sign in with your Nostr account.
-- **Stay organized:** See everything stored on each server at a glance.
-- **Keep files safe:** Make backup copies on other servers with just a few clicks.
-- **Share easily:** Grab ready-to-use links without digging through menus or share directly to Nostr by creating a note with embedded media.
-- **Metadata support:** Bloom fully supports editing blob metadata both at time of upload and at any point after. This is done through Nostr NIP-94 support. This allows users to "rename" blob hashes to human-readable names and add additional data for certain filetypes like ID3 tags to music files.
-- **Media support:** Play your music right from Bloom, and with rich metadata support, actually know what you're playing :-D
-- **Connection Management:** Manage your media servers and Nostr relays right from Bloom.
+- **No accounts, no passwords:** sign in with your Nostr npub via browser extension (NIP-07), or remote signer (NIP-46).
+- **Stay organized:** See everything stored on each server at a glance. Want to store stuff in folders? No problem! While Blossom servers do not support this by default, Bloom leverages lists (NIP-51) to store links to blobs in a way that resembles a traditional filesystem.
+- **Keep files safe:** Make backup copies on other servers with just a two clicks.
+- **Keep files private:** At upload, users have the option of marking files as private which encrypts the payload with AES-GCM (NIP-44) locally before sending it to the defined servers. Note that since files are store on the user's local machine, Bloom cannot currently encrypt files that already exist on a remote server.
+- **Share easily:** Grab ready-to-use links without digging through menus or share directly to Nostr by creating a note with embedded media or sending it to other users directly via DM (NIP-04) or private DM (NIP-17 encrypted via NIP-44 and sealed via NIP-59).
+- **Metadata support:** Bloom fully supports editing blob metadata both at time of upload and at any point after. This is done through Nostr NIP-94 support. This allows users to "rename" blob hashes to human-readable names and add additional data for certain filetypes. Users can also set a "folder" tag on the fly. Bloom also has an option to remove EXIF metadata from images at the time of upload.
+- **Media support:** Play your music right from Bloom, and with rich metadata support, actually know what you're playing. Audio files with ID3 tags will be automatically paarsed and converted into metadata tags at the time of upload.
+- **Connection management:** Manage your Blossom and NIP-96 servers as well as Nostr relay list (NIP-65) right from Bloom. We also support Satellite.earth's API if you use their servers for uploads.
+- **Fully customizeable:** Control various UI elements right from the Settings page.
 
 ## Before You Start
-- Use a browser that supports Nostr extensions (for example, Alby)
-- Have the addresses of the Blossom servers you want to use. I have added a few popular options by default in case you don't have any preference.
+- You need a browser with a Nostr extension such as Alby installed, or have a remote signer such as Amber available.
 
 ## Quick Start
 ```bash
@@ -21,17 +21,6 @@ pnpm install
 pnpm dev
 # open http://localhost:5173
 ```
-
-1. Open Bloom and click **Connect (NIP-07)** so your browser extension can unlock your servers.
-2. Add one or more server addresses in the **Servers** panel. The server name is derived from the URL, but feel free to customize with your own.
-3. Browse your files, copy links, or delete items you no longer need.
-4. Head to **Upload** to drop in new photos, audio, or other media. Bloom tidies them, removes extra data, and keeps track of progress.
-5. Use **Transfer** when you want to copy selected files to another server for backup.
-
-## How It Works Behind the Scenes
-- Bloom remembers your preferred servers by saving a short note to your Nostr profile. Your data is yours always.
-- The app talks to Blossom and NIP-96 servers using simple web requests to list, upload, delete, or mirror files.
-- Extra tools help clean images (remove hidden data, resize, generate blur previews) before they upload.
 
 ## Production Build
 ```bash
