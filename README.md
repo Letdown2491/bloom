@@ -10,7 +10,7 @@ Bloom is a simple to use and intuitive file manager interface for Blossom and NI
 - **Metadata support:** Bloom fully supports editing blob metadata both at time of upload and at any point after. This is done through Nostr NIP-94 support. This allows users to "rename" blob hashes to human-readable names and add additional data for certain filetypes. Users can also set a "folder" tag on the fly. Bloom also has an option to remove EXIF metadata from images at the time of upload.
 - **Media support:** Play your music right from Bloom, and with rich metadata support, actually know what you're playing. Audio files with ID3 tags will be automatically parsed and converted into metadata tags at the time of upload.
 - **Connection management:** Manage your Blossom and NIP-96 servers as well as Nostr relay list (NIP-65) right from Bloom. We also support Satellite.earth's API if you use their servers for uploads.
-- **Fully customizeable:** Control various UI elements right from the Settings page.
+- **Fully customizable:** Control various UI elements right from the Settings page.
 
 ## Before You Start
 - You need a browser with a Nostr extension such as Alby installed, or have a remote signer such as Amber available.
