@@ -4,6 +4,7 @@ Bloom is a simple to use and intuitive file manager interface for Blossom and NI
 ## What can Bloom do?
 - **No accounts, no passwords:** Sign in with your Nostr npub via browser extension (NIP-07), or remote signer (NIP-46).
 - **Stay organized:** See everything stored on each server at a glance. Want to store stuff in folders? No problem! While Blossom servers do not support this by default, Bloom leverages lists (NIP-51) to store links to blobs in a way that resembles a traditional file system.
+- **File searches:** Easily search for files on any connected server by name, file type, mime type, extension, or file size, or combined any search type to find exactly what you need. Bloom also has some easy to access filters for popular file types right from the toolbar.
 - **Keep files safe:** Make backup copies on other servers with just a couple of clicks.
 - **Keep files private:** At upload, users have the option of marking files as private which encrypts the payload with AES-GCM (NIP-44) locally before sending it to the defined servers. Note that since files are encrypted on the user's machine, Bloom cannot currently encrypt files that already exist on a remote server.
 - **Share easily:** Grab ready-to-use links without digging through menus or share directly to Nostr by creating a note with embedded media or sending it to other users directly via DM (NIP-04) or private DM (NIP-17 encrypted via NIP-44 and sealed via NIP-59) without ever having to leave Bloom.
