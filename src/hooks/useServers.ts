@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useMemo } from "react";
 import { USER_BLOSSOM_SERVER_LIST_KIND } from "blossom-client-sdk";
 import { useCurrentPubkey, useNdk } from "../context/NdkContext";
-import { NDKEvent } from "@nostr-dev-kit/ndk";
+import type { NDKEvent as NdkEvent } from "@nostr-dev-kit/ndk";
 import { deriveServerNameFromUrl } from "../utils/serverName";
 
 export type ManagedServer = {
@@ -17,10 +17,9 @@ export type ManagedServer = {
 const DEFAULT_SERVERS: ManagedServer[] = [
   { name: "Nostrcheck", url: "https://nostrcheck.me", type: "nip96", requiresAuth: true, sync: false },
   { name: "Primal", url: "https://blossom.primal.net", type: "blossom", requiresAuth: true, sync: false },
-  { name: "Satellite Earth", url: "https://cdn.satellite.earth", type: "satellite", requiresAuth: true, sync: false },
 ];
 
-function parseServerTags(event: NDKEvent): ManagedServer[] {
+function parseServerTags(event: NdkEvent): ManagedServer[] {
   const seen = new Set<string>();
   const servers: ManagedServer[] = [];
   for (const tag of event.tags) {
@@ -30,14 +29,15 @@ function parseServerTags(event: NDKEvent): ManagedServer[] {
     const url = rawUrl.replace(/\/$/, "");
     if (seen.has(url)) continue;
     seen.add(url);
-    const rawType = (tag[2] as ManagedServer["type"]) || "blossom";
+    const rawType = (tag[2] as ManagedServer["type"] | "satellite") || "blossom";
     const type: ManagedServer["type"] = rawType === "nip96" || rawType === "satellite" ? rawType : "blossom";
     const flag = tag[3] || "";
     const note = tag[4];
-    const requiresAuth = type === "satellite" ? true : flag.includes("auth");
+    const customName = (tag[5] || "").trim();
+    const requiresAuth = rawType === "satellite" ? true : flag.includes("auth");
     const sync = flag.includes("sync");
     const derivedName = deriveServerNameFromUrl(url);
-    const name = derivedName || url.replace(/^https?:\/\//, "");
+    const name = customName || derivedName || url.replace(/^https?:\/\//, "");
     servers.push({ url, name, type, requiresAuth, note, sync });
   }
   return servers;
@@ -48,7 +48,7 @@ export const sortServersByName = (servers: ManagedServer[]): ManagedServer[] => 
 };
 
 export const useServers = () => {
-  const { ndk, status: ndkStatus, connectionError: ndkError } = useNdk();
+  const { ndk, status: ndkStatus, connectionError: ndkError, getModule } = useNdk();
   const pubkey = useCurrentPubkey();
   const queryClient = useQueryClient();
 
@@ -66,9 +66,9 @@ export const useServers = () => {
       const events = (await ndk.fetchEvents({
         authors: [pubkey],
         kinds: [USER_BLOSSOM_SERVER_LIST_KIND],
-      })) as Set<NDKEvent>;
+      })) as Set<NdkEvent>;
       if (events.size === 0) return [];
-      const eventsArray = Array.from(events) as NDKEvent[];
+      const eventsArray = Array.from(events) as NdkEvent[];
       eventsArray.sort((a, b) => (b.created_at ?? 0) - (a.created_at ?? 0));
       const newest = eventsArray[0];
       if (!newest) return [];
@@ -76,9 +76,12 @@ export const useServers = () => {
     },
   });
 
+  const hasFetchedUserServers = query.isSuccess;
+
   const saveMutation = useMutation({
     mutationFn: async (servers: ManagedServer[]) => {
       if (!ndk || !pubkey || !ndk.signer) throw new Error("Connect your Nostr signer first.");
+      const { NDKEvent } = await getModule();
       const event = new NDKEvent(ndk);
       event.kind = USER_BLOSSOM_SERVER_LIST_KIND;
       event.created_at = Math.floor(Date.now() / 1000);
@@ -89,7 +92,7 @@ export const useServers = () => {
         if (s.requiresAuth) flagParts.push("auth");
         if (s.sync) flagParts.push("sync");
         const flag = flagParts.join(",");
-        return ["server", s.url, s.type, flag, s.note || ""];
+        return ["server", s.url, s.type, flag, s.note || "", s.name];
       });
       await event.sign();
       await event.publish();
@@ -130,5 +133,6 @@ export const useServers = () => {
     saving: isPending,
     error: query.error || saveMutation.error || ndkError,
     ndkStatus,
+    hasFetchedUserServers,
   };
 };

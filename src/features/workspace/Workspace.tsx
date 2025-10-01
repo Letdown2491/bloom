@@ -6,23 +6,25 @@ import type { StatusMessageTone } from "../../types/status";
 import type { TabId } from "../../types/tabs";
 import type { TransferState } from "../../components/UploadPanel";
 import type { DefaultSortOption } from "../../context/UserPreferencesContext";
-import { WorkspaceProvider } from "./WorkspaceContext";
 import { BrowseTabContainer } from "./BrowseTabContainer";
 import type { BrowseNavigationState } from "./BrowseTabContainer";
 import type { FilterMode } from "../../types/filter";
 import { useBrowseControls } from "../browse/useBrowseControls";
 import { BrowseControls } from "../browse/BrowseTab";
-import { TransferTabContainer, type SyncStateSnapshot } from "./TransferTabContainer";
+import type { SyncStateSnapshot } from "./TransferTabContainer";
 
 const UploadPanelLazy = React.lazy(() =>
   import("../../components/UploadPanel").then(module => ({ default: module.UploadPanel }))
+);
+
+const TransferTabLazy = React.lazy(() =>
+  import("./TransferTabContainer").then(module => ({ default: module.TransferTabContainer }))
 );
 
 type WorkspaceProps = {
   tab: TabId;
   servers: ManagedServer[];
   selectedServer: string | null;
-  onSelectServer: (value: string | null) => void;
   homeNavigationKey: number;
   onStatusMetricsChange: (metrics: { count: number; size: number }) => void;
   onSyncStateChange: (snapshot: SyncStateSnapshot) => void;
@@ -49,7 +51,6 @@ export const Workspace: React.FC<WorkspaceProps> = ({
   showGridPreviews,
   showListPreviews,
   defaultSortOption,
-  onSelectServer,
   onStatusMetricsChange,
   onSyncStateChange,
   onProvideSyncStarter,
@@ -78,6 +79,8 @@ export const Workspace: React.FC<WorkspaceProps> = ({
     toggleFilterMenu,
     closeFilterMenu,
     handleTabChange,
+    sortDirection,
+    toggleSortDirection,
   } = browseControls;
   const filterMenuRef = useRef<HTMLDivElement | null>(null);
 
@@ -90,10 +93,10 @@ export const Workspace: React.FC<WorkspaceProps> = ({
     return (
       <BrowseControls
         viewMode={viewMode}
-        gridDisabled={false}
-        listDisabled={false}
         disabled={false}
-        onViewModeChange={mode => setViewMode(mode)}
+        onSelectViewMode={mode => setViewMode(mode)}
+        sortDirection={sortDirection}
+        onToggleSortDirection={toggleSortDirection}
         filterButtonLabel={filterButtonLabel}
         filterButtonAriaLabel={filterButtonAriaLabel}
         filterButtonActive={filterButtonActive}
@@ -108,6 +111,8 @@ export const Workspace: React.FC<WorkspaceProps> = ({
     tab,
     viewMode,
     setViewMode,
+    sortDirection,
+    toggleSortDirection,
     filterButtonLabel,
     filterButtonAriaLabel,
     filterButtonActive,
@@ -134,7 +139,7 @@ export const Workspace: React.FC<WorkspaceProps> = ({
   }, []);
 
   return (
-    <WorkspaceProvider servers={servers} selectedServer={selectedServer} onSelectServer={onSelectServer}>
+    <>
       {tab === "browse" && (
         <BrowseTabContainer
           active
@@ -154,19 +159,28 @@ export const Workspace: React.FC<WorkspaceProps> = ({
           showListPreviews={showListPreviews}
           homeResetKey={homeNavigationKey}
           defaultSortOption={defaultSortOption}
+          sortDirection={sortDirection}
           onNavigationChange={onProvideBrowseNavigation}
           searchTerm={searchQuery}
         />
       )}
       {tab === "transfer" && (
-        <TransferTabContainer
-          active
-          onBackToBrowse={() => onSetTab("browse")}
-          showStatusMessage={showStatusMessage}
-          onSyncStateChange={onSyncStateChange}
-          onSyncTransfersChange={handleSyncTransfersChange}
-          onProvideSyncStarter={onProvideSyncStarter}
-        />
+        <Suspense
+          fallback={
+            <div className="flex flex-1 items-center justify-center text-sm text-slate-400">
+              Loading transfer tools…
+            </div>
+          }
+        >
+          <TransferTabLazy
+            active
+            onBackToBrowse={() => onSetTab("browse")}
+            showStatusMessage={showStatusMessage}
+            onSyncStateChange={onSyncStateChange}
+            onSyncTransfersChange={handleSyncTransfersChange}
+            onProvideSyncStarter={onProvideSyncStarter}
+          />
+        </Suspense>
       )}
       {tab === "upload" && (
         <Suspense
@@ -184,7 +198,7 @@ export const Workspace: React.FC<WorkspaceProps> = ({
           />
         </Suspense>
       )}
-    </WorkspaceProvider>
+    </>
   );
 };
 

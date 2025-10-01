@@ -3,7 +3,7 @@ import type { BlossomBlob, SignTemplate } from "../../lib/blossomClient";
 import type { ServerSnapshot } from "../../hooks/useServerData";
 import type { BlobListProps, BlobReplicaSummary } from "../../components/BlobList";
 import type { FilterMode } from "../../types/filter";
-import type { DefaultSortOption } from "../../context/UserPreferencesContext";
+import type { DefaultSortOption, SortDirection } from "../../context/UserPreferencesContext";
 
 export type BrowseContentProps = {
   viewMode: "grid" | "list";
@@ -29,6 +29,7 @@ export type BrowseContentProps = {
   renderBlobList: (props: BlobListProps) => React.ReactNode;
   onOpenList?: (blob: BlossomBlob) => void;
   defaultSortOption: DefaultSortOption;
+  sortDirection: SortDirection;
 };
 
 export const BrowseContent: React.FC<BrowseContentProps> = ({
@@ -55,6 +56,7 @@ export const BrowseContent: React.FC<BrowseContentProps> = ({
   renderBlobList,
   onOpenList,
   defaultSortOption,
+  sortDirection,
 }) => {
   const isMusicView = filterMode === "music";
   const commonProps: Pick<
@@ -75,6 +77,7 @@ export const BrowseContent: React.FC<BrowseContentProps> = ({
     | "showListPreviews"
     | "onOpenList"
     | "defaultSortOption"
+    | "sortDirection"
   > = {
     selected: selectedBlobs,
     viewMode,
@@ -92,6 +95,7 @@ export const BrowseContent: React.FC<BrowseContentProps> = ({
     showListPreviews,
     onOpenList,
     defaultSortOption,
+    sortDirection,
   };
 
   if (browsingAllServers) {

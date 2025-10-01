@@ -7,7 +7,7 @@ import {
   type SignedEvent,
   type EventTemplate,
 } from "./blossomClient";
-import { BloomHttpError, fromAxiosError, httpRequest, requestJson } from "./httpService";
+import { canonicalizeSatelliteApiBase } from "./satelliteUtils";
 
 export type SatelliteAccountFile = {
   sha256: string;
@@ -63,7 +63,7 @@ const sanitizeFileName = (value: string | undefined) => {
   return value.replace(/[\\/]/g, "_");
 };
 
-const normalizeBase = (url: string) => url.replace(/\/$/, "");
+const normalizeBase = (url: string) => canonicalizeSatelliteApiBase(url);
 
 const ensureTrailingSlash = (url: string) => (url.endsWith("/") ? url : `${url}/`);
 
@@ -132,26 +132,11 @@ async function createSatelliteAuthEvent(
 
 const encodeAuthParam = (event: SignedEvent) => encodeURIComponent(JSON.stringify(event));
 
-const normalizeEpochSeconds = (value: number): number | undefined => {
-  if (!Number.isFinite(value)) return undefined;
-  const normalized = value > 1_000_000_000_000 ? Math.floor(value / 1000) : Math.floor(value);
-  return normalized >= 0 ? normalized : undefined;
-};
-
 const coerceNumber = (value: unknown): number | undefined => {
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return normalizeEpochSeconds(value);
-  }
+  if (typeof value === "number" && Number.isFinite(value)) return value;
   if (typeof value === "string" && value.trim()) {
-    const raw = value.trim();
-    const numeric = Number(raw);
-    if (Number.isFinite(numeric)) {
-      return normalizeEpochSeconds(numeric);
-    }
-    const parsedMs = Date.parse(raw);
-    if (!Number.isNaN(parsedMs)) {
-      return Math.floor(parsedMs / 1000);
-    }
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
   }
   return undefined;
 };
@@ -192,25 +177,13 @@ export async function getSatelliteAccount(serverUrl: string, signTemplate: SignT
   const authEvent = await createSatelliteAuthEvent(signTemplate, "account");
   const url = buildEndpointUrl(base, "account");
   const requestUrl = `${url}?auth=${encodeAuthParam(authEvent)}`;
-  const data = await requestJson<SatelliteAccount | undefined>({
-    url: requestUrl,
-    method: "GET",
-    headers: { Accept: "application/json" },
-    source: "satellite",
-    retries: 2,
-    retryDelayMs: 800,
-    retryJitterRatio: 0.35,
-    retryOn: err => {
-      const status = err.status ?? 0;
-      return status === 0 || status >= 500 || status === 429;
-    },
-  });
+  const res = await fetch(requestUrl, { headers: { Accept: "application/json" } });
+  if (!res.ok) {
+    throw new Error(`Account fetch failed with status ${res.status}`);
+  }
+  const data = (await res.json().catch(() => undefined)) as SatelliteAccount | undefined;
   if (!data || typeof data !== "object") {
-    throw new BloomHttpError("Satellite account response malformed", {
-      request: { url: requestUrl, method: "GET" },
-      source: "satellite",
-      data,
-    });
+    throw new Error("Satellite account response malformed");
   }
   return data;
 }
@@ -220,10 +193,7 @@ export async function listSatelliteFiles(
   options: { signTemplate?: SignTemplate }
 ): Promise<BlossomBlob[]> {
   if (!options.signTemplate) {
-    throw new BloomHttpError("Satellite servers require a connected signer.", {
-      request: { url: serverUrl, method: "GET" },
-      source: "satellite",
-    });
+    throw new Error("Satellite servers require a connected signer.");
   }
   const account = await getSatelliteAccount(serverUrl, options.signTemplate);
   const files = Array.isArray(account.files) ? account.files : [];
@@ -250,12 +220,7 @@ export async function uploadBlobToSatellite(
 
   let requestUrl = endpoint;
   if (requiresAuth) {
-    if (!signTemplate) {
-      throw new BloomHttpError("Satellite upload requires a connected signer.", {
-        request: { url: requestUrl, method: "PUT" },
-        source: "satellite",
-      });
-    }
+    if (!signTemplate) throw new Error("Satellite upload requires a connected signer.");
     const authEvent = await createSatelliteAuthEvent(signTemplate, "upload", {
       fileName: (source as { fileName?: string }).fileName,
       fileSize: uploadFile.size,
@@ -274,18 +239,23 @@ export async function uploadBlobToSatellite(
     const payload = response.data as SatelliteAccountFile & { message?: string };
     if (!payload || !payload.sha256) {
       const message = payload?.message || "Satellite upload failed";
-      throw new BloomHttpError(message, {
-        request: { url: requestUrl, method: "PUT" },
-        source: "satellite",
-        data: payload,
-      });
+      throw new Error(message);
     }
     const blob = satelliteFileToBlob(payload, base);
     if (!blob.name) blob.name = (source as { fileName?: string }).fileName;
     if (!blob.type) blob.type = uploadFile.type || (source as { contentType?: string }).contentType;
     return blob;
   } catch (error) {
-    throw fromAxiosError(error, { url: requestUrl, method: "PUT", source: "satellite" });
+    if (axios.isAxiosError(error)) {
+      const status = error.response?.status;
+      const serverMessage = (error.response?.data as { message?: string } | undefined)?.message || error.message;
+      const uploadError = new Error(serverMessage || `Satellite upload failed with status ${status ?? "unknown"}`) as Error & {
+        status?: number;
+      };
+      uploadError.status = status;
+      throw uploadError;
+    }
+    throw error;
   }
 }
 
@@ -297,23 +267,33 @@ export async function deleteSatelliteFile(
 ): Promise<void> {
   const base = normalizeBase(serverUrl);
   const endpoint = buildEndpointUrl(base, "item");
-  let requestUrl = endpoint;
+  let requestUrl = `${endpoint}?sha256=${encodeURIComponent(hash)}`;
   if (requiresAuth) {
-    if (!signTemplate) {
-      throw new BloomHttpError("Satellite delete requires a connected signer.", {
-        request: { url: requestUrl, method: "DELETE" },
-        source: "satellite",
-      });
-    }
+    if (!signTemplate) throw new Error("Satellite delete requires a connected signer.");
     const authEvent = await createSatelliteAuthEvent(signTemplate, "delete", { hash });
-    requestUrl = `${endpoint}?auth=${encodeAuthParam(authEvent)}`;
+    const authParam = encodeAuthParam(authEvent);
+    requestUrl = `${endpoint}?sha256=${encodeURIComponent(hash)}&auth=${authParam}`;
   }
-  await httpRequest({
-    url: requestUrl,
+  const res = await fetch(requestUrl, {
     method: "DELETE",
     headers: { Accept: "application/json" },
-    source: "satellite",
+    mode: "cors",
   });
+  if (!res.ok) {
+    let message: string | null = null;
+    try {
+      const data = await res.json();
+      message = typeof data?.message === "string" ? data.message : null;
+    } catch {
+      try {
+        const text = await res.text();
+        message = text || null;
+      } catch {
+        message = null;
+      }
+    }
+    throw new Error(message ? `Delete failed with status ${res.status}: ${message}` : `Delete failed with status ${res.status}`);
+  }
 }
 
 export async function requestSatelliteCreditOffer(
@@ -321,36 +301,18 @@ export async function requestSatelliteCreditOffer(
   gbMonths: number,
   signTemplate: SignTemplate | undefined
 ): Promise<SatelliteCreditOffer> {
-  if (!signTemplate) {
-    const url = buildEndpointUrl(normalizeBase(serverUrl), "account/credit");
-    throw new BloomHttpError("Satellite credit purchase requires a connected signer.", {
-      request: { url, method: "GET" },
-      source: "satellite",
-    });
-  }
+  if (!signTemplate) throw new Error("Satellite credit purchase requires a connected signer.");
   const base = normalizeBase(serverUrl);
   const endpoint = buildEndpointUrl(base, "account/credit");
   const authEvent = await createSatelliteAuthEvent(signTemplate, "credit", { gbMonths });
   const requestUrl = `${endpoint}?auth=${encodeAuthParam(authEvent)}`;
-  const data = await requestJson<SatelliteCreditOffer | undefined>({
-    url: requestUrl,
-    method: "GET",
-    headers: { Accept: "application/json" },
-    source: "satellite",
-    retries: 2,
-    retryDelayMs: 800,
-    retryJitterRatio: 0.35,
-    retryOn: err => {
-      const status = err.status ?? 0;
-      return status === 0 || status >= 500 || status === 429;
-    },
-  });
+  const res = await fetch(requestUrl, { headers: { Accept: "application/json" } });
+  if (!res.ok) {
+    throw new Error(`Credit offer failed with status ${res.status}`);
+  }
+  const data = (await res.json().catch(() => undefined)) as SatelliteCreditOffer | undefined;
   if (!data || typeof data !== "object") {
-    throw new BloomHttpError("Satellite credit offer response malformed", {
-      request: { url: requestUrl, method: "GET" },
-      source: "satellite",
-      data,
-    });
+    throw new Error("Satellite credit offer response malformed");
   }
   return data;
 }

@@ -1,17 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-  NDKEvent,
-  NDKPublishError,
-  NDKRelay,
-  NDKRelaySet,
-  NDKRelayStatus,
-  NDKUser,
-  normalizeRelayUrl,
-} from "@nostr-dev-kit/ndk";
+import type { NDKRelayStatus, NDKRelay } from "@nostr-dev-kit/ndk";
 import { useCurrentPubkey, useNdk } from "../context/NdkContext";
 import { DEFAULT_PUBLIC_RELAYS, extractPreferredRelays, sanitizeRelayUrl } from "../utils/relays";
-import { giftWrap } from "@nostr-dev-kit/ndk";
 import { nip19 } from "nostr-tools";
+import { PrivateLinkPanel } from "../features/share/PrivateLinkPanel";
+import { PRIVATE_LINK_SERVICE_HOST } from "../constants/privateLinks";
+import { prettyBytes } from "../utils/format";
+import { loadNdkModule, type NdkModule } from "../lib/ndkModule";
 
 export type SharePayload = {
   url: string;
@@ -21,7 +16,7 @@ export type SharePayload = {
   size?: number | null;
 };
 
-export type ShareMode = "note" | "dm" | "dm-private";
+export type ShareMode = "note" | "dm" | "dm-private" | "private-link";
 
 export type ShareCompletion = {
   mode: ShareMode;
@@ -36,6 +31,8 @@ export type ShareCompletion = {
   successes?: number;
   failures?: number;
   message?: string | null;
+  alias?: string;
+  link?: string;
 };
 
 type ShareComposerProps = {
@@ -123,45 +120,56 @@ const CONNECTION_VARIANT_STYLES: Record<ConnectionVariant, { label: string; dotC
   },
 };
 
-function mapRelayStatus(status: NDKRelayStatus): ConnectionVariant {
+const mapRelayStatus = (
+  status: NDKRelayStatus | undefined,
+  enums: NdkModule["NDKRelayStatus"] | null
+): ConnectionVariant => {
+  if (status === undefined || !enums) return "unknown";
   switch (status) {
-    case NDKRelayStatus.AUTHENTICATED:
+    case enums.AUTHENTICATED:
       return "connected-auth";
-    case NDKRelayStatus.AUTHENTICATING:
-    case NDKRelayStatus.AUTH_REQUESTED:
+    case enums.AUTHENTICATING:
+    case enums.AUTH_REQUESTED:
       return "authenticating";
-    case NDKRelayStatus.CONNECTED:
+    case enums.CONNECTED:
       return "connected";
-    case NDKRelayStatus.CONNECTING:
+    case enums.CONNECTING:
       return "connecting";
-    case NDKRelayStatus.RECONNECTING:
+    case enums.RECONNECTING:
       return "reconnecting";
-    case NDKRelayStatus.FLAPPING:
+    case enums.FLAPPING:
       return "flapping";
-    case NDKRelayStatus.DISCONNECTING:
+    case enums.DISCONNECTING:
       return "disconnecting";
-    case NDKRelayStatus.DISCONNECTED:
-    default:
+    case enums.DISCONNECTED:
       return "disconnected";
+    default:
+      return "unknown";
   }
-}
+};
 
-function safeNormalizeRelayUrl(value: string): string | null {
+const safeNormalizeRelayUrl = (
+  value: string,
+  normalizeRelayUrlFn: ((value: string) => string) | null
+): string | null => {
   if (!value) return null;
-  try {
-    return normalizeRelayUrl(value);
-  } catch {
+  if (normalizeRelayUrlFn) {
     try {
-      const url = new URL(value);
-      url.hash = "";
-      url.search = "";
-      return url.toString().replace(/\/+$/, "");
+      return normalizeRelayUrlFn(value);
     } catch {
-      const trimmed = value.trim();
-      return trimmed ? trimmed.replace(/\/+$/, "") : null;
+      // fall back to manual normalization below
     }
   }
-}
+  try {
+    const url = new URL(value);
+    url.hash = "";
+    url.search = "";
+    return url.toString().replace(/\/+$/, "");
+  } catch {
+    const trimmed = value.trim();
+    return trimmed ? trimmed.replace(/\/+$/, "") : null;
+  }
+};
 
 function describeConnectionState(state?: RelayConnectionState): { label: string; dotClass: string } {
   if (!state) {
@@ -428,6 +436,24 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
   const [metadataError, setMetadataError] = useState<string | null>(null);
   const [globalError, setGlobalError] = useState<string | null>(null);
   const [profileInfo, setProfileInfo] = useState<ProfileInfo>(() => emptyProfileInfo());
+
+  const runtimeRef = useRef<NdkModule | null>(null);
+  const normalizeRelayUrlRef = useRef<NdkModule["normalizeRelayUrl"] | null>(null);
+  const [relayStatusEnum, setRelayStatusEnum] = useState<NdkModule["NDKRelayStatus"] | null>(null);
+
+  const ensureRuntime = useCallback(async () => {
+    if (!runtimeRef.current) {
+      const module = await loadNdkModule();
+      runtimeRef.current = module;
+      normalizeRelayUrlRef.current = module.normalizeRelayUrl;
+      setRelayStatusEnum(module.NDKRelayStatus);
+    }
+    return runtimeRef.current;
+  }, []);
+
+  useEffect(() => {
+    void ensureRuntime();
+  }, [ensureRuntime]);
 
   const isLegacyDmMode = shareMode === "dm";
   const isPrivateDmMode = shareMode === "dm-private";
@@ -707,7 +733,7 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
     setProfileInfo(emptyProfileInfo());
     ndk
       .fetchEvent({ kinds: [0], authors: [pubkey] })
-      .then((evt: NDKEvent | null) => {
+      .then(evt => {
         if (ignore) return;
         if (!evt?.content) {
           setPreferredRelays([]);
@@ -810,13 +836,13 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
       setConnectionStatuses(() => {
         const next: Record<string, RelayConnectionState> = {};
         effectiveRelays.forEach(relayUrl => {
-          const normalized = safeNormalizeRelayUrl(relayUrl);
+          const normalized = safeNormalizeRelayUrl(relayUrl, normalizeRelayUrlRef.current);
           const relay = normalized ? pool.relays.get(normalized) : undefined;
           if (!relay) {
             next[relayUrl] = { variant: "missing" };
           } else {
             next[relayUrl] = {
-              variant: mapRelayStatus(relay.status),
+              variant: mapRelayStatus(relay.status as NDKRelayStatus | undefined, relayStatusEnum),
               ndkStatus: relay.status,
               connectedAt: relay.connectionStats.connectedAt,
             };
@@ -833,7 +859,7 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
       disposed = true;
       window.clearInterval(interval);
     };
-  }, [ndk, effectiveRelays]);
+  }, [ndk, effectiveRelays, relayStatusEnum]);
 
   const usingFallbackRelays = preferredRelays.length === 0;
   const usingDefaultFallback = usingFallbackRelays && poolRelays.length === 0;
@@ -903,6 +929,8 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
 
     const createdAt = Math.floor(Date.now() / 1000);
     const finalContent = composedContent || payload.url || "";
+    const module = await ensureRuntime();
+    const { NDKEvent, NDKRelaySet, NDKPublishError, NDKUser, giftWrap } = module;
 
     if (isLegacyDmMode) {
       if (!signer.encryptionEnabled || !signer.encryptionEnabled("nip04")) {
@@ -1254,6 +1282,18 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
                   >
                     Share via Private DM
                   </button>
+                  <button
+                    type="button"
+                    className={`rounded-xl px-3 py-1 font-medium transition-colors ${
+                      shareMode === "private-link"
+                        ? "bg-emerald-600 text-white shadow"
+                        : "text-slate-300 hover:text-white"
+                    }`}
+                    onClick={() => setShareMode("private-link")}
+                    disabled={publishing}
+                  >
+                    Private link
+                  </button>
                 </div>
                 <span className="w-full text-xs text-slate-400">
                   {shareMode === "note"
@@ -1264,6 +1304,10 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
             </header>
 
             <div className="flex-1 overflow-auto pr-1">
+              {shareMode === "private-link" ? (
+                <PrivateLinkPanel payload={data} onShareComplete={onShareComplete} />
+              ) : (
+                <>
               {isDmMode && (
                 <section className="space-y-3 mb-[7px]">
                   <div className="flex items-center justify-between text-xs font-semibold uppercase tracking-wide text-slate-400">
@@ -1404,60 +1448,129 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
                       }.`}
                 </div>
               )}
+                </>
+              )}
             </div>
-
-            <footer className="flex flex-wrap items-center justify-between gap-3 pt-4">
-              <button
-                type="button"
-                onClick={handleClose}
-                className="rounded-xl border border-slate-700 bg-slate-900 px-4 py-2 text-sm font-medium text-slate-300 hover:border-slate-600"
-              >
-                Close
-              </button>
-              <div className="flex flex-wrap items-center gap-2">
-                {!signer && (
+            {shareMode === "private-link" ? (
+              <footer className="flex flex-wrap items-center justify-end gap-3 pt-4">
+                {!signer ? (
                   <button
                     type="button"
                     onClick={handleConnectClick}
                     className="rounded-xl border border-emerald-500/70 bg-emerald-500/10 px-4 py-2 text-sm font-medium text-emerald-200 hover:border-emerald-400"
-                    disabled={publishing}
                   >
                     Connect signer
                   </button>
-                )}
+                ) : null}
+              </footer>
+            ) : (
+              <footer className="flex flex-wrap items-center justify-between gap-3 pt-4">
                 <button
                   type="button"
-                  onClick={handleShare}
-                  className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-60"
-                  disabled={publishing || !data.url || (isDmMode && !selectedRecipient)}
+                  onClick={handleClose}
+                  className="rounded-xl border border-slate-700 bg-slate-900 px-4 py-2 text-sm font-medium text-slate-300 hover:border-slate-600"
                 >
-                  {publishing
-                    ? isDmMode
-                      ? "Sending…"
-                      : "Publishing…"
-                    : isDmMode
-                    ? "Send DM"
-                    : "Publish note"}
+                  Close
                 </button>
-              </div>
-            </footer>
+                <div className="flex flex-wrap items-center gap-2">
+                  {!signer && (
+                    <button
+                      type="button"
+                      onClick={handleConnectClick}
+                      className="rounded-xl border border-emerald-500/70 bg-emerald-500/10 px-4 py-2 text-sm font-medium text-emerald-200 hover:border-emerald-400"
+                      disabled={publishing}
+                    >
+                      Connect signer
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={handleShare}
+                    className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-60"
+                    disabled={publishing || !data.url || (isDmMode && !selectedRecipient)}
+                  >
+                    {publishing
+                      ? isDmMode
+                        ? "Sending…"
+                        : "Publishing…"
+                      : isDmMode
+                      ? "Send DM"
+                      : "Publish note"}
+                  </button>
+                </div>
+              </footer>
+            )}
           </div>
         </div>
 
         <aside className={previewCardClasses}>
           <div className="flex flex-col gap-5 p-5">
             <div>
-              <h1 className="text-xl font-semibold text-slate-100">{shareMode === "note" ? "Note Preview" : isPrivateDmMode ? "Private DM Preview" : "DM Preview"}</h1>
+              <h1 className="text-xl font-semibold text-slate-100">
+                {shareMode === "note"
+                  ? "Note Preview"
+                  : shareMode === "private-link"
+                  ? "Private Link Overview"
+                  : isPrivateDmMode
+                  ? "Private DM Preview"
+                  : "DM Preview"}
+              </h1>
             </div>
 
             <div className="flex-1 overflow-auto">
-              <div className="rounded-xl border border-slate-800 bg-slate-950/70 p-5">
-                <div className="flex flex-col gap-5">
-                  <div className="flex items-start gap-4">
-                    <div className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-full bg-slate-800 text-sm font-semibold text-slate-300">
-                      {previewAvatar ? (
-                        <img
-                          src={previewAvatar}
+              {shareMode === "private-link" ? (
+                <div className="rounded-xl border border-slate-800 bg-slate-950/70 p-5 text-sm text-slate-200">
+                  <div className="mb-4 space-y-1">
+                    <div className="text-xs uppercase tracking-wide text-slate-500">File summary</div>
+                    <div className="font-medium text-slate-100">{data.name ?? "Unnamed file"}</div>
+                    {typeof data.size === "number" && Number.isFinite(data.size) && (
+                      <div className="text-xs text-slate-400">
+                        Size: {prettyBytes(Math.max(0, Math.round(data.size)))}
+                      </div>
+                    )}
+                    {data.sha256 && (
+                      <div className="text-xs text-slate-400">
+                        SHA-256: <span className="font-mono text-[11px] text-slate-300">{data.sha256}</span>
+                      </div>
+                    )}
+                  </div>
+                  <div className="space-y-2 text-xs text-slate-400">
+                    <p>
+                      Private links proxy downloads through <span className="font-mono text-slate-200">{PRIVATE_LINK_SERVICE_HOST}</span>. Recipients only see the proxy URL, never the Blossom endpoint.
+                    </p>
+                    <p>Use the controls on the left to generate shareable links for this file.</p>
+                  </div>
+                  {mediaType === "image" ? (
+                    <div className="mt-4 overflow-hidden rounded-xl border border-slate-800 bg-slate-950/80">
+                      <img
+                        src={data.url}
+                        alt={data.name ? `Preview of ${data.name}` : "Shared media preview"}
+                        className="max-h-72 w-full object-contain"
+                        onError={() => setMediaError(true)}
+                      />
+                    </div>
+                  ) : data.url ? (
+                    <div className="mt-4 rounded-xl border border-slate-800 bg-slate-950/80 p-4 text-xs text-slate-300">
+                      <div className="uppercase tracking-wide text-slate-500">Link preview</div>
+                      <a
+                        href={data.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="mt-1 block truncate font-mono text-[11px] text-emerald-300 hover:text-emerald-200"
+                      >
+                        {data.url}
+                      </a>
+                    </div>
+                  ) : null}
+                </div>
+              ) : (
+                <div className="rounded-xl border border-slate-800 bg-slate-950/70 p-5">
+                  <div className="flex flex-col gap-5">
+                    <div className="flex items-start gap-4">
+                      <div className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-full bg-slate-800 text-sm font-semibold text-slate-300">
+                        {previewAvatar ? (
+                          <img
+                            src={previewAvatar}
                           alt={`${previewDisplayName}'s avatar`}
                           className="h-full w-full object-cover"
                           onError={() => setProfileInfo(prev => ({ ...prev, picture: null }))}
@@ -1514,8 +1627,9 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
                       </div>
                     </div>
                   )}
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
           </div>
         </aside>

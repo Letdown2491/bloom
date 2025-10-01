@@ -6,25 +6,24 @@ import { useCurrentPubkey, useNdk } from "../context/NdkContext";
 import { uploadBlobToServer, type BlossomBlob } from "../lib/blossomClient";
 import { uploadBlobToNip96 } from "../lib/nip96Client";
 import { uploadBlobToSatellite } from "../lib/satelliteClient";
-import { resizeImage, stripImageMetadata } from "../utils/image";
-import { computeBlurhash } from "../utils/blurhash";
 import { prettyBytes } from "../utils/format";
 import { useQueryClient } from "@tanstack/react-query";
-import { NDKEvent } from "@nostr-dev-kit/ndk";
 import {
   rememberBlobMetadata,
   applyAliasUpdate,
   rememberAudioMetadata,
   sanitizeCoverUrl,
   normalizeFolderPathInput,
+  containsReservedFolderSegment,
   type BlobAudioMetadata,
 } from "../utils/blobMetadataStore";
 import { buildNip94EventTemplate } from "../lib/nip94";
-import { extractAudioMetadata, type ExtractedAudioMetadata } from "../utils/audioMetadata";
+import type { ExtractedAudioMetadata } from "../utils/audioMetadata";
 import { encryptFileForPrivateUpload } from "../lib/privateEncryption";
 import { usePrivateLibrary } from "../context/PrivateLibraryContext";
 import type { PrivateListEntry } from "../lib/privateList";
 import { useFolderLists } from "../context/FolderListContext";
+import { loadNdkModule } from "../lib/ndkModule";
 
 const RESIZE_OPTIONS = [
   { id: 0, label: "Original" },
@@ -32,6 +31,33 @@ const RESIZE_OPTIONS = [
   { id: 2, label: "Medium (1280px)", size: 1280 },
   { id: 3, label: "Small (720px)", size: 720 },
 ];
+
+let audioMetadataModule: Promise<typeof import("../utils/audioMetadata")> | null = null;
+
+const loadAudioMetadataModule = () => {
+  if (!audioMetadataModule) {
+    audioMetadataModule = import("../utils/audioMetadata");
+  }
+  return audioMetadataModule;
+};
+
+let imageUtilsModule: Promise<typeof import("../utils/image")> | null = null;
+
+const loadImageUtilsModule = () => {
+  if (!imageUtilsModule) {
+    imageUtilsModule = import("../utils/image");
+  }
+  return imageUtilsModule;
+};
+
+let blurhashModule: Promise<typeof import("../utils/blurhash")> | null = null;
+
+const loadBlurhashModule = () => {
+  if (!blurhashModule) {
+    blurhashModule = import("../utils/blurhash");
+  }
+  return blurhashModule;
+};
 
 type UploadEntryKind = "audio" | "image" | "other";
 
@@ -145,13 +171,18 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
       selectedServers.some(url => {
         const server = serverMap.get(url);
         if (!server) return false;
-        return server.type === "satellite" || Boolean(server.requiresAuth);
+        return Boolean(server.requiresAuth);
       }),
     [selectedServers, serverMap]
   );
 
   const activeSigner = ndk?.signer ?? signer ?? null;
-  const canUpload = requiresAuthSelected ? Boolean(activeSigner) : true;
+  const signerMissing = requiresAuthSelected && !activeSigner;
+  const folderNamesInvalid = useMemo(
+    () => entries.some(entry => containsReservedFolderSegment(entry.metadata.folder)),
+    [entries]
+  );
+  const canUpload = !signerMissing && !folderNamesInvalid;
   const hasImageEntries = useMemo(() => entries.some(entry => entry.kind === "image"), [entries]);
 
   React.useEffect(() => {
@@ -197,6 +228,7 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
     for (const file of selectedFiles) {
       const kind = detectEntryKind(file);
       if (kind === "audio") {
+        const { extractAudioMetadata } = await loadAudioMetadataModule();
         const extracted = await extractAudioMetadata(file);
         const metadata = createAudioMetadataFormState(file, extracted);
         nextEntries.push({
@@ -279,6 +311,7 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
       blurhash: options.blurHash,
       extraTags: options.extraTags,
     });
+    const { NDKEvent } = await loadNdkModule();
     const event = new NDKEvent(ndk, template);
     await event.sign();
     await event.publish().catch(() => undefined);
@@ -288,6 +321,9 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
     if (!entries.length || !selectedServers.length) return;
     if (requiresAuthSelected && !activeSigner) {
       alert("Connect your NIP-07 signer to upload to servers that require auth.");
+      return;
+    }
+    if (folderNamesInvalid) {
       return;
     }
     const privateEntries = entries.filter(entry => entry.isPrivate);
@@ -302,13 +338,24 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
     const limit = pLimit(2);
     const preparedUploads: { entry: UploadEntry; file: File; buffer: ArrayBuffer; privateInfo?: PrivatePreparedInfo }[] = [];
 
+    type ImageUtils = Awaited<ReturnType<typeof loadImageUtilsModule>>;
+    let imageUtils: ImageUtils | null = null;
+    const ensureImageUtils = async () => {
+      if (!imageUtils) {
+        imageUtils = await loadImageUtilsModule();
+      }
+      return imageUtils;
+    };
+
     for (const entry of entries) {
       let processed = entry.file;
       if (cleanMetadata && entry.kind === "image") {
+        const { stripImageMetadata } = await ensureImageUtils();
         processed = await stripImageMetadata(processed);
       }
       const resize = RESIZE_OPTIONS.find(r => r.id === resizeOption && r.size);
       if (resize && entry.kind === "image") {
+        const { resizeImage } = await ensureImageUtils();
         processed = await resizeImage(processed, resize.size!, resize.size!);
       }
 
@@ -336,6 +383,15 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
     const pendingFolderUpdates = new Map<string, string>();
 
     let encounteredError = false;
+
+    type BlurhashUtils = Awaited<ReturnType<typeof loadBlurhashModule>>;
+    let blurhashUtils: BlurhashUtils | null = null;
+    const ensureBlurhashUtils = async () => {
+      if (!blurhashUtils) {
+        blurhashUtils = await loadBlurhashModule();
+      }
+      return blurhashUtils;
+    };
 
     const performUpload = async (
       entry: UploadEntry,
@@ -370,14 +426,18 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
         if (entry.isPrivate && !privateInfo) {
           console.warn("Missing private metadata for entry", entry.id);
         }
-        const blurHash =
-          entry.kind === "image"
-            ? blurhashCache.get(entry.id) ?? (await computeBlurhash(serverFile))
-            : undefined;
-        if (!blurhashCache.has(entry.id) && blurHash) {
-          blurhashCache.set(entry.id, blurHash);
+        let blurHash: { hash: string; width: number; height: number } | undefined;
+        if (entry.kind === "image") {
+          blurHash = blurhashCache.get(entry.id);
+          if (!blurHash) {
+            const { computeBlurhash } = await ensureBlurhashUtils();
+            blurHash = await computeBlurhash(serverFile);
+            if (blurHash) {
+              blurhashCache.set(entry.id, blurHash);
+            }
+          }
         }
-        const requiresAuthForServer = server.type === "satellite" || Boolean(server.requiresAuth);
+        const requiresAuthForServer = Boolean(server.requiresAuth);
         const handleProgress = (progress: AxiosProgressEvent) => {
           setTransfers(prev =>
             prev.map(item =>
@@ -402,12 +462,19 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
             handleProgress
           );
         } else if (server.type === "satellite") {
+          const satelliteLabel =
+            entry.metadata.kind === "audio"
+              ? entry.metadata.alias || entry.metadata.title || entry.file.name
+              : entry.metadata.kind === "generic"
+              ? entry.metadata.alias || entry.file.name
+              : entry.file.name;
           uploaded = await uploadBlobToSatellite(
             server.url,
             serverFile,
-            signEventTemplate,
-            true,
-            handleProgress
+            requiresAuthForServer ? signEventTemplate : undefined,
+            requiresAuthForServer,
+            handleProgress,
+            { label: satelliteLabel }
           );
         } else {
           uploaded = await uploadBlobToServer(
@@ -618,8 +685,11 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
             }}
             className="mt-1 w-full"
           />
-          {!canUpload && (
+          {signerMissing && (
             <div className="mt-2 text-xs text-red-400">Connect your NIP-07 signer to upload.</div>
+          )}
+          {folderNamesInvalid && (
+            <div className="mt-2 text-xs text-red-400">Folder names cannot include the word "private".</div>
           )}
           {entries.length > 0 && (
             <div className="mt-2 text-xs text-slate-400">
@@ -788,152 +858,173 @@ type GenericMetadataFormProps = {
 const inputClasses =
   "mt-1 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500";
 
-const GenericMetadataForm: React.FC<GenericMetadataFormProps> = ({ metadata, onChange }) => (
-  <div className="space-y-2">
-    <label className="block text-xs uppercase text-slate-400">
-      Display name
-      <input
-        className={inputClasses}
-        value={metadata.alias}
-        onChange={event => onChange({ alias: event.target.value })}
-        placeholder="Friendly name"
-      />
-    </label>
-    <label className="block text-xs uppercase text-slate-400">
-      Folder
-      <input
-        className={inputClasses}
-        value={metadata.folder}
-        onChange={event => onChange({ folder: event.target.value })}
-        placeholder="e.g. Pictures/2024"
-      />
-    </label>
-    <p className="text-xs text-slate-500">The display name will be included in the metadata event.</p>
-  </div>
-);
+const invalidInputClasses =
+  "mt-1 w-full rounded-lg border border-red-500 bg-slate-900 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:border-red-500 focus:outline-none focus:ring-1 focus:ring-red-500";
 
-type AudioMetadataFormProps = {
-  metadata: AudioMetadataFormState;
-  onChange: (changes: Partial<AudioMetadataFormState>) => void;
-};
+const getInputClasses = (invalid?: boolean) => (invalid ? invalidInputClasses : inputClasses);
 
-const AudioMetadataForm: React.FC<AudioMetadataFormProps> = ({ metadata, onChange }) => (
-  <div className="space-y-3">
-    <div className="grid gap-3 md:grid-cols-2">
+const GenericMetadataForm: React.FC<GenericMetadataFormProps> = ({ metadata, onChange }) => {
+  const folderInvalid = containsReservedFolderSegment(metadata.folder);
+
+  return (
+    <div className="space-y-2">
       <label className="block text-xs uppercase text-slate-400">
         Display name
         <input
           className={inputClasses}
           value={metadata.alias}
           onChange={event => onChange({ alias: event.target.value })}
-          placeholder="Artist - Title"
+          placeholder="Friendly name"
         />
       </label>
       <label className="block text-xs uppercase text-slate-400">
         Folder
         <input
-          className={inputClasses}
+          className={getInputClasses(folderInvalid)}
           value={metadata.folder}
           onChange={event => onChange({ folder: event.target.value })}
-          placeholder="e.g. Videos/Chernobyl"
+          placeholder="e.g. Pictures/2024"
         />
+        {folderInvalid && (
+          <p className="mt-1 text-xs text-red-400">Folder names cannot include the word "private".</p>
+        )}
       </label>
-      <label className="block text-xs uppercase text-slate-400">
-        Title
-        <input
-          className={inputClasses}
-          value={metadata.title}
-          onChange={event => onChange({ title: event.target.value })}
-          placeholder="Track title"
-        />
-      </label>
-      <label className="block text-xs uppercase text-slate-400">
-        Artist
-        <input
-          className={inputClasses}
-          value={metadata.artist}
-          onChange={event => onChange({ artist: event.target.value })}
-          placeholder="Artist"
-        />
-      </label>
-      <label className="block text-xs uppercase text-slate-400">
-        Album
-        <input
-          className={inputClasses}
-          value={metadata.album}
-          onChange={event => onChange({ album: event.target.value })}
-          placeholder="Album"
-        />
-      </label>
-      <label className="block text-xs uppercase text-slate-400 md:col-span-2">
-        Cover URL
-        <input
-          className={inputClasses}
-          value={metadata.coverUrl}
-          onChange={event => onChange({ coverUrl: event.target.value })}
-          placeholder="https://example.com/cover.jpg"
-          type="url"
-          inputMode="url"
-          pattern="https?://.*"
-        />
-      </label>
+      <p className="text-xs text-slate-500">The display name will be included in the metadata event.</p>
     </div>
-    <div className="grid gap-3 md:grid-cols-3">
-      <label className="block text-xs uppercase text-slate-400">
-        Track #
-        <input
-          className={inputClasses}
-          value={metadata.trackNumber}
-          onChange={event => onChange({ trackNumber: event.target.value })}
-          inputMode="numeric"
-          placeholder="e.g. 1"
-        />
-      </label>
-      <label className="block text-xs uppercase text-slate-400">
-        Track total
-        <input
-          className={inputClasses}
-          value={metadata.trackTotal}
-          onChange={event => onChange({ trackTotal: event.target.value })}
-          inputMode="numeric"
-          placeholder="e.g. 12"
-        />
-      </label>
-      <label className="block text-xs uppercase text-slate-400">
-        Duration (seconds)
-        <input
-          className={inputClasses}
-          value={metadata.durationSeconds}
-          onChange={event => onChange({ durationSeconds: event.target.value })}
-          inputMode="numeric"
-          placeholder="e.g. 215"
-        />
-      </label>
+  );
+};
+
+type AudioMetadataFormProps = {
+  metadata: AudioMetadataFormState;
+  onChange: (changes: Partial<AudioMetadataFormState>) => void;
+};
+
+const AudioMetadataForm: React.FC<AudioMetadataFormProps> = ({ metadata, onChange }) => {
+  const folderInvalid = containsReservedFolderSegment(metadata.folder);
+
+  return (
+    <div className="space-y-3">
+      <div className="grid gap-3 md:grid-cols-2">
+        <label className="block text-xs uppercase text-slate-400">
+          Display name
+          <input
+            className={inputClasses}
+            value={metadata.alias}
+            onChange={event => onChange({ alias: event.target.value })}
+            placeholder="Artist - Title"
+          />
+        </label>
+        <label className="block text-xs uppercase text-slate-400">
+          Folder
+          <input
+            className={getInputClasses(folderInvalid)}
+            value={metadata.folder}
+            onChange={event => onChange({ folder: event.target.value })}
+            placeholder="e.g. Videos/Chernobyl"
+          />
+          {folderInvalid && (
+            <p className="mt-1 text-xs text-red-400">Folder names cannot include the word "private".</p>
+          )}
+        </label>
+      </div>
+      <div className="grid gap-3 md:grid-cols-2">
+        <label className="block text-xs uppercase text-slate-400">
+          Title
+          <input
+            className={inputClasses}
+            value={metadata.title}
+            onChange={event => onChange({ title: event.target.value })}
+            placeholder="Track title"
+          />
+        </label>
+        <label className="block text-xs uppercase text-slate-400">
+          Artist
+          <input
+            className={inputClasses}
+            value={metadata.artist}
+            onChange={event => onChange({ artist: event.target.value })}
+            placeholder="Artist"
+          />
+        </label>
+        <label className="block text-xs uppercase text-slate-400">
+          Album
+          <input
+            className={inputClasses}
+            value={metadata.album}
+            onChange={event => onChange({ album: event.target.value })}
+            placeholder="Album"
+          />
+        </label>
+        <label className="block text-xs uppercase text-slate-400 md:col-span-2">
+          Cover URL
+          <input
+            className={inputClasses}
+            value={metadata.coverUrl}
+            onChange={event => onChange({ coverUrl: event.target.value })}
+            placeholder="https://example.com/cover.jpg"
+            type="url"
+            inputMode="url"
+            pattern="https?://.*"
+          />
+        </label>
+      </div>
+      <div className="grid gap-3 md:grid-cols-3">
+        <label className="block text-xs uppercase text-slate-400">
+          Track #
+          <input
+            className={inputClasses}
+            value={metadata.trackNumber}
+            onChange={event => onChange({ trackNumber: event.target.value })}
+            inputMode="numeric"
+            placeholder="e.g. 1"
+          />
+        </label>
+        <label className="block text-xs uppercase text-slate-400">
+          Track total
+          <input
+            className={inputClasses}
+            value={metadata.trackTotal}
+            onChange={event => onChange({ trackTotal: event.target.value })}
+            inputMode="numeric"
+            placeholder="e.g. 12"
+          />
+        </label>
+        <label className="block text-xs uppercase text-slate-400">
+          Duration (seconds)
+          <input
+            className={inputClasses}
+            value={metadata.durationSeconds}
+            onChange={event => onChange({ durationSeconds: event.target.value })}
+            inputMode="numeric"
+            placeholder="e.g. 215"
+          />
+        </label>
+      </div>
+      <div className="grid gap-3 md:grid-cols-2">
+        <label className="block text-xs uppercase text-slate-400">
+          Genre
+          <input
+            className={inputClasses}
+            value={metadata.genre}
+            onChange={event => onChange({ genre: event.target.value })}
+            placeholder="Genre"
+          />
+        </label>
+        <label className="block text-xs uppercase text-slate-400">
+          Year
+          <input
+            className={inputClasses}
+            value={metadata.year}
+            onChange={event => onChange({ year: event.target.value })}
+            inputMode="numeric"
+            placeholder="e.g. 2024"
+          />
+        </label>
+      </div>
+      <p className="text-xs text-slate-500">These details will be published with the upload and saved locally.</p>
     </div>
-    <div className="grid gap-3 md:grid-cols-2">
-      <label className="block text-xs uppercase text-slate-400">
-        Genre
-        <input
-          className={inputClasses}
-          value={metadata.genre}
-          onChange={event => onChange({ genre: event.target.value })}
-          placeholder="Genre"
-        />
-      </label>
-      <label className="block text-xs uppercase text-slate-400">
-        Year
-        <input
-          className={inputClasses}
-          value={metadata.year}
-          onChange={event => onChange({ year: event.target.value })}
-          inputMode="numeric"
-          placeholder="e.g. 2024"
-        />
-      </label>
-    </div>
-    <p className="text-xs text-slate-500">These details will be published with the upload and saved locally.</p>
-  </div>
-);
+  );
+};
 
 type AudioEventDetails = {
   alias?: string;

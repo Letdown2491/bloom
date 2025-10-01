@@ -12,6 +12,7 @@ import {
   removeShaFromRecord,
   type FolderListRecord,
 } from "../lib/folderList";
+import { containsReservedFolderSegment } from "../utils/blobMetadataStore";
 
 const sortRecords = (records: Iterable<FolderListRecord>) =>
   Array.from(records).sort((a, b) => a.path.localeCompare(b.path, undefined, { sensitivity: "base" }));
@@ -157,6 +158,9 @@ export const FolderListProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       const trimmed = name.trim();
       if (trimmed.length === 0) {
         throw new Error("Folder name cannot be empty.");
+      }
+      if (containsReservedFolderSegment(trimmed)) {
+        throw new Error('Folder names cannot include the word "private".');
       }
       if (isPrivateFolderName(trimmed)) {
         const conflict = findRecordByName(trimmed, existing.path);

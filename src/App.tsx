@@ -1,4 +1,4 @@
-import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState, memo } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 
 import { useNdk, useCurrentPubkey } from "./context/NdkContext";
@@ -18,8 +18,7 @@ import type { TabId } from "./types/tabs";
 import type { SyncStateSnapshot } from "./features/workspace/TransferTabContainer";
 import type { BrowseNavigationState } from "./features/workspace/BrowseTabContainer";
 import type { FilterMode } from "./types/filter";
-
-import { prettyBytes } from "./utils/format";
+import type { ProfileMetadataPayload } from "./features/profile/ProfilePanel";
 import { deriveServerNameFromUrl } from "./utils/serverName";
 
 import {
@@ -33,25 +32,13 @@ import {
   ServersIcon,
   RelayIcon,
   SettingsIcon,
+  EditIcon,
+  LinkIcon,
   LogoutIcon,
 } from "./components/icons";
 import { FolderRenameDialog } from "./components/FolderRenameDialog";
-
-const WorkspaceLazy = React.lazy(() =>
-  import("./features/workspace/Workspace").then(module => ({ default: module.Workspace }))
-);
-
-const ServerListLazy = React.lazy(() =>
-  import("./components/ServerList").then(module => ({ default: module.ServerList }))
-);
-
-const RelayListLazy = React.lazy(() =>
-  import("./components/RelayList").then(module => ({ default: module.RelayList }))
-);
-
-const ShareComposerLazy = React.lazy(() =>
-  import("./features/share/ShareComposerPanel").then(module => ({ default: module.ShareComposerPanel }))
-);
+import { StatusFooter } from "./components/StatusFooter";
+import { WorkspaceSection } from "./components/WorkspaceSection";
 
 const ConnectSignerDialogLazy = React.lazy(() =>
   import("./features/nip46/ConnectSignerDialog").then(module => ({ default: module.ConnectSignerDialog }))
@@ -63,10 +50,6 @@ const RenameDialogLazy = React.lazy(() =>
 
 const AudioPlayerCardLazy = React.lazy(() =>
   import("./features/browse/BrowseTab").then(module => ({ default: module.AudioPlayerCard }))
-);
-
-const SettingsPanelLazy = React.lazy(() =>
-  import("./features/settings/SettingsPanel").then(module => ({ default: module.SettingsPanel }))
 );
 
 const NAV_TABS = [{ id: "upload" as const, label: "Upload", icon: UploadIcon }];
@@ -91,7 +74,7 @@ const normalizeManagedServer = (server: ManagedServer): ManagedServer => {
     url: normalizedUrl,
     name,
     requiresAuth,
-    sync: Boolean(server.sync),
+    sync: server.type === "satellite" ? false : Boolean(server.sync),
   };
 };
 
@@ -110,12 +93,18 @@ const validateManagedServers = (servers: ManagedServer[]): string | null => {
   return null;
 };
 
+type PendingSave = {
+  servers: ManagedServer[];
+  successMessage?: string;
+  backoffUntil?: number;
+};
+
 export default function App() {
   const queryClient = useQueryClient();
   const { connect, disconnect, user, signer, ndk } = useNdk();
-  const { snapshot: nip46Snapshot } = useNip46();
+  const { snapshot: nip46Snapshot, service: nip46Service, ready: nip46Ready } = useNip46();
   const pubkey = useCurrentPubkey();
-  const { servers, saveServers, saving } = useServers();
+  const { servers, saveServers, saving, hasFetchedUserServers } = useServers();
   const {
     preferences,
     setDefaultServerUrl,
@@ -125,6 +114,8 @@ export default function App() {
     setShowGridPreviews,
     setShowListPreviews,
     setKeepSearchExpanded,
+    setSyncEnabled,
+    syncState,
   } = useUserPreferences();
   const { effectiveRelays } = usePreferredRelays();
   useAliasSync(effectiveRelays, Boolean(pubkey));
@@ -157,6 +148,8 @@ export default function App() {
 
   const audio = useAudio();
 
+  const { enabled: syncEnabled, loading: syncLoading, error: syncError, pending: syncPending, lastSyncedAt: syncLastSyncedAt } = syncState;
+
   const handleFilterModeChange = useCallback((mode: FilterMode) => {
     setActiveBrowseFilter(prev => (prev === mode ? prev : mode));
   }, []);
@@ -173,10 +166,14 @@ export default function App() {
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [statusMessageTone, setStatusMessageTone] = useState<StatusMessageTone>("info");
   const statusMessageTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingSaveRef = useRef<PendingSave | null>(null);
+  const retryPendingSaveTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [pendingSaveVersion, setPendingSaveVersion] = useState(0);
 
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const [connectSignerOpen, setConnectSignerOpen] = useState(false);
+  const [pendingRemoteSignerConnect, setPendingRemoteSignerConnect] = useState(false);
   const [renameTarget, setRenameTarget] = useState<BlossomBlob | null>(null);
   const [folderRenamePath, setFolderRenamePath] = useState<string | null>(null);
 
@@ -221,11 +218,12 @@ export default function App() {
   }, [servers, preferences.defaultServerUrl]);
 
   useEffect(() => {
+    if (!hasFetchedUserServers) return;
     if (!preferences.defaultServerUrl) return;
     if (!servers.some(server => server.url === preferences.defaultServerUrl)) {
       setDefaultServerUrl(null);
     }
-  }, [servers, preferences.defaultServerUrl, setDefaultServerUrl]);
+  }, [servers, hasFetchedUserServers, preferences.defaultServerUrl, setDefaultServerUrl]);
 
   useEffect(() => {
     setActiveBrowseFilter(preferences.defaultFilterMode);
@@ -272,21 +270,13 @@ export default function App() {
     }
   }, [user]);
 
-  const showAuthPrompt = !user;
+  const isSignedIn = Boolean(user);
+  const showAuthPrompt = !isSignedIn;
 
   useEffect(() => {
     const element = mainWidgetRef.current;
     if (!element) return;
-    if (showAuthPrompt) {
-      element.setAttribute("inert", "");
-      return () => {
-        element.removeAttribute("inert");
-      };
-    }
     element.removeAttribute("inert");
-    return () => {
-      element.removeAttribute("inert");
-    };
   }, [showAuthPrompt]);
 
   useEffect(() => {
@@ -306,6 +296,9 @@ export default function App() {
     return () => {
       if (statusMessageTimeout.current) {
         clearTimeout(statusMessageTimeout.current);
+      }
+      if (retryPendingSaveTimeout.current) {
+        clearTimeout(retryPendingSaveTimeout.current);
       }
     };
   }, []);
@@ -356,23 +349,113 @@ export default function App() {
     []
   );
 
-  const hasActiveRemoteSigner = useMemo(() => {
-    if (signer) return true;
-    return nip46Snapshot.sessions.some(session => session.userPubkey && !session.lastError);
-  }, [signer, nip46Snapshot.sessions]);
+  const handleProfileUpdated = useCallback((metadata: ProfileMetadataPayload) => {
+    const nextAvatarUrl = typeof metadata.picture === "string" && metadata.picture.trim() ? metadata.picture.trim() : null;
+    setAvatarUrl(nextAvatarUrl);
+  }, []);
+
+  const latestRemoteSignerSession = useMemo(() => {
+    return (
+      nip46Snapshot.sessions
+        .filter(session => session.status !== "revoked" && !session.lastError)
+        .sort((a, b) => b.updatedAt - a.updatedAt)[0] ?? null
+    );
+  }, [nip46Snapshot.sessions]);
+
+  const hasConnectableRemoteSignerSession = useMemo(
+    () => nip46Snapshot.sessions.some(session => session.status !== "revoked" && !session.lastError),
+    [nip46Snapshot.sessions]
+  );
+
+  const isRemoteSignerAdopted = Boolean(signer);
+  const shouldShowConnectSignerDialog = connectSignerOpen && !isRemoteSignerAdopted;
 
   const handleConnectSignerClick = useCallback(() => {
-    if (hasActiveRemoteSigner) {
+    if (isRemoteSignerAdopted) {
       showStatusMessage("Remote signer already connected", "info", 2500);
       return;
     }
-    setConnectSignerOpen(true);
-  }, [hasActiveRemoteSigner, showStatusMessage]);
+
+    if (pendingRemoteSignerConnect) {
+      showStatusMessage("Connecting to remote signer…", "info", 2500);
+      return;
+    }
+
+    if (nip46Ready && !latestRemoteSignerSession) {
+      setConnectSignerOpen(true);
+      return;
+    }
+
+    setPendingRemoteSignerConnect(true);
+    if (!nip46Ready || !nip46Service) {
+      showStatusMessage("Preparing remote signer support…", "info", 3000);
+    } else {
+      showStatusMessage("Connecting to remote signer…", "info", 3000);
+    }
+  }, [
+    isRemoteSignerAdopted,
+    pendingRemoteSignerConnect,
+    nip46Ready,
+    latestRemoteSignerSession,
+    nip46Service,
+    showStatusMessage,
+  ]);
 
   useEffect(() => {
-    if (!hasActiveRemoteSigner) return;
+    if (!isRemoteSignerAdopted) return;
     setConnectSignerOpen(false);
-  }, [hasActiveRemoteSigner]);
+  }, [isRemoteSignerAdopted]);
+
+  useEffect(() => {
+    if (!isRemoteSignerAdopted) return;
+    if (!pendingRemoteSignerConnect) return;
+    setPendingRemoteSignerConnect(false);
+  }, [isRemoteSignerAdopted, pendingRemoteSignerConnect]);
+
+  useEffect(() => {
+    if (!pendingRemoteSignerConnect) return;
+    if (!nip46Ready) return;
+    if (!nip46Service) return;
+
+    const sessionId = latestRemoteSignerSession?.id;
+    if (!sessionId) {
+      setPendingRemoteSignerConnect(false);
+      if (!hasConnectableRemoteSignerSession) {
+        setConnectSignerOpen(true);
+      }
+      return;
+    }
+
+    let cancelled = false;
+
+    const attemptReconnect = async () => {
+      try {
+        await nip46Service.connectSession(sessionId);
+      } catch (error) {
+        console.error("Failed to connect remote signer", error);
+        if (cancelled) return;
+        showStatusMessage("Failed to connect to remote signer. Please re-connect.", "error", 6000);
+        setConnectSignerOpen(true);
+      } finally {
+        if (!cancelled) {
+          setPendingRemoteSignerConnect(false);
+        }
+      }
+    };
+
+    void attemptReconnect();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    pendingRemoteSignerConnect,
+    nip46Ready,
+    nip46Service,
+    latestRemoteSignerSession,
+    hasConnectableRemoteSignerSession,
+    showStatusMessage,
+  ]);
 
   const handleRequestRename = useCallback((blob: BlossomBlob) => {
     setRenameTarget(blob);
@@ -535,19 +618,118 @@ export default function App() {
     }
   }, [isSearchOpen, keepSearchExpanded, tab]);
 
+  const schedulePendingSaveAttempt = useCallback(
+    (backoffUntil?: number) => {
+      if (retryPendingSaveTimeout.current) {
+        clearTimeout(retryPendingSaveTimeout.current);
+        retryPendingSaveTimeout.current = null;
+      }
+
+      setPendingSaveVersion(prev => prev + 1);
+
+      if (backoffUntil === undefined) return;
+      const delay = Math.max(0, backoffUntil - Date.now());
+      retryPendingSaveTimeout.current = setTimeout(() => {
+        retryPendingSaveTimeout.current = null;
+        setPendingSaveVersion(prev => prev + 1);
+      }, delay);
+    },
+    []
+  );
+
+  const queuePendingSave = useCallback(
+    (payload: PendingSave) => {
+      pendingSaveRef.current = payload;
+      schedulePendingSaveAttempt(payload.backoffUntil);
+    },
+    [schedulePendingSaveAttempt]
+  );
+
+  const attemptSave = useCallback(
+    async (serversToPersist: ManagedServer[], successMessage?: string) => {
+      try {
+        await saveServers(serversToPersist);
+        showStatusMessage(successMessage ?? "Server list updated", "success", 2500);
+      } catch (error: any) {
+        const message = error?.message || "Failed to save servers";
+        const backoffUntil = Date.now() + 5000;
+        queuePendingSave({ servers: serversToPersist, successMessage, backoffUntil });
+        showStatusMessage(message, "error", 3000);
+      }
+    },
+    [queuePendingSave, saveServers, showStatusMessage]
+  );
+
+  const flushPendingSave = useCallback(() => {
+    const pending = pendingSaveRef.current;
+    if (!pending) return;
+    if (!signer || saving) return;
+    if (pending.backoffUntil && pending.backoffUntil > Date.now()) return;
+
+    pendingSaveRef.current = null;
+    void attemptSave(pending.servers, pending.successMessage);
+  }, [attemptSave, saving, signer]);
+
+  useEffect(() => {
+    flushPendingSave();
+  }, [flushPendingSave, pendingSaveVersion]);
+
+  const persistServers = useCallback(
+    (serversToPersist: ManagedServer[], options?: { successMessage?: string }): boolean => {
+      const validationError = validateManagedServers(serversToPersist);
+      if (validationError) {
+        showStatusMessage(validationError, "error", 3000);
+        return false;
+      }
+
+      const normalized = sortServersByName(serversToPersist.map(normalizeManagedServer));
+      setLocalServers(normalized);
+
+      const successMessage = options?.successMessage;
+
+      if (!signer) {
+        queuePendingSave({ servers: normalized, successMessage });
+        showStatusMessage("Connect your signer to finish saving changes", "info", 3000);
+        return true;
+      }
+
+      if (saving) {
+        queuePendingSave({ servers: normalized, successMessage });
+        showStatusMessage("Saving queued…", "info", 2000);
+        return true;
+      }
+
+      void attemptSave(normalized, successMessage);
+      return true;
+    },
+    [attemptSave, queuePendingSave, saving, showStatusMessage, signer]
+  );
+
   const handleAddServer = (server: ManagedServer) => {
     const normalized = normalizeManagedServer(server);
     const trimmedUrl = normalized.url;
     if (!trimmedUrl) return;
 
+    let added = false;
+    let nextServers: ManagedServer[] | null = null;
+
     setLocalServers(prev => {
       if (prev.find(existing => existing.url === trimmedUrl)) {
+        nextServers = prev;
         return prev;
       }
-      const next = [...prev, normalized];
-      return sortServersByName(next);
+
+      const next = sortServersByName([...prev, normalized]);
+      nextServers = next;
+      added = true;
+      return next;
     });
+
     setSelectedServer(trimmedUrl);
+
+    if (added && nextServers) {
+      persistServers(nextServers, { successMessage: "Server added" });
+    }
   };
 
   const handleUpdateServer = (originalUrl: string, updated: ManagedServer) => {
@@ -555,12 +737,30 @@ export default function App() {
     const normalizedUrl = normalized.url;
     if (!normalizedUrl) return;
 
+    let updatedServers: ManagedServer[] | null = null;
+    let didChange = false;
+
     setLocalServers(prev => {
       if (prev.some(server => server.url !== originalUrl && server.url === normalizedUrl)) {
+        updatedServers = prev;
         return prev;
       }
-      const updatedList = prev.map(server => (server.url === originalUrl ? normalized : server));
-      return sortServersByName(updatedList);
+
+      const replaced = prev.map(server => {
+        if (server.url !== originalUrl) return server;
+        didChange =
+          didChange ||
+          server.name !== normalized.name ||
+          server.url !== normalized.url ||
+          server.type !== normalized.type ||
+          Boolean(server.requiresAuth) !== normalized.requiresAuth ||
+          Boolean(server.sync) !== normalized.sync;
+        return normalized;
+      });
+
+      const sorted = sortServersByName(replaced);
+      updatedServers = sorted;
+      return sorted;
     });
 
     setSelectedServer(prev => {
@@ -569,43 +769,33 @@ export default function App() {
       }
       return prev;
     });
+
+    if (didChange && updatedServers) {
+      persistServers(updatedServers, { successMessage: "Server updated" });
+    }
   };
 
   const handleRemoveServer = (url: string) => {
-    setLocalServers(prev => prev.filter(server => server.url !== url));
+    const target = localServers.find(server => server.url === url);
+    if (!target) return;
+
+    if (typeof window !== "undefined") {
+      const confirmed = window.confirm(`Remove ${target.name || target.url}?`);
+      if (!confirmed) return;
+    }
+
+    const nextServers = localServers.filter(server => server.url !== url);
+    if (nextServers.length === localServers.length) {
+      return;
+    }
+
+    const committed = persistServers(nextServers, { successMessage: "Server removed" });
+    if (!committed) {
+      return;
+    }
+
     if (selectedServer === url) {
       setSelectedServer(null);
-    }
-  };
-
-  const handleToggleRequiresAuth = (url: string, value: boolean) => {
-    setLocalServers(prev => prev.map(server => (server.url === url ? { ...server, requiresAuth: value } : server)));
-  };
-
-  const handleToggleSync = (url: string, value: boolean) => {
-    setLocalServers(prev => prev.map(server => (server.url === url ? { ...server, sync: value } : server)));
-  };
-
-  const handleSaveServers = async () => {
-    if (!signer) {
-      showStatusMessage("Connect your signer to save servers", "error", 2500);
-      return;
-    }
-    if (saving) {
-      showStatusMessage("Server list update already in progress.", "info", 2000);
-      return;
-    }
-    if (serverValidationError) {
-      showStatusMessage(serverValidationError, "error", 3000);
-      return;
-    }
-    const normalized = sortServersByName(localServers.map(normalizeManagedServer));
-    setLocalServers(normalized);
-    try {
-      await saveServers(normalized);
-      showStatusMessage("Server list updated", "success", 2500);
-    } catch (error: any) {
-      showStatusMessage(error?.message || "Failed to save servers", "error", 3000);
     }
   };
 
@@ -693,21 +883,30 @@ export default function App() {
     return { text: "Servers not in sync", tone: "warning" as const };
   }, [syncEnabledServerUrls.length, syncStatus, syncSnapshot.allLinkedServersSynced, syncSnapshot.syncAutoReady]);
 
-  const centerMessage = statusMessage ?? syncSummary.text;
-  const centerClass = statusMessage
-    ? statusMessageTone === "error"
-      ? "text-red-400"
-      : statusMessageTone === "success"
-      ? "text-emerald-300"
-      : "text-slate-400"
-    : centerMessage
-    ? toneClassByKey[syncSummary.tone]
-    : "text-slate-500";
+  const derivedStatusMessage = statusMessage ?? (syncLoading ? "Syncing settings" : null);
+  const centerMessage = derivedStatusMessage ?? syncSummary.text;
+  const centerTone = derivedStatusMessage
+    ? derivedStatusMessage === statusMessage
+      ? statusMessageTone === "error"
+        ? "error"
+        : statusMessageTone === "success"
+        ? "success"
+        : "info"
+      : "syncing"
+    : syncSummary.text
+    ? syncSummary.tone
+    : "muted";
+  const centerClass = toneClassByKey[centerTone];
 
   const statusSelectValue = selectedServer ?? ALL_SERVERS_VALUE;
 
   const statusCount = statusMetrics.count;
   const statusSize = statusMetrics.size;
+  const showStatusTotals = tab === "browse" || tab === "upload" || tab === "share" || tab === "transfer";
+  const hideServerSelectorTabs: TabId[] = ["profile", "private-links", "relays", "servers", "settings"];
+  const showServerSelector = !hideServerSelectorTabs.includes(tab);
+  const showGithubLink = hideServerSelectorTabs.includes(tab);
+  const showSupportLink = showGithubLink;
 
   const handleProvideSyncStarter = useCallback((runner: () => void) => {
     syncStarterRef.current = runner;
@@ -734,8 +933,18 @@ export default function App() {
     setIsUserMenuOpen(false);
   }, []);
 
+  const handleSelectProfile = useCallback(() => {
+    setTab("profile");
+    setIsUserMenuOpen(false);
+  }, []);
+
   const handleSelectRelays = useCallback(() => {
     setTab("relays");
+    setIsUserMenuOpen(false);
+  }, []);
+
+  const handleSelectPrivateLinks = useCallback(() => {
+    setTab("private-links");
     setIsUserMenuOpen(false);
   }, []);
 
@@ -743,6 +952,17 @@ export default function App() {
     setTab("settings");
     setIsUserMenuOpen(false);
   }, []);
+
+  const userMenuLinks = useMemo(() =>
+    [
+      { label: "Edit Profile", icon: EditIcon, handler: handleSelectProfile },
+      { label: "Private Links", icon: LinkIcon, handler: handleSelectPrivateLinks },
+      { label: "Relays", icon: RelayIcon, handler: handleSelectRelays },
+      { label: "Servers", icon: ServersIcon, handler: handleSelectServers },
+      { label: "Settings", icon: SettingsIcon, handler: handleSelectSettings },
+    ].sort((a, b) => a.label.localeCompare(b.label)),
+  [handleSelectPrivateLinks, handleSelectProfile, handleSelectRelays, handleSelectServers, handleSelectSettings]
+  );
 
   const handleDisconnectClick = useCallback(() => {
     setIsUserMenuOpen(false);
@@ -756,9 +976,9 @@ export default function App() {
     <div className="flex min-h-screen max-h-screen flex-col overflow-hidden bg-slate-950 text-slate-100">
       <div className="mx-auto flex w-full flex-1 min-h-0 flex-col gap-6 overflow-hidden px-6 py-8 max-w-7xl box-border">
         <header className="flex flex-wrap items-center gap-4">
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 min-h-12">
             <img
-              src="/bloom.png"
+              src="/bloom.webp"
               alt="Bloom logo"
               className="h-10 w-10 rounded-xl object-cover"
             />
@@ -793,45 +1013,21 @@ export default function App() {
                 {isUserMenuOpen && (
                   <div className="absolute right-0 z-50 mt-2 min-w-[10rem] rounded-md bg-slate-900 px-2 py-2 text-sm shadow-lg">
                     <ul className="flex flex-col gap-1 text-slate-200">
-                      <li>
-                        <a
-                          href="#"
-                          onClick={event => {
-                            event.preventDefault();
-                            handleSelectServers();
-                          }}
-                          className="flex items-center gap-2 rounded-lg px-2 py-1 transition hover:bg-slate-800/70 hover:text-emerald-300"
-                        >
-                          <ServersIcon size={16} />
-                          <span>Servers</span>
-                        </a>
-                      </li>
-                      <li>
-                        <a
-                          href="#"
-                          onClick={event => {
-                            event.preventDefault();
-                            handleSelectRelays();
-                          }}
-                          className="flex items-center gap-2 rounded-lg px-2 py-1 transition hover:bg-slate-800/70 hover:text-emerald-300"
-                        >
-                          <RelayIcon size={16} />
-                          <span>Relays</span>
-                        </a>
-                      </li>
-                      <li>
-                        <a
-                          href="#"
-                          onClick={event => {
-                            event.preventDefault();
-                            handleSelectSettings();
-                          }}
-                          className="flex items-center gap-2 rounded-lg px-2 py-1 transition hover:bg-slate-800/70 hover:text-emerald-300"
-                        >
-                          <SettingsIcon size={16} />
-                          <span>Settings</span>
-                        </a>
-                      </li>
+                      {userMenuLinks.map(item => (
+                        <li key={item.label}>
+                          <a
+                            href="#"
+                            onClick={event => {
+                              event.preventDefault();
+                              item.handler();
+                            }}
+                            className="flex items-center gap-2 rounded-lg px-2 py-1 transition hover:bg-slate-800/70 hover:text-emerald-300"
+                          >
+                            <item.icon size={16} />
+                            <span>{item.label}</span>
+                          </a>
+                        </li>
+                      ))}
                       <li>
                         <a
                           href="#"
@@ -854,309 +1050,106 @@ export default function App() {
         </header>
 
         <div className="relative flex flex-1 min-h-0 flex-col overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/70">
-          <div
-            ref={mainWidgetRef}
-            className={`flex flex-1 min-h-0 flex-col ${showAuthPrompt ? "pointer-events-none opacity-40" : ""}`}
-            aria-hidden={showAuthPrompt || undefined}
-          >
-            <nav className="flex flex-wrap items-center gap-3 px-4 py-3 border-b border-slate-800 bg-slate-900/60">
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={handleBreadcrumbHome}
-                  disabled={showAuthPrompt}
-                  className="px-3 py-2 text-sm rounded-xl border flex items-center gap-2 transition disabled:cursor-not-allowed disabled:opacity-60 border-slate-800 bg-slate-900/70 text-slate-300 hover:border-slate-700"
-                >
-                  <HomeIcon size={16} />
-                  <span>Home</span>
-                </button>
-                {keepSearchExpanded && (
-                  <button
-                    type="button"
-                    onClick={() => browseNavigationState?.onNavigateUp?.()}
-                    disabled={showAuthPrompt || !browseNavigationState?.canNavigateUp}
-                    className="px-3 py-2 text-sm rounded-xl border flex items-center gap-2 transition disabled:cursor-not-allowed disabled:opacity-40 border-slate-800 bg-slate-900/70 text-slate-300 hover:border-slate-700"
-                    aria-label="Go back"
-                  >
-                    <ChevronLeftIcon size={16} />
-                  </button>
-                )}
-              </div>
-              <div className="min-w-0 flex-1">
-                {isSearchOpen ? (
-                  <div className="relative w-full">
-                    <input
-                      ref={searchInputRef}
-                      type="search"
-                      value={searchQuery}
-                      onChange={handleSearchChange}
-                      onKeyDown={handleSearchKeyDown}
-                      placeholder="Search files"
-                      className="w-full rounded-xl border border-slate-800 bg-slate-900/70 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                    />
-                    {searchQuery ? (
-                      <button
-                        type="button"
-                        onClick={handleClearSearch}
-                        className="absolute right-2 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-full text-slate-400 transition hover:text-slate-200"
-                        aria-label="Clear search"
-                      >
-                        <CloseIcon size={14} />
-                      </button>
-                    ) : null}
-                  </div>
-                ) : browseNavigationState && browseNavigationState.segments.length > 0 ? (
-                  <div
-                    className="flex min-w-0 items-center gap-1 overflow-x-auto whitespace-nowrap text-sm text-slate-200"
-                    title={`/${browseNavigationState.segments.map(segment => segment.label).join("/")}`}
-                  >
-                    {browseNavigationState.segments.map((segment, index) => (
-                      <React.Fragment key={segment.id}>
-                        {index > 0 && <ChevronRightIcon size={14} className="text-slate-600 flex-shrink-0" />}
-                        <button
-                          type="button"
-                          onClick={segment.onNavigate}
-                          disabled={showAuthPrompt}
-                          className="max-w-[10rem] truncate rounded-lg border border-slate-800 bg-slate-900/70 px-2 py-1 text-left transition hover:border-slate-700 disabled:cursor-not-allowed disabled:opacity-60"
-                        >
-                          {segment.label}
-                        </button>
-                      </React.Fragment>
-                    ))}
-                  </div>
-                ) : (
-                  <span className="text-sm text-slate-500">/</span>
-                )}
-              </div>
-              <div className="flex items-center gap-3">
-                <button
-                  type="button"
-                  onClick={handleToggleSearch}
-                  disabled={showAuthPrompt || keepSearchExpanded}
-                  aria-label="Search files"
-                  aria-pressed={isSearchOpen}
-                  className="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-800 bg-slate-900/70 text-slate-300 transition hover:border-slate-700 focus:outline-none focus:ring-1 focus:ring-emerald-500 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  <SearchIcon size={16} />
-                </button>
-                {browseHeaderControls ? (
-                  <div className="flex items-center gap-3">{browseHeaderControls}</div>
-                ) : null}
-                <div className="flex gap-3 ml-3">
-                  {NAV_TABS.map(item => {
-                    const selectedCount = selectedBlobs.size;
-                    const isUploadTab = item.id === "upload";
-                    const isTransferView = tab === "transfer";
-                    const showTransfer = isUploadTab && selectedCount > 0;
-                    const isActive = tab === item.id || (isUploadTab && isTransferView);
-                    const IconComponent = showTransfer ? TransferIcon : item.icon;
-                    const label = showTransfer ? "Transfer" : item.label;
-                    const hideLabelOnMobile = isUploadTab;
-                    return (
-                      <button
-                        key={item.id}
-                        onClick={() => {
-                          const nextTab = showTransfer ? "transfer" : item.id;
-                          setTab(nextTab);
-                        }}
-                        disabled={showAuthPrompt}
-                        aria-label={label}
-                        className={`px-3 py-2 text-sm rounded-xl border flex items-center gap-2 transition disabled:cursor-not-allowed disabled:opacity-60 ${
-                          isActive
-                            ? "border-emerald-500 bg-emerald-500/10 text-emerald-200"
-                            : "border-slate-800 bg-slate-900/70 text-slate-300 hover:border-slate-700"
-                        }`}
-                      >
-                        <IconComponent size={16} />
-                        <span className={hideLabelOnMobile ? "hidden sm:inline" : undefined}>{label}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            </nav>
-            <div
-              className={`flex flex-1 min-h-0 flex-col box-border p-4 ${
-                tab === "browse" || tab === "share" ? "overflow-hidden" : "overflow-y-auto"
-              }`}
-            >
-              <Suspense
-                fallback={
-                  <div className="flex flex-1 items-center justify-center text-sm text-slate-400">
-                    Loading workspace…
-                  </div>
-                }
-              >
-              <WorkspaceLazy
-                tab={tab}
-                servers={localServers}
-                selectedServer={selectedServer}
-                onSelectServer={setSelectedServer}
-                homeNavigationKey={homeNavigationKey}
-                showGridPreviews={preferences.showGridPreviews}
-                showListPreviews={preferences.showListPreviews}
-                defaultSortOption={preferences.defaultSortOption}
-                onStatusMetricsChange={handleStatusMetricsChange}
-                onSyncStateChange={handleSyncStateChange}
-                onProvideSyncStarter={handleProvideSyncStarter}
-                onRequestRename={handleRequestRename}
-                onRequestFolderRename={handleRequestFolderRename}
-                onRequestShare={handleShareBlob}
-                onSetTab={setTab}
-                onUploadCompleted={handleUploadCompleted}
-                showStatusMessage={showStatusMessage}
-                onProvideBrowseControls={setBrowseHeaderControls}
-                onProvideBrowseNavigation={setBrowseNavigationState}
-                onFilterModeChange={handleFilterModeChange}
-                searchQuery={searchQuery}
+          <div ref={mainWidgetRef} className="flex flex-1 min-h-0 flex-col">
+            {showAuthPrompt ? (
+              <LoggedOutPrompt
+                onConnect={connect}
+                onConnectRemoteSigner={handleConnectSignerClick}
               />
-            </Suspense>
-
-              {tab === "share" && (
-                <div className="flex flex-1 min-h-0">
-                  <Suspense
-                    fallback={
-                      <div className="flex flex-1 items-center justify-center text-sm text-slate-400">
-                        Loading share composer…
-                      </div>
-                    }
-                  >
-                    <ShareComposerLazy
-                      embedded
-                      payload={shareState.payload}
-                      shareKey={shareState.shareKey}
-                      onClose={() => {
-                        clearShareState();
-                        setTab("browse");
-                      }}
-                      onShareComplete={handleShareComplete}
-                    />
-                  </Suspense>
-                </div>
-              )}
-
-              {tab === "servers" && (
-                <Suspense
-                  fallback={
-                    <div className="flex flex-1 items-center justify-center text-sm text-slate-400">
-                      Loading servers…
-                    </div>
-                  }
-                >
-                  <ServerListLazy
-                    servers={localServers}
-                    selected={selectedServer}
-                    defaultServerUrl={preferences.defaultServerUrl}
-                    onSelect={setSelectedServer}
-                    onSetDefaultServer={handleSetDefaultServer}
-                    onAdd={handleAddServer}
-                    onUpdate={handleUpdateServer}
-                    onSave={handleSaveServers}
-                    saving={saving}
-                    disabled={!signer}
-                    onRemove={handleRemoveServer}
-                    onToggleAuth={handleToggleRequiresAuth}
-                    onToggleSync={handleToggleSync}
-                    onSync={handleSyncSelectedServers}
-                    syncDisabled={syncButtonDisabled}
-                    syncInProgress={syncBusy}
-                    validationError={serverValidationError}
-                  />
-                </Suspense>
-              )}
-
-              {tab === "settings" && (
-                <Suspense
-                  fallback={
-                    <div className="flex flex-1 items-center justify-center text-sm text-slate-400">
-                      Loading settings…
-                    </div>
-                  }
-                >
-                  <SettingsPanelLazy
-                    servers={localServers}
-                    defaultServerUrl={preferences.defaultServerUrl}
-                    showIconsPreviews={preferences.showGridPreviews}
-                    showListPreviews={preferences.showListPreviews}
-                    defaultViewMode={preferences.defaultViewMode}
-                    defaultFilterMode={preferences.defaultFilterMode}
-                    defaultSortOption={preferences.defaultSortOption}
-                    keepSearchExpanded={keepSearchExpanded}
-                    onSetDefaultViewMode={handleSetDefaultViewMode}
-                    onSetDefaultFilterMode={handleSetDefaultFilterMode}
-                    onSetDefaultSortOption={handleSetDefaultSortOption}
-                    onSetDefaultServer={handleSetDefaultServer}
-                    onSetShowIconsPreviews={handleSetShowPreviewsInGrid}
-                    onSetShowListPreviews={handleSetShowPreviewsInList}
-                    onSetKeepSearchExpanded={handleSetKeepSearchExpanded}
-                  />
-                </Suspense>
-              )}
-
-              {tab === "relays" && (
-                <Suspense
-                  fallback={
-                    <div className="flex flex-1 items-center justify-center text-sm text-slate-400">
-                      Loading relays…
-                    </div>
-                  }
-                >
-                  <RelayListLazy />
-                </Suspense>
-              )}
-            </div>
+            ) : (
+              <>
+                <MainNavigation
+                  showAuthPrompt={false}
+                  keepSearchExpanded={keepSearchExpanded}
+                  browseNavigationState={browseNavigationState}
+                  isSearchOpen={isSearchOpen}
+                  searchQuery={searchQuery}
+                  searchInputRef={searchInputRef}
+                  onSearchChange={handleSearchChange}
+                  onSearchKeyDown={handleSearchKeyDown}
+                  onSearchClear={handleClearSearch}
+                  onToggleSearch={handleToggleSearch}
+                  browseHeaderControls={browseHeaderControls}
+                  selectedCount={selectedBlobs.size}
+                  tab={tab}
+                  onSelectTab={setTab}
+                  navTabs={NAV_TABS}
+                  onBreadcrumbHome={handleBreadcrumbHome}
+                />
+                <WorkspaceSection
+                  tab={tab}
+                  localServers={localServers}
+                  selectedServer={selectedServer}
+                  onSelectServer={setSelectedServer}
+                  homeNavigationKey={homeNavigationKey}
+                  defaultViewMode={preferences.defaultViewMode}
+                  defaultFilterMode={preferences.defaultFilterMode}
+                  showGridPreviews={preferences.showGridPreviews}
+                  showListPreviews={preferences.showListPreviews}
+                  defaultSortOption={preferences.defaultSortOption}
+                  onStatusMetricsChange={handleStatusMetricsChange}
+                  onSyncStateChange={handleSyncStateChange}
+                  onProvideSyncStarter={handleProvideSyncStarter}
+                  onRequestRename={handleRequestRename}
+                  onRequestFolderRename={handleRequestFolderRename}
+                  onRequestShare={handleShareBlob}
+                  onSetTab={setTab}
+                  onUploadCompleted={handleUploadCompleted}
+                  showStatusMessage={showStatusMessage}
+                  onProvideBrowseControls={setBrowseHeaderControls}
+                  onProvideBrowseNavigation={setBrowseNavigationState}
+                  onFilterModeChange={handleFilterModeChange}
+                  searchQuery={searchQuery}
+                  shareState={shareState}
+                  onClearShareState={clearShareState}
+                  onShareComplete={handleShareComplete}
+                  defaultServerUrl={preferences.defaultServerUrl}
+                  keepSearchExpanded={keepSearchExpanded}
+                  syncEnabled={syncEnabled}
+                  syncLoading={syncLoading}
+                  syncError={syncError}
+                  syncPending={syncPending}
+                  syncLastSyncedAt={syncLastSyncedAt}
+                  onToggleSyncEnabled={setSyncEnabled}
+                  onSetDefaultViewMode={handleSetDefaultViewMode}
+                  onSetDefaultFilterMode={handleSetDefaultFilterMode}
+                  onSetDefaultSortOption={handleSetDefaultSortOption}
+                  onSetDefaultServer={handleSetDefaultServer}
+                  onSetShowGridPreviews={handleSetShowPreviewsInGrid}
+                  onSetShowListPreviews={handleSetShowPreviewsInList}
+                  onSetKeepSearchExpanded={handleSetKeepSearchExpanded}
+                  saving={saving}
+                  signer={signer}
+                  onAddServer={handleAddServer}
+                  onUpdateServer={handleUpdateServer}
+                  onRemoveServer={handleRemoveServer}
+                  onSyncSelectedServers={handleSyncSelectedServers}
+                  syncButtonDisabled={syncButtonDisabled}
+                  syncBusy={syncBusy}
+                  serverValidationError={serverValidationError}
+                  onProfileUpdated={handleProfileUpdated}
+                />
+              </>
+            )}
           </div>
 
-          <footer className="border-t border-slate-800 bg-slate-900/70 px-4 py-3 text-xs text-slate-300 flex flex-wrap items-center gap-4">
-            <div className="flex items-center gap-2">
-              <label htmlFor="status-server" className="text-[11px] uppercase tracking-wide text-slate-300">
-                Server
-              </label>
-              <select
-                id="status-server"
-                value={statusSelectValue}
-                onChange={handleStatusServerChange}
-                className="rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-200 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
-              >
-                <option value={ALL_SERVERS_VALUE}>All servers</option>
-                {localServers.map(server => (
-                  <option key={server.url} value={server.url}>
-                    {server.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className={`flex-1 text-center ${centerClass}`}>{centerMessage ?? ""}</div>
-            <div className="ml-auto flex gap-4">
-              <span>
-                {statusCount} item{statusCount === 1 ? "" : "s"}
-              </span>
-              <span>{prettyBytes(statusSize)}</span>
-            </div>
-          </footer>
+          <StatusFooter
+            isSignedIn={isSignedIn}
+            localServers={localServers}
+            statusSelectValue={statusSelectValue}
+            onStatusServerChange={handleStatusServerChange}
+            centerClass={centerClass}
+            centerMessage={centerMessage}
+            showStatusTotals={showStatusTotals}
+            showServerSelector={showServerSelector}
+            statusCount={statusCount}
+            statusSize={statusSize}
+            allServersValue={ALL_SERVERS_VALUE}
+            showGithubLink={showGithubLink}
+            showSupportLink={showSupportLink}
+          />
 
-          {showAuthPrompt && (
-            <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-4 bg-slate-950/80 px-6 text-center backdrop-blur-sm">
-              <img src="/bloom.png" alt="Bloom logo" className="w-24 md:w-32 rounded-xl" />
-              <p className="text-sm text-slate-200">Connect your Nostr account to use Bloom.</p>
-              <div className="flex flex-col gap-2">
-                <button
-                  onClick={connect}
-                  className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-slate-900"
-                >
-                  Connect With Browser Extension
-                </button>
-                <button
-                  onClick={handleConnectSignerClick}
-                  className="px-3 py-2 rounded-xl border border-emerald-500/60 bg-transparent text-emerald-300 hover:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-slate-900"
-                >
-                  Connect With Remote Signer
-                </button>
-              </div>
-            </div>
-          )}
-
-          {renameTarget && (
+          {!showAuthPrompt && renameTarget && (
             <Suspense
               fallback={
                 <div className="fixed inset-0 z-20 flex items-center justify-center bg-slate-950/80 text-sm text-slate-300">
@@ -1175,7 +1168,7 @@ export default function App() {
             </Suspense>
           )}
 
-          {folderRenamePath && (
+          {!showAuthPrompt && folderRenamePath && (
             <FolderRenameDialog
               path={folderRenamePath}
               onClose={handleFolderRenameClose}
@@ -1185,7 +1178,7 @@ export default function App() {
 
           <Suspense fallback={null}>
             <ConnectSignerDialogLazy
-              open={connectSignerOpen}
+              open={shouldShowConnectSignerDialog}
               onClose={() => setConnectSignerOpen(false)}
             />
           </Suspense>
@@ -1200,3 +1193,206 @@ export default function App() {
     </div>
   );
 }
+
+type MainNavigationProps = {
+  showAuthPrompt: boolean;
+  keepSearchExpanded: boolean;
+  browseNavigationState: BrowseNavigationState | null;
+  isSearchOpen: boolean;
+  searchQuery: string;
+  searchInputRef: React.MutableRefObject<HTMLInputElement | null>;
+  onSearchChange: React.ChangeEventHandler<HTMLInputElement>;
+  onSearchKeyDown: React.KeyboardEventHandler<HTMLInputElement>;
+  onSearchClear: () => void;
+  onToggleSearch: () => void;
+  browseHeaderControls: React.ReactNode | null;
+  selectedCount: number;
+  tab: TabId;
+  onSelectTab: (tab: TabId) => void;
+  navTabs: typeof NAV_TABS;
+  onBreadcrumbHome: () => void;
+};
+
+type LoggedOutPromptProps = {
+  onConnect: () => void | Promise<void>;
+  onConnectRemoteSigner: () => void;
+};
+
+const LoggedOutPrompt: React.FC<LoggedOutPromptProps> = ({ onConnect, onConnectRemoteSigner }) => {
+  return (
+    <div className="flex flex-1 items-center justify-center p-6">
+      <div className="flex w-full max-w-md flex-col items-center gap-4 rounded-2xl border border-slate-800 bg-slate-900/70 p-8 text-center shadow-xl">
+        <img src="/bloom.webp" alt="Bloom logo" className="w-24 md:w-32 rounded-xl" />
+        <div className="space-y-2">
+          <h2 className="text-lg font-semibold text-slate-100">Welcome to Bloom</h2>
+          <p className="text-sm text-slate-300">
+            Connect your Nostr account to browse your files, manage uploads, share your library, and more.
+          </p>
+        </div>
+        <div className="flex w-full flex-col gap-2">
+          <button
+            onClick={() => {
+              void onConnect();
+            }}
+            className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-slate-900"
+          >
+            Connect With Browser Extension
+          </button>
+          <button
+            onClick={onConnectRemoteSigner}
+            className="px-3 py-2 rounded-xl border border-emerald-500/60 bg-transparent text-emerald-300 hover:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-slate-900"
+          >
+            Connect With Remote Signer
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const MainNavigation = memo(function MainNavigation({
+  showAuthPrompt,
+  keepSearchExpanded,
+  browseNavigationState,
+  isSearchOpen,
+  searchQuery,
+  searchInputRef,
+  onSearchChange,
+  onSearchKeyDown,
+  onSearchClear,
+  onToggleSearch,
+  browseHeaderControls,
+  selectedCount,
+  tab,
+  onSelectTab,
+  navTabs,
+  onBreadcrumbHome,
+}: MainNavigationProps) {
+  const assignSearchInputRef = (node: HTMLInputElement | null) => {
+    searchInputRef.current = node;
+  };
+
+  return (
+    <nav className="flex flex-wrap items-center gap-3 px-4 py-3 border-b border-slate-800 bg-slate-900/60">
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={onBreadcrumbHome}
+          disabled={showAuthPrompt}
+          className="px-3 py-2 text-sm rounded-xl border flex items-center gap-2 transition disabled:cursor-not-allowed disabled:opacity-60 border-slate-800 bg-slate-900/70 text-slate-300 hover:border-slate-700"
+        >
+          <HomeIcon size={16} />
+          <span>Home</span>
+        </button>
+        {keepSearchExpanded && (
+          <button
+            type="button"
+            onClick={() => browseNavigationState?.onNavigateUp?.()}
+            disabled={showAuthPrompt || !browseNavigationState?.canNavigateUp}
+            className="px-3 py-2 text-sm rounded-xl border flex items-center gap-2 transition disabled:cursor-not-allowed disabled:opacity-40 border-slate-800 bg-slate-900/70 text-slate-300 hover:border-slate-700"
+            aria-label="Go back"
+          >
+            <ChevronLeftIcon size={16} />
+          </button>
+        )}
+      </div>
+      <div className="min-w-0 flex-1">
+        {isSearchOpen ? (
+          <div className="relative w-full">
+            <input
+              ref={assignSearchInputRef}
+              type="search"
+              value={searchQuery}
+              onChange={onSearchChange}
+              onKeyDown={onSearchKeyDown}
+              placeholder="Search files"
+              className="w-full rounded-xl border border-slate-800 bg-slate-900/70 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+            />
+            {searchQuery ? (
+              <button
+                type="button"
+                onClick={onSearchClear}
+                className="absolute right-2 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-full bg-slate-800/70 text-emerald-300 transition hover:bg-emerald-500/20 hover:text-emerald-200 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                aria-label="Clear search"
+              >
+                <CloseIcon size={14} />
+              </button>
+            ) : null}
+          </div>
+        ) : browseNavigationState && browseNavigationState.segments.length > 0 ? (
+          <div
+            className="flex min-w-0 items-center gap-1 overflow-x-auto whitespace-nowrap text-sm text-slate-200"
+            title={`/${browseNavigationState.segments.map(segment => segment.label).join("/")}`}
+          >
+            {browseNavigationState.segments.map((segment, index) => (
+              <React.Fragment key={segment.id}>
+                {index > 0 && <ChevronRightIcon size={14} className="text-slate-600 flex-shrink-0" />}
+                <button
+                  type="button"
+                  onClick={segment.onNavigate}
+                  disabled={showAuthPrompt}
+                  className="max-w-[10rem] truncate rounded-lg border border-slate-800 bg-slate-900/70 px-2 py-1 text-left transition hover:border-slate-700 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {segment.label}
+                </button>
+              </React.Fragment>
+            ))}
+          </div>
+        ) : (
+          <span className="text-sm text-slate-500">/</span>
+        )}
+      </div>
+      <div className="flex items-center gap-3 min-h-12">
+        <button
+          type="button"
+          onClick={onToggleSearch}
+          disabled={showAuthPrompt || keepSearchExpanded}
+          aria-label="Search files"
+          aria-pressed={isSearchOpen}
+          className="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-800 bg-slate-900/70 text-slate-300 transition hover:border-slate-700 focus:outline-none focus:ring-1 focus:ring-emerald-500 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          <SearchIcon size={16} />
+        </button>
+        {browseHeaderControls ? (
+          <div className="flex items-center gap-3 min-h-12">{browseHeaderControls}</div>
+        ) : tab === "browse" ? (
+          <div className="flex items-center gap-3 min-h-12" aria-hidden="true">
+            <span className="h-10 w-11 rounded-xl border border-transparent bg-transparent" />
+            <span className="h-10 w-11 rounded-xl border border-transparent bg-transparent" />
+            <span className="h-10 w-11 rounded-xl border border-transparent bg-transparent" />
+          </div>
+        ) : null}
+        <div className="flex gap-3 ml-3">
+          {navTabs.map(item => {
+            const isUploadTab = item.id === "upload";
+            const isTransferView = tab === "transfer";
+            const showTransfer = isUploadTab && selectedCount > 0;
+            const isActive = tab === item.id || (isUploadTab && (isTransferView || showTransfer));
+            const IconComponent = showTransfer ? TransferIcon : item.icon;
+            const label = showTransfer ? "Transfer" : item.label;
+            const hideLabelOnMobile = isUploadTab;
+            const nextTab: TabId = showTransfer ? "transfer" : item.id;
+            return (
+              <button
+                key={item.id}
+                onClick={() => onSelectTab(nextTab)}
+                disabled={showAuthPrompt}
+                aria-label={label}
+                className={`px-3 py-2 text-sm rounded-xl border flex items-center gap-2 transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                  isActive
+                    ? "border-emerald-500 bg-emerald-500/10 text-emerald-200"
+                    : "border-slate-800 bg-slate-900/70 text-slate-300 hover:border-slate-700"
+                }`}
+              >
+                <IconComponent size={16} />
+                <span className={hideLabelOnMobile ? "hidden sm:inline" : undefined}>{label}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </nav>
+  );
+});
+
+MainNavigation.displayName = "MainNavigation";

@@ -21,6 +21,7 @@ import {
   VideoIcon,
   DocumentIcon,
   LockIcon,
+  CopyIcon,
 } from "./icons";
 import { PRIVATE_PLACEHOLDER_SHA } from "../constants/private";
 import type { FileKind } from "./icons";
@@ -32,7 +33,7 @@ import { useInViewport } from "../hooks/useInViewport";
 import { useAudioMetadataMap } from "../features/browse/useAudioMetadata";
 import { usePrivateLibrary } from "../context/PrivateLibraryContext";
 import type { PrivateListEntry } from "../lib/privateList";
-import type { DefaultSortOption } from "../context/UserPreferencesContext";
+import type { DefaultSortOption, SortDirection } from "../context/UserPreferencesContext";
 
 export type BlobReplicaSummary = {
   count: number;
@@ -62,6 +63,7 @@ export type BlobListProps = {
   showGridPreviews?: boolean;
   showListPreviews?: boolean;
   defaultSortOption: DefaultSortOption;
+  sortDirection?: SortDirection;
 };
 
 type DetectedKindMap = Record<string, "image" | "video">;
@@ -97,6 +99,75 @@ const isListLikeBlob = (blob: BlossomBlob) => {
   const metadataType = blob.privateData?.metadata?.type;
   if (isDirectoryLikeMime(metadataType)) return true;
   return false;
+};
+
+const DROPDOWN_OFFSET_PX = 8;
+
+type DropdownPlacement = "up" | "down";
+
+const useDropdownPlacement = (
+  menuOpen: boolean,
+  triggerRef: React.RefObject<HTMLElement | null>,
+  menuRef: React.RefObject<HTMLElement | null>,
+  boundary: HTMLElement | null
+) => {
+  const [placement, setPlacement] = useState<DropdownPlacement | null>(null);
+
+  useLayoutEffect(() => {
+    if (!menuOpen) {
+      setPlacement(null);
+      return;
+    }
+
+    if (typeof window === "undefined") return;
+
+    let frame: number | null = null;
+
+    const computePlacement = () => {
+      const trigger = triggerRef.current;
+      const menu = menuRef.current;
+      if (!trigger || !menu) return;
+
+      const boundaryRect = boundary?.getBoundingClientRect();
+      const triggerRect = trigger.getBoundingClientRect();
+      const menuRect = menu.getBoundingClientRect();
+
+      const topLimit = boundaryRect ? boundaryRect.top : 0;
+      const bottomLimit = boundaryRect ? boundaryRect.bottom : window.innerHeight;
+      const spaceBelow = bottomLimit - triggerRect.bottom;
+      const spaceAbove = triggerRect.top - topLimit;
+      const requiredSpace = menuRect.height + DROPDOWN_OFFSET_PX;
+      const shouldDropUp = spaceBelow < requiredSpace && spaceAbove > spaceBelow;
+
+      setPlacement(previous => {
+        const next = shouldDropUp ? "up" : "down";
+        return previous === next ? previous : next;
+      });
+    };
+
+    computePlacement();
+
+    const scrollTarget: HTMLElement | Window = boundary ?? window;
+
+    const scheduleCompute = () => {
+      if (frame) window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(() => {
+        computePlacement();
+        frame = null;
+      });
+    };
+
+    scrollTarget.addEventListener("scroll", scheduleCompute, { passive: true });
+    window.addEventListener("resize", scheduleCompute);
+
+    return () => {
+      if (frame) window.cancelAnimationFrame(frame);
+      scrollTarget.removeEventListener("scroll", scheduleCompute);
+      window.removeEventListener("resize", scheduleCompute);
+    };
+  }, [menuOpen, boundary, triggerRef, menuRef]);
+
+  return placement;
 };
 
 const prioritizeListBlobs = (items: readonly BlossomBlob[]): BlossomBlob[] => {
@@ -225,6 +296,7 @@ export const BlobList: React.FC<BlobListProps> = ({
   showGridPreviews = true,
   showListPreviews = true,
   defaultSortOption = "updated",
+  sortDirection = "descending",
 }) => {
   const { resolvedMeta, detectedKinds, requestMetadata, reportDetectedKind } = useBlobMetadata(blobs, {
     baseUrl,
@@ -299,63 +371,64 @@ export const BlobList: React.FC<BlobListProps> = ({
 
   useEffect(() => {
     setSortConfig(current => (current ? null : current));
-  }, [defaultSortOption]);
+  }, [defaultSortOption, sortDirection]);
 
   const baseSortedBlobs = useMemo(() => {
     if (decoratedBlobs.length <= 1) {
       return decoratedBlobs;
     }
 
-    const compareByUpdatedDesc = (a: BlossomBlob, b: BlossomBlob) => {
+    const compareNumbers = (a: number, b: number) => (a < b ? -1 : a > b ? 1 : 0);
+    const compareNamesAsc = (a: BlossomBlob, b: BlossomBlob) =>
+      deriveBlobSortName(a).localeCompare(deriveBlobSortName(b));
+    const compareUploadsAsc = (a: BlossomBlob, b: BlossomBlob) => {
       const aUploaded = typeof a.uploaded === "number" ? a.uploaded : 0;
       const bUploaded = typeof b.uploaded === "number" ? b.uploaded : 0;
-      if (aUploaded !== bUploaded) {
-        return bUploaded - aUploaded;
-      }
-      return deriveBlobSortName(a).localeCompare(deriveBlobSortName(b));
+      return compareNumbers(aUploaded, bUploaded);
     };
-
-    const compareByNameAsc = (a: BlossomBlob, b: BlossomBlob) => {
-      const diff = deriveBlobSortName(a).localeCompare(deriveBlobSortName(b));
-      if (diff !== 0) return diff;
-      return compareByUpdatedDesc(a, b);
-    };
-
-    const compareByServersDesc = (a: BlossomBlob, b: BlossomBlob) => {
+    const compareReplicaCountAsc = (a: BlossomBlob, b: BlossomBlob) => {
       const aCount = deriveReplicaCount(a);
       const bCount = deriveReplicaCount(b);
-      if (aCount !== bCount) {
-        return bCount - aCount;
-      }
-      return compareByNameAsc(a, b);
+      return compareNumbers(aCount, bCount);
     };
-
-    const compareBySizeDesc = (a: BlossomBlob, b: BlossomBlob) => {
+    const compareSizeAsc = (a: BlossomBlob, b: BlossomBlob) => {
       const aSize = typeof a.size === "number" ? a.size : -1;
       const bSize = typeof b.size === "number" ? b.size : -1;
-      if (aSize !== bSize) {
-        return bSize - aSize;
-      }
-      return compareByNameAsc(a, b);
+      return compareNumbers(aSize, bSize);
     };
+
+    const directionMultiplier = sortDirection === "descending" ? -1 : 1;
 
     const comparator = (a: BlossomBlob, b: BlossomBlob) => {
       switch (defaultSortOption) {
-        case "name":
-          return compareByNameAsc(a, b);
-        case "servers":
-          return compareByServersDesc(a, b);
-        case "size":
-          return compareBySizeDesc(a, b);
+        case "name": {
+          const diff = compareNamesAsc(a, b);
+          if (diff !== 0) return diff * directionMultiplier;
+          const uploadedDiff = compareUploadsAsc(a, b);
+          return uploadedDiff * directionMultiplier;
+        }
+        case "servers": {
+          const diff = compareReplicaCountAsc(a, b);
+          if (diff !== 0) return diff * directionMultiplier;
+          return compareNamesAsc(a, b) * directionMultiplier;
+        }
+        case "size": {
+          const diff = compareSizeAsc(a, b);
+          if (diff !== 0) return diff * directionMultiplier;
+          return compareNamesAsc(a, b) * directionMultiplier;
+        }
         case "updated":
-        default:
-          return compareByUpdatedDesc(a, b);
+        default: {
+          const diff = compareUploadsAsc(a, b);
+          if (diff !== 0) return diff * directionMultiplier;
+          return compareNamesAsc(a, b) * directionMultiplier;
+        }
       }
     };
 
     const sorted = [...decoratedBlobs].sort(comparator);
     return prioritizeListBlobs(sorted);
-  }, [decoratedBlobs, defaultSortOption, deriveReplicaCount]);
+  }, [decoratedBlobs, defaultSortOption, deriveReplicaCount, sortDirection]);
 
   const sortedBlobs = useMemo(() => {
     if (!sortConfig) {
@@ -420,15 +493,14 @@ export const BlobList: React.FC<BlobListProps> = ({
       const detectedKind = detectedKinds[blob.sha256];
       const kind = decideFileKind(blob, detectedKind);
       const displayName = buildDisplayName(blob);
-      const effectiveServerType = blob.serverType ?? serverType;
       const fallbackBaseUrl = blob.serverUrl ?? baseUrl;
-      const effectiveRequiresAuth =
-        effectiveServerType === "satellite"
-          ? false
-          : Boolean((blob.requiresAuth ?? requiresAuth) || blob.privateData?.encryption);
+      const effectiveRequiresAuth = Boolean((blob.requiresAuth ?? requiresAuth) || blob.privateData?.encryption);
+      const rawPreviewUrl = buildPreviewUrl(blob, fallbackBaseUrl);
       const canPreview = canBlobPreview(blob, detectedKind, kind);
-      const previewUrl = canPreview ? buildPreviewUrl(blob, fallbackBaseUrl) : null;
-      const disablePreview = !canPreview;
+      const isPdf = kind === "pdf";
+      const isDocLike = kind === "doc" || kind === "document";
+      const previewUrl = !isPdf && !isDocLike && canPreview ? rawPreviewUrl : null;
+      const disablePreview = isPdf || isDocLike || !canPreview;
 
       openPreview(blob, {
         displayName,
@@ -456,8 +528,6 @@ export const BlobList: React.FC<BlobListProps> = ({
               url: blob.url,
               method: "GET",
             });
-          } else if (kind === "satellite") {
-            // Satellite CDN URLs are globally accessible; no auth header required.
           } else {
             if (!signTemplate) throw new Error("Signer required to authorize this download.");
             let resource: URL | null = null;
@@ -657,8 +727,8 @@ export const BlobList: React.FC<BlobListProps> = ({
   );
 };
 
-const LIST_ROW_HEIGHT = 76;
-const LIST_ROW_GAP = 8;
+const LIST_ROW_HEIGHT = 68;
+const LIST_ROW_GAP = 4;
 
 const ListLayout: React.FC<{
   blobs: BlossomBlob[];
@@ -722,6 +792,7 @@ const ListLayout: React.FC<{
   const selectAllRef = useRef<HTMLInputElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const listOuterRef = useRef<HTMLDivElement | null>(null);
+  const getMenuBoundary = useCallback(() => listOuterRef.current, []);
   const [container, setContainer] = useState({ width: 0, height: 0 });
   const [actionsColumnWidth, setActionsColumnWidth] = useState<number | null>(null);
 
@@ -812,56 +883,35 @@ const ListLayout: React.FC<{
     }
   };
 
-  const Row = useCallback(
-    ({ index, style }: { index: number; style: React.CSSProperties }) => {
-      const blob = blobs[index];
-      if (!blob) return null;
-      const adjustedStyle: React.CSSProperties = {
-        ...style,
-        position: "absolute",
-        top: typeof style.top === "number" ? style.top + LIST_ROW_GAP / 2 : style.top,
-        left: 0,
-        width: listWidth,
-        height: LIST_ROW_HEIGHT,
-      };
-      const replicaSummary = replicaInfo?.get(blob.sha256);
-      const isPrivateBlob = Boolean(blob.privateData);
-      const trackMetadata = audioMetadata.get(blob.sha256);
-      const coverEntry = resolveCoverEntry(trackMetadata?.coverUrl);
-
-      return (
-        <ListRow
-          key={blob.sha256}
-          style={adjustedStyle}
-          blob={blob}
-          baseUrl={baseUrl}
-          requiresAuth={requiresAuth}
-          signTemplate={signTemplate}
-          serverType={serverType}
-          selected={selected}
-          onToggle={onToggle}
-          onDelete={onDelete}
-          onDownload={onDownload}
-          onPreview={onPreview}
-          onPlay={onPlay}
-          onShare={onShare}
-          onRename={onRename}
-          onOpenList={onOpenList}
-          currentTrackUrl={currentTrackUrl}
-          currentTrackStatus={currentTrackStatus}
-          detectedKinds={detectedKinds}
-          onDetect={onDetect}
-          onBlobVisible={onBlobVisible}
-          replicaSummary={replicaSummary}
-          isMusicListView={isMusicView}
-          audioMetadata={audioMetadata}
-          onActionsWidthChange={handleActionsWidthChange}
-          showPreviews={showPreviews}
-          isPrivateBlob={isPrivateBlob}
-          coverEntry={coverEntry}
-        />
-      );
-    },
+  const itemData = useMemo(
+    () => ({
+      blobs,
+      baseUrl,
+      requiresAuth,
+      signTemplate,
+      serverType,
+      selected,
+      onToggle,
+      onDelete,
+      onDownload,
+      onPreview,
+      onPlay,
+      onShare,
+      onRename,
+      onOpenList,
+      currentTrackUrl,
+      currentTrackStatus,
+      detectedKinds,
+      onDetect,
+      onBlobVisible,
+      replicaInfo,
+      isMusicView,
+      audioMetadata,
+      showPreviews,
+      resolveCoverEntry,
+      handleActionsWidthChange,
+      getMenuBoundary,
+    }),
     [
       blobs,
       baseUrl,
@@ -876,21 +926,105 @@ const ListLayout: React.FC<{
       onPlay,
       onShare,
       onRename,
+      onOpenList,
       currentTrackUrl,
       currentTrackStatus,
       detectedKinds,
       onDetect,
       onBlobVisible,
-      requestMetadata,
       replicaInfo,
-      listWidth,
       isMusicView,
       audioMetadata,
       showPreviews,
-      handleActionsWidthChange,
-      onOpenList,
       resolveCoverEntry,
+      handleActionsWidthChange,
+      getMenuBoundary,
     ]
+  );
+
+  const Row = useCallback(
+    ({ index, style, data }: { index: number; style: React.CSSProperties; data: typeof itemData }) => {
+      const {
+        blobs: listBlobs,
+        baseUrl: rowBaseUrl,
+        requiresAuth: rowRequiresAuth,
+        signTemplate: rowSignTemplate,
+        serverType: rowServerType,
+        selected: rowSelected,
+        onToggle: rowOnToggle,
+        onDelete: rowOnDelete,
+        onDownload: rowOnDownload,
+        onPreview: rowOnPreview,
+        onPlay: rowOnPlay,
+        onShare: rowOnShare,
+        onRename: rowOnRename,
+        onOpenList: rowOnOpenList,
+        currentTrackUrl: rowCurrentTrackUrl,
+        currentTrackStatus: rowCurrentTrackStatus,
+        detectedKinds: rowDetectedKinds,
+        onDetect: rowOnDetect,
+        onBlobVisible: rowOnBlobVisible,
+        replicaInfo: rowReplicaInfo,
+        isMusicView: rowIsMusicView,
+        audioMetadata: rowAudioMetadata,
+        showPreviews: rowShowPreviews,
+        resolveCoverEntry: rowResolveCoverEntry,
+        handleActionsWidthChange: rowHandleActionsWidthChange,
+        getMenuBoundary: rowGetMenuBoundary,
+      } = data;
+
+      const blob = listBlobs[index];
+      if (!blob) return null;
+
+      const rawTop = typeof style.top === "number" ? style.top : Number.parseFloat(String(style.top ?? 0));
+      const top = Number.isFinite(rawTop) ? rawTop + LIST_ROW_GAP / 2 : rawTop;
+      const rawHeight = typeof style.height === "number" ? style.height : Number.parseFloat(String(style.height ?? LIST_ROW_HEIGHT));
+      const height = Number.isFinite(rawHeight) ? rawHeight : LIST_ROW_HEIGHT;
+      const replicaSummary = rowReplicaInfo?.get(blob.sha256);
+      const isPrivateBlob = Boolean(blob.privateData);
+      const trackMetadata = rowAudioMetadata.get(blob.sha256) ?? null;
+      const coverEntry = rowResolveCoverEntry(trackMetadata?.coverUrl ?? undefined);
+      const isSelected = rowSelected.has(blob.sha256);
+      const detectedKind = rowDetectedKinds[blob.sha256];
+
+      return (
+        <ListRow
+          key={blob.sha256}
+          top={top}
+          left={0}
+          width={listWidth}
+          height={height}
+          blob={blob}
+          baseUrl={rowBaseUrl}
+          requiresAuth={rowRequiresAuth}
+          signTemplate={rowSignTemplate}
+          serverType={rowServerType}
+          isSelected={isSelected}
+          onToggle={rowOnToggle}
+          onDelete={rowOnDelete}
+          onDownload={rowOnDownload}
+          onPreview={rowOnPreview}
+          onPlay={rowOnPlay}
+          onShare={rowOnShare}
+          onRename={rowOnRename}
+          onOpenList={rowOnOpenList}
+          currentTrackUrl={rowCurrentTrackUrl}
+          currentTrackStatus={rowCurrentTrackStatus}
+          detectedKind={detectedKind}
+          onDetect={rowOnDetect}
+          onBlobVisible={rowOnBlobVisible}
+          replicaSummary={replicaSummary}
+          isMusicListView={rowIsMusicView}
+          trackMetadata={trackMetadata}
+          onActionsWidthChange={rowHandleActionsWidthChange}
+          showPreviews={rowShowPreviews}
+          isPrivateBlob={isPrivateBlob}
+          coverEntry={coverEntry}
+          getMenuBoundary={rowGetMenuBoundary}
+        />
+      );
+    },
+    [itemData, listWidth]
   );
 
   const handleItemsRendered = useCallback(
@@ -1021,6 +1155,7 @@ const ListLayout: React.FC<{
             onItemsRendered={handleItemsRendered}
             overscanCount={6}
             outerRef={listOuterRef}
+            itemData={itemData}
           >
             {Row}
           </VirtualList>
@@ -1082,17 +1217,54 @@ const GridLayout: React.FC<{
   const CARD_WIDTH = 220;
   const GAP = 16;
   const OVERSCAN_ROWS = 2;
+  const FALLBACK_MAX_WIDTH = 1280;
+  const FALLBACK_HORIZONTAL_PADDING = 48;
+  const FALLBACK_MIN_ROWS = 3;
   const viewportRef = useRef<HTMLDivElement | null>(null);
-  const [viewport, setViewport] = useState({ height: 0, width: 0, scrollTop: 0 });
+  const fallbackViewport = useMemo(() => {
+    if (typeof window === "undefined") {
+      return {
+        width: CARD_WIDTH * 3 + GAP * 4,
+        height: (CARD_HEIGHT + GAP) * FALLBACK_MIN_ROWS,
+      };
+    }
+    const width = Math.max(
+      CARD_WIDTH,
+      Math.min(window.innerWidth, FALLBACK_MAX_WIDTH) - FALLBACK_HORIZONTAL_PADDING
+    );
+    const height = Math.max(CARD_HEIGHT + GAP, Math.floor((window.innerHeight || 800) * 0.6));
+    return { width, height };
+  }, []);
+  const [viewport, setViewport] = useState(() => ({
+    height: fallbackViewport.height,
+    width: fallbackViewport.width,
+    scrollTop: 0,
+  }));
+  const [hasMeasuredViewport, setHasMeasuredViewport] = useState(false);
   const [openMenuBlob, setOpenMenuBlob] = useState<string | null>(null);
   const dropdownRefs = useRef<Map<string, HTMLDivElement | null>>(new Map());
+  const getMenuBoundary = useCallback(() => viewportRef.current, []);
 
   useLayoutEffect(() => {
     const el = viewportRef.current;
     if (!el) return;
     let frame: number | null = null;
     const updateSize = () => {
-      setViewport(prev => ({ height: el.clientHeight, width: el.clientWidth, scrollTop: prev.scrollTop }));
+      setViewport(prev => {
+        const nextHeight = el.clientHeight;
+        const nextWidth = el.clientWidth;
+        const hasDimensions = nextHeight > 0 && nextWidth > 0;
+        if (hasDimensions && prev.height === nextHeight && prev.width === nextWidth) {
+          return prev;
+        }
+        if (!hasDimensions) {
+          return prev;
+        }
+        return { height: nextHeight, width: nextWidth, scrollTop: el.scrollTop };
+      });
+      if (el.clientHeight > 0 && el.clientWidth > 0) {
+        setHasMeasuredViewport(true);
+      }
     };
     const handleScroll = () => {
       if (frame) cancelAnimationFrame(frame);
@@ -1145,9 +1317,9 @@ const GridLayout: React.FC<{
     };
   }, [openMenuBlob]);
 
-  const viewportHeight = viewport.height || 0;
-  const viewportWidth = viewport.width || 0;
-  const scrollTop = viewport.scrollTop;
+  const viewportHeight = hasMeasuredViewport ? viewport.height : fallbackViewport.height;
+  const viewportWidth = hasMeasuredViewport ? viewport.width : fallbackViewport.width;
+  const scrollTop = hasMeasuredViewport ? viewport.scrollTop : 0;
   const columnCount = Math.max(1, Math.floor((viewportWidth + GAP) / (CARD_WIDTH + GAP)));
   const effectiveColumnWidth = Math.max(160, Math.floor((viewportWidth - GAP * (columnCount + 1)) / columnCount) || CARD_WIDTH);
   const rowHeight = CARD_HEIGHT + GAP;
@@ -1155,16 +1327,27 @@ const GridLayout: React.FC<{
   const visibleRowCount = viewportHeight > 0 ? Math.ceil(viewportHeight / rowHeight) + OVERSCAN_ROWS * 2 : rowCount;
   const startRow = Math.max(0, Math.floor(scrollTop / rowHeight) - OVERSCAN_ROWS);
   const endRow = Math.min(rowCount, startRow + visibleRowCount);
-  const items: Array<{ blob: BlossomBlob; row: number; col: number }> = [];
-  for (let row = startRow; row < endRow; row += 1) {
-    for (let col = 0; col < columnCount; col += 1) {
-      const index = row * columnCount + col;
-      if (index >= blobs.length) break;
-      const blob = blobs[index];
-      if (!blob) continue;
-      items.push({ blob, row, col });
+  const visibleItems = useMemo(() => {
+    const result: Array<{ blob: BlossomBlob; row: number; col: number }> = [];
+    for (let row = startRow; row < endRow; row += 1) {
+      for (let col = 0; col < columnCount; col += 1) {
+        const index = row * columnCount + col;
+        if (index >= blobs.length) break;
+        const blob = blobs[index];
+        if (!blob) continue;
+        result.push({ blob, row, col });
+      }
     }
-  }
+    return result;
+  }, [blobs, columnCount, endRow, startRow]);
+
+  const handleToggleMenu = useCallback((sha: string) => {
+    setOpenMenuBlob(current => (current === sha ? null : sha));
+  }, []);
+
+  const handleCloseMenu = useCallback(() => {
+    setOpenMenuBlob(null);
+  }, []);
   const containerHeight = rowCount * rowHeight + GAP;
 
   return (
@@ -1174,336 +1357,43 @@ const GridLayout: React.FC<{
         className="relative flex-1 min-h-0 w-full overflow-y-auto overflow-x-hidden pl-2 pr-2 -mr-2"
       >
         <div style={{ position: "relative", height: containerHeight }}>
-          {items.map(({ blob, row, col }) => {
-            const isSelected = selected.has(blob.sha256);
-            const isAudio = blob.type?.startsWith("audio/");
-            const isActiveTrack = Boolean(currentTrackUrl && blob.url && currentTrackUrl === blob.url);
-            const isActivePlaying = isActiveTrack && currentTrackStatus === "playing";
-            const playButtonLabel = isActivePlaying ? "Pause" : "Play";
-            const playButtonAria = isActivePlaying ? "Pause audio" : "Play audio";
-            const playPauseIcon = isActivePlaying ? <PauseIcon size={16} /> : <PlayIcon size={16} />;
-            const displayName = buildDisplayName(blob);
-            const effectiveServerType = blob.serverType ?? serverType;
-            const previewRequiresAuth =
-              effectiveServerType === "satellite"
-                ? false
-                : Boolean((blob.requiresAuth ?? requiresAuth) || blob.privateData?.encryption);
-            const detectedKind = detectedKinds[blob.sha256];
-            const kind = decideFileKind(blob, detectedKind);
-            const trackMetadata = audioMetadata.get(blob.sha256);
-            const canPreview = canBlobPreview(blob, detectedKind, kind);
-            const disablePreview = !canPreview;
-            const coverUrl = kind === "music" ? trackMetadata?.coverUrl : undefined;
-            const coverEntry = resolveCoverEntry(coverUrl);
-            const previewUrl = canPreview ? buildPreviewUrl(blob, baseUrl) : null;
-            const blurhash = extractBlurhash(blob);
-            const top = GAP + row * rowHeight;
-            const left = GAP + col * (effectiveColumnWidth + GAP);
-            const replicaSummary = replicaInfo?.get(blob.sha256);
-            const isListBlob = isListLikeBlob(blob);
-            const isPrivateList = isListBlob && blob.sha256 === PRIVATE_PLACEHOLDER_SHA;
-            const isPrivateBlob = Boolean(blob.privateData);
-            const isPrivateItem = isPrivateList || isPrivateBlob;
-            const showReplicaBadge = replicaSummary && replicaSummary.count > 1;
-            const coverAlt = trackMetadata?.title?.trim() || displayName;
-            const previewAllowed = showPreviews && canPreview;
-            const allowCoverArt = showPreviews && Boolean(coverUrl);
-            const primaryActionBaseClass =
-              "p-2 shrink-0 rounded-lg flex items-center justify-center transition focus:outline-none focus:ring-1 focus:ring-emerald-400 disabled:cursor-not-allowed disabled:opacity-40";
-            const playButtonClass = `${primaryActionBaseClass} ${
-              isActivePlaying
-                ? "bg-emerald-500/80 text-slate-900 hover:bg-emerald-400"
-                : "bg-emerald-700/70 text-slate-100 hover:bg-emerald-600"
-            }`;
-            const showButtonClass = `${primaryActionBaseClass} bg-emerald-700/70 text-slate-100 hover:bg-emerald-600`;
-            const primaryAction =
-              isListBlob && onOpenList
-                ? (
-                    <button
-                      className={`${showButtonClass} h-10 w-10`}
-                      onClick={event => {
-                        event.stopPropagation();
-                        onOpenList(blob);
-                      }}
-                      aria-label="Open list"
-                      title="Open"
-                      type="button"
-                    >
-                      <PreviewIcon size={16} />
-                    </button>
-                  )
-                : isAudio && onPlay && blob.url
-                  ? (
-                      <button
-                        className={`${playButtonClass} aspect-square h-10 w-10`}
-                        onClick={event => {
-                          event.stopPropagation();
-                          onPlay?.(blob);
-                        }}
-                        aria-label={playButtonAria}
-                        aria-pressed={isActivePlaying}
-                        title={playButtonLabel}
-                        type="button"
-                      >
-                        {playPauseIcon}
-                      </button>
-                    )
-                  : !isAudio
-                    ? (
-                        <button
-                          className={`${showButtonClass} h-10 w-10`}
-                          onClick={event => {
-                            event.stopPropagation();
-                            onPreview(blob);
-                          }}
-                          aria-label={disablePreview ? "Preview unavailable" : "Show blob"}
-                          title={disablePreview ? "Preview unavailable" : "Show"}
-                          type="button"
-                          disabled={disablePreview}
-                        >
-                          <PreviewIcon size={16} />
-                        </button>
-                      )
-                    : null;
-
-            const shareButton =
-              blob.url && onShare
-                ? (
-                    <button
-                      className="p-2 shrink-0 flex h-10 w-10 items-center justify-center rounded-lg bg-slate-800 text-slate-200 transition hover:bg-slate-700"
-                      onClick={event => {
-                        event.stopPropagation();
-                        onShare?.(blob);
-                      }}
-                      aria-label={isAudio ? "Share track" : "Share blob"}
-                      title="Share"
-                      type="button"
-                    >
-                      <ShareIcon size={16} />
-                    </button>
-                  )
-                : null;
-
-            type DropdownItem = {
-              key: string;
-              label: string;
-              icon: React.ReactNode;
-              onSelect: () => void;
-              ariaLabel?: string;
-              variant?: "destructive";
-            };
-
-            const dropdownItems: DropdownItem[] = [];
-
-            if (blob.url && !isListBlob) {
-              dropdownItems.push({
-                key: "download",
-                label: "Download",
-                icon: <DownloadIcon size={14} />,
-                ariaLabel: isAudio ? "Download track" : "Download blob",
-                onSelect: () => onDownload(blob),
-              });
-            }
-
-            if (onRename && !isPrivateList) {
-              dropdownItems.push({
-                key: "rename",
-                label: "Edit Details",
-                icon: <EditIcon size={14} />,
-                ariaLabel: isAudio ? "Edit track details" : "Edit file details",
-                onSelect: () => onRename(blob),
-              });
-            }
-
-            dropdownItems.push({
-              key: "delete",
-              label: isListBlob ? "Delete Folder" : isAudio ? "Delete Track" : "Delete",
-              icon: <TrashIcon size={14} />,
-              ariaLabel: isListBlob
-                ? "Delete folder"
-                : isAudio
-                  ? "Delete track"
-                  : "Delete blob",
-              onSelect: () => onDelete(blob),
-              variant: "destructive",
-            });
-
-            const menuOpen = openMenuBlob === blob.sha256;
-            const handleMenuToggle: React.MouseEventHandler<HTMLButtonElement> = event => {
-              event.stopPropagation();
-              setOpenMenuBlob(current => (current === blob.sha256 ? null : blob.sha256));
-            };
-
-            const registerDropdownRef = (node: HTMLDivElement | null) => {
-              if (node) {
-                dropdownRefs.current.set(blob.sha256, node);
-              } else {
-                dropdownRefs.current.delete(blob.sha256);
-              }
-            };
-
-            const dropdownMenu = dropdownItems.length === 0
-              ? null
-              : (
-                  <div className="relative" ref={registerDropdownRef}>
-                    <button
-                      className="p-2 shrink-0 flex h-10 w-10 items-center justify-center rounded-lg bg-slate-800 text-slate-200 transition hover:bg-slate-700"
-                      onClick={handleMenuToggle}
-                      aria-haspopup="true"
-                      aria-expanded={menuOpen}
-                      title="More actions"
-                      type="button"
-                    >
-                      <ChevronDownIcon size={16} />
-                    </button>
-                    {menuOpen ? (
-                      <div
-                        className="absolute right-0 z-50 mt-2 w-44 rounded-md border border-slate-700 bg-slate-900/95 p-1 shadow-xl"
-                        role="menu"
-                        aria-label="More actions"
-                      >
-                        {dropdownItems.map(item => (
-                          <a
-                            key={item.key}
-                            href="#"
-                            role="menuitem"
-                            aria-label={item.ariaLabel ?? item.label}
-                            className={`flex items-center gap-2 rounded-md px-3 py-1.5 text-sm transition focus:outline-none focus:ring-1 focus:ring-emerald-400 ${
-                              item.variant === "destructive"
-                                ? "text-red-300 hover:bg-red-900/40 focus:ring-offset-1 focus:ring-offset-slate-900"
-                                : "text-slate-200 hover:bg-slate-700 focus:ring-offset-1 focus:ring-offset-slate-900"
-                            }`}
-                            onClick={event => {
-                              event.preventDefault();
-                              event.stopPropagation();
-                              item.onSelect();
-                              setOpenMenuBlob(null);
-                            }}
-                          >
-                            {item.icon}
-                            <span>{item.label}</span>
-                          </a>
-                        ))}
-                      </div>
-                    ) : null}
-                  </div>
-                );
-            const fallbackPreview = (
-              <div
-                className={`flex h-full w-full items-center justify-center rounded-lg border border-slate-800 bg-gradient-to-br ${
-                  kind === "music"
-                    ? "from-emerald-900/70 via-slate-900 to-slate-950"
-                    : kind === "video"
-                      ? "from-sky-900/70 via-slate-900 to-slate-950"
-                      : kind === "image"
-                        ? "from-cyan-900/70 via-slate-900 to-slate-950"
-                        : kind === "pdf"
-                          ? "from-red-900/70 via-slate-900 to-slate-950"
-                          : kind === "doc" || kind === "document"
-                            ? "from-purple-900/70 via-slate-900 to-slate-950"
-                            : kind === "folder"
-                              ? "from-amber-900/70 via-slate-900 to-slate-950"
-                              : "from-slate-900 via-slate-900 to-slate-950"
-                }`}
-              >
-                <FileTypeIcon
-                  kind={kind}
-                  size={Math.round(CARD_HEIGHT * 0.5)}
-                  className={kind === "folder" ? "text-amber-200" : "text-slate-200"}
-                  aria-hidden="true"
-                />
-              </div>
-            );
-
-            let previewPanel: React.ReactNode = fallbackPreview;
-            if (previewAllowed && previewUrl) {
-              previewPanel = (
-                <BlobPreview
-                  sha={blob.sha256}
-                  url={previewUrl}
-                  name={blob.name || blob.sha256}
-                  type={blob.type}
-                  serverUrl={blob.serverUrl ?? baseUrl}
-                  requiresAuth={previewRequiresAuth}
-                  signTemplate={previewRequiresAuth ? signTemplate : undefined}
-                  serverType={blob.serverType ?? serverType}
-                  onDetect={onDetect}
-                  fallbackIconSize={Math.round(CARD_HEIGHT * 0.5)}
-                  className="h-full w-full rounded-lg border border-slate-800 bg-slate-950/70"
-                  onVisible={onBlobVisible}
-                  blurhash={blurhash}
-                  blob={blob}
-                />
-              );
-            }
-
-            const previewContent = allowCoverArt
-              ? (
-                  <AudioCoverImage
-                    url={coverUrl!}
-                    alt={`${coverAlt} cover art`}
-                    className="h-full w-full rounded-lg border border-slate-800 object-cover"
-                    fallback={fallbackPreview}
-                    requiresAuth={previewRequiresAuth}
-                    signTemplate={previewRequiresAuth ? signTemplate : undefined}
-                    serverType={blob.serverType ?? serverType}
-                    blob={blob}
-                    coverEntry={coverEntry}
-                  />
-                )
-              : previewPanel;
-            return (
-              <React.Fragment key={blob.sha256}>
-                <div
-                  role="button"
-                  tabIndex={0}
-                  aria-pressed={isSelected}
-                  onClick={() => onToggle(blob.sha256)}
-                  onKeyDown={event => {
-                    if (event.key === "Enter" || event.key === " ") {
-                      event.preventDefault();
-                      onToggle(blob.sha256);
-                    }
-                  }}
-                  className={`absolute flex flex-col overflow-visible rounded-xl border focus:outline-none focus:ring-2 focus:ring-emerald-500/70 focus:ring-offset-2 focus:ring-offset-slate-900 cursor-pointer transition ${
-                    isSelected ? "border-emerald-500 bg-emerald-500/10" : "border-slate-800 bg-slate-900/60"
-                  }`}
-                  style={{ top, left, width: effectiveColumnWidth, height: CARD_HEIGHT }}
-                >
-                  <div className="relative flex-1 overflow-hidden" style={{ height: CARD_HEIGHT * 0.75 }}>
-                    {showReplicaBadge ? (
-                      <div className="pointer-events-none absolute right-2 top-2 z-20">
-                        <ReplicaBadge info={replicaSummary!} variant="grid" />
-                      </div>
-                    ) : null}
-                    {previewContent}
-                    <div className="pointer-events-none absolute inset-x-0 bottom-0 px-3 pb-2">
-                      <div
-                        className="w-full rounded-md bg-slate-950/75 px-2 py-1 text-xs font-medium text-slate-100 text-center"
-                        title={displayName}
-                      >
-                        <span className="flex max-w-full items-center justify-center gap-1">
-                          <span className="truncate">{displayName}</span>
-                          {isPrivateItem ? (
-                            <LockIcon size={12} className="text-amber-300" aria-hidden="true" />
-                          ) : null}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                  <div
-                    className="flex items-center justify-center gap-2 border-t border-slate-800/80 bg-slate-950/90 px-2 py-3"
-                    style={{ height: CARD_HEIGHT * 0.25 }}
-                  >
-                    {primaryAction}
-                    {shareButton}
-                    {dropdownMenu}
-                  </div>
-                </div>
-              </React.Fragment>
-            );
-
-          })}
+          {visibleItems.map(({ blob, row, col }) => (
+            <GridCard
+              key={blob.sha256}
+              blob={blob}
+              top={GAP + row * rowHeight}
+              left={GAP + col * (effectiveColumnWidth + GAP)}
+              width={effectiveColumnWidth}
+              height={CARD_HEIGHT}
+              isSelected={selected.has(blob.sha256)}
+              baseUrl={baseUrl}
+              requiresAuth={requiresAuth}
+              signTemplate={signTemplate}
+              serverType={serverType}
+              currentTrackUrl={currentTrackUrl}
+              currentTrackStatus={currentTrackStatus}
+              detectedKind={detectedKinds[blob.sha256]}
+              audioMetadata={audioMetadata}
+              onToggle={onToggle}
+              onDelete={onDelete}
+              onDownload={onDownload}
+              onPreview={onPreview}
+              onPlay={onPlay}
+              onShare={onShare}
+              onRename={onRename}
+              onOpenList={onOpenList}
+              onDetect={onDetect}
+              onBlobVisible={onBlobVisible}
+              replicaSummary={replicaInfo?.get(blob.sha256)}
+              showPreviews={showPreviews}
+              resolveCoverEntry={resolveCoverEntry}
+              isMenuOpen={openMenuBlob === blob.sha256}
+              onToggleMenu={handleToggleMenu}
+              onCloseMenu={handleCloseMenu}
+              dropdownRefs={dropdownRefs}
+              getMenuBoundary={getMenuBoundary}
+            />
+          ))}
           {blobs.length === 0 && (
             <div className="absolute inset-0 flex items-center justify-center text-sm text-slate-300">
               No content on this server yet.
@@ -1514,6 +1404,467 @@ const GridLayout: React.FC<{
     </div>
   );
 };
+
+type GridCardProps = {
+  blob: BlossomBlob;
+  top: number;
+  left: number;
+  width: number;
+  height: number;
+  isSelected: boolean;
+  baseUrl?: string;
+  requiresAuth: boolean;
+  signTemplate?: SignTemplate;
+  serverType?: "blossom" | "nip96" | "satellite";
+  currentTrackUrl?: string;
+  currentTrackStatus?: "idle" | "playing" | "paused";
+  detectedKind?: "image" | "video";
+  audioMetadata: Map<string, BlobAudioMetadata>;
+  onToggle: (sha: string) => void;
+  onDelete: (blob: BlossomBlob) => void;
+  onDownload: (blob: BlossomBlob) => void;
+  onPreview: (blob: BlossomBlob) => void;
+  onPlay?: (blob: BlossomBlob) => void;
+  onShare?: (blob: BlossomBlob) => void;
+  onRename?: (blob: BlossomBlob) => void;
+  onOpenList?: (blob: BlossomBlob) => void;
+  onDetect: (sha: string, kind: "image" | "video") => void;
+  onBlobVisible: (sha: string) => void;
+  replicaSummary?: BlobReplicaSummary;
+  showPreviews: boolean;
+  resolveCoverEntry: (coverUrl?: string | null) => PrivateListEntry | null;
+  isMenuOpen: boolean;
+  onToggleMenu: (sha: string) => void;
+  onCloseMenu: () => void;
+  dropdownRefs: React.MutableRefObject<Map<string, HTMLDivElement | null>>;
+  getMenuBoundary: () => HTMLElement | null;
+};
+
+const GridCard = React.memo<GridCardProps>(
+  ({
+    blob,
+    top,
+    left,
+    width,
+    height,
+    isSelected,
+    baseUrl,
+    requiresAuth,
+    signTemplate,
+    serverType,
+    currentTrackUrl,
+    currentTrackStatus,
+    detectedKind,
+    audioMetadata,
+    onToggle,
+    onDelete,
+    onDownload,
+    onPreview,
+    onPlay,
+    onShare,
+    onRename,
+    onOpenList,
+    onDetect,
+    onBlobVisible,
+    replicaSummary,
+    showPreviews,
+    resolveCoverEntry,
+    isMenuOpen,
+    onToggleMenu,
+    onCloseMenu,
+    dropdownRefs,
+    getMenuBoundary,
+  }) => {
+    const dropdownContainerRef = useRef<HTMLDivElement | null>(null);
+    const menuRef = useRef<HTMLDivElement | null>(null);
+    const menuBoundary = getMenuBoundary?.() ?? null;
+    const menuPlacement = useDropdownPlacement(isMenuOpen, dropdownContainerRef, menuRef, menuBoundary);
+    const cardStyle = useMemo<React.CSSProperties>(
+      () => ({
+        top: 0,
+        left: 0,
+        width,
+        height,
+        transform: `translate3d(${left}px, ${top}px, 0)`,
+        willChange: "transform",
+        zIndex: isMenuOpen ? 40 : isSelected ? 30 : undefined,
+      }),
+      [height, isMenuOpen, isSelected, left, top, width]
+    );
+    const contentHeight = height * 0.75;
+    const footerHeight = height * 0.25;
+
+    const isAudio = blob.type?.startsWith("audio/");
+    const isActiveTrack = Boolean(currentTrackUrl && blob.url && currentTrackUrl === blob.url);
+    const isActivePlaying = isActiveTrack && currentTrackStatus === "playing";
+    const previewRequiresAuth = Boolean((blob.requiresAuth ?? requiresAuth) || blob.privateData?.encryption);
+    const kind = decideFileKind(blob, detectedKind);
+    const trackMetadata = audioMetadata.get(blob.sha256);
+    const canPreview = canBlobPreview(blob, detectedKind, kind);
+    const allowDialogPreview = kind === "pdf" || kind === "doc" || kind === "document";
+    const coverUrl = kind === "music" ? trackMetadata?.coverUrl : undefined;
+    const coverEntry = resolveCoverEntry(coverUrl);
+    const previewUrl = canPreview ? buildPreviewUrl(blob, baseUrl) : null;
+    const blurhash = extractBlurhash(blob);
+    const isListBlob = isListLikeBlob(blob);
+    const isPrivateList = isListBlob && blob.sha256 === PRIVATE_PLACEHOLDER_SHA;
+    const isPrivateBlob = Boolean(blob.privateData);
+    const isPrivateScope = blob.__bloomFolderScope === "private";
+    const isPrivateItem = isPrivateList || isPrivateBlob || isPrivateScope;
+    const playButtonLabel = isActivePlaying ? "Pause" : "Play";
+    const playButtonAria = isActivePlaying ? "Pause audio" : "Play audio";
+    const displayName = buildDisplayName(blob);
+
+    const handleMenuToggle = useCallback<React.MouseEventHandler<HTMLButtonElement>>(
+      event => {
+        event.stopPropagation();
+        onToggleMenu(blob.sha256);
+      },
+      [blob.sha256, onToggleMenu]
+    );
+
+    const registerDropdownRef = useCallback(
+      (node: HTMLDivElement | null) => {
+        dropdownContainerRef.current = node;
+        if (node) {
+          dropdownRefs.current.set(blob.sha256, node);
+        } else {
+          dropdownRefs.current.delete(blob.sha256);
+        }
+      },
+      [blob.sha256, dropdownRefs]
+    );
+
+    const dropdownItems = useMemo(() => {
+      type DropdownItem = {
+        key: string;
+        label: string;
+        icon: React.ReactNode;
+        onSelect: () => void;
+        ariaLabel?: string;
+        variant?: "destructive";
+      };
+      const items: DropdownItem[] = [];
+      if (blob.url && !isListBlob) {
+        items.push({
+          key: "download",
+          label: "Download",
+          icon: <DownloadIcon size={14} />,
+          ariaLabel: isAudio ? "Download track" : "Download blob",
+          onSelect: () => onDownload(blob),
+        });
+      }
+
+      if (onRename && !isPrivateList) {
+        items.push({
+          key: "rename",
+          label: "Edit Details",
+          icon: <EditIcon size={14} />,
+          ariaLabel: isAudio ? "Edit track details" : "Edit file details",
+          onSelect: () => onRename(blob),
+        });
+      }
+
+      items.push({
+        key: "delete",
+        label: isListBlob ? "Delete Folder" : isAudio ? "Delete Track" : "Delete",
+        icon: <TrashIcon size={14} />,
+        ariaLabel: isListBlob
+          ? "Delete folder"
+          : isAudio
+            ? "Delete track"
+            : "Delete blob",
+        onSelect: () => onDelete(blob),
+        variant: "destructive",
+      });
+
+      return items;
+    }, [blob, isAudio, isListBlob, isPrivateList, onDelete, onDownload, onRename]);
+
+    const handleMenuItemSelect = useCallback(
+      (callback: () => void) => {
+        callback();
+        onCloseMenu();
+      },
+      [onCloseMenu]
+    );
+
+    const previewAllowed = showPreviews && canPreview && !(kind === "pdf" || kind === "doc" || kind === "document");
+    const allowCoverArt = showPreviews && Boolean(coverUrl);
+
+    const fallbackPreview = useMemo(() => {
+      const backgroundClass =
+        kind === "music"
+          ? "from-emerald-900/70 via-slate-900 to-slate-950"
+          : kind === "video"
+            ? "from-sky-900/70 via-slate-900 to-slate-950"
+            : kind === "image"
+              ? "from-cyan-900/70 via-slate-900 to-slate-950"
+              : kind === "pdf"
+                ? "from-red-900/70 via-slate-900 to-slate-950"
+                : kind === "doc" || kind === "document"
+                  ? "from-purple-900/70 via-slate-900 to-slate-950"
+                  : kind === "folder"
+                    ? "from-amber-900/70 via-slate-900 to-slate-950"
+                    : "from-slate-900 via-slate-900 to-slate-950";
+      return (
+        <div className={`flex h-full w-full items-center justify-center rounded-lg border border-slate-800 bg-gradient-to-br ${backgroundClass}`}>
+          <FileTypeIcon
+            kind={kind}
+            size={Math.round(CARD_HEIGHT * 0.5)}
+            className={kind === "folder" ? "text-amber-200" : "text-slate-200"}
+            aria-hidden="true"
+          />
+        </div>
+      );
+    }, [kind]);
+
+    const previewContent = useMemo(() => {
+      if (allowCoverArt && coverUrl) {
+        return (
+          <AudioCoverImage
+            url={coverUrl}
+            alt={`${(trackMetadata?.title?.trim() || displayName)} cover art`}
+            className="h-full w-full rounded-lg border border-slate-800 object-cover"
+            fallback={fallbackPreview}
+            requiresAuth={previewRequiresAuth}
+            signTemplate={previewRequiresAuth ? signTemplate : undefined}
+            serverType={blob.serverType ?? serverType}
+            blob={blob}
+            coverEntry={coverEntry}
+          />
+        );
+      }
+      if (previewAllowed && previewUrl) {
+        return (
+          <BlobPreview
+            sha={blob.sha256}
+            url={previewUrl}
+            name={blob.name || blob.sha256}
+            type={blob.type}
+            serverUrl={blob.serverUrl ?? baseUrl}
+            requiresAuth={previewRequiresAuth}
+            signTemplate={previewRequiresAuth ? signTemplate : undefined}
+            serverType={blob.serverType ?? serverType}
+            onDetect={onDetect}
+            fallbackIconSize={Math.round(CARD_HEIGHT * 0.5)}
+            className="h-full w-full rounded-lg border border-slate-800 bg-slate-950/70"
+            onVisible={onBlobVisible}
+            blurhash={blurhash}
+            blob={blob}
+          />
+        );
+      }
+      return fallbackPreview;
+    }, [
+      allowCoverArt,
+      blob,
+      baseUrl,
+      blurhash,
+      coverEntry,
+      coverUrl,
+      fallbackPreview,
+      onBlobVisible,
+      onDetect,
+      previewAllowed,
+      previewRequiresAuth,
+      previewUrl,
+      serverType,
+      signTemplate,
+      trackMetadata,
+      displayName,
+    ]);
+
+    const shareButton = useMemo(() => {
+      if (!onShare) return null;
+      const disabled = isPrivateItem || !blob.url;
+      const title = disabled
+        ? isPrivateItem
+          ? "Private files cannot be shared"
+          : "Share available once file link is ready"
+        : "Share";
+      const ariaLabel = isAudio ? "Share track" : "Share blob";
+      return (
+        <button
+          className="p-2 shrink-0 flex h-10 w-10 items-center justify-center rounded-lg bg-slate-800 text-slate-200 transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-slate-800"
+          onClick={event => {
+            if (disabled) return;
+            event.stopPropagation();
+            onShare(blob);
+          }}
+          aria-label={ariaLabel}
+          title={title}
+          type="button"
+          disabled={disabled}
+        >
+          <ShareIcon size={16} />
+        </button>
+      );
+    }, [blob, isAudio, isPrivateItem, onShare]);
+
+    const primaryAction = useMemo(() => {
+      const primaryActionBaseClass =
+        "p-2 shrink-0 rounded-lg flex items-center justify-center transition focus:outline-none focus:ring-1 focus:ring-emerald-400 disabled:cursor-not-allowed disabled:opacity-40";
+      if (isListBlob && onOpenList) {
+        return (
+          <button
+            className={`${primaryActionBaseClass} bg-emerald-700/70 text-slate-100 hover:bg-emerald-600 h-10 w-10`}
+            onClick={event => {
+              event.stopPropagation();
+              onOpenList(blob);
+            }}
+            aria-label="Open list"
+            title="Open"
+            type="button"
+          >
+            <PreviewIcon size={16} />
+          </button>
+        );
+      }
+      if (isAudio && onPlay && blob.url) {
+        return (
+          <button
+            className={`${primaryActionBaseClass} ${
+              isActivePlaying
+                ? "bg-emerald-500/80 text-slate-900 hover:bg-emerald-400"
+                : "bg-emerald-700/70 text-slate-100 hover:bg-emerald-600"
+            } aspect-square h-10 w-10`}
+            onClick={event => {
+              event.stopPropagation();
+              onPlay(blob);
+            }}
+            aria-label={playButtonAria}
+            aria-pressed={isActivePlaying}
+            title={playButtonLabel}
+            type="button"
+          >
+            {isActivePlaying ? <PauseIcon size={16} /> : <PlayIcon size={16} />}
+          </button>
+        );
+      }
+      const buttonDisabled = !canPreview && !allowDialogPreview;
+      return (
+        <button
+          className={`${primaryActionBaseClass} bg-emerald-700/70 text-slate-100 hover:bg-emerald-600 h-10 w-10`}
+          onClick={event => {
+            event.stopPropagation();
+            onPreview(blob);
+          }}
+          aria-label={buttonDisabled ? "Preview unavailable" : "Show blob"}
+          title={buttonDisabled ? "Preview unavailable" : "Show"}
+          type="button"
+          disabled={buttonDisabled}
+        >
+          <PreviewIcon size={16} />
+        </button>
+      );
+    }, [
+      allowDialogPreview,
+      blob,
+      canPreview,
+      isActivePlaying,
+      isAudio,
+      isListBlob,
+      onOpenList,
+      onPlay,
+      onPreview,
+      playButtonAria,
+      playButtonLabel,
+    ]);
+
+    const menuPlacementClass =
+      menuPlacement === "up"
+        ? "bottom-full mb-2 origin-bottom"
+        : "top-full mt-2 origin-top";
+    const menuVisibilityClass = menuPlacement ? "visible opacity-100" : "invisible opacity-0 pointer-events-none";
+
+    return (
+      <div
+        role="button"
+        tabIndex={0}
+        aria-pressed={isSelected}
+        onClick={() => onToggle(blob.sha256)}
+        onKeyDown={event => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            onToggle(blob.sha256);
+          }
+        }}
+        className={`absolute flex flex-col overflow-visible rounded-xl border focus:outline-none focus:ring-2 focus:ring-emerald-500/70 focus:ring-offset-2 focus:ring-offset-slate-900 cursor-pointer transition ${
+          isSelected ? "border-emerald-500 bg-emerald-500/10" : "border-slate-800 bg-slate-900/60"
+        }`}
+        style={cardStyle}
+      >
+        <div className="relative flex-1 overflow-hidden" style={{ height: contentHeight }}>
+          {replicaSummary && replicaSummary.count > 1 ? (
+            <div className="pointer-events-none absolute right-2 top-2 z-20">
+              <ReplicaBadge info={replicaSummary} variant="grid" />
+            </div>
+          ) : null}
+          {previewContent}
+          <div className="pointer-events-none absolute inset-x-0 bottom-0 px-3 pb-2">
+            <div className="w-full rounded-md bg-slate-950/75 px-2 py-1 text-xs font-medium text-slate-100 text-center" title={displayName}>
+              <span className="flex max-w-full items-center justify-center gap-1">
+                <span className="truncate">{displayName}</span>
+                {isPrivateItem ? <LockIcon size={12} className="text-amber-300" aria-hidden="true" /> : null}
+              </span>
+            </div>
+          </div>
+        </div>
+        <div className="flex items-center justify-center gap-2 border-t border-slate-800/80 bg-slate-950/90 px-2 py-3" style={{ height: footerHeight }}>
+          {primaryAction}
+          {shareButton}
+          {dropdownItems.length > 0 ? (
+            <div className="relative" ref={registerDropdownRef}>
+              <button
+                className="p-2 shrink-0 flex h-10 w-10 items-center justify-center rounded-lg bg-slate-800 text-slate-200 transition hover:bg-slate-700"
+                onClick={handleMenuToggle}
+                aria-haspopup="true"
+                aria-expanded={isMenuOpen}
+                title="More actions"
+                type="button"
+              >
+                <ChevronDownIcon size={16} />
+              </button>
+              {isMenuOpen ? (
+                <div
+                  ref={menuRef}
+                  className={`absolute right-0 z-50 w-44 rounded-md border border-slate-700 bg-slate-900/95 p-1 shadow-xl ${menuPlacementClass} ${menuVisibilityClass}`}
+                  role="menu"
+                  aria-label="More actions"
+                >
+                  {dropdownItems.map(item => (
+                    <a
+                      key={item.key}
+                      href="#"
+                      role="menuitem"
+                      aria-label={item.ariaLabel ?? item.label}
+                      className={`flex items-center gap-2 rounded-md px-3 py-1.5 text-sm transition focus:outline-none focus:ring-1 focus:ring-emerald-400 ${
+                        item.variant === "destructive"
+                          ? "text-red-300 hover:bg-red-900/40 focus:ring-offset-1 focus:ring-offset-slate-900"
+                          : "text-slate-200 hover:bg-slate-700 focus:ring-offset-1 focus:ring-offset-slate-900"
+                      }`}
+                      onClick={event => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        handleMenuItemSelect(item.onSelect);
+                      }}
+                    >
+                      {item.icon}
+                      <span>{item.label}</span>
+                    </a>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
+      </div>
+    );
+  }
+);
+
+GridCard.displayName = "GridCard";
 
 const PreviewDialog: React.FC<{
   target: PreviewTarget;
@@ -1653,6 +2004,7 @@ const PreviewDialog: React.FC<{
             >
               <span className="text-slate-300">Direct URL:</span>
               <span className="truncate font-mono">{blob.url}</span>
+              <span className="mt-[1px] text-current"><CopyIcon size={12} /></span>
             </button>
           )}
         </div>
@@ -1695,10 +2047,24 @@ const ListThumbnail: React.FC<{
   const blurhash = extractBlurhash(blob);
   const effectiveServerType = blob.serverType ?? serverType;
   const coverEncryption = coverEntry?.encryption;
-  const effectiveRequiresAuth =
-    effectiveServerType === "satellite"
-      ? false
-      : Boolean((blob.requiresAuth ?? requiresAuth) || coverEncryption);
+  const effectiveRequiresAuth = Boolean((blob.requiresAuth ?? requiresAuth) || coverEncryption);
+  const [devicePixelRatio, setDevicePixelRatio] = useState(() =>
+    typeof window === "undefined" ? 1 : window.devicePixelRatio || 1
+  );
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const updatePixelRatio = () => {
+      setDevicePixelRatio(window.devicePixelRatio || 1);
+    };
+    updatePixelRatio();
+    window.addEventListener("resize", updatePixelRatio);
+    return () => window.removeEventListener("resize", updatePixelRatio);
+  }, []);
+
+  const THUMBNAIL_BASE_PX = 48;
+  const effectivePixelSize = THUMBNAIL_BASE_PX * devicePixelRatio;
+  const shouldLoadCompactCover = effectivePixelSize >= 136;
 
   if (kind === "music") {
     const fallbackContent = (
@@ -1706,7 +2072,7 @@ const ListThumbnail: React.FC<{
         <MusicIcon size={18} className="text-emerald-200" aria-hidden="true" />
       </div>
     );
-    if (showPreview && coverUrl) {
+    if (showPreview && coverUrl && shouldLoadCompactCover) {
       return (
         <div className={containerClass}>
           <AudioCoverImage
@@ -1719,6 +2085,19 @@ const ListThumbnail: React.FC<{
             serverType={effectiveServerType}
             blob={blob}
             coverEntry={coverEntry}
+            targetSize={Math.max(64, Math.min(256, Math.round(effectivePixelSize * 1.25)))}
+          />
+        </div>
+      );
+    }
+    if (showPreview && blurhash) {
+      return (
+        <div className={containerClass}>
+          <BlurhashThumbnail
+            hash={blurhash.hash}
+            width={blurhash.width}
+            height={blurhash.height}
+            alt={`${blob.name || blob.sha256} preview`}
           />
         </div>
       );
@@ -1812,42 +2191,17 @@ const ListThumbnail: React.FC<{
   );
 };
 
-function ListRow({
-  style,
-  blob,
-  baseUrl,
-  requiresAuth,
-  signTemplate,
-  serverType,
-  selected,
-  onToggle,
-  onDelete,
-  onDownload,
-  onPreview,
-  onPlay,
-  onShare,
-  onRename,
-  onOpenList,
-  currentTrackUrl,
-  currentTrackStatus,
-  detectedKinds,
-  onDetect,
-  onBlobVisible,
-  replicaSummary,
-  isMusicListView,
-  audioMetadata,
-  onActionsWidthChange,
-  showPreviews,
-  isPrivateBlob,
-  coverEntry,
-}: {
-  style: React.CSSProperties;
+type ListRowProps = {
+  top: number;
+  left: number;
+  width: number;
+  height: number;
   blob: BlossomBlob;
   baseUrl?: string;
   requiresAuth: boolean;
   signTemplate?: SignTemplate;
   serverType?: "blossom" | "nip96" | "satellite";
-  selected: Set<string>;
+  isSelected: boolean;
   onToggle: (sha: string) => void;
   onDelete: (blob: BlossomBlob) => void;
   onDownload: (blob: BlossomBlob) => void;
@@ -1858,18 +2212,57 @@ function ListRow({
   onOpenList?: (blob: BlossomBlob) => void;
   currentTrackUrl?: string;
   currentTrackStatus?: "idle" | "playing" | "paused";
-  detectedKinds: DetectedKindMap;
+  detectedKind?: "image" | "video";
   onDetect: (sha: string, kind: "image" | "video") => void;
   onBlobVisible: (sha: string) => void;
   replicaSummary?: BlobReplicaSummary;
   isMusicListView: boolean;
-  audioMetadata: Map<string, BlobAudioMetadata>;
+  trackMetadata: BlobAudioMetadata | null;
   onActionsWidthChange: (width: number) => void;
   showPreviews: boolean;
   isPrivateBlob?: boolean;
   coverEntry?: PrivateListEntry | null;
-}) {
-  const detectedKind = detectedKinds[blob.sha256];
+  getMenuBoundary?: () => HTMLElement | null;
+};
+
+const ListRowComponent: React.FC<ListRowProps> = ({
+  top,
+  left,
+  width,
+  height,
+  blob,
+  baseUrl,
+  requiresAuth,
+  signTemplate,
+  serverType,
+  isSelected,
+  onToggle,
+  onDelete,
+  onDownload,
+  onPreview,
+  onPlay,
+  onShare,
+  onRename,
+  onOpenList,
+  currentTrackUrl,
+  currentTrackStatus,
+  detectedKind,
+  onDetect,
+  onBlobVisible,
+  replicaSummary,
+  isMusicListView,
+  trackMetadata: trackMetadataProp,
+  onActionsWidthChange,
+  showPreviews,
+  isPrivateBlob,
+  coverEntry,
+  getMenuBoundary,
+}) => {
+  const rowStyle = useMemo<React.CSSProperties>(
+    () => ({ position: "absolute", top, left, width, height }),
+    [top, left, width, height]
+  );
+  const footerHeight = height * 0.25;
   const kind = decideFileKind(blob, detectedKind);
   const isAudio = blob.type?.startsWith("audio/");
   const isActiveTrack = Boolean(currentTrackUrl && blob.url && currentTrackUrl === blob.url);
@@ -1884,14 +2277,15 @@ function ListRow({
   const showButtonClass = `${primaryActionBaseClass} bg-emerald-700/70 text-slate-100 hover:bg-emerald-600`;
   const playPauseIcon = isActivePlaying ? <PauseIcon size={16} /> : <PlayIcon size={16} />;
   const displayName = buildDisplayName(blob);
-  const isSelected = selected.has(blob.sha256);
-  const trackMetadata = audioMetadata.get(blob.sha256);
+  const trackMetadata = trackMetadataProp ?? undefined;
   const canPreview = canBlobPreview(blob, detectedKind, kind);
-  const disablePreview = !canPreview;
+  const allowDialogPreview = kind === "pdf" || kind === "doc" || kind === "document";
   const previewUrl = canPreview ? buildPreviewUrl(blob, baseUrl) : null;
+  const disablePreview = !canPreview && !allowDialogPreview;
   const isListBlob = isListLikeBlob(blob);
   const isPrivateListEntry = isListBlob && blob.sha256 === PRIVATE_PLACEHOLDER_SHA;
-  const isPrivateItem = isPrivateListEntry || isPrivateBlob;
+  const isPrivateScope = blob.__bloomFolderScope === "private";
+  const isPrivateItem = isPrivateListEntry || isPrivateBlob || isPrivateScope;
   const handleOpenList = useCallback(() => {
     if (onOpenList) onOpenList(blob);
   }, [blob, onOpenList]);
@@ -1909,7 +2303,8 @@ function ListRow({
       : "hover:bg-slate-800/40";
   const coverUrl = kind === "music" ? trackMetadata?.coverUrl : undefined;
   const resolvedCoverEntry = coverEntry ?? null;
-  const allowThumbnailPreview = showPreviews && (canPreview || (kind === "music" && Boolean(coverUrl)));
+  const allowThumbnailPreview =
+    showPreviews && !allowDialogPreview && (canPreview || (kind === "music" && Boolean(coverUrl)));
 
   const updatedLabel = blob.uploaded ? prettyDate(blob.uploaded) : "—";
 
@@ -1972,6 +2367,9 @@ function ListRow({
     return undefined;
   }, [onActionsWidthChange, menuOpen]);
   const dropdownRef = useRef<HTMLDivElement | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const menuBoundary = getMenuBoundary?.() ?? null;
+  const menuPlacement = useDropdownPlacement(menuOpen, dropdownRef, menuRef, menuBoundary);
 
   useEffect(() => {
     setMenuOpen(false);
@@ -2050,23 +2448,33 @@ function ListRow({
       </button>
     ) : null;
 
-  const shareButton =
-    blob.url && onShare
-      ? (
+  const shareButton = onShare
+    ? (() => {
+        const disabled = isPrivateItem || !blob.url;
+        const ariaLabel = isMusicListView ? "Share track" : "Share blob";
+        const title = disabled
+          ? isPrivateItem
+            ? "Private files cannot be shared"
+            : "Share available once file link is ready"
+          : "Share";
+        return (
           <button
-            className="p-2 shrink-0 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200"
+            className="p-2 shrink-0 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-slate-800"
             onClick={event => {
+              if (disabled) return;
               event.stopPropagation();
               onShare?.(blob);
             }}
-            aria-label={isMusicListView ? "Share track" : "Share blob"}
-            title="Share"
+            aria-label={ariaLabel}
+            title={title}
             type="button"
+            disabled={disabled}
           >
             <ShareIcon size={16} />
           </button>
-        )
-      : null;
+        );
+      })()
+    : null;
 
   type DropdownItem = {
     key: string;
@@ -2115,6 +2523,12 @@ function ListRow({
     setMenuOpen(value => !value);
   };
 
+  const menuPlacementClass =
+    menuPlacement === "up"
+      ? "bottom-full mb-2 origin-bottom"
+      : "top-full mt-2 origin-top";
+  const menuVisibilityClass = menuPlacement ? "visible opacity-100" : "invisible opacity-0 pointer-events-none";
+
   const dropdownMenu = !showDropdown
     ? null
     : (
@@ -2131,7 +2545,8 @@ function ListRow({
           </button>
           {menuOpen ? (
             <div
-              className="absolute right-0 z-30 mt-2 w-44 rounded-md border border-slate-700 bg-slate-900/95 p-1 shadow-xl"
+              ref={menuRef}
+              className={`absolute right-0 z-30 w-44 rounded-md border border-slate-700 bg-slate-900/95 p-1 shadow-xl ${menuPlacementClass} ${menuVisibilityClass}`}
               role="menu"
               aria-label="More actions"
             >
@@ -2174,7 +2589,7 @@ function ListRow({
   if (isMusicListView) {
     return (
       <div
-        style={style}
+        style={rowStyle}
         className={`absolute left-0 right-0 grid grid-cols-[60px,minmax(0,1fr)] md:grid-cols-[60px,minmax(0,1fr),10rem,12rem,6rem,max-content] items-center gap-2 border-b border-slate-800 px-2 transition-colors ring-1 ring-transparent ${rowHighlightClass}`}
         role="row"
         aria-current={isActiveTrack ? "true" : undefined}
@@ -2204,6 +2619,7 @@ function ListRow({
         <div
           ref={actionsContainerRef}
           className="col-span-2 flex shrink-0 items-center justify-center gap-2 px-2 md:col-span-1 md:justify-end"
+          style={{ minHeight: footerHeight }}
         >
           {primaryAction}
           {shareButton}
@@ -2215,7 +2631,7 @@ function ListRow({
 
   return (
     <div
-      style={style}
+      style={rowStyle}
       className={`absolute left-0 right-0 flex items-center gap-2 border-b border-slate-800 px-2 transition-colors ring-1 ring-transparent ${rowHighlightClass}`}
       role="row"
       aria-current={isActiveTrack ? "true" : undefined}
@@ -2255,7 +2671,11 @@ function ListRow({
         {updatedLabel}
       </div>
       <div className="w-24 shrink-0 px-3 text-sm text-slate-400">{isListBlob ? "—" : prettyBytes(blob.size || 0)}</div>
-      <div ref={actionsContainerRef} className="flex shrink-0 items-center justify-center gap-2 px-2 md:justify-end">
+      <div
+        ref={actionsContainerRef}
+        className="flex shrink-0 items-center justify-center gap-2 px-2 md:justify-end"
+        style={{ minHeight: footerHeight }}
+      >
         {primaryAction}
         {shareButton}
         {dropdownMenu}
@@ -2309,9 +2729,11 @@ const BlobPreview: React.FC<{
   const [src, setSrc] = useState<string | null>(initialCachedSrc);
   const [failed, setFailed] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [previewType, setPreviewType] = useState<"image" | "video" | "text" | "unknown">(() => {
+  const [previewType, setPreviewType] = useState<"image" | "video" | "text" | "pdf" | "doc" | "unknown">(() => {
     if (isPreviewableTextType({ mime: effectiveType, name: effectiveName, url })) return "text";
-    return inferKind(effectiveType, effectiveName) ?? "unknown";
+    if (isPdfType(effectiveType, effectiveName || url)) return "pdf";
+    if (isDocType(effectiveType, effectiveName || url)) return "doc";
+    return inferKind(effectiveType, effectiveName || url) ?? "unknown";
   });
   const [isReady, setIsReady] = useState(Boolean(initialCachedSrc));
   const [textPreview, setTextPreview] = useState<{ content: string; truncated: boolean } | null>(null);
@@ -2328,7 +2750,9 @@ const BlobPreview: React.FC<{
   }, [onDetect]);
 
   const fallbackIconKind = useMemo<FileKind>(() => {
-    if (previewType === "image" || previewType === "video") return previewType;
+    if (previewType === "image" || previewType === "video" || previewType === "pdf" || previewType === "doc") {
+      return previewType;
+    }
     if (isMusicType(effectiveType, effectiveName, url)) return "music";
     if (isSheetType(effectiveType, effectiveName || url)) return "sheet";
     if (isDocType(effectiveType, effectiveName || url)) return "doc";
@@ -2375,8 +2799,12 @@ const BlobPreview: React.FC<{
   useEffect(() => {
     if (isPreviewableTextType({ mime: effectiveType, name: effectiveName, url })) {
       setPreviewType("text");
+    } else if (isPdfType(effectiveType, effectiveName || url)) {
+      setPreviewType("pdf");
+    } else if (isDocType(effectiveType, effectiveName || url)) {
+      setPreviewType("doc");
     } else {
-      setPreviewType(inferKind(effectiveType, effectiveName) ?? "unknown");
+      setPreviewType(inferKind(effectiveType, effectiveName || url) ?? "unknown");
     }
   }, [effectiveType, url, effectiveName]);
 
@@ -2450,6 +2878,16 @@ const BlobPreview: React.FC<{
       lastFailureKeyRef.current = null;
       setSrc(objectUrl);
       setIsReady(true);
+      const resolvedType = blobData.type || effectiveType || privateMeta?.type;
+      if (resolvedType === "application/pdf" || isPdfType(resolvedType, effectiveName ?? url)) {
+        setPreviewType(previous => (previous === "pdf" ? previous : "pdf"));
+      } else if (isDocType(resolvedType, effectiveName ?? url)) {
+        setPreviewType(previous => (previous === "doc" ? previous : "doc"));
+      } else if (resolvedType?.startsWith("image/") && previewType !== "image") {
+        setPreviewType("image");
+      } else if (resolvedType?.startsWith("video/") && previewType !== "video") {
+        setPreviewType("video");
+      }
     };
 
     const useDirectUrl = () => {
@@ -2487,6 +2925,11 @@ const BlobPreview: React.FC<{
 
     const load = async () => {
       try {
+        if (previewType === "pdf" || previewType === "doc") {
+          setLoading(false);
+          finalizeRequest();
+          return;
+        }
         const allowPersistentCache = !isPrivate && !metaSuggestsText;
         const cachedBlob = allowPersistentCache ? await getCachedPreviewBlob(cacheServerHint, sha) : null;
         if (cancelled) return;
@@ -2517,7 +2960,7 @@ const BlobPreview: React.FC<{
         }
 
         const response = await fetch(url, {
-          method: metaSuggestsText ? "GET" : "GET",
+          method: "GET",
           headers,
           signal: controller.signal,
         });
@@ -2589,7 +3032,17 @@ const BlobPreview: React.FC<{
         }
 
         if (!requiresAuth) {
-          useDirectUrl();
+        const resolvedMime = mimeHint ?? effectiveType;
+        if (resolvedMime === "application/pdf" || isPdfType(resolvedMime, effectiveName ?? url)) {
+          setPreviewType(previous => (previous === "pdf" ? previous : "pdf"));
+        } else if (isDocType(resolvedMime, effectiveName ?? url)) {
+          setPreviewType(previous => (previous === "doc" ? previous : "doc"));
+        } else if (resolvedMime?.startsWith("image/") && previewType !== "image") {
+          setPreviewType("image");
+        } else if (resolvedMime?.startsWith("video/") && previewType !== "video") {
+          setPreviewType("video");
+        }
+        useDirectUrl();
           setLoading(false);
           finalizeRequest();
           return;
@@ -2641,6 +3094,7 @@ const BlobPreview: React.FC<{
     variant,
     isPrivate,
     privateEncryption,
+    previewType,
   ]);
 
   useEffect(() => {
@@ -2655,11 +3109,22 @@ const BlobPreview: React.FC<{
     }
   }, [isVisible, onVisible, previewKey, sha]);
 
-  const showMedia = Boolean(src) && !failed && Boolean(url);
+  useEffect(() => {
+    if (previewType === "pdf" || previewType === "doc") {
+      setIsReady(true);
+      setLoading(false);
+      setFailed(false);
+    }
+  }, [previewType]);
+
+  const isPdf = previewType === "pdf";
+  const isDoc = previewType === "doc";
+  const isStaticPreview = isPdf || isDoc;
+  const showMedia = !isStaticPreview && Boolean(src) && !failed && Boolean(url);
   const isVideo = showMedia && previewType === "video";
-  const isImage = showMedia && previewType !== "video";
-  const showLoading = loading && !showMedia && !textPreview;
-  const showUnavailable = failed || (!showMedia && !textPreview && !loading);
+  const isImage = showMedia && previewType === "image";
+  const showLoading = !isStaticPreview && loading && !showMedia && !textPreview;
+  const showUnavailable = !isStaticPreview && (failed || (!showMedia && !textPreview && !loading));
 
   const classNames = `relative flex h-full w-full items-center justify-center overflow-hidden bg-slate-950/80 ${
     className ?? ""
@@ -2721,6 +3186,31 @@ const BlobPreview: React.FC<{
         setFailed(true);
       }}
     />
+  ) : isDoc ? (
+    <div
+      className={`flex h-full w-full items-center justify-center rounded-2xl border border-slate-800/80 bg-gradient-to-br from-purple-900/70 via-slate-900 to-slate-950 transition-opacity duration-200 ${
+        isReady ? "opacity-100" : "opacity-0"
+      } ${variant === "dialog" ? "mx-4 my-4" : ""}`}
+    >
+      <DocumentIcon
+        size={fallbackIconSize ?? (variant === "dialog" ? 120 : 56)}
+        className="text-purple-200"
+        aria-hidden="true"
+      />
+    </div>
+  ) : isPdf ? (
+    <div
+      className={`flex h-full w-full items-center justify-center rounded-2xl border border-slate-800/80 bg-gradient-to-br from-red-900/70 via-slate-900 to-slate-950 transition-opacity duration-200 ${
+        isReady ? "opacity-100" : "opacity-0"
+      } ${variant === "dialog" ? "mx-4 my-4" : ""}`}
+    >
+      <FileTypeIcon
+        kind="pdf"
+        size={fallbackIconSize ?? (variant === "dialog" ? 120 : 56)}
+        className="text-red-200"
+        aria-hidden="true"
+      />
+    </div>
   ) : null;
 
   const overlayConfig = useMemo(() => {
@@ -2760,7 +3250,7 @@ const BlobPreview: React.FC<{
     }
   }, [fallbackIconKind, fallbackIconSize, variant]);
 
-  const showBlurhashPlaceholder = Boolean(blurhashPlaceholder && !textPreview && !showMedia);
+  const showBlurhashPlaceholder = Boolean(blurhashPlaceholder && !textPreview && !showMedia && !isStaticPreview);
   const showLoadingOverlay = showLoading && !showBlurhashPlaceholder;
   const showUnavailableOverlay = showUnavailable && !showBlurhashPlaceholder;
 
@@ -2789,6 +3279,30 @@ const BlobPreview: React.FC<{
     </div>
   );
 };
+
+const ListRow = React.memo(ListRowComponent, (prev, next) => {
+  return (
+    prev.blob === next.blob &&
+    prev.top === next.top &&
+    prev.left === next.left &&
+    prev.width === next.width &&
+    prev.height === next.height &&
+    prev.isSelected === next.isSelected &&
+    prev.baseUrl === next.baseUrl &&
+    prev.requiresAuth === next.requiresAuth &&
+    prev.signTemplate === next.signTemplate &&
+    prev.serverType === next.serverType &&
+    prev.currentTrackUrl === next.currentTrackUrl &&
+    prev.currentTrackStatus === next.currentTrackStatus &&
+    prev.detectedKind === next.detectedKind &&
+    prev.replicaSummary === next.replicaSummary &&
+    prev.isMusicListView === next.isMusicListView &&
+    prev.trackMetadata === next.trackMetadata &&
+    prev.showPreviews === next.showPreviews &&
+    prev.isPrivateBlob === next.isPrivateBlob &&
+    prev.coverEntry === next.coverEntry
+  );
+});
 
 
 function deriveFilename(disposition?: string) {
@@ -2985,6 +3499,7 @@ const AudioCoverImage: React.FC<{
   serverType?: "blossom" | "nip96" | "satellite";
   blob?: BlossomBlob;
   coverEntry?: PrivateListEntry | null;
+  targetSize?: number;
 }> = ({
   url,
   alt,
@@ -2995,11 +3510,28 @@ const AudioCoverImage: React.FC<{
   serverType = "blossom",
   blob,
   coverEntry,
+  targetSize,
 }) => {
   const [failed, setFailed] = useState(false);
   const coverEncryption = coverEntry?.encryption;
   const coverMetadata = coverEntry?.metadata;
-  const [src, setSrc] = useState<string | null>(requiresAuth || coverEncryption ? null : url);
+  const preferredSize = Math.max(64, Math.min(targetSize ?? 256, 384));
+  const optimizedUrl = useMemo(() => {
+    if (requiresAuth || coverEncryption) return url;
+    try {
+      const parsed = new URL(url);
+      const candidates = [preferredSize, Math.min(preferredSize * 2, 512)];
+      const primary = new URL(parsed.toString());
+      primary.searchParams.set("w", String(candidates[0]));
+      primary.searchParams.set("h", String(candidates[0]));
+      primary.searchParams.set("fit", "cover");
+      return primary.toString();
+    } catch {
+      return url;
+    }
+  }, [coverEncryption, preferredSize, requiresAuth, url]);
+  const [src, setSrc] = useState<string | null>(requiresAuth || coverEncryption ? null : optimizedUrl);
+  const [usedOptimized, setUsedOptimized] = useState(() => optimizedUrl !== url);
   const objectUrlRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -3021,7 +3553,8 @@ const AudioCoverImage: React.FC<{
     const isDataUrl = url.startsWith("data:");
     const needsFetch = (requiresAuth || Boolean(coverEncryption)) && !isDataUrl;
     if (!needsFetch) {
-      setSrc(url);
+      setSrc(optimizedUrl);
+      setUsedOptimized(optimizedUrl !== url);
       setFailed(false);
       return () => {
         controller.abort();
@@ -3044,7 +3577,7 @@ const AudioCoverImage: React.FC<{
               url,
               method: "GET",
             });
-          } else if (serverType !== "satellite") {
+          } else {
             let resource: URL | null = null;
             try {
               resource = new URL(url, window.location.href);
@@ -3060,7 +3593,8 @@ const AudioCoverImage: React.FC<{
           }
         }
 
-        const response = await fetch(url, {
+        const fetchTarget = optimizedUrl;
+        const response = await fetch(fetchTarget, {
           headers,
           signal: controller.signal,
           mode: "cors",
@@ -3101,6 +3635,7 @@ const AudioCoverImage: React.FC<{
         const objectUrl = URL.createObjectURL(imageBlob);
         objectUrlRef.current = objectUrl;
         setSrc(objectUrl);
+        setUsedOptimized(false);
       } catch (error) {
         if (!cancelled) {
           setFailed(true);
@@ -3118,7 +3653,7 @@ const AudioCoverImage: React.FC<{
         objectUrlRef.current = null;
       }
     };
-  }, [coverEncryption, coverMetadata, requiresAuth, serverType, signTemplate, url]);
+  }, [coverEncryption, coverMetadata, optimizedUrl, requiresAuth, serverType, signTemplate, url]);
 
   if (!src || failed) {
     return <>{fallback}</>;
@@ -3130,7 +3665,14 @@ const AudioCoverImage: React.FC<{
       alt={alt}
       className={className}
       loading="lazy"
-      onError={() => setFailed(true)}
+      onError={() => {
+        if (usedOptimized) {
+          setUsedOptimized(false);
+          setSrc(url);
+          return;
+        }
+        setFailed(true);
+      }}
       draggable={false}
     />
   );
@@ -3140,6 +3682,46 @@ const blurhashDataUrlCache = new Map<string, string>();
 
 const buildBlurhashCacheKey = (hash: string, width?: number, height?: number) =>
   `${hash}|${width ?? ""}|${height ?? ""}`;
+
+type IdleCancel = () => void;
+
+const scheduleIdle = (work: () => void): IdleCancel => {
+  if (typeof window === "undefined") {
+    work();
+    return () => undefined;
+  }
+
+  const win = window as typeof window & {
+    requestIdleCallback?: (callback: (...args: any[]) => void, options?: { timeout?: number }) => number;
+    cancelIdleCallback?: (handle: number) => void;
+  };
+
+  if (typeof win.requestIdleCallback === "function") {
+    const handle = win.requestIdleCallback(() => work(), { timeout: 150 });
+    return () => {
+      win.cancelIdleCallback?.(handle);
+    };
+  }
+
+  const timeout = window.setTimeout(work, 32);
+  return () => {
+    window.clearTimeout(timeout);
+  };
+};
+
+let blurhashCanvas: HTMLCanvasElement | null = null;
+let blurhashContext: CanvasRenderingContext2D | null = null;
+
+const ensureDecodeSurface = (width: number, height: number) => {
+  if (!blurhashCanvas) {
+    blurhashCanvas = document.createElement("canvas");
+    blurhashContext = blurhashCanvas.getContext("2d");
+  }
+  if (!blurhashCanvas || !blurhashContext) return null;
+  if (blurhashCanvas.width !== width) blurhashCanvas.width = width;
+  if (blurhashCanvas.height !== height) blurhashCanvas.height = height;
+  return { canvas: blurhashCanvas, ctx: blurhashContext } as const;
+};
 
 const decodeBlurhashToDataUrl = (hash: string, width?: number, height?: number): string | null => {
   if (typeof window === "undefined") return null;
@@ -3159,12 +3741,10 @@ const decodeBlurhashToDataUrl = (hash: string, width?: number, height?: number):
     decodeWidth = Math.max(4, Math.min(maxSize, decodeWidth));
     decodeHeight = Math.max(4, Math.min(maxSize, decodeHeight));
 
+    const surface = ensureDecodeSurface(decodeWidth, decodeHeight);
+    if (!surface) return null;
+    const { canvas, ctx } = surface;
     const pixels = decode(hash, decodeWidth, decodeHeight);
-    const canvas = document.createElement("canvas");
-    canvas.width = decodeWidth;
-    canvas.height = decodeHeight;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return null;
     const imageData = ctx.createImageData(decodeWidth, decodeHeight);
     imageData.data.set(pixels);
     ctx.putImageData(imageData, 0, 0);
@@ -3192,13 +3772,22 @@ function BlurhashThumbnail({ hash, width, height, alt }: BlurhashThumbnailProps)
       setDataUrl(cached);
       return;
     }
-    const result = decodeBlurhashToDataUrl(hash, width, height);
-    if (result) {
-      blurhashDataUrlCache.set(cacheKey, result);
-      setDataUrl(result);
-    } else {
-      setDataUrl(null);
-    }
+    let cancelled = false;
+    const cancel = scheduleIdle(() => {
+      if (cancelled) return;
+      const result = decodeBlurhashToDataUrl(hash, width, height);
+      if (cancelled) return;
+      if (result) {
+        blurhashDataUrlCache.set(cacheKey, result);
+        setDataUrl(result);
+      } else {
+        setDataUrl(null);
+      }
+    });
+    return () => {
+      cancelled = true;
+      cancel();
+    };
   }, [cacheKey, hash, width, height]);
 
   if (!dataUrl) {

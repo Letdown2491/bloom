@@ -23,7 +23,7 @@ import { PRIVATE_PLACEHOLDER_SHA, PRIVATE_SERVER_NAME } from "../../constants/pr
 import { applyFolderUpdate, normalizeFolderPathInput } from "../../utils/blobMetadataStore";
 import type { BlobAudioMetadata } from "../../utils/blobMetadataStore";
 import type { BlobReplicaSummary } from "../../components/BlobList";
-import type { DefaultSortOption } from "../../context/UserPreferencesContext";
+import type { DefaultSortOption, SortDirection } from "../../context/UserPreferencesContext";
 import { buildNip98AuthHeader } from "../../lib/nip98";
 import { decryptPrivateBlob } from "../../lib/privateEncryption";
 import type { Track } from "../../context/AudioContext";
@@ -293,15 +293,15 @@ const createFolderPlaceholder = (
   return placeholder;
 };
 
-const buildFolderView = (
-  blobs: readonly BlossomBlob[],
+const buildFolderViewFromIndex = (
+  index: Map<string, FolderNode>,
+  allBlobs: readonly BlossomBlob[],
   options: BuildFolderViewOptions
 ): { list: BlossomBlob[]; parentPath: string | null } => {
-  const index = buildFolderIndex(blobs);
   const targetPath = options.activePath;
   const node = index.get(targetPath) ?? index.get("");
   if (!node) {
-    return { list: blobs.slice(), parentPath: null };
+    return { list: allBlobs.slice(), parentPath: null };
   }
   const childPaths = Array.from(node.children);
   childPaths.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
@@ -342,6 +342,7 @@ export type BrowseTabContainerProps = {
   showListPreviews: boolean;
   homeResetKey: number;
   defaultSortOption: DefaultSortOption;
+  sortDirection: SortDirection;
   onNavigationChange?: (navigation: BrowseNavigationState | null) => void;
   searchTerm: string;
 };
@@ -381,6 +382,7 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
   showListPreviews,
   homeResetKey,
   defaultSortOption,
+  sortDirection,
   onNavigationChange,
   searchTerm,
 }) => {
@@ -804,6 +806,8 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
     return filtered.filter(matchesSearch);
   }, [aggregated.blobs, excludeListedBlobs, filterMode, isSearching, matchesSearch]);
 
+  const aggregatedFolderIndex = useMemo(() => buildFolderIndex(aggregatedFilteredBlobs), [aggregatedFilteredBlobs]);
+
   const aggregatedFolderPath = activeFolder?.scope === "aggregated" ? activeFolder.path : "";
 
   const visibleAggregatedBlobs = useMemo(() => {
@@ -813,7 +817,7 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
       }
       return aggregatedFilteredBlobs;
     }
-    const { list } = buildFolderView(aggregatedFilteredBlobs, {
+    const { list } = buildFolderViewFromIndex(aggregatedFolderIndex, aggregatedFilteredBlobs, {
       activePath: aggregatedFolderPath,
       scope: "aggregated",
       resolveFolderName: getFolderDisplayName,
@@ -824,6 +828,7 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
     return list;
   }, [
     aggregatedFilteredBlobs,
+    aggregatedFolderIndex,
     aggregatedFolderPath,
     hasActiveFilter,
     hasPrivateMatchingFilter,
@@ -881,9 +886,11 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
     return byFilter.filter(matchesSearch);
   }, [filterMode, isSearching, matchesSearch, privateScopedBlobs]);
 
+  const privateFolderIndex = useMemo(() => buildFolderIndex(privateVisibleBlobs), [privateVisibleBlobs]);
+
   const visiblePrivateBlobs = useMemo(() => {
     if (!isPrivateView || hasActiveFilter) return privateVisibleBlobs;
-    const { list } = buildFolderView(privateVisibleBlobs, {
+    const { list } = buildFolderViewFromIndex(privateFolderIndex, privateVisibleBlobs, {
       activePath: privateFolderPath,
       scope: "private",
       serverUrl: privateScopeUrl,
@@ -899,6 +906,7 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
     privateFolderPath,
     privateScopeUrl,
     privateVisibleBlobs,
+    privateFolderIndex,
     getFolderDisplayName,
   ]);
 
@@ -913,6 +921,11 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
     return filtered.filter(matchesSearch);
   }, [currentSnapshot, excludeListedBlobs, filterMode, isSearching, matchesSearch]);
 
+  const currentFolderIndex = useMemo(
+    () => (currentFilteredBlobs ? buildFolderIndex(currentFilteredBlobs) : null),
+    [currentFilteredBlobs]
+  );
+
   const currentFolderPath = activeFolder?.scope === "server" ? activeFolder.path : "";
 
   const currentVisibleBlobs = useMemo(() => {
@@ -924,7 +937,8 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
       }
       return currentFilteredBlobs;
     }
-    const { list } = buildFolderView(currentFilteredBlobs, {
+    const index = currentFolderIndex ?? buildFolderIndex(currentFilteredBlobs);
+    const { list } = buildFolderViewFromIndex(index, currentFilteredBlobs, {
       activePath: currentFolderPath,
       scope: "server",
       serverUrl: serverInfo ? normalizeServerUrl(serverInfo.url) : null,
@@ -943,6 +957,7 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
     hasActiveFilter,
     hasPrivateMatchingFilter,
     privatePlaceholderBlob,
+    currentFolderIndex,
     getFolderDisplayName,
   ]);
 
@@ -1145,10 +1160,7 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
       }
 
       const effectiveServerType = blob.serverType ?? "blossom";
-      const requiresAuth =
-        effectiveServerType === "satellite"
-          ? false
-          : Boolean(blob.requiresAuth);
+      const requiresAuth = Boolean(blob.requiresAuth);
       const encryption = blob.privateData?.encryption;
 
       if (!requiresAuth && !encryption) {
@@ -1240,10 +1252,7 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
       if (cached) return cached;
 
       const effectiveServerType = blob.serverType ?? "blossom";
-      const requiresAuth =
-        effectiveServerType === "satellite"
-          ? false
-          : Boolean(blob.requiresAuth || coverEntry?.encryption);
+      const requiresAuth = Boolean(blob.requiresAuth || coverEntry?.encryption);
       const encryption = coverEntry?.encryption;
 
       const headers: Record<string, string> = {};
@@ -1496,8 +1505,7 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
         `Delete ${blob.sha256.slice(0, 10)}… from ${targetServer.name}?`
       );
       if (!confirmed) return;
-      const requiresSigner =
-        targetServer.type === "satellite" || Boolean(targetServer.requiresAuth);
+      const requiresSigner = Boolean(targetServer.requiresAuth);
       if (requiresSigner && !signer) {
         showStatusMessage("Connect your signer to delete from this server.", "error", 2000);
         return;
@@ -1833,6 +1841,7 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
             showListPreviews={showListPreviews}
             onOpenList={handleOpenListBlob}
             defaultSortOption={defaultSortOption}
+            sortDirection={sortDirection}
           />
         </Suspense>
       </div>
@@ -1852,7 +1861,7 @@ const performDelete = async (
     return;
   }
   if (serverType === "satellite") {
-    await deleteSatelliteFile(serverUrl, blob.sha256, requiresSigner ? signTemplate : undefined, requiresSigner);
+    await deleteSatelliteFile(serverUrl, blob.sha256, signTemplate, true);
     return;
   }
   await deleteUserBlob(serverUrl, blob.sha256, requiresSigner ? signTemplate : undefined, requiresSigner);

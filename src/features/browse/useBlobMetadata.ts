@@ -46,6 +46,16 @@ export const useBlobMetadata = (blobs: BlossomBlob[], options?: MetadataOptions)
   const [detectedKinds, setDetectedKinds] = useState<Record<string, "image" | "video">>({});
   const [visibilitySignal, setVisibilitySignal] = useState(0);
 
+  const resolvedMetaRef = useRef(resolvedMeta);
+  useEffect(() => {
+    resolvedMetaRef.current = resolvedMeta;
+  }, [resolvedMeta]);
+
+  const detectedKindsRef = useRef(detectedKinds);
+  useEffect(() => {
+    detectedKindsRef.current = detectedKinds;
+  }, [detectedKinds]);
+
   const metadataSchedulerRef = useRef<{ running: number; queue: Array<() => void>; generation: number }>({
     running: 0,
     queue: [],
@@ -109,6 +119,8 @@ export const useBlobMetadata = (blobs: BlossomBlob[], options?: MetadataOptions)
   }, []);
 
   useEffect(() => {
+    const resolvedMetaSnapshot = resolvedMetaRef.current;
+    const detectedKindsSnapshot = detectedKindsRef.current;
     const scheduler = metadataSchedulerRef.current;
     scheduler.generation += 1;
     scheduler.queue = [];
@@ -138,7 +150,7 @@ export const useBlobMetadata = (blobs: BlossomBlob[], options?: MetadataOptions)
     };
 
     const ensurePassiveProbe = (blob: BlossomBlob, resourceUrl: string) => {
-      if (requiresAuth || passiveDetectors.current.has(blob.sha256) || detectedKinds[blob.sha256]) return;
+      if (requiresAuth || passiveDetectors.current.has(blob.sha256) || detectedKindsSnapshot[blob.sha256]) return;
       const img = new Image();
       img.decoding = "async";
       const cleanup = () => {
@@ -166,7 +178,7 @@ export const useBlobMetadata = (blobs: BlossomBlob[], options?: MetadataOptions)
       try {
         const headers: Record<string, string> = {};
         const effectiveType = blob.serverType ?? serverType;
-        const needsAuthHeader = requiresAuth && effectiveType !== "satellite";
+        const needsAuthHeader = requiresAuth;
         const buildAuth = async (method: "HEAD" | "GET") => {
           if (!needsAuthHeader || !signTemplate) return undefined;
           if (effectiveType === "nip96") {
@@ -277,7 +289,7 @@ export const useBlobMetadata = (blobs: BlossomBlob[], options?: MetadataOptions)
     let processedThisCycle = 0;
 
     for (const blob of blobs) {
-      const overrides = resolvedMeta[blob.sha256];
+      const overrides = resolvedMetaSnapshot[blob.sha256];
       const effectiveType = overrides?.type ?? blob.type;
       const effectiveName = overrides?.name ?? blob.name;
       const hasType = Boolean(effectiveType && effectiveType !== "application/octet-stream");
@@ -334,7 +346,7 @@ export const useBlobMetadata = (blobs: BlossomBlob[], options?: MetadataOptions)
         break;
       }
     }
-  }, [baseUrl, blobs, detectedKinds, requiresAuth, resolvedMeta, serverType, signTemplate, ttlMs, visibilitySignal]);
+  }, [baseUrl, blobs, requiresAuth, serverType, signTemplate, ttlMs, visibilitySignal]);
 
   const reportDetectedKind = useCallback((sha: string, kind: "image" | "video") => {
     setDetectedKinds(prev => (prev[sha] === kind ? prev : { ...prev, [sha]: kind }));

@@ -215,20 +215,6 @@ export function setStoredBlobMetadata(serverUrl: string | undefined, sha256: str
     next.audio = current.audio;
   }
 
-  if (updatedProvided) {
-    if (typeof metadata.updatedAt === "number" && Number.isFinite(metadata.updatedAt)) {
-      next.updatedAt = metadata.updatedAt;
-    }
-  } else if (
-    (nameProvided && typeof metadata.name === "string") ||
-    (typeProvided && typeof metadata.type === "string") ||
-    (audioProvided && metadata.audio !== undefined)
-  ) {
-    next.updatedAt = Date.now();
-  } else if (typeof current.updatedAt === "number") {
-    next.updatedAt = current.updatedAt;
-  }
-
   if (checkedProvided) {
     if (typeof metadata.lastCheckedAt === "number" && Number.isFinite(metadata.lastCheckedAt)) {
       next.lastCheckedAt = metadata.lastCheckedAt;
@@ -241,9 +227,48 @@ export function setStoredBlobMetadata(serverUrl: string | undefined, sha256: str
   if (typeof next.type !== "string") delete next.type;
   if (typeof next.lastCheckedAt !== "number") delete next.lastCheckedAt;
   if (!next.audio || Object.keys(next.audio).length === 0) delete next.audio;
-  if (typeof next.updatedAt !== "number") delete next.updatedAt;
+
+  const currentName = typeof current.name === "string" ? current.name : undefined;
+  const nextName = typeof next.name === "string" ? next.name : undefined;
+  const currentType = typeof current.type === "string" ? current.type : undefined;
+  const nextType = typeof next.type === "string" ? next.type : undefined;
+  const currentFolder = Object.prototype.hasOwnProperty.call(current, "folderPath")
+    ? current.folderPath ?? null
+    : undefined;
+  const nextFolder = Object.prototype.hasOwnProperty.call(next, "folderPath")
+    ? next.folderPath ?? null
+    : undefined;
+  const currentAudio = current.audio;
+  const nextAudio = next.audio;
+  const currentChecked = typeof current.lastCheckedAt === "number" ? current.lastCheckedAt : undefined;
+  const nextChecked = typeof next.lastCheckedAt === "number" ? next.lastCheckedAt : undefined;
+
+  const contentChanged =
+    currentName !== nextName ||
+    currentType !== nextType ||
+    currentFolder !== nextFolder ||
+    !isAudioEqual(currentAudio, nextAudio) ||
+    currentChecked !== nextChecked;
+
+  let nextUpdatedAt: number | undefined;
+  if (updatedProvided) {
+    if (typeof metadata.updatedAt === "number" && Number.isFinite(metadata.updatedAt)) {
+      nextUpdatedAt = metadata.updatedAt;
+    }
+  } else if (contentChanged) {
+    nextUpdatedAt = Date.now();
+  } else if (typeof current.updatedAt === "number") {
+    nextUpdatedAt = current.updatedAt;
+  }
+
+  if (typeof nextUpdatedAt === "number") {
+    next.updatedAt = nextUpdatedAt;
+  } else {
+    delete next.updatedAt;
+  }
+
   let changed = false;
-  if (!next.name && !next.type && !next.audio && !next.lastCheckedAt && !next.updatedAt) {
+  if (!next.name && !next.type && !next.audio && !next.lastCheckedAt && typeof next.updatedAt !== "number") {
     if (serverStore[sha256]) {
       delete serverStore[sha256];
       if (Object.keys(serverStore).length === 0) {
@@ -491,15 +516,35 @@ export function sanitizeCoverUrl(value?: string | null): string | undefined {
   return undefined;
 }
 
+const RESERVED_FOLDER_KEYWORD = "private";
+
+const splitFolderSegments = (value: string) =>
+  value
+    .split("/")
+    .map(segment => segment.trim())
+    .filter(segment => segment.length > 0);
+
+const normalizeReservedScanTarget = (segment: string) => segment.toLowerCase().replace(/[^a-z0-9]/g, "");
+
+const segmentContainsReservedKeyword = (segment: string) =>
+  normalizeReservedScanTarget(segment).includes(RESERVED_FOLDER_KEYWORD);
+
+export function containsReservedFolderSegment(value?: string | null): boolean {
+  if (value === undefined || value === null) return false;
+  const trimmed = value.trim();
+  if (!trimmed) return false;
+  return splitFolderSegments(trimmed).some(segmentContainsReservedKeyword);
+}
+
 export function normalizeFolderPathInput(value?: string | null): string | null | undefined {
   if (value === undefined) return undefined;
   if (value === null) return null;
   const trimmed = value.trim();
   if (!trimmed) return null;
-  const segments = trimmed
-    .split("/")
-    .map(segment => segment.trim())
-    .filter(segment => segment.length > 0);
+  const segments = splitFolderSegments(trimmed);
+  if (segments.some(segmentContainsReservedKeyword)) {
+    return null;
+  }
   if (segments.length === 0) return null;
   return segments.join("/");
 }

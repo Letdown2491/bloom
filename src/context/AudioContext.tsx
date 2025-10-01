@@ -81,6 +81,7 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [volume, setVolumeState] = useState(1);
+  const [audioReady, setAudioReady] = useState(false);
   const audioContextRef = useRef<AudioContext | null>(null);
   const mediaSourceRef = useRef<MediaElementAudioSourceNode | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
@@ -88,6 +89,7 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const graphConnectedRef = useRef(false);
   const visualizerEnabledRef = useRef(true);
   const volumeRef = useRef(1);
+  const audioReadyRef = useRef(false);
 
   const ensureAudio = useCallback(() => {
     if (!audioRef.current) {
@@ -97,6 +99,10 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       audio.preload = "metadata";
       audio.volume = volumeRef.current;
       audioRef.current = audio;
+      if (!audioReadyRef.current) {
+        audioReadyRef.current = true;
+        setAudioReady(true);
+      }
     }
     if (audioRef.current) {
       audioRef.current.crossOrigin = "anonymous";
@@ -189,7 +195,9 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   );
 
   useEffect(() => {
-    const audio = ensureAudio();
+    if (!audioReadyRef.current) return;
+    const audio = audioRef.current;
+    if (!audio) return;
 
     const handlePlay = () => {
       setStatus("playing");
@@ -273,7 +281,7 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       audio.removeEventListener("durationchange", handleDurationChange);
       audio.removeEventListener("loadedmetadata", handleDurationChange);
     };
-  }, [ensureAudio, queue, currentIndex, repeatMode, playTrackAtIndex]);
+  }, [audioReady, queue, currentIndex, repeatMode, playTrackAtIndex]);
 
   const replaceQueue = useCallback(
     (tracks: Track[]) => {
@@ -435,7 +443,7 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const hasNext = currentIndex !== null && currentIndex < queue.length - 1;
   const hasPrevious = currentIndex !== null && currentIndex > 0;
 
-  const visualizerAvailable = visualizerEnabledRef.current && Boolean(analyserRef.current);
+  const visualizerAvailable = audioReady && visualizerEnabledRef.current && Boolean(analyserRef.current);
 
   const setVolume = useCallback(
     (value: number) => {
@@ -451,14 +459,18 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   );
 
   useEffect(() => {
-    const audio = ensureAudio();
+    if (!audioReadyRef.current) return;
+    const audio = audioRef.current;
+    if (!audio) return;
     if (Math.abs(audio.volume - volume) > 0.002) {
       audio.volume = volume;
     }
-  }, [ensureAudio, volume]);
+  }, [audioReady, volume]);
 
   useEffect(() => {
-    const audio = ensureAudio();
+    if (!audioReadyRef.current) return;
+    const audio = audioRef.current;
+    if (!audio) return;
     const handleVolumeChange = () => {
       const nextVolume = audio.volume;
       volumeRef.current = nextVolume;
@@ -468,7 +480,7 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     return () => {
       audio.removeEventListener("volumechange", handleVolumeChange);
     };
-  }, [ensureAudio]);
+  }, [audioReady]);
 
   const value = useMemo<AudioContextValue>(
     () => ({

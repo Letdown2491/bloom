@@ -1,4 +1,4 @@
-import React, { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import React, { Suspense } from "react";
 import type { FilterMode } from "../../types/filter";
 import { BrowseContent, type BrowseContentProps } from "./BrowseContent";
 import { useAudio, type AudioContextValue } from "../../context/AudioContext";
@@ -6,6 +6,8 @@ import type { BlobListProps } from "../../components/BlobList";
 import {
   GridIcon,
   ListIcon,
+  DoubleChevronUpIcon,
+  DoubleChevronDownIcon,
   FilterIcon,
   MusicIcon,
   DocumentIcon,
@@ -20,6 +22,7 @@ import {
   RepeatOneIcon,
   StopIcon,
 } from "../../components/icons";
+import type { SortDirection } from "../../context/UserPreferencesContext";
 
 const BlobListPanelLazy = React.lazy(() =>
   import("./BlobListPanel").then(module => ({ default: module.BlobListPanel }))
@@ -43,12 +46,18 @@ const FILTER_OPTIONS: FilterOption[] = [...BASE_FILTER_OPTIONS].sort((a, b) =>
   a.label.localeCompare(b.label)
 );
 
+
+const CONTROL_BUTTON_BASE =
+  "flex items-center gap-2 rounded-xl border px-2.5 py-2 text-sm transition focus:outline-none focus:ring-1 focus:ring-emerald-500 disabled:cursor-not-allowed disabled:opacity-60";
+const CONTROL_BUTTON_DEFAULT = "border-slate-800 bg-slate-900/70 text-slate-300 hover:border-slate-700";
+const CONTROL_BUTTON_ACTIVE = "border-emerald-500 bg-emerald-500/10 text-emerald-200";
+const CONTROL_BUTTON_DISABLED = "border-slate-800 bg-slate-900/70 text-slate-500";
 type BrowseControlsProps = {
   viewMode: "grid" | "list";
-  gridDisabled: boolean;
-  listDisabled: boolean;
   disabled: boolean;
-  onViewModeChange: (mode: "grid" | "list") => void;
+  onSelectViewMode: (mode: "grid" | "list") => void;
+  sortDirection: SortDirection;
+  onToggleSortDirection: () => void;
   filterButtonLabel: string;
   filterButtonAriaLabel: string;
   filterButtonActive: boolean;
@@ -61,10 +70,10 @@ type BrowseControlsProps = {
 
 export const BrowseControls: React.FC<BrowseControlsProps> = ({
   viewMode,
-  gridDisabled,
-  listDisabled,
   disabled,
-  onViewModeChange,
+  onSelectViewMode,
+  sortDirection,
+  onToggleSortDirection,
   filterButtonLabel,
   filterButtonAriaLabel,
   filterButtonActive,
@@ -74,116 +83,28 @@ export const BrowseControls: React.FC<BrowseControlsProps> = ({
   filterMode,
   filterMenuRef,
 }) => {
-  const viewMenuRef = useRef<HTMLDivElement | null>(null);
-  const [viewMenuOpen, setViewMenuOpen] = useState(false);
-
-  useEffect(() => {
-    if (!viewMenuOpen) return;
-
-    const handlePointerDown = (event: PointerEvent) => {
-      if (!viewMenuRef.current || viewMenuRef.current.contains(event.target as Node)) {
-        return;
-      }
-      setViewMenuOpen(false);
-    };
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setViewMenuOpen(false);
-      }
-    };
-
-    document.addEventListener("pointerdown", handlePointerDown, true);
-    document.addEventListener("keydown", handleKeyDown);
-
-    return () => {
-      document.removeEventListener("pointerdown", handlePointerDown, true);
-      document.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [viewMenuOpen]);
-
-  useEffect(() => {
-    if (disabled) {
-      setViewMenuOpen(false);
-    }
-  }, [disabled]);
-
-  useEffect(() => {
-    setViewMenuOpen(false);
-  }, [viewMode]);
-
-  const viewOptions = useMemo(
-    () => [
-      { id: "grid" as const, label: "Grid View", Icon: GridIcon, disabled: gridDisabled },
-      { id: "list" as const, label: "List View", Icon: ListIcon, disabled: listDisabled },
-    ],
-    [gridDisabled, listDisabled]
-  );
-
-  const currentView = viewOptions.find(option => option.id === viewMode) ?? viewOptions[0];
-
   return (
     <>
-      <div className="relative" ref={viewMenuRef}>
-        <button
-          type="button"
-          onClick={() => setViewMenuOpen(prev => !prev)}
-          disabled={disabled}
-          aria-haspopup="menu"
-          aria-expanded={viewMenuOpen}
-          className={`flex items-center gap-2 rounded-xl border px-2.5 py-2 text-sm text-slate-300 transition focus:outline-none focus:ring-1 focus:ring-emerald-500 disabled:cursor-not-allowed disabled:opacity-60 ${
-            viewMenuOpen
-              ? "border-emerald-500 bg-emerald-500/10"
-              : "border-slate-800 bg-slate-900/70 hover:border-slate-700"
-          }`}
-        >
-          {currentView ? <currentView.Icon size={18} /> : <GridIcon size={18} />}
-        </button>
-        {viewMenuOpen && (
-          <div
-            role="menu"
-            className="absolute z-50 mt-2 w-40 rounded-xl border border-slate-800 bg-slate-950/95 p-1 shadow-lg backdrop-blur"
-          >
-            {viewOptions.map(option => {
-              const isActive = option.id === viewMode;
-              return (
-                <a
-                  key={option.id}
-                  role="menuitemradio"
-                  aria-checked={isActive}
-                  aria-disabled={option.disabled || undefined}
-                  tabIndex={option.disabled ? -1 : 0}
-                  href="#"
-                  onClick={event => {
-                    event.preventDefault();
-                    if (option.disabled) return;
-                    onViewModeChange(option.id);
-                    setViewMenuOpen(false);
-                  }}
-                  onKeyDown={event => {
-                    if (event.key === "Enter" || event.key === " ") {
-                      event.preventDefault();
-                      if (option.disabled) return;
-                      onViewModeChange(option.id);
-                      setViewMenuOpen(false);
-                    }
-                  }}
-                  className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm transition ${
-                    option.disabled
-                      ? "pointer-events-none opacity-50"
-                      : isActive
-                      ? "bg-emerald-500/15 text-emerald-200 hover:bg-emerald-500/20"
-                      : "text-slate-300 hover:bg-slate-800/70"
-                  }`}
-                >
-                  <option.Icon size={16} />
-                  <span>{option.label}</span>
-                </a>
-              );
-            })}
-          </div>
-        )}
-      </div>
+      <button
+        type="button"
+        onClick={() => onSelectViewMode(viewMode === "grid" ? "list" : "grid")}
+        disabled={disabled}
+        aria-label={`Switch to ${viewMode === "grid" ? "list" : "grid"} view`}
+        className={`${CONTROL_BUTTON_BASE} ${disabled ? CONTROL_BUTTON_DISABLED : CONTROL_BUTTON_DEFAULT}`}
+      >
+        {viewMode === "grid" ? <GridIcon size={18} /> : <ListIcon size={18} />}
+      </button>
+
+      <button
+        type="button"
+        onClick={onToggleSortDirection}
+        disabled={disabled}
+        aria-label={`Toggle sort direction (${sortDirection === "ascending" ? "ascending" : "descending"})`}
+        className={`${CONTROL_BUTTON_BASE} ${disabled ? CONTROL_BUTTON_DISABLED : CONTROL_BUTTON_DEFAULT}`}
+      >
+        {sortDirection === "ascending" ? <DoubleChevronUpIcon size={18} /> : <DoubleChevronDownIcon size={18} />}
+      </button>
+
       <div className="relative" ref={filterMenuRef}>
         <button
           type="button"
@@ -194,10 +115,8 @@ export const BrowseControls: React.FC<BrowseControlsProps> = ({
           aria-haspopup="menu"
           aria-expanded={isFilterMenuOpen}
           title={filterButtonLabel}
-          className={`rounded-xl border px-2.5 py-2 text-sm flex items-center gap-2 disabled:cursor-not-allowed disabled:opacity-60 ${
-            filterButtonActive
-              ? "border-emerald-500 bg-emerald-500/10 text-emerald-200"
-              : "border-slate-800 bg-slate-900/70 text-slate-300 hover:border-slate-700"
+          className={`${CONTROL_BUTTON_BASE} ${
+            disabled ? CONTROL_BUTTON_DISABLED : filterButtonActive ? CONTROL_BUTTON_ACTIVE : CONTROL_BUTTON_DEFAULT
           }`}
         >
           <FilterIcon size={18} />

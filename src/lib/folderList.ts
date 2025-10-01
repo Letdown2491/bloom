@@ -1,6 +1,7 @@
-import { NDKEvent } from "@nostr-dev-kit/ndk";
+import type { NDKEvent as NdkEvent } from "@nostr-dev-kit/ndk";
 import { normalizeFolderPathInput } from "../utils/blobMetadataStore";
 import type { NdkContextValue } from "../context/NdkContext";
+import { loadNdkModule } from "./ndkModule";
 
 const FOLDER_LIST_KIND = 30000;
 const FOLDER_LIST_PREFIX = "bloom-folder:";
@@ -10,7 +11,7 @@ type NdkInstance = NdkContextValue["ndk"];
 type NdkSigner = NdkContextValue["signer"];
 type NdkUser = NdkContextValue["user"];
 
-type RawNdkEvent = InstanceType<typeof NDKEvent>;
+type RawNdkEvent = NdkEvent;
 
 export type FolderListRecord = {
   path: string;
@@ -110,7 +111,7 @@ export const loadFolderLists = async (ndk: NdkInstance | null, pubkey: string | 
   return records;
 };
 
-const buildFolderEvent = (
+const buildFolderEvent = async (
   ndk: NdkInstance,
   signer: NdkSigner,
   user: NdkUser,
@@ -119,6 +120,7 @@ const buildFolderEvent = (
   if (!ndk) throw new Error("NDK unavailable");
   if (!signer) throw new Error("Connect your signer to update folders.");
   if (!user) throw new Error("Connect your Nostr account to update folders.");
+  const { NDKEvent } = await loadNdkModule();
   const event = new NDKEvent(ndk);
   event.kind = FOLDER_LIST_KIND;
   event.pubkey = user.pubkey;
@@ -143,7 +145,7 @@ export const publishFolderList = async (
   user: NdkUser,
   record: FolderListRecord
 ): Promise<FolderListRecord> => {
-  const event = buildFolderEvent(ndk, signer, user, record);
+  const event = await buildFolderEvent(ndk, signer, user, record);
   await event.sign();
   await event.publish();
   return {

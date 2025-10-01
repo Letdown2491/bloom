@@ -4,7 +4,7 @@ import { useServerData } from "../../hooks/useServerData";
 import type { ServerSnapshot, BlobDistribution } from "../../hooks/useServerData";
 import type { BlobReplicaSummary } from "../../components/BlobList";
 import { deriveServerNameFromUrl } from "../../utils/serverName";
-import { normalizeFolderPathInput } from "../../utils/blobMetadataStore";
+import { normalizeFolderPathInput, mergeBlobsWithStoredMetadata } from "../../utils/blobMetadataStore";
 import { usePrivateLibrary } from "../../context/PrivateLibraryContext";
 import type { PrivateListEntry } from "../../lib/privateList";
 import type { BlossomBlob } from "../../lib/blossomClient";
@@ -106,15 +106,28 @@ export const WorkspaceProvider: React.FC<WorkspaceProviderProps> = ({
         : encryption
           ? `Encrypted ${entry.sha256.slice(0, 8)}`
           : `Private ${entry.sha256.slice(0, 8)}`;
-      const privateData = {
-        metadata: metadata ? { ...metadata, folderPath: normalizedFolder } : undefined,
-        servers: entry.servers,
-        ...(encryption ? { encryption } : {}),
-      };
-      return {
+      const normalizedSize = (() => {
+        if (typeof metadata?.size === "number") return metadata.size;
+        if (typeof metadata?.size === "string") {
+          const parsed = Number(metadata.size);
+          return Number.isFinite(parsed) ? parsed : undefined;
+        }
+        return undefined;
+      })();
+
+      const privateMetadata = metadata ? { ...metadata, size: normalizedSize, folderPath: normalizedFolder } : undefined;
+      const privateData: BlossomBlob["privateData"] | undefined = encryption
+        ? {
+            encryption,
+            metadata: privateMetadata,
+            servers: entry.servers,
+          }
+        : undefined;
+
+      const baseBlob: BlossomBlob = {
         sha256: entry.sha256,
-        size: metadata?.size,
-        type: metadata?.type,
+        size: normalizedSize,
+        type: metadata?.type ?? (metadata?.audio ? "audio/*" : undefined),
         uploaded: entry.updatedAt,
         url: downloadUrl,
         name: displayName,
@@ -124,7 +137,10 @@ export const WorkspaceProvider: React.FC<WorkspaceProviderProps> = ({
         folderPath: normalizedFolder,
         privateData,
         label: PRIVATE_SERVER_NAME,
-      } as BlossomBlob;
+      };
+
+      const [merged] = mergeBlobsWithStoredMetadata(normalizedServerUrl, [baseBlob]);
+      return merged ?? baseBlob;
     });
   }, [privateEntries, privateServerMap]);
 

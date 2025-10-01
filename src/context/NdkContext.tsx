@@ -1,18 +1,9 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { NDKRelay, NDKSigner, NDKUser } from "@nostr-dev-kit/ndk";
 import type { EventTemplate, SignedEvent } from "../lib/blossomClient";
+import { loadNdkModule, type NdkModule } from "../lib/ndkModule";
 
-type NdkModule = typeof import("@nostr-dev-kit/ndk");
 type NdkInstance = InstanceType<NdkModule["default"]>;
-
-let ndkModuleLoader: Promise<NdkModule> | null = null;
-
-const loadNdkModule = async (): Promise<NdkModule> => {
-  if (!ndkModuleLoader) {
-    ndkModuleLoader = import("@nostr-dev-kit/ndk");
-  }
-  return ndkModuleLoader;
-};
 
 export type NdkConnectionStatus = "idle" | "connecting" | "connected" | "error";
 
@@ -34,18 +25,20 @@ export type NdkContextValue = {
   status: NdkConnectionStatus;
   connectionError: Error | null;
   relayHealth: RelayHealth[];
+  ensureConnection: () => Promise<NdkInstance>;
+  getModule: () => Promise<NdkModule>;
 };
 
 const NdkContext = createContext<NdkContextValue | undefined>(undefined);
 
 const DEFAULT_RELAYS = [
-  "wss://nos.lol",
-  "wss://relay.damus.io",
-  "wss://relay.nos.social",
   "wss://relay.primal.net",
 ];
 
 const RELAY_HEALTH_STORAGE_KEY = "bloom.ndk.relayHealth.v1";
+const SIGNER_PREFERENCE_STORAGE_KEY = "bloom.ndk.signerPreference.v1";
+
+type PersistedSignerPreference = "nip07";
 
 let relayHealthStorageBlocked = false;
 let relayHealthStorageWarned = false;
@@ -152,6 +145,30 @@ const persistRelayHealth = (entries: RelayHealth[]) => {
   }
 };
 
+const loadSignerPreference = (): PersistedSignerPreference | null => {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(SIGNER_PREFERENCE_STORAGE_KEY);
+    return raw === "nip07" ? "nip07" : null;
+  } catch (error) {
+    console.warn("Unable to load signer preference", error);
+    return null;
+  }
+};
+
+const persistSignerPreference = (preference: PersistedSignerPreference | null) => {
+  if (typeof window === "undefined") return;
+  try {
+    if (!preference) {
+      window.localStorage.removeItem(SIGNER_PREFERENCE_STORAGE_KEY);
+    } else {
+      window.localStorage.setItem(SIGNER_PREFERENCE_STORAGE_KEY, preference);
+    }
+  } catch (error) {
+    console.warn("Unable to persist signer preference", error);
+  }
+};
+
 const enqueueMicrotask = (cb: () => void) => {
   if (typeof queueMicrotask === "function") {
     queueMicrotask(cb);
@@ -176,13 +193,18 @@ export const NdkProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   });
   const pendingRelayUpdatesRef = useRef<Map<string, Partial<RelayHealth>> | null>(null);
   const relayUpdateScheduledRef = useRef(false);
+  const signerPreferenceRef = useRef<PersistedSignerPreference | null>(loadSignerPreference());
+  const autoConnectAttemptedRef = useRef(false);
+
+  const ensureNdkModule = useCallback(async (): Promise<NdkModule> => {
+    if (!ndkModuleRef.current) {
+      ndkModuleRef.current = await loadNdkModule();
+    }
+    return ndkModuleRef.current;
+  }, []);
 
   const ensureNdkInstance = useCallback(async () => {
-    let mod = ndkModuleRef.current;
-    if (!mod) {
-      mod = await loadNdkModule();
-      ndkModuleRef.current = mod;
-    }
+    const mod = await ensureNdkModule();
 
     if (!ndkRef.current) {
       ndkRef.current = new mod.default({ explicitRelayUrls: DEFAULT_RELAYS });
@@ -190,7 +212,7 @@ export const NdkProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     return { ndk: ndkRef.current, module: mod } as { ndk: NdkInstance; module: NdkModule };
-  }, []);
+  }, [ensureNdkModule]);
 
   const ensureNdkConnection = useCallback(async (): Promise<NdkInstance> => {
     const { ndk: instance } = await ensureNdkInstance();
@@ -239,6 +261,10 @@ export const NdkProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     return instance;
   }, [ensureNdkInstance]);
+
+  const getNdkModule = useCallback(async () => {
+    return ensureNdkModule();
+  }, [ensureNdkModule]);
 
   useEffect(() => {
     if (!ndk) return;
@@ -429,6 +455,15 @@ export const NdkProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           setUser(nextUser);
           setStatus("connected");
           setConnectionError(null);
+          const module = ndkModuleRef.current;
+          const nip07Ctor = module?.NDKNip07Signer;
+          if (nip07Ctor && nextSigner instanceof nip07Ctor) {
+            persistSignerPreference("nip07");
+            signerPreferenceRef.current = "nip07";
+          } else {
+            persistSignerPreference(null);
+            signerPreferenceRef.current = null;
+          }
         } else {
           const instance = ndkRef.current;
           if (instance) {
@@ -437,6 +472,8 @@ export const NdkProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           setSigner(null);
           setUser(null);
           setStatus("idle");
+          persistSignerPreference(null);
+          signerPreferenceRef.current = null;
         }
       } catch (error) {
         const normalized = error instanceof Error ? error : new Error("Failed to adopt signer");
@@ -487,6 +524,45 @@ export const NdkProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     [ensureNdkInstance, signer]
   );
 
+  useEffect(() => {
+    if (signerPreferenceRef.current !== "nip07") return;
+    if (autoConnectAttemptedRef.current) return;
+    if (signer) return;
+    if (typeof window === "undefined") return;
+    if (!(window as any).nostr) return;
+
+    autoConnectAttemptedRef.current = true;
+
+    const win = window as typeof window & {
+      requestIdleCallback?: (callback: IdleRequestCallback, options?: IdleRequestOptions) => number;
+      cancelIdleCallback?: (handle: number) => void;
+    };
+
+    let cancelled = false;
+
+    const attemptConnect = () => {
+      if (cancelled) return;
+      void connect().catch(error => {
+        if (cancelled) return;
+        console.warn("Automatic NIP-07 reconnect failed", error);
+      });
+    };
+
+    if (typeof win.requestIdleCallback === "function") {
+      const handle = win.requestIdleCallback(() => attemptConnect(), { timeout: 1500 });
+      return () => {
+        cancelled = true;
+        win.cancelIdleCallback?.(handle);
+      };
+    }
+
+    const timeout = window.setTimeout(() => attemptConnect(), 200);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeout);
+    };
+  }, [connect, signer]);
+
   const value = useMemo<NdkContextValue>(
     () => ({
       ndk,
@@ -499,8 +575,23 @@ export const NdkProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       status,
       connectionError,
       relayHealth,
+      ensureConnection: ensureNdkConnection,
+      getModule: getNdkModule,
     }),
-    [ndk, signer, user, connect, disconnect, adoptSigner, signEventTemplate, status, connectionError, relayHealth]
+    [
+      ndk,
+      signer,
+      user,
+      connect,
+      disconnect,
+      adoptSigner,
+      signEventTemplate,
+      status,
+      connectionError,
+      relayHealth,
+      ensureNdkConnection,
+      getNdkModule,
+    ]
   );
 
   return <NdkContext.Provider value={value}>{children}</NdkContext.Provider>;

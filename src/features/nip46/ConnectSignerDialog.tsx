@@ -35,7 +35,7 @@ type ConnectSignerDialogProps = {
 
 export const ConnectSignerDialog: React.FC<ConnectSignerDialogProps> = ({ open, onClose }) => {
   const { createInvitation } = useNip46Pairing();
-  const { snapshot, sessionManager, service } = useNip46();
+  const { snapshot, sessionManager, service, ready } = useNip46();
   const { connect: ensureNdkConnection, signer: adoptedSigner } = useNdk();
   const [busySessionId, setBusySessionId] = useState<string | null>(null);
   const [invitationSessionId, setInvitationSessionId] = useState<string | null>(null);
@@ -62,7 +62,7 @@ export const ConnectSignerDialog: React.FC<ConnectSignerDialogProps> = ({ open, 
   }, [invitationSessionId, snapshot.sessions]);
 
   useEffect(() => {
-    if (!invitationSession) return;
+    if (!invitationSession || !service) return;
     const uri = buildNostrConnectUriFromSession(invitationSession);
     setInvitationUri(prev => (prev === uri ? prev : uri));
   }, [invitationSession]);
@@ -84,6 +84,7 @@ export const ConnectSignerDialog: React.FC<ConnectSignerDialogProps> = ({ open, 
 
   useEffect(() => {
     if (!open) return;
+    if (!sessionManager || !service) return;
     if (activeSessionReady) return;
     if (invitationSessionId) return;
     const pendingSessions = snapshot.sessions.filter(session => {
@@ -108,10 +109,10 @@ export const ConnectSignerDialog: React.FC<ConnectSignerDialogProps> = ({ open, 
         })
       );
     }
-  }, [activeSessionReady, invitationSessionId, open, sessionManager, snapshot.sessions]);
+  }, [activeSessionReady, invitationSessionId, open, service, sessionManager, snapshot.sessions]);
 
   useEffect(() => {
-    if (!invitationSession) return;
+    if (!invitationSession || !service) return;
     if (activeSessionReady) {
       attemptedAutoConnectRef.current.delete(invitationSession.id);
       return;
@@ -134,7 +135,7 @@ export const ConnectSignerDialog: React.FC<ConnectSignerDialogProps> = ({ open, 
   }, [activeSessionReady, onClose, open]);
 
   useEffect(() => {
-    if (!activeSessionReady) return;
+    if (!activeSessionReady || !sessionManager) return;
     setInvitationSessionId(null);
     setInvitationUri(null);
     invitationRef.current = null;
@@ -153,6 +154,10 @@ export const ConnectSignerDialog: React.FC<ConnectSignerDialogProps> = ({ open, 
 
   const generateInvitation = useCallback(async () => {
     if (activeSessionReady) return;
+    if (!sessionManager) {
+      setInvitationError("Remote signer is still preparing. Please try again shortly.");
+      return;
+    }
     setInvitationError(null);
     setInvitationBusy(true);
     const previousSessionId = invitationRef.current;
@@ -183,7 +188,7 @@ export const ConnectSignerDialog: React.FC<ConnectSignerDialogProps> = ({ open, 
   }, [activeSessionReady, generateInvitation, invitationBusy, invitationSessionId, open]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open || !sessionManager) return;
     const errored = snapshot.sessions.filter(
       session => session.lastError && !session.userPubkey && session.status !== "revoked"
     );
@@ -251,6 +256,7 @@ export const ConnectSignerDialog: React.FC<ConnectSignerDialogProps> = ({ open, 
 
   const handleRevoke = useCallback(
     async (sessionId: string) => {
+      if (!sessionManager) return;
       try {
         await sessionManager.removeSession(sessionId);
       } catch (error) {
@@ -262,6 +268,7 @@ export const ConnectSignerDialog: React.FC<ConnectSignerDialogProps> = ({ open, 
 
   const handleReconnect = useCallback(
     async (sessionId: string) => {
+      if (!service) return;
       setBusySessionId(sessionId);
       try {
         await service.connectSession(sessionId);
@@ -286,15 +293,25 @@ export const ConnectSignerDialog: React.FC<ConnectSignerDialogProps> = ({ open, 
 
   if (!open) return null;
 
+  if (!ready || !sessionManager || !service) {
+    return (
+      <div className="fixed inset-0 z-30 flex items-center justify-center bg-slate-950/80 px-4 py-6 backdrop-blur">
+        <div className="w-full max-w-sm rounded-2xl border border-slate-700 bg-slate-900 p-6 text-center text-sm text-slate-300 shadow-2xl max-h-[calc(100vh-3rem)] overflow-y-auto">
+          Preparing remote signer support…
+        </div>
+      </div>
+    );
+  }
+
   if (activeSessionReady) {
     return null;
   }
 
   return (
     <div className="fixed inset-0 z-30 flex items-center justify-center bg-slate-950/80 px-4 py-6 backdrop-blur">
-      <div className="w-full max-w-lg rounded-2xl border border-slate-700 bg-slate-900 p-6 text-slate-200 shadow-2xl">
+      <div className="w-full max-w-lg rounded-2xl border border-slate-700 bg-slate-900 p-6 text-slate-200 shadow-2xl max-h-[calc(100vh-3rem)] overflow-y-auto">
         <div className="flex items-center justify-between gap-4">
-          <h2 className="text-lg font-semibold">Connect Amber Signer</h2>
+          <h2 className="text-lg font-semibold">Connect Remote Signer</h2>
           <button
             type="button"
             onClick={onClose}

@@ -1,6 +1,6 @@
-import { NDKEvent } from "@nostr-dev-kit/ndk";
-import type { NDKUser, NDKSigner } from "@nostr-dev-kit/ndk";
+import type { NDKEvent as NdkEvent, NDKUser, NDKSigner } from "@nostr-dev-kit/ndk";
 import { normalizeFolderPathInput } from "../utils/blobMetadataStore";
+import { loadNdkModule } from "./ndkModule";
 
 export const PRIVATE_LIST_KIND = 30000;
 export const PRIVATE_LIST_IDENTIFIER = "private";
@@ -135,7 +135,7 @@ export const loadPrivateList = async (
     authors: [user.pubkey],
     kinds: [PRIVATE_LIST_KIND],
     "#d": [PRIVATE_LIST_IDENTIFIER],
-  })) as Set<NDKEvent>;
+  })) as Set<NdkEvent>;
   if (!events || events.size === 0) return [];
   const sorted = Array.from(events).sort((a, b) => (b.created_at ?? 0) - (a.created_at ?? 0));
   const latest = sorted[0];
@@ -166,6 +166,7 @@ export const publishPrivateList = async (
 ) => {
   if (!ndk || !signer || !user) throw new Error("Nostr signer unavailable");
   if (!ensureSigner(signer)) throw new Error("Signer does not support encryption");
+  const { NDKEvent } = await loadNdkModule();
   const event = new NDKEvent(ndk);
   event.kind = PRIVATE_LIST_KIND;
   event.created_at = Math.floor(Date.now() / 1000);

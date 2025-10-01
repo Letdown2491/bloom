@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useUserPreferences } from "../../context/UserPreferencesContext";
 import type { FilterMode } from "../../types/filter";
+import type { SortDirection } from "../../context/UserPreferencesContext";
 
 type FilterOption = {
   id: Exclude<FilterMode, "all">;
@@ -25,10 +26,11 @@ const OPTION_MAP = FILTER_OPTIONS.reduce<Record<Exclude<FilterMode, "all">, Filt
 }, {} as any);
 
 export const useBrowseControls = () => {
-  const { preferences, setDefaultViewMode } = useUserPreferences();
+  const { preferences, setDefaultViewMode, setSortDirection } = useUserPreferences();
   const [viewMode, setViewModeState] = useState<"grid" | "list">(() => preferences.defaultViewMode);
   const [filterMode, setFilterMode] = useState<FilterMode>(() => preferences.defaultFilterMode);
   const [isFilterMenuOpen, setIsFilterMenuOpen] = useState(false);
+  const [sortDirection, setSortDirectionState] = useState<SortDirection>(preferences.sortDirection);
 
   const setViewMode = useCallback(
     (mode: "grid" | "list", persist = true) => {
@@ -57,6 +59,17 @@ export const useBrowseControls = () => {
     [setFilterMode, setIsFilterMenuOpen]
   );
 
+  const toggleSortDirection = useCallback(
+    () => {
+      setSortDirectionState(prev => {
+        const nextDirection: SortDirection = prev === "ascending" ? "descending" : "ascending";
+        setSortDirection(nextDirection);
+        return nextDirection;
+      });
+    },
+    [setSortDirection]
+  );
+
   useEffect(() => {
     setViewModeState(prev => (prev === preferences.defaultViewMode ? prev : preferences.defaultViewMode));
   }, [preferences.defaultViewMode]);
@@ -68,6 +81,10 @@ export const useBrowseControls = () => {
       return nextValue;
     });
   }, [preferences.defaultFilterMode]);
+
+  useEffect(() => {
+    setSortDirectionState(prev => (prev === preferences.sortDirection ? prev : preferences.sortDirection));
+  }, [preferences.sortDirection]);
 
   const filterContext = useMemo(() => {
     const activeOption = filterMode === "all" ? null : OPTION_MAP[filterMode];
@@ -98,6 +115,8 @@ export const useBrowseControls = () => {
     closeFilterMenu,
     toggleFilterMenu,
     handleTabChange,
+    sortDirection,
+    toggleSortDirection,
   };
 };
 

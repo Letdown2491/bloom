@@ -1,5 +1,6 @@
-import type NDK from "@nostr-dev-kit/ndk";
-import { NDKUser, type NostrEvent, type NDKSigner, type NDKRelay } from "@nostr-dev-kit/ndk";
+import type { NostrEvent } from "nostr-tools";
+import type { NDKSigner } from "@nostr-dev-kit/ndk";
+import { loadNdkModule, type NdkModule } from "../ndkModule";
 import { validateEvent, verifyEvent, type Event as NostrToolsEvent } from "nostr-tools";
 
 import type { Nip46Service } from "./service";
@@ -17,13 +18,18 @@ const ensureSession = (session: RemoteSignerSession | null): RemoteSignerSession
 
 export class Nip46DelegatedSigner implements NDKSigner {
   constructor(
-    private readonly ndk: NDK,
+    private readonly ndk: InstanceType<NdkModule["default"]>,
     private readonly service: Nip46Service,
     private readonly sessions: SessionManager,
-    private readonly sessionId: string
+    private readonly sessionId: string,
+    private readonly modulePromise: Promise<NdkModule> = loadNdkModule()
   ) {}
 
-  private cachedUser?: NDKUser;
+  private cachedUser?: InstanceType<NdkModule["NDKUser"]>;
+
+  private async getRuntime() {
+    return this.modulePromise;
+  }
 
   private getSession(): RemoteSignerSession {
     const session = this.sessions.getSession(this.sessionId);
@@ -34,21 +40,22 @@ export class Nip46DelegatedSigner implements NDKSigner {
     return this.getSession().userPubkey!;
   }
 
-  async blockUntilReady(): Promise<NDKUser> {
+  async blockUntilReady(): Promise<InstanceType<NdkModule["NDKUser"]>> {
     return this.user();
   }
 
-  async user(): Promise<NDKUser> {
+  async user(): Promise<InstanceType<NdkModule["NDKUser"]>> {
     if (!this.cachedUser) {
       const session = this.getSession();
-      const user = new NDKUser({ pubkey: session.userPubkey! });
+      const runtime = await this.getRuntime();
+      const user = new runtime.NDKUser({ pubkey: session.userPubkey! });
       user.ndk = this.ndk;
       this.cachedUser = user;
     }
     return this.cachedUser;
   }
 
-  get userSync(): NDKUser {
+  get userSync(): InstanceType<NdkModule["NDKUser"]> {
     if (!this.cachedUser) throw new Error("Not ready");
     return this.cachedUser;
   }
@@ -90,7 +97,11 @@ export class Nip46DelegatedSigner implements NDKSigner {
     return event.sig!;
   }
 
-  async encrypt(recipient: NDKUser, value: string, scheme: "nip44" | "nip04" = "nip44"): Promise<string> {
+  async encrypt(
+    recipient: InstanceType<NdkModule["NDKUser"]>,
+    value: string,
+    scheme: "nip44" | "nip04" = "nip44"
+  ): Promise<string> {
     const session = this.getSession();
     const method = scheme === "nip44" ? "nip44_encrypt" : "nip04_encrypt";
     const response = await this.service.sendRequest(session.id, method, [recipient.pubkey, value]);
@@ -100,7 +111,11 @@ export class Nip46DelegatedSigner implements NDKSigner {
     return response.result;
   }
 
-  async decrypt(sender: NDKUser, value: string, scheme: "nip44" | "nip04" = "nip44"): Promise<string> {
+  async decrypt(
+    sender: InstanceType<NdkModule["NDKUser"]>,
+    value: string,
+    scheme: "nip44" | "nip04" = "nip44"
+  ): Promise<string> {
     const session = this.getSession();
     const method = scheme === "nip44" ? "nip44_decrypt" : "nip04_decrypt";
     const response = await this.service.sendRequest(session.id, method, [sender.pubkey, value]);
@@ -110,10 +125,10 @@ export class Nip46DelegatedSigner implements NDKSigner {
     return response.result;
   }
 
-  async relays(): Promise<NDKRelay[]> {
+  async relays(): Promise<Array<InstanceType<NdkModule["NDKRelay"]>>> {
     const session = this.getSession();
     if (!this.ndk.pool) return [];
-    const relays: NDKRelay[] = [];
+    const relays: Array<InstanceType<NdkModule["NDKRelay"]>> = [];
     session.relays.forEach(url => {
       const relay = this.ndk.pool!.getRelay(url, false, false);
       if (relay) relays.push(relay);

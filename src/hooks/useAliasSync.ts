@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef } from "react";
-import NDK, { NDKRelaySet, type NDKEvent, NDKSubscription } from "@nostr-dev-kit/ndk";
+import type { NDKEvent, NDKSubscription } from "@nostr-dev-kit/ndk";
 import { useCurrentPubkey, useNdk } from "../context/NdkContext";
 import { parseNip94Event } from "../lib/nip94";
 import { applyAliasUpdate, rememberAudioMetadata, sanitizeCoverUrl, type BlobAudioMetadata } from "../utils/blobMetadataStore";
@@ -28,22 +28,8 @@ const applyAliasFromEvent = (event: NDKEvent) => {
   }
 };
 
-const subscribeToAliasStream = (
-  ndk: NDK | null,
-  relays: string[],
-  pubkey: string,
-  onEvent: (event: NDKEvent) => void
-) => {
-  if (!ndk) return null;
-  const filter = aliasFilterForAuthor(pubkey);
-  const relaySet = relays.length > 0 ? NDKRelaySet.fromRelayUrls(relays, ndk) : undefined;
-  const sub = ndk.subscribe(filter, { closeOnEose: false, relaySet });
-  sub.on("event", onEvent);
-  return sub;
-};
-
 export const useAliasSync = (relayUrls: string[], enabled = true) => {
-  const { ndk } = useNdk();
+  const { ndk, getModule } = useNdk();
   const pubkey = useCurrentPubkey();
   const normalizedRelays = useMemo(() => {
     const set = new Set<string>();
@@ -62,44 +48,55 @@ export const useAliasSync = (relayUrls: string[], enabled = true) => {
       subscriptionRef.current = null;
       return;
     }
-    const relayKey = normalizedRelays.slice().sort().join("|");
-    const effectKey = `${pubkey}|${relayKey}`;
-    const relaySet = normalizedRelays.length > 0 ? NDKRelaySet.fromRelayUrls(normalizedRelays, ndk) : undefined;
+
     let disposed = false;
+    let activeSubscription: NDKSubscription | null = null;
 
-    const handleEvent = (event: NDKEvent) => {
+    const run = async () => {
+      const module = await getModule();
       if (disposed) return;
-      applyAliasFromEvent(event);
-    };
 
-    const fetchHistory = async () => {
-      try {
-        const events = await ndk.fetchEvents(aliasFilterForAuthor(pubkey), { closeOnEose: true }, relaySet);
-        events.forEach((event: NDKEvent) => handleEvent(event));
-      } catch (error) {
-        // Silently ignore history fetch errors; live subscription will still capture future updates.
+      const relayKey = normalizedRelays.slice().sort().join("|");
+      const effectKey = `${pubkey}|${relayKey}`;
+      const relaySet = normalizedRelays.length > 0 ? module.NDKRelaySet.fromRelayUrls(normalizedRelays, ndk) : undefined;
+
+      const handleEvent = (event: NDKEvent) => {
+        if (disposed) return;
+        applyAliasFromEvent(event);
+      };
+
+      if (lastKeyRef.current !== effectKey) {
+        try {
+          const events = await ndk.fetchEvents(aliasFilterForAuthor(pubkey), { closeOnEose: true }, relaySet);
+          if (!disposed) {
+            events.forEach((event: NDKEvent) => handleEvent(event));
+          }
+        } catch {
+          // Silently ignore history fetch errors; live subscription still delivers updates.
+        }
+        lastKeyRef.current = effectKey;
       }
+
+      subscriptionRef.current?.stop();
+      const filter = aliasFilterForAuthor(pubkey);
+      const subscription = ndk.subscribe(filter, { closeOnEose: false, relaySet });
+      subscription.on("event", handleEvent);
+      activeSubscription = subscription;
+      subscriptionRef.current = subscription;
     };
 
-    if (lastKeyRef.current !== effectKey) {
-      fetchHistory().catch(() => undefined);
-      lastKeyRef.current = effectKey;
-    }
-
-    subscriptionRef.current?.stop();
-    const sub = subscribeToAliasStream(ndk, normalizedRelays, pubkey, handleEvent);
-    subscriptionRef.current = sub;
+    run().catch(() => undefined);
 
     return () => {
       disposed = true;
-      if (subscriptionRef.current === sub) {
+      if (subscriptionRef.current === activeSubscription) {
         subscriptionRef.current?.stop();
         subscriptionRef.current = null;
       } else {
-        sub?.stop();
+        activeSubscription?.stop();
       }
     };
-  }, [ndk, pubkey, normalizedRelays, enabled]);
+  }, [ndk, pubkey, normalizedRelays, enabled, getModule]);
 };
 
 const extractAudioMetadataFromEvent = (event: NDKEvent): BlobAudioMetadata | null => {

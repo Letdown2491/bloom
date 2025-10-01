@@ -1,5 +1,19 @@
 services:
   web:
-    build: .
+    build:
+      context: .
+    env_file:
+      - .env
+    depends_on:
+      - private-link-proxy
     ports:
       - "3000:80"
+
+  private-link-proxy:
+    build:
+      context: .
+      target: private-link-proxy
+    env_file:
+      - ./services/private-link-proxy/.env
+    ports:
+      - "${PRIVATE_LINK_PROXY_PORT:-8787}:8787"

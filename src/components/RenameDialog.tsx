@@ -26,6 +26,7 @@ export type EditDialogProps = {
   onAudioFieldChange?: (field: keyof EditDialogAudioFields, value: string) => void;
   folder: string;
   onFolderChange: (value: string) => void;
+  folderInvalid?: boolean;
 };
 
 export const EditDialog: React.FC<EditDialogProps> = ({
@@ -41,9 +42,14 @@ export const EditDialog: React.FC<EditDialogProps> = ({
   onAudioFieldChange,
   folder,
   onFolderChange,
+  folderInvalid = false,
 }) => {
   const aliasInputRef = useRef<HTMLInputElement | null>(null);
   const titleInputRef = useRef<HTMLInputElement | null>(null);
+
+  const folderInputClass = folderInvalid
+    ? "mt-2 w-full rounded-xl border border-red-500 bg-slate-950 px-3 py-2 text-slate-100 focus:border-red-500 focus:outline-none focus:ring-1 focus:ring-red-500"
+    : "mt-2 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 focus:border-emerald-500 focus:outline-none";
 
   useEffect(() => {
     const target = isMusic ? titleInputRef.current : aliasInputRef.current;
@@ -118,9 +124,12 @@ export const EditDialog: React.FC<EditDialogProps> = ({
               value={folder}
               onChange={event => onFolderChange(event.target.value)}
               disabled={busy}
-              className="mt-2 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 focus:border-emerald-500 focus:outline-none"
+              className={folderInputClass}
               placeholder="e.g. Videos/Chernobyl"
             />
+            {folderInvalid && (
+              <p className="mt-2 text-xs text-red-400">Folder names cannot include the word "private".</p>
+            )}
           </label>
           <label className="block text-sm text-slate-300">
             Album
@@ -252,9 +261,12 @@ export const EditDialog: React.FC<EditDialogProps> = ({
               value={folder}
               onChange={event => onFolderChange(event.target.value)}
               disabled={busy}
-              className="mt-2 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 focus:border-emerald-500 focus:outline-none"
+              className={folderInputClass}
               placeholder="e.g. Pictures/2024"
             />
+            {folderInvalid && (
+              <p className="mt-2 text-xs text-red-400">Folder names cannot include the word "private".</p>
+            )}
           </label>
         )}
 
@@ -270,7 +282,7 @@ export const EditDialog: React.FC<EditDialogProps> = ({
           <button
             className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-slate-900 hover:bg-emerald-500 disabled:opacity-50"
             onClick={onSubmit}
-            disabled={busy}
+            disabled={busy || folderInvalid}
           >
             {busy ? "Saving…" : "Save"}
           </button>

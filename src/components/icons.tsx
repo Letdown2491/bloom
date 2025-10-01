@@ -32,6 +32,22 @@ export const GridIcon = createIcon(
   </>
 );
 
+export const GithubIcon = createIcon(
+  <path
+    d="M12 .5C5.648.5.5 5.648.5 12c0 5.088 3.292 9.396 7.865 10.925.575.105.786-.25.786-.556 0-.274-.01-1-.015-1.962-3.2.696-3.878-1.544-3.878-1.544-.523-1.33-1.277-1.685-1.277-1.685-1.044-.715.08-.701.08-.701 1.155.081 1.764 1.187 1.764 1.187 1.027 1.76 2.695 1.252 3.352.957.104-.743.402-1.252.732-1.54-2.553-.29-5.238-1.276-5.238-5.684 0-1.256.452-2.285 1.19-3.09-.12-.29-.517-1.454.112-3.033 0 0 .975-.312 3.195 1.18a11.16 11.16 0 0 1 2.91-.392c.988.005 1.98.134 2.91.392 2.22-1.492 3.193-1.18 3.193-1.18.63 1.579.233 2.743.114 3.033.74.805 1.19 1.834 1.19 3.09 0 4.42-2.689 5.39-5.255 5.676.413.354.781 1.047.781 2.11 0 1.523-.014 2.75-.014 3.126 0 .309.208.666.79.553C20.21 21.392 23.5 17.084 23.5 12c0-6.352-5.148-11.5-11.5-11.5Z"
+    fill="currentColor"
+    stroke="none"
+  />
+);
+
+export const LightningIcon = createIcon(
+  <path
+    d="M13 2 4 13h6l-1 9 9-11h-6l1-9Z"
+    fill="currentColor"
+    stroke="none"
+  />
+);
+
 export const ListIcon = createIcon(
   <>
     <circle cx="6" cy="7" r="1.5" fill="currentColor" stroke="none" />
@@ -66,6 +82,20 @@ export const ChevronRightIcon = createIcon(
 export const ChevronLeftIcon = createIcon(
   <>
     <path d="M15 6.5 9 12l6 5.5" />
+  </>
+);
+
+export const DoubleChevronUpIcon = createIcon(
+  <>
+    <path d="m6 15 6-6 6 6" />
+    <path d="m6 19 6-6 6 6" />
+  </>
+);
+
+export const DoubleChevronDownIcon = createIcon(
+  <>
+    <path d="m6 9 6 6 6-6" />
+    <path d="m6 5 6 6 6-6" />
   </>
 );
 
@@ -190,6 +220,14 @@ export const DocumentIcon = createIcon(
   </>
 );
 
+export const LinkIcon = createIcon(
+  <>
+    <path d="M10.5 13.5 13.5 10.5" />
+    <path d="M8.5 16.5a4 4 0 0 1 0-5.657l2-2a4 4 0 0 1 5.657 0" />
+    <path d="M15.5 7.5a4 4 0 0 1 0 5.657l-2 2a4 4 0 0 1-5.657 0" />
+  </>
+);
+
 export type FileKind =
   | "folder"
   | "image"
@@ -238,6 +276,15 @@ export const CancelIcon = createIcon(
     <circle cx="12" cy="12" r="8" />
     <path d="m15 9-6 6" />
     <path d="m9 9 6 6" />
+  </>
+);
+
+export const RefreshIcon = createIcon(
+  <>
+    <path d="M3 11a9 9 0 0 1 15.53-5.66L21 8" />
+    <path d="M21 13a9 9 0 0 1-15.53 5.66L3 16" />
+    <path d="M21 8v5h-5" />
+    <path d="M3 16v-5h5" />
   </>
 );
 
@@ -338,6 +385,13 @@ export const LogoutIcon = createIcon(
     <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
     <path d="M16 17l5-5-5-5" />
     <path d="M21 12H9" />
+  </>
+);
+
+export const BellIcon = createIcon(
+  <>
+    <path d="M18 13V11a6 6 0 0 0-12 0v2c0 1.7-.8 3.3-2 4.3-.3.2-.4.5-.4.7 0 .6.4 1 1 1h17c.6 0 1-.4 1-1 0-.3-.1-.5-.4-.7-1.2-1-2.2-2.6-2.2-4.3Z" />
+    <path d="M10 19a2 2 0 1 0 4 0" />
   </>
 );
 

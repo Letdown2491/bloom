@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 
 import { useFolderLists } from "../context/FolderListContext";
+import { containsReservedFolderSegment } from "../utils/blobMetadataStore";
 import type { StatusMessageTone } from "../types/status";
 
 export type FolderRenameDialogProps = {
@@ -33,6 +34,10 @@ export const FolderRenameDialog: React.FC<FolderRenameDialogProps> = ({ path, on
       setError("Folder name cannot be empty.");
       return;
     }
+    if (containsReservedFolderSegment(trimmed)) {
+      setError('Folder names cannot include the word "private".');
+      return;
+    }
     setBusy(true);
     try {
       await renameFolder(path, trimmed);
@@ -58,6 +63,11 @@ export const FolderRenameDialog: React.FC<FolderRenameDialogProps> = ({ path, on
     }
   };
 
+  const nameHasReservedKeyword = containsReservedFolderSegment(name);
+  const folderInputClass = nameHasReservedKeyword
+    ? "mt-2 w-full rounded-xl border border-red-500 bg-slate-950 px-3 py-2 text-slate-100 focus:border-red-500 focus:outline-none focus:ring-1 focus:ring-red-500"
+    : "mt-2 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 focus:border-emerald-500 focus:outline-none";
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4" onKeyDown={handleKeyDown}>
       <div className="w-full max-w-md rounded-2xl border border-slate-800 bg-slate-900/90 p-6 shadow-xl">
@@ -69,12 +79,18 @@ export const FolderRenameDialog: React.FC<FolderRenameDialogProps> = ({ path, on
             ref={inputRef}
             type="text"
             value={name}
-            onChange={event => setName(event.target.value)}
+            onChange={event => {
+              setName(event.target.value);
+              if (error) setError(null);
+            }}
             disabled={busy}
-            className="mt-2 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 focus:border-emerald-500 focus:outline-none"
+            className={folderInputClass}
             placeholder="Enter a folder name"
           />
         </label>
+        {nameHasReservedKeyword && (
+          <div className="mt-2 text-sm text-red-400">Folder names cannot include the word "private".</div>
+        )}
         {error && <div className="mt-2 text-sm text-red-400">{error}</div>}
         <div className="mt-6 flex justify-end gap-3">
           <button
@@ -87,7 +103,7 @@ export const FolderRenameDialog: React.FC<FolderRenameDialogProps> = ({ path, on
           <button
             className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-slate-900 hover:bg-emerald-500 disabled:opacity-50"
             onClick={() => void handleSubmit()}
-            disabled={busy}
+            disabled={busy || nameHasReservedKeyword}
           >
             {busy ? "Saving…" : "Save"}
           </button>
@@ -98,4 +114,3 @@ export const FolderRenameDialog: React.FC<FolderRenameDialogProps> = ({ path, on
 };
 
 export default FolderRenameDialog;
-

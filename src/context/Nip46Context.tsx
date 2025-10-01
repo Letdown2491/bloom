@@ -1,23 +1,17 @@
 import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
-import {
-  createDefaultCodecConfig,
-  createNip46Codec,
-  LocalStorageAdapter,
-  MemoryStorageAdapter,
+import type {
   Nip46Codec,
   Nip46Service,
   SessionManager,
   SessionSnapshot,
   TransportConfig,
-  createNdkTransport,
-  Nip46DelegatedSigner,
 } from "../lib/nip46";
 import { useNdk } from "./NdkContext";
 
 export interface Nip46ContextValue {
-  codec: Nip46Codec;
-  sessionManager: SessionManager;
-  service: Nip46Service;
+  codec: Nip46Codec | null;
+  sessionManager: SessionManager | null;
+  service: Nip46Service | null;
   snapshot: SessionSnapshot;
   ready: boolean;
 }
@@ -29,14 +23,24 @@ const defaultSnapshot: SessionSnapshot = {
 
 const Nip46Context = createContext<Nip46ContextValue | undefined>(undefined);
 
+type Nip46Module = typeof import("../lib/nip46");
+
+let nip46ModuleLoader: Promise<Nip46Module> | null = null;
+
+const loadNip46Module = async (): Promise<Nip46Module> => {
+  if (!nip46ModuleLoader) {
+    nip46ModuleLoader = import("../lib/nip46");
+  }
+  return nip46ModuleLoader;
+};
+
 export const Nip46Provider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { ndk, adoptSigner } = useNdk();
 
-  const [sessionManager] = useState(() => {
-    const storage = typeof window === "undefined" ? new MemoryStorageAdapter() : new LocalStorageAdapter();
-    return new SessionManager(storage);
-  });
-  const codec = useMemo(() => createNip46Codec(createDefaultCodecConfig()), []);
+  const moduleRef = useRef<Nip46Module | null>(null);
+  const [codec, setCodec] = useState<Nip46Codec | null>(null);
+  const [sessionManager, setSessionManager] = useState<SessionManager | null>(null);
+  const [service, setService] = useState<Nip46Service | null>(null);
   const [snapshot, setSnapshot] = useState<SessionSnapshot>(defaultSnapshot);
   const [ready, setReady] = useState(false);
 
@@ -50,20 +54,68 @@ export const Nip46Provider: React.FC<{ children: React.ReactNode }> = ({ childre
     []
   );
 
-  const [service, setService] = useState(() => new Nip46Service({ codec, sessionManager, transport: missingTransport }));
   const fetchTrackerRef = useRef(new Map<string, number>());
   const activeSessionRef = useRef<string | null>(null);
 
   useEffect(() => {
-    if (!ndk) return;
-    const nextService = new Nip46Service({
+    let cancelled = false;
+    void loadNip46Module()
+      .then(mod => {
+        if (cancelled) return;
+        moduleRef.current = mod;
+        const storage = typeof window === "undefined" ? new mod.MemoryStorageAdapter() : new mod.LocalStorageAdapter();
+        const manager = new mod.SessionManager(storage);
+        const codecInstance = mod.createNip46Codec(mod.createDefaultCodecConfig());
+        setSessionManager(manager);
+        setCodec(codecInstance);
+        setService(new mod.Nip46Service({ codec: codecInstance, sessionManager: manager, transport: missingTransport }));
+      })
+      .catch(error => {
+        console.error("Failed to load NIP-46 module", error);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [missingTransport]);
+
+  useEffect(() => {
+    if (!sessionManager) return;
+    let unsubscribe: (() => void) | null = null;
+    let disposed = false;
+    sessionManager
+      .hydrate()
+      .then(hydratedSnapshot => {
+        if (disposed) return;
+        setSnapshot(hydratedSnapshot);
+        setReady(true);
+        unsubscribe = sessionManager.onChange(setSnapshot);
+      })
+      .catch(error => {
+        if (disposed) return;
+        console.error("Failed to hydrate NIP-46 sessions", error);
+        setReady(true);
+        unsubscribe = sessionManager.onChange(setSnapshot);
+      });
+
+    return () => {
+      disposed = true;
+      if (unsubscribe) {
+        unsubscribe();
+      }
+    };
+  }, [sessionManager]);
+
+  useEffect(() => {
+    const mod = moduleRef.current;
+    if (!mod || !ndk || !sessionManager || !codec) return;
+    const nextService = new mod.Nip46Service({
       codec,
       sessionManager,
-      transport: createNdkTransport(ndk),
+      transport: mod.createNdkTransport(ndk),
     });
 
     setService(prev => {
-      void prev.destroy().catch(() => undefined);
+      void prev?.destroy().catch(() => undefined);
       return nextService;
     });
 
@@ -73,29 +125,7 @@ export const Nip46Provider: React.FC<{ children: React.ReactNode }> = ({ childre
   }, [codec, ndk, sessionManager]);
 
   useEffect(() => {
-    let unsubscribe: (() => void) | null = null;
-    sessionManager
-      .hydrate()
-      .then(hydratedSnapshot => {
-        setSnapshot(hydratedSnapshot);
-        setReady(true);
-        unsubscribe = sessionManager.onChange(setSnapshot);
-      })
-      .catch(error => {
-        console.error("Failed to hydrate NIP-46 sessions", error);
-        setReady(true);
-        unsubscribe = sessionManager.onChange(setSnapshot);
-      });
-
-    return () => {
-      if (unsubscribe) {
-        unsubscribe();
-      }
-    };
-  }, [sessionManager]);
-
-  useEffect(() => {
-    if (!ready) return;
+    if (!ready || !service) return;
     snapshot.sessions.forEach(session => {
       if (
         session.status !== "active" ||
@@ -114,7 +144,8 @@ export const Nip46Provider: React.FC<{ children: React.ReactNode }> = ({ childre
   }, [snapshot, ready, service]);
 
   useEffect(() => {
-    if (!ndk || !ready) return;
+    const mod = moduleRef.current;
+    if (!mod || !ndk || !ready || !service || !sessionManager) return;
 
     const candidate = snapshot.sessions.find(
       session => session.status === "active" && session.userPubkey && !session.lastError
@@ -132,7 +163,7 @@ export const Nip46Provider: React.FC<{ children: React.ReactNode }> = ({ childre
 
     if (candidate.id === current) return;
 
-    const signer = new Nip46DelegatedSigner(ndk, service, sessionManager, candidate.id);
+    const signer = new mod.Nip46DelegatedSigner(ndk, service, sessionManager, candidate.id);
     activeSessionRef.current = candidate.id;
     void adoptSigner(signer).catch(error => {
       console.error("Failed to adopt NIP-46 signer", error);

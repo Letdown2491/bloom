@@ -1,1 +1,1 @@
-export type StatusMessageTone = "success" | "info" | "error";
+export type StatusMessageTone = "success" | "info" | "error" | "warning";

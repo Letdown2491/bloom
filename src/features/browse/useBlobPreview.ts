@@ -38,7 +38,7 @@ export const useBlobPreview = (options?: PreviewOptions) => {
     (blob: BlossomBlob, context: OpenPreviewContext) => {
       const serverType = blob.serverType ?? defaultServerType;
       const baseUrl = context.baseUrl ?? blob.serverUrl;
-      const requiresAuth = serverType === "satellite" ? false : context.requiresAuth;
+      const requiresAuth = context.requiresAuth;
       const signTemplate = requiresAuth ? defaultSignTemplate : undefined;
       const disablePreview =
         context.disablePreview ?? shouldDisableBlobPreview(blob, context.detectedKind, context.kind);
@@ -85,6 +85,9 @@ function shouldDisableBlobPreview(
   detectedKind?: "image" | "video",
   declaredKind?: string
 ) {
+  if (declaredKind && declaredKind.toLowerCase() === "pdf") {
+    return false;
+  }
   const normalizedKind = normalizeKind(declaredKind);
   const effectiveKind = detectedKind ?? normalizedKind;
   if (effectiveKind === "image" || effectiveKind === "video") {
@@ -93,16 +96,25 @@ function shouldDisableBlobPreview(
 
   const privateMime = blob.privateData?.metadata?.type;
   const mime = (privateMime ?? blob.type ?? "").split(";")[0]?.toLowerCase() ?? "";
+  if (mime === "application/pdf") {
+    return false;
+  }
   if (mime.startsWith("image/") || mime.startsWith("video/")) {
     return false;
   }
 
   const nipMime = readNip94Value(blob, "m")?.toLowerCase() ?? "";
+  if (nipMime === "application/pdf") {
+    return false;
+  }
   if (nipMime.startsWith("image/") || nipMime.startsWith("video/")) {
     return false;
   }
 
   const candidates = collectFilenameCandidates(blob);
+  if (candidates.some(value => PDF_EXTENSION_REGEX.test(value))) {
+    return false;
+  }
   if (candidates.some(value => IMAGE_EXTENSION_REGEX.test(value))) {
     return false;
   }
@@ -153,3 +165,4 @@ function readNip94Value(blob: BlossomBlob, key: string) {
 
 const IMAGE_EXTENSION_REGEX = /\.(png|jpe?g|gif|webp|bmp|svg|heic|heif)$/i;
 const VIDEO_EXTENSION_REGEX = /\.(mp4|m4v|mov|webm|mkv|avi|hevc|mpe?g|mpg|ogv|3gp|3g2|ts|m2ts)$/i;
+const PDF_EXTENSION_REGEX = /\.pdf(?:\?|#|$)/i;

@@ -283,7 +283,7 @@ export const TransferTabContainer: React.FC<TransferTabContainerProps> = ({
           const sourceBlob = sourceSnapshot.blobs.find(blob => blob.sha256 === sha);
           if (!sourceBlob || !sourceBlob.url) continue;
 
-          const targetNeedsSigner = target.type === "satellite" || Boolean(target.requiresAuth);
+          const targetNeedsSigner = Boolean(target.requiresAuth);
           if (targetNeedsSigner && !signer) continue;
           if (targetNeedsSigner && !signEventTemplate) continue;
 
@@ -322,7 +322,7 @@ export const TransferTabContainer: React.FC<TransferTabContainerProps> = ({
           });
           try {
             let completed = false;
-            const targetRequiresAuth = target.type === "satellite" || Boolean(target.requiresAuth);
+            const targetRequiresAuth = Boolean(target.requiresAuth);
             const mirrorUnsupported = unsupportedMirrorTargetsRef.current.has(target.url);
             const finalizeProgress = (loaded: number, total: number) => {
               setSyncTransfers(prev =>
@@ -427,6 +427,7 @@ export const TransferTabContainer: React.FC<TransferTabContainerProps> = ({
                 nextSyncAttemptRef.current.set(key, Date.now() + 15 * 60 * 1000);
                 throw new Error("Unable to fetch blob content for sync");
               }
+              const satelliteLabel = sourceBlob.name || fileName;
               await uploadBlobToSatellite(
                 target.url,
                 streamSource,
@@ -438,7 +439,8 @@ export const TransferTabContainer: React.FC<TransferTabContainerProps> = ({
                   const loadedRaw = typeof progress.loaded === "number" ? progress.loaded : 0;
                   const loaded = Math.min(totalProgress, loadedRaw);
                   finalizeProgress(loaded, totalProgress);
-                }
+                },
+                { label: satelliteLabel }
               );
               completed = true;
             } else {
@@ -553,8 +555,7 @@ export const TransferTabContainer: React.FC<TransferTabContainerProps> = ({
       template: SignTemplate | undefined
     ): UploadStreamSource | null => {
       if (!sourceBlob.url) return null;
-      const sourceRequiresAuth =
-        sourceServer.type === "satellite" ? false : Boolean(sourceServer.requiresAuth);
+      const sourceRequiresAuth = sourceServer.type === "satellite" ? false : Boolean(sourceServer.requiresAuth);
       if (sourceRequiresAuth && !template) return null;
 
       const inferExtensionFromType = (type?: string) => {
@@ -703,7 +704,7 @@ export const TransferTabContainer: React.FC<TransferTabContainerProps> = ({
       setTransferFeedback("Connect your signer to read from the selected servers.");
       return;
     }
-    if (targets.some(server => server.type === "satellite" || server.requiresAuth) && (!signer || !signEventTemplate)) {
+    if (targets.some(server => server.requiresAuth) && (!signer || !signEventTemplate)) {
       setTransferFeedback("Connect your signer to upload to servers that require authorization.");
       return;
     }
@@ -759,7 +760,7 @@ export const TransferTabContainer: React.FC<TransferTabContainerProps> = ({
 
           try {
             let completed = false;
-            const targetRequiresAuth = target.type === "satellite" || Boolean(target.requiresAuth);
+            const targetRequiresAuth = Boolean(target.requiresAuth);
             if (target.type === "blossom") {
               const mirrorUnsupported = unsupportedMirrorTargetsRef.current.has(target.url);
               if (!mirrorUnsupported) {
@@ -860,6 +861,7 @@ export const TransferTabContainer: React.FC<TransferTabContainerProps> = ({
                   `Unable to fetch ${fileName} from ${serverNameByUrl.get(sourceServer.url) || sourceServer.url}`
                 );
               }
+              const satelliteLabel = blob.name || fileName;
               await uploadBlobToSatellite(
                 target.url,
                 streamSource,
@@ -881,7 +883,8 @@ export const TransferTabContainer: React.FC<TransferTabContainerProps> = ({
                         : item
                     )
                   );
-                }
+                },
+                { label: satelliteLabel }
               );
               completed = true;
             } else {

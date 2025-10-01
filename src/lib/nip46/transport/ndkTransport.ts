@@ -1,23 +1,29 @@
 import type NDK from "@nostr-dev-kit/ndk";
-import {
-  NDKEvent,
-  NDKRelaySet,
-  NDKRelayStatus,
-  type NDKFilter,
-  NDKRelay,
-} from "@nostr-dev-kit/ndk";
+import type { NDKRelay, NDKFilter, NDKSubscription, NDKRelayStatus } from "@nostr-dev-kit/ndk";
+import { loadNdkModule, type NdkModule } from "../../ndkModule";
 
 import type { NostrFilter, TransportConfig } from "./types";
 
 const RELAY_WARNING_THROTTLE_MS = 10_000;
 const relayWarningTimestamps = new Map<string, number>();
 const RELAY_CONNECT_TIMEOUT_MS = 5_000;
-const CONNECTED_STATUSES = new Set<NDKRelayStatus>([
-  NDKRelayStatus.CONNECTED,
-  NDKRelayStatus.AUTH_REQUESTED,
-  NDKRelayStatus.AUTHENTICATING,
-  NDKRelayStatus.AUTHENTICATED,
-]);
+const getRuntime = (() => {
+  let promise: Promise<NdkModule> | null = null;
+  return () => {
+    if (!promise) promise = loadNdkModule();
+    return promise;
+  };
+})();
+
+const isConnectedStatus = (status: NDKRelayStatus, runtime: NdkModule) => {
+  const { NDKRelayStatus } = runtime;
+  return (
+    status === NDKRelayStatus.CONNECTED ||
+    status === NDKRelayStatus.AUTH_REQUESTED ||
+    status === NDKRelayStatus.AUTHENTICATING ||
+    status === NDKRelayStatus.AUTHENTICATED
+  );
+};
 
 const logRelayWarning = (url: string) => {
   const now = Date.now();
@@ -32,11 +38,12 @@ const waitForRelayConnection = async (
   ndk: NDK,
   timeoutMs = RELAY_CONNECT_TIMEOUT_MS
 ): Promise<boolean> => {
+  const runtime = await getRuntime();
   if (ndk.pool && !ndk.pool.relays.has(relay.url)) {
     ndk.pool.addRelay(relay, false);
   }
 
-  if (CONNECTED_STATUSES.has(relay.status as NDKRelayStatus)) {
+  if (isConnectedStatus(relay.status as NDKRelayStatus, runtime)) {
     return true;
   }
 
@@ -56,7 +63,7 @@ const waitForRelayConnection = async (
 
     const onReady = () => finish(true);
     const onDisconnect = () => finish(false);
-    timer = setTimeout(() => finish(relay.status === NDKRelayStatus.CONNECTED), timeoutMs);
+    timer = setTimeout(() => finish(relay.status === runtime.NDKRelayStatus.CONNECTED), timeoutMs);
 
     relay.once("ready", onReady);
     relay.once("connect", onReady);
@@ -69,7 +76,7 @@ const waitForRelayConnection = async (
     return true;
   }
 
-  return CONNECTED_STATUSES.has(relay.status as NDKRelayStatus);
+  return isConnectedStatus(relay.status as NDKRelayStatus, runtime);
 };
 
 const convertFilter = (filter: NostrFilter): NDKFilter => {
@@ -85,16 +92,17 @@ const convertFilter = (filter: NostrFilter): NDKFilter => {
 export const createNdkTransport = (ndk: NDK): TransportConfig => {
   return {
     publish: async event => {
+      const runtime = await getRuntime();
       if (!event.id || !event.sig) {
         throw new Error("NIP-46 event must be signed before publishing");
       }
 
       const relayUrls = event.relays ?? [];
-      const ndkEvent = new NDKEvent(ndk, event);
-      let relaySet: NDKRelaySet | undefined;
-      let effectiveRelaySet: NDKRelaySet | undefined;
+      const ndkEvent = new runtime.NDKEvent(ndk, event);
+      let relaySet: InstanceType<NdkModule["NDKRelaySet"]> | undefined;
+      let effectiveRelaySet: InstanceType<NdkModule["NDKRelaySet"]> | undefined;
       if (relayUrls.length) {
-        relaySet = NDKRelaySet.fromRelayUrls(relayUrls, ndk);
+        relaySet = runtime.NDKRelaySet.fromRelayUrls(relayUrls, ndk);
         const relays = Array.from(relaySet.relays);
 
         if (relays.length) {
@@ -102,7 +110,7 @@ export const createNdkTransport = (ndk: NDK): TransportConfig => {
         }
 
         const pendingRelays = relays
-          .filter(relay => relay.status !== NDKRelayStatus.CONNECTED)
+          .filter(relay => relay.status !== runtime.NDKRelayStatus.CONNECTED)
           .map(relay => relay.url);
         if (pendingRelays.length) {
           pendingRelays.forEach(logRelayWarning);
@@ -120,14 +128,16 @@ export const createNdkTransport = (ndk: NDK): TransportConfig => {
       }
     },
     subscribe: (filters, handler) => {
+      const runtimePromise = getRuntime();
       const ndkFilters = filters.map(convertFilter);
       const subscription = ndk.subscribe(ndkFilters, { closeOnEose: false }, {
-        onEvent: (ndkEvent: NDKEvent) => {
+        onEvent: async ndkEvent => {
+          await runtimePromise;
           const raw = ndkEvent.rawEvent();
           console.debug("NIP-46 raw event", raw);
           handler(raw);
         },
-      });
+      }) as NDKSubscription;
       return () => {
         subscription.removeAllListeners();
         subscription.stop();

@@ -1,5 +1,4 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { NDKEvent, NDKPublishError, NDKRelaySet } from "@nostr-dev-kit/ndk";
 
 import type { BlossomBlob } from "../../lib/blossomClient";
 import { buildNip94EventTemplate } from "../../lib/nip94";
@@ -11,6 +10,7 @@ import {
   rememberAudioMetadata,
   sanitizeCoverUrl,
   applyFolderUpdate,
+  containsReservedFolderSegment,
   type BlobAudioMetadata,
 } from "../../utils/blobMetadataStore";
 import { isMusicBlob } from "../../utils/blobClassification";
@@ -20,6 +20,7 @@ import type { StatusMessageTone } from "../../types/status";
 import { usePrivateLibrary } from "../../context/PrivateLibraryContext";
 import type { PrivateListEntry } from "../../lib/privateList";
 import { useFolderLists } from "../../context/FolderListContext";
+import { loadNdkModule } from "../../lib/ndkModule";
 
 type NdkInstance = NdkContextValue["ndk"];
 type NdkSigner = NdkContextValue["signer"];
@@ -161,8 +162,21 @@ export const RenameDialog: React.FC<RenameDialogProps> = ({ blob, ndk, signer, r
     onClose();
   }, [busy, onClose]);
 
+  const handleFolderChange = useCallback(
+    (next: string) => {
+      setFolder(next);
+      if (error) setError(null);
+    },
+    [error]
+  );
+
   const handleSubmit = useCallback(async () => {
     if (busy) return;
+
+    if (containsReservedFolderSegment(folder)) {
+      setError("Folder names cannot include the word \"private\".");
+      return;
+    }
 
     const relayList = normalizeRelays(relays);
 
@@ -371,6 +385,7 @@ export const RenameDialog: React.FC<RenameDialogProps> = ({ blob, ndk, signer, r
 
       let aliasEventTimestamp: number | undefined;
       if (needsAliasUpdate) {
+        const { NDKEvent, NDKRelaySet, NDKPublishError } = await loadNdkModule();
         const template = buildNip94EventTemplate({
           blob,
           alias: aliasForEvent ?? "",
@@ -451,6 +466,8 @@ export const RenameDialog: React.FC<RenameDialogProps> = ({ blob, ndk, signer, r
     removeBlobFromFolder,
   ]);
 
+  const folderHasReservedKeyword = containsReservedFolderSegment(folder);
+
   return (
     <EditDialog
       blob={blob}
@@ -464,7 +481,8 @@ export const RenameDialog: React.FC<RenameDialogProps> = ({ blob, ndk, signer, r
       audioFields={isMusic ? audioFields : undefined}
       onAudioFieldChange={isMusic ? handleAudioFieldChange : undefined}
       folder={folder}
-      onFolderChange={setFolder}
+      onFolderChange={handleFolderChange}
+      folderInvalid={folderHasReservedKeyword}
     />
   );
 };

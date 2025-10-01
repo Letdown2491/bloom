@@ -1,10 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { NDKEvent } from "@nostr-dev-kit/ndk";
 import { useNdk, type RelayHealth } from "../context/NdkContext";
 import { usePreferredRelays, type RelayPolicy } from "../hooks/usePreferredRelays";
 import { normalizeRelayOrigin, sanitizeRelayUrl } from "../utils/relays";
 import type { EventTemplate } from "../lib/blossomClient";
-import { SaveIcon, TrashIcon, CancelIcon, EditIcon } from "./icons";
+import { SaveIcon, TrashIcon, CancelIcon, EditIcon, RelayIcon } from "./icons";
+import { loadNdkModule } from "../lib/ndkModule";
+import type { StatusMessageTone } from "../types/status";
 
 const statusStyles: Record<RelayHealth["status"], { label: string; dot: string; text: string }> = {
   error: {
@@ -84,6 +85,36 @@ const normalizeDrafts = (drafts: RelayDraft[]) => {
   return normalizePolicies(entries);
 };
 
+const collectRelayDraftErrors = (drafts: RelayDraft[]): Map<string, string> => {
+  const errors = new Map<string, string>();
+  const seen = new Map<string, string>();
+  drafts.forEach(draft => {
+    const sanitized = sanitizeRelayUrl(draft.url);
+    if (!sanitized) {
+      errors.set(draft.id, "Enter a valid wss:// URL.");
+      return;
+    }
+    const key = sanitized.toLowerCase();
+    const previousId = seen.get(key);
+    if (previousId) {
+      errors.set(previousId, "Duplicate relay URL.");
+      errors.set(draft.id, "Duplicate relay URL.");
+    } else {
+      seen.set(key, draft.id);
+    }
+    if (!draft.read && !draft.write) {
+      errors.set(draft.id, "Enable read or write access.");
+    }
+  });
+  return errors;
+};
+
+type PendingRelaySave = {
+  policies: RelayPolicy[];
+  successMessage?: string;
+  backoffUntil?: number;
+};
+
 const diffPolicies = (drafts: RelayDraft[], policies: RelayPolicy[]) => {
   const normalizedDrafts = normalizeDrafts(drafts);
   const normalizedPolicies = normalizePolicies(policies);
@@ -112,19 +143,32 @@ const buildNip65Template = (policies: RelayPolicy[]): EventTemplate => {
   };
 };
 
-const RelayList: React.FC = () => {
+type RelayListProps = {
+  showStatusMessage: (message: string, tone?: StatusMessageTone, duration?: number) => void;
+};
+
+const RelayList: React.FC<RelayListProps> = ({ showStatusMessage }) => {
   const { relayPolicies, loading, refresh } = usePreferredRelays();
   const { relayHealth, ndk, signer } = useNdk();
   const [drafts, setDrafts] = useState<RelayDraft[]>([]);
   const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
-  const [messageTone, setMessageTone] = useState<"success" | "error" | "info">("info");
   const [editingId, setEditingId] = useState<string | null>(null);
   const editingSnapshotRef = useRef<RelayDraft | null>(null);
+  const pendingSaveRef = useRef<PendingRelaySave | null>(null);
+  const retryPendingSaveTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [pendingSaveVersion, setPendingSaveVersion] = useState(0);
 
   useEffect(() => {
     setDrafts(policiesToDrafts(relayPolicies));
   }, [relayPolicies]);
+
+  useEffect(() => {
+    return () => {
+      if (retryPendingSaveTimeout.current) {
+        clearTimeout(retryPendingSaveTimeout.current);
+      }
+    };
+  }, []);
 
   const healthMap = useMemo(() => {
     const map = new Map<string, RelayHealth>();
@@ -135,32 +179,8 @@ const RelayList: React.FC = () => {
     return map;
   }, [relayHealth]);
 
-  const validationErrors = useMemo(() => {
-    const errors = new Map<string, string>();
-    const seen = new Map<string, string>();
-    drafts.forEach(draft => {
-      const sanitized = sanitizeRelayUrl(draft.url);
-      if (!sanitized) {
-        errors.set(draft.id, "Enter a valid wss:// URL.");
-        return;
-      }
-      const key = sanitized.toLowerCase();
-      const previousId = seen.get(key);
-      if (previousId) {
-        errors.set(previousId, "Duplicate relay URL.");
-        errors.set(draft.id, "Duplicate relay URL.");
-      } else {
-        seen.set(key, draft.id);
-      }
-      if (!draft.read && !draft.write) {
-        errors.set(draft.id, "Enable read or write access.");
-      }
-    });
-    return errors;
-  }, [drafts]);
+  const validationErrors = useMemo(() => collectRelayDraftErrors(drafts), [drafts]);
 
-  const hasChanges = useMemo(() => diffPolicies(drafts, relayPolicies), [drafts, relayPolicies]);
-  const hasValidationError = validationErrors.size > 0;
   const canEdit = Boolean(signer && ndk);
 
   const setDraftField = useCallback(
@@ -170,8 +190,127 @@ const RelayList: React.FC = () => {
     []
   );
 
+  const schedulePendingSaveAttempt = useCallback(
+    (backoffUntil?: number) => {
+      if (retryPendingSaveTimeout.current) {
+        clearTimeout(retryPendingSaveTimeout.current);
+        retryPendingSaveTimeout.current = null;
+      }
+
+      if (backoffUntil === undefined) {
+        setPendingSaveVersion(prev => prev + 1);
+        return;
+      }
+
+      const delay = Math.max(0, backoffUntil - Date.now());
+      retryPendingSaveTimeout.current = setTimeout(() => {
+        retryPendingSaveTimeout.current = null;
+        setPendingSaveVersion(prev => prev + 1);
+      }, delay);
+    },
+    []
+  );
+
+  const queuePendingSave = useCallback(
+    (payload: PendingRelaySave) => {
+      pendingSaveRef.current = payload;
+      schedulePendingSaveAttempt(payload.backoffUntil);
+    },
+    [schedulePendingSaveAttempt]
+  );
+
+  const attemptSave = useCallback(
+    async (policies: RelayPolicy[], successMessage?: string) => {
+      if (!ndk || !signer) {
+        queuePendingSave({ policies, successMessage });
+        showStatusMessage("Connect your signer to finish saving relay changes.", "warning");
+        return;
+      }
+
+      setSaving(true);
+      try {
+        const template = buildNip65Template(policies);
+        const { NDKEvent } = await loadNdkModule();
+        const event = new NDKEvent(ndk, template);
+        if (!event.created_at) {
+          event.created_at = Math.floor(Date.now() / 1000);
+        }
+        await event.sign();
+        await event.publish();
+        showStatusMessage(successMessage ?? "Relay preferences saved.", "success");
+        await refresh();
+      } catch (error) {
+        const backoffUntil = Date.now() + 5000;
+        queuePendingSave({ policies, successMessage, backoffUntil });
+        const messageText = error instanceof Error ? error.message : "Failed to save relays.";
+        showStatusMessage(messageText, "error");
+      } finally {
+        setSaving(false);
+      }
+    },
+    [ndk, queuePendingSave, refresh, showStatusMessage, signer]
+  );
+
+  const flushPendingSave = useCallback(() => {
+    const pending = pendingSaveRef.current;
+    if (!pending) return;
+    if (saving) return;
+    if (!signer || !ndk) return;
+    if (pending.backoffUntil && pending.backoffUntil > Date.now()) return;
+
+    pendingSaveRef.current = null;
+    void attemptSave(pending.policies, pending.successMessage);
+  }, [attemptSave, ndk, saving, signer]);
+
+  useEffect(() => {
+    flushPendingSave();
+  }, [flushPendingSave, pendingSaveVersion]);
+
+  useEffect(() => {
+    if (pendingSaveRef.current && !saving && signer && ndk) {
+      schedulePendingSaveAttempt();
+    }
+  }, [ndk, saving, schedulePendingSaveAttempt, signer]);
+
+  const persistRelayPolicies = useCallback(
+    (nextDrafts: RelayDraft[], options?: { successMessage?: string }): boolean => {
+      const nextErrors = collectRelayDraftErrors(nextDrafts);
+      if (nextErrors.size > 0) {
+        showStatusMessage("Resolve relay validation errors before saving.", "error");
+        return false;
+      }
+
+      if (!diffPolicies(nextDrafts, relayPolicies)) {
+        return true;
+      }
+
+      const normalizedPolicies = normalizeDrafts(nextDrafts);
+      if (nextDrafts.length > 0 && normalizedPolicies.length === 0) {
+        showStatusMessage("Relay changes could not be saved because the remaining entries are invalid.", "error");
+        return false;
+      }
+
+      const successMessage = options?.successMessage;
+
+      if (saving) {
+        queuePendingSave({ policies: normalizedPolicies, successMessage });
+        showStatusMessage("Saving relay changes queued.", "info");
+        return true;
+      }
+
+      if (!signer || !ndk) {
+        queuePendingSave({ policies: normalizedPolicies, successMessage });
+        showStatusMessage("Connect your signer to finish saving relay changes.", "warning");
+        return true;
+      }
+
+      void attemptSave(normalizedPolicies, successMessage);
+      return true;
+    },
+    [attemptSave, ndk, queuePendingSave, relayPolicies, saving, showStatusMessage, signer]
+  );
+
   const handleAddRelay = () => {
-    setMessage(null);
     const id = createDraftId();
     setDrafts(prev => [
       ...prev,
@@ -187,19 +326,27 @@ const RelayList: React.FC = () => {
   };
 
   const handleRemoveRelay = (id: string) => {
-    setMessage(null);
-    setDrafts(prev => prev.filter(item => item.id !== id));
+    const confirmed = typeof window !== "undefined" ? window.confirm("Remove this relay?") : true;
+    if (!confirmed) return;
+
+    const nextDrafts = drafts.filter(item => item.id !== id);
+    if (nextDrafts.length === drafts.length) return;
+
+    const committed = persistRelayPolicies(nextDrafts, { successMessage: "Relay removed." });
+    if (!committed) {
+      return;
+    }
+
     if (editingId === id) {
       setEditingId(null);
       editingSnapshotRef.current = null;
     }
-  };
 
-  const saveDisabled = !canEdit || saving || !hasChanges || hasValidationError;
+    setDrafts(nextDrafts);
+  };
 
   const beginEdit = (id: string) => {
     if (!canEdit) return;
-    setMessage(null);
     const current = drafts.find(item => item.id === id);
     editingSnapshotRef.current = current ? { ...current } : null;
     setEditingId(id);
@@ -222,52 +369,23 @@ const RelayList: React.FC = () => {
     if (!editingId) return;
     const validationMessage = validationErrors.get(editingId);
     if (validationMessage) {
-      setMessage(validationMessage);
-      setMessageTone("error");
+      showStatusMessage(validationMessage, "error");
       return;
     }
-    setMessage(null);
-    setDrafts(prev =>
-      prev.map(item => {
-        if (item.id !== editingId) return item;
-        const sanitized = sanitizeRelayUrl(item.url) ?? item.url;
-        return { ...item, url: sanitized };
-      })
-    );
+    const nextDrafts = drafts.map(item => {
+      if (item.id !== editingId) return item;
+      const sanitized = sanitizeRelayUrl(item.url) ?? item.url;
+      return { ...item, url: sanitized };
+    });
+    const snapshot = editingSnapshotRef.current;
+    const successMessage = snapshot ? "Relay updated." : "Relay added.";
+    const committed = persistRelayPolicies(nextDrafts, { successMessage });
+    if (!committed) {
+      return;
+    }
+    setDrafts(nextDrafts);
     setEditingId(null);
     editingSnapshotRef.current = null;
-  };
-
-  const handleSave = async () => {
-    if (saveDisabled) return;
-    if (!ndk) {
-      setMessage("NDK is not ready.");
-      setMessageTone("error");
-      return;
-    }
-    setMessage(null);
-    setMessageTone("info");
-
-    const normalized = normalizeDrafts(drafts);
-    setSaving(true);
-    try {
-      const template = buildNip65Template(normalized);
-      const event = new NDKEvent(ndk, template);
-      if (!event.created_at) {
-        event.created_at = Math.floor(Date.now() / 1000);
-      }
-      await event.sign();
-      await event.publish();
-      setMessage("Relay preferences saved.");
-      setMessageTone("success");
-      await refresh();
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to save relays.";
-      setMessage(message);
-      setMessageTone("error");
-    } finally {
-      setSaving(false);
-    }
   };
 
   return (
@@ -282,18 +400,9 @@ const RelayList: React.FC = () => {
             type="button"
             onClick={handleAddRelay}
             className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-sm disabled:opacity-40 disabled:cursor-not-allowed"
-            disabled={!canEdit}
+            disabled={!canEdit || saving}
           >
-            Add relay
-          </button>
-          <button
-            type="button"
-            onClick={handleSave}
-            className="flex items-center gap-2 px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-sm disabled:opacity-40 disabled:cursor-not-allowed"
-            disabled={saveDisabled}
-          >
-            <SaveIcon size={16} />
-            {saving ? "Saving…" : "Save"}
+            Add Relay
           </button>
         </div>
       </header>
@@ -301,21 +410,6 @@ const RelayList: React.FC = () => {
       {!canEdit && (
         <div className="mb-3 rounded-xl border border-slate-700 bg-slate-900/80 px-3 py-2 text-xs text-slate-300" role="alert">
           Connect your signer to publish relay preferences.
-        </div>
-      )}
-
-      {message && (
-        <div
-          className={`mb-3 rounded-xl border px-3 py-2 text-xs ${
-            messageTone === "success"
-              ? "border-emerald-600/40 bg-emerald-500/5 text-emerald-200"
-              : messageTone === "error"
-              ? "border-red-600/40 bg-red-500/5 text-red-200"
-              : "border-slate-700 bg-slate-900/60 text-slate-300"
-          }`}
-          role="alert"
-        >
-          {message}
         </div>
       )}
 
@@ -369,17 +463,20 @@ const RelayList: React.FC = () => {
                     return (
                       <tr key={draft.id} className="border-t border-slate-800 align-top">
                         <td className="py-3 px-3">
-                          <input
-                            type="text"
-                            value={draft.url}
-                            onChange={event => setDraftField(draft.id, { url: event.target.value })}
-                            className={`w-full rounded-lg px-3 py-2 text-sm text-slate-200 focus:border-emerald-500 focus:outline-none bg-slate-900 ${
-                              validationMessage ? "border border-red-700" : "border border-slate-700"
-                            }`}
-                            placeholder="wss://relay.example.com"
-                            autoComplete="off"
-                            spellCheck={false}
-                          />
+                          <div className="flex items-center gap-2">
+                            <RelayIcon size={16} className="text-slate-400" aria-hidden />
+                            <input
+                              type="text"
+                              value={draft.url}
+                              onChange={event => setDraftField(draft.id, { url: event.target.value })}
+                              className={`w-full rounded-lg px-3 py-2 text-sm text-slate-200 focus:border-emerald-500 focus:outline-none bg-slate-900 ${
+                                validationMessage ? "border border-red-700" : "border border-slate-700"
+                              }`}
+                              placeholder="wss://relay.example.com"
+                              autoComplete="off"
+                              spellCheck={false}
+                            />
+                          </div>
                           {validationMessage ? (
                             <p className="mt-1 text-[11px] text-red-300">{validationMessage}</p>
                           ) : null}
@@ -437,7 +534,10 @@ const RelayList: React.FC = () => {
                     <tr key={draft.id} className="border-t border-slate-800 align-top">
                       <td className="py-3 px-3 text-slate-100">
                         <div className="flex flex-col">
-                          <span className="break-all text-sm">{sanitized ?? draft.url}</span>
+                          <span className="inline-flex items-center gap-2 break-all text-sm">
+                            <RelayIcon size={16} className="text-slate-400" aria-hidden />
+                            {sanitized ?? draft.url}
+                          </span>
                           {validationMessage ? (
                             <p className="mt-1 text-[11px] text-red-300">{validationMessage}</p>
                           ) : null}
@@ -455,20 +555,32 @@ const RelayList: React.FC = () => {
                         </div>
                       </td>
                       <td className="py-3 px-3 text-center">
-                        <input
-                          type="checkbox"
-                          checked={draft.read}
-                          onChange={event => setDraftField(draft.id, { read: event.target.checked })}
-                          disabled={!canEdit}
-                        />
+                        <label
+                          className="inline-flex cursor-not-allowed items-center justify-center gap-2 text-xs text-slate-400 opacity-60"
+                          onClick={event => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                          }}
+                          aria-disabled
+                          title="Edit this relay to change read access"
+                        >
+                          <input type="checkbox" checked={draft.read} disabled />
+                          <span className="sr-only">Relay read access</span>
+                        </label>
                       </td>
                       <td className="py-3 px-3 text-center">
-                        <input
-                          type="checkbox"
-                          checked={draft.write}
-                          onChange={event => setDraftField(draft.id, { write: event.target.checked })}
-                          disabled={!canEdit}
-                        />
+                        <label
+                          className="inline-flex cursor-not-allowed items-center justify-center gap-2 text-xs text-slate-400 opacity-60"
+                          onClick={event => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                          }}
+                          aria-disabled
+                          title="Edit this relay to change write access"
+                        >
+                          <input type="checkbox" checked={draft.write} disabled />
+                          <span className="sr-only">Relay write access</span>
+                        </label>
                       </td>
                       <td className="py-3 px-3 text-center">
                         <div className="flex justify-center gap-2">

@@ -398,7 +398,9 @@ export const useServerData = (servers: ManagedServer[], options?: UseServerDataO
         enabled:
           isActive &&
           !!pubkey &&
-          (!(server.type === "satellite" || server.requiresAuth) || !!signer),
+          (server.type === "satellite"
+            ? Boolean(signEventTemplate)
+            : !server.requiresAuth || !!signer),
         initialData: cached,
         staleTime: 1000 * 60,
         queryFn: async (): Promise<BlossomBlob[]> => {
@@ -419,7 +421,6 @@ export const useServerData = (servers: ManagedServer[], options?: UseServerDataO
             return filterHiddenBlobTypes(blobs);
           }
           if (server.type === "satellite") {
-            if (!signEventTemplate) throw new Error("Satellite servers require a connected signer.");
             const blobs = await listSatelliteFiles(server.url, {
               signTemplate: signEventTemplate,
             });
