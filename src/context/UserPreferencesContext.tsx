@@ -36,6 +36,7 @@ export type UserPreferences = {
   showGridPreviews: boolean;
   showListPreviews: boolean;
   keepSearchExpanded: boolean;
+  theme: "dark" | "light";
 };
 
 export type PreferencesSyncState = {
@@ -56,6 +57,7 @@ type UserPreferencesContextValue = {
   setShowGridPreviews: (value: boolean) => void;
   setShowListPreviews: (value: boolean) => void;
   setKeepSearchExpanded: (value: boolean) => void;
+  setTheme: (theme: "dark" | "light") => void;
   setSyncEnabled: (value: boolean) => Promise<void>;
   syncState: PreferencesSyncState;
 };
@@ -69,6 +71,7 @@ const DEFAULT_PREFERENCES: UserPreferences = {
   showGridPreviews: true,
   showListPreviews: true,
   keepSearchExpanded: false,
+  theme: "dark",
 };
 
 const STORAGE_KEY = "bloom:user-preferences";
@@ -116,6 +119,7 @@ const readStoredPreferences = (): UserPreferences => {
     const defaultServerUrl = typeof parsed?.defaultServerUrl === "string" && parsed.defaultServerUrl.trim()
       ? parsed.defaultServerUrl.trim()
       : null;
+    const theme: "dark" | "light" = parsed?.theme === "light" ? "light" : "dark";
     return {
       defaultServerUrl,
       defaultViewMode,
@@ -125,6 +129,7 @@ const readStoredPreferences = (): UserPreferences => {
       showGridPreviews,
       showListPreviews,
       keepSearchExpanded,
+      theme,
     };
   } catch {
     return DEFAULT_PREFERENCES;
@@ -183,7 +188,8 @@ const preferencesEqual = (a: UserPreferences, b: UserPreferences) =>
   a.sortDirection === b.sortDirection &&
   a.showGridPreviews === b.showGridPreviews &&
   a.showListPreviews === b.showListPreviews &&
-  a.keepSearchExpanded === b.keepSearchExpanded;
+  a.keepSearchExpanded === b.keepSearchExpanded &&
+  a.theme === b.theme;
 
 const persistSyncEnabled = (value: boolean) => {
   if (typeof window === "undefined") return;
@@ -231,6 +237,12 @@ export const UserPreferencesProvider: React.FC<{ children: React.ReactNode }> = 
       // ignore storage failures
     }
   }, [preferences]);
+
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    document.documentElement.dataset.theme = preferences.theme;
+    document.body.dataset.theme = preferences.theme;
+  }, [preferences.theme]);
 
   useEffect(() => {
     return () => {
@@ -458,8 +470,7 @@ export const UserPreferencesProvider: React.FC<{ children: React.ReactNode }> = 
     if (!origin) return;
     changeOriginRef.current = null;
     if (origin === "local") {
-      const timestamp = Math.floor(Date.now() / 1000);
-      lastLocalUpdateAtRef.current = timestamp;
+      const timestamp = lastLocalUpdateAtRef.current > 0 ? lastLocalUpdateAtRef.current : Math.floor(Date.now() / 1000);
       syncMetaRef.current = {
         lastSyncedAt: syncMetaRef.current.lastSyncedAt,
         lastLocalUpdatedAt: timestamp,
@@ -480,6 +491,9 @@ export const UserPreferencesProvider: React.FC<{ children: React.ReactNode }> = 
       return next;
     });
     if (nextValue) {
+      const baseTimestamp = Math.floor(Date.now() / 1000);
+      const nextTimestamp = Math.max(baseTimestamp, lastLocalUpdateAtRef.current + 1, latestSyncedAtRef.current + 1);
+      lastLocalUpdateAtRef.current = nextTimestamp;
       changeOriginRef.current = "local";
     }
   }, []);
@@ -564,6 +578,16 @@ export const UserPreferencesProvider: React.FC<{ children: React.ReactNode }> = 
     [mutatePreferences]
   );
 
+  const setTheme = useCallback(
+    (theme: "dark" | "light") => {
+      mutatePreferences(prev => {
+        if (prev.theme === theme) return prev;
+        return { ...prev, theme };
+      });
+    },
+    [mutatePreferences]
+  );
+
   const setSyncEnabled = useCallback(
     async (value: boolean) => {
       if (value === syncEnabled) return;
@@ -615,6 +639,7 @@ export const UserPreferencesProvider: React.FC<{ children: React.ReactNode }> = 
       setShowGridPreviews,
       setShowListPreviews,
       setKeepSearchExpanded,
+      setTheme,
       setSyncEnabled,
       syncState,
     }),
@@ -628,6 +653,7 @@ export const UserPreferencesProvider: React.FC<{ children: React.ReactNode }> = 
       setShowGridPreviews,
       setShowListPreviews,
       setKeepSearchExpanded,
+      setTheme,
       setSyncEnabled,
       syncState,
     ]

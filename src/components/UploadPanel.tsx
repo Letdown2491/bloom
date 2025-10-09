@@ -24,6 +24,7 @@ import { usePrivateLibrary } from "../context/PrivateLibraryContext";
 import type { PrivateListEntry } from "../lib/privateList";
 import { useFolderLists } from "../context/FolderListContext";
 import { loadNdkModule } from "../lib/ndkModule";
+import { FolderIcon, LockIcon, WarningIcon } from "./icons";
 
 const RESIZE_OPTIONS = [
   { id: 0, label: "Original" },
@@ -136,6 +137,7 @@ export type UploadPanelProps = {
   selectedServerUrl?: string | null;
   onUploaded: (success: boolean) => void;
   syncTransfers?: TransferState[];
+  defaultFolderPath?: string | null;
 };
 
 export const UploadPanel: React.FC<UploadPanelProps> = ({
@@ -143,6 +145,7 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
   selectedServerUrl,
   onUploaded,
   syncTransfers = [],
+  defaultFolderPath,
 }) => {
   const [selectedServers, setSelectedServers] = useState<string[]>(() => {
     if (selectedServerUrl) {
@@ -163,6 +166,12 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
   const { upsertEntries: upsertPrivateEntries } = usePrivateLibrary();
   const pubkey = useCurrentPubkey();
   const { addBlobToFolder, resolveFolderPath } = useFolderLists();
+  const normalizedFolderSuggestion = useMemo(() => {
+    if (defaultFolderPath === undefined) return undefined;
+    const normalized = normalizeFolderPathInput(defaultFolderPath);
+    if (normalized === undefined) return undefined;
+    return normalized ?? "";
+  }, [defaultFolderPath]);
 
   const serverMap = useMemo(() => new Map(servers.map(server => [server.url, server])), [servers]);
 
@@ -184,6 +193,51 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
   );
   const canUpload = !signerMissing && !folderNamesInvalid;
   const hasImageEntries = useMemo(() => entries.some(entry => entry.kind === "image"), [entries]);
+  const allMetadataExpanded = useMemo(
+    () => entries.length > 0 && entries.every(entry => entry.showMetadata),
+    [entries]
+  );
+  const uploadSummary = useMemo(() => {
+    if (entries.length === 0) return null;
+    const totalBytes = entries.reduce((acc, entry) => acc + entry.file.size, 0);
+    const privateCount = entries.reduce((count, entry) => (entry.isPrivate ? count + 1 : count), 0);
+    const folderGroupsMap = new Map<
+      string,
+      {
+        key: string;
+        label: string;
+        invalid: boolean;
+        count: number;
+      }
+    >();
+    let noFolderCount = 0;
+    for (const entry of entries) {
+      const trimmed = entry.metadata.folder?.trim();
+      if (!trimmed) {
+        noFolderCount += 1;
+        continue;
+      }
+      const normalized = normalizeFolderPathInput(entry.metadata.folder);
+      const key = normalized ?? `invalid:${trimmed}`;
+      if (!folderGroupsMap.has(key)) {
+        folderGroupsMap.set(key, {
+          key,
+          label: normalized ?? trimmed,
+          invalid: !normalized,
+          count: 0,
+        });
+      }
+      folderGroupsMap.get(key)!.count += 1;
+    }
+
+    return {
+      count: entries.length,
+      totalBytes,
+      privateCount,
+      folderGroups: Array.from(folderGroupsMap.values()),
+      noFolderCount,
+    };
+  }, [entries]);
 
   React.useEffect(() => {
     setSelectedServers(prev => {
@@ -230,7 +284,7 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
       if (kind === "audio") {
         const { extractAudioMetadata } = await loadAudioMetadataModule();
         const extracted = await extractAudioMetadata(file);
-        const metadata = createAudioMetadataFormState(file, extracted);
+        const metadata = createAudioMetadataFormState(file, extracted, normalizedFolderSuggestion);
         nextEntries.push({
           id: createUploadEntryId(),
           file,
@@ -245,7 +299,7 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
           id: createUploadEntryId(),
           file,
           kind,
-          metadata: createGenericMetadataFormState(file),
+          metadata: createGenericMetadataFormState(file, normalizedFolderSuggestion),
           extractedAudioMetadata: null,
           showMetadata: false,
           isPrivate: false,
@@ -260,6 +314,12 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
 
   const toggleMetadataVisibility = (id: string) => {
     setEntries(prev => prev.map(entry => (entry.id === id ? { ...entry, showMetadata: !entry.showMetadata } : entry)));
+  };
+
+  const setAllMetadataVisibility = (visible: boolean) => {
+    setEntries(prev =>
+      prev.map(entry => (entry.showMetadata === visible ? entry : { ...entry, showMetadata: visible }))
+    );
   };
 
   const updateEntryMetadata = (
@@ -691,17 +751,131 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
           {folderNamesInvalid && (
             <div className="mt-2 text-xs text-red-400">Folder names cannot include the word "private".</div>
           )}
-          {entries.length > 0 && (
-            <div className="mt-2 text-xs text-slate-400">
-              {entries.length} file(s), total {prettyBytes(entries.reduce((acc, item) => acc + item.file.size, 0))}
-            </div>
-          )}
         </div>
+        {uploadSummary && entries.length > 1 && (
+          <div className="rounded-xl border border-slate-800 bg-slate-950/60 px-4 py-3 text-sm text-slate-200 space-y-2">
+            <div className="flex flex-wrap items-center gap-3">
+              <span className="font-medium">
+                {uploadSummary.count} {uploadSummary.count === 1 ? "file" : "files"} ·{" "}
+                {prettyBytes(uploadSummary.totalBytes)}
+              </span>
+              {uploadSummary.privateCount > 0 ? (
+                <span className="inline-flex items-center gap-1 text-xs text-slate-400">
+                  <LockIcon size={14} className="text-emerald-300" />
+                  <span>
+                    {uploadSummary.privateCount}{" "}
+                    {uploadSummary.privateCount === 1 ? "private file" : "private files"}
+                  </span>
+                </span>
+              ) : null}
+            </div>
+            {(uploadSummary.folderGroups.length > 0 || uploadSummary.noFolderCount > 0) && (
+              <div className="flex flex-col gap-1 text-xs text-slate-400">
+                {uploadSummary.folderGroups.map(group => (
+                  <span
+                    key={group.key}
+                    className={`inline-flex items-center gap-2 ${
+                      group.invalid ? "text-amber-300" : "text-emerald-300"
+                    }`}
+                  >
+                    {group.invalid ? (
+                      <WarningIcon size={14} aria-hidden="true" />
+                    ) : (
+                      <FolderIcon size={14} />
+                    )}
+                    <span className="font-medium">{group.label}</span>
+                    <span className="text-slate-400">
+                      · {group.count} {group.count === 1 ? "file" : "files"}
+                    </span>
+                  </span>
+                ))}
+                {uploadSummary.noFolderCount > 0 ? (
+                  <span className="inline-flex items-center gap-2 text-slate-400">
+                    <FolderIcon size={14} className="text-slate-400" />
+                    <span className="font-medium text-slate-300">No folder selected</span>
+                    <span>· {uploadSummary.noFolderCount} {uploadSummary.noFolderCount === 1 ? "file" : "files"}</span>
+                  </span>
+                ) : null}
+              </div>
+            )}
+          </div>
+        )}
+        {entries.length > 0 && (
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center gap-2 text-xs text-slate-300">
+              {entries.length > 1 && (
+                <>
+                  <span className="font-medium text-slate-400">Bulk actions:</span>
+                  <button
+                    type="button"
+                    className="rounded-lg border border-slate-700 px-2 py-1 text-xs font-medium text-slate-200 hover:border-emerald-400 hover:text-emerald-200"
+                    onClick={() => {
+                      const raw = window.prompt("Enter folder path to apply to all files (e.g. Photos/Trips):");
+                      if (raw === null) return;
+                      const trimmed = raw.trim();
+                      if (!trimmed) {
+                        window.alert("Folder path cannot be empty.");
+                        return;
+                      }
+                      const normalized = normalizeFolderPathInput(trimmed);
+                      if (normalized === undefined) return;
+                      if (normalized === null) {
+                        window.alert("Folder names cannot include the word 'private'.");
+                        return;
+                      }
+                      setEntries(prev =>
+                        prev.map(entry => {
+                          if (entry.metadata.kind === "audio") {
+                            return { ...entry, metadata: { ...entry.metadata, folder: normalized } };
+                          }
+                          if (entry.metadata.kind === "generic") {
+                            return { ...entry, metadata: { ...entry.metadata, folder: normalized } };
+                          }
+                          return entry;
+                        })
+                      );
+                    }}
+                  >
+                    Apply folder…
+                  </button>
+                  <button
+                    type="button"
+                    className="rounded-lg border border-slate-700 px-2 py-1 text-xs font-medium text-slate-200 hover:border-emerald-400 hover:text-emerald-200"
+                    onClick={() => {
+                      const shouldSetPrivate = entries.some(entry => !entry.isPrivate);
+                      setEntries(prev => prev.map(entry => (entry.isPrivate === shouldSetPrivate ? entry : { ...entry, isPrivate: shouldSetPrivate })));
+                    }}
+                  >
+                    Set {entries.some(entry => !entry.isPrivate) ? "all private" : "all public"}
+                  </button>
+                </>
+              )}
+            </div>
+            {entries.length > 1 && (
+              <button
+                type="button"
+                className="text-xs font-medium text-emerald-300 hover:text-emerald-200"
+                onClick={() => setAllMetadataVisibility(!allMetadataExpanded)}
+              >
+                {allMetadataExpanded ? "Collapse all metadata" : "Expand all metadata"}
+              </button>
+            )}
+          </div>
+        )}
         {entries.length > 0 && !busy && (
           <div className="space-y-3">
             {entries.map(entry => {
               const { file, metadata, kind, showMetadata } = entry;
               const typeLabel = describeUploadEntryKind(kind);
+              const folderInputValue = metadata.folder?.trim() ?? "";
+              const normalizedFolderPreview = normalizeFolderPathInput(metadata.folder);
+              const folderInvalid = containsReservedFolderSegment(metadata.folder);
+              const effectiveFolderLabel =
+                folderInputValue && normalizedFolderPreview
+                  ? normalizedFolderPreview
+                  : folderInputValue;
+              const showFolderWarning = Boolean(folderInputValue && (!normalizedFolderPreview || folderInvalid));
+              const showStatusIcons = showFolderWarning || entry.isPrivate;
               return (
                 <div
                   key={entry.id}
@@ -714,8 +888,36 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
                         {typeLabel} • {prettyBytes(file.size)}
                         {file.type ? ` • ${file.type}` : ""}
                       </div>
+                      {folderInputValue ? (
+                        <div
+                          className={`mt-1 text-xs ${
+                            folderInvalid || !normalizedFolderPreview ? "text-amber-300" : "text-emerald-300"
+                          }`}
+                        >
+                          {folderInvalid || !normalizedFolderPreview ? "Invalid folder path" : "Uploading to"}{" "}
+                          <span className="font-medium">
+                            {folderInvalid || !normalizedFolderPreview ? folderInputValue : effectiveFolderLabel}
+                          </span>
+                        </div>
+                      ) : null}
                     </div>
-                    <div className="flex flex-col items-end gap-3">
+                    <div className="flex flex-col items-end gap-2">
+                      {showStatusIcons ? (
+                        <div className="flex items-center gap-2 text-xs text-slate-400">
+                          {showFolderWarning ? (
+                            <span className="inline-flex items-center gap-1 text-amber-300">
+                              <WarningIcon size={16} aria-hidden="true" title="Folder path needs attention" />
+                              <span className="sr-only">Folder path needs attention</span>
+                            </span>
+                          ) : null}
+                          {entry.isPrivate ? (
+                            <span className="inline-flex items-center gap-1 text-emerald-300">
+                              <LockIcon size={16} aria-hidden="true" title="Private upload" />
+                              <span className="sr-only">Private upload</span>
+                            </span>
+                          ) : null}
+                        </div>
+                      ) : null}
                       <button
                         type="button"
                         onClick={() => toggleMetadataVisibility(entry.id)}
@@ -725,20 +927,23 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
                       </button>
                     </div>
                   </div>
-                  <div className="rounded-xl border border-amber-600/40 bg-amber-900/10 px-4 py-3">
-                    <label className="flex items-center gap-3 text-sm text-amber-200">
+                  <div className="rounded-xl border border-slate-700 bg-slate-900/80 px-4 py-3">
+                    <label className="flex items-start gap-3 text-sm text-slate-200">
                       <input
                         type="checkbox"
-                        className="h-4 w-4 rounded border-amber-500 bg-slate-950 text-amber-400 focus:outline-none focus:ring-1 focus:ring-amber-400"
+                        className="mt-1 h-4 w-4 rounded border-slate-600 bg-slate-950 text-emerald-400 focus:outline-none focus:ring-1 focus:ring-emerald-500"
                         checked={entry.isPrivate}
                         onChange={event => setEntryPrivacy(entry.id, event.target.checked)}
                         disabled={busy}
                       />
-                      <span>Mark as Private</span>
+                      <span className="flex flex-col gap-1 text-left">
+                        <span className="font-medium text-slate-100">Private upload</span>
+                        <span className="text-xs leading-relaxed text-slate-400">
+                          Encrypts the file on your device. Private files cannot be shared publicly as they require your
+                          private key to decrypt.
+                        </span>
+                      </span>
                     </label>
-                    <p className="mt-2 text-xs leading-relaxed text-amber-200/80">
-                      Marking an upload as private will encrypt the file on the client-side and cannot be reversed. If you would like to share the file publicly, you will have to download it, then reupload without checking this option.
-                    </p>
                   </div>
                   {showMetadata ? (
                     <div className="space-y-3">
@@ -759,7 +964,9 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
                       Metadata detected{entry.extractedAudioMetadata ? " from the file." : "."} Click "Edit metadata" to review.
                     </div>
                   ) : (
-                    <div className="text-xs text-slate-400">Click "Edit metadata" to override the display name.</div>
+                    <div className="text-xs text-slate-400">
+                      Click "Edit metadata" to override the display name, upload location, and other file specific metadata.
+                    </div>
                   )}
                 </div>
               );
@@ -809,6 +1016,7 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
           <button
             onClick={handleUpload}
             disabled={!entries.length || !selectedServers.length || busy || !canUpload}
+            title="Upload selected files"
             className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-40"
           >
             {busy ? "Uploading…" : "Upload"}
@@ -1137,19 +1345,20 @@ const createUploadEntryId = () => {
 
 const stripExtension = (fileName: string) => fileName.replace(/\.[^/.]+$/, "");
 
-const createGenericMetadataFormState = (file: File): GenericMetadataFormState => {
+const createGenericMetadataFormState = (file: File, initialFolder?: string): GenericMetadataFormState => {
   const withoutExt = stripExtension(file.name);
   const alias = sanitizePart(withoutExt) ?? sanitizePart(file.name) ?? "Untitled";
   return {
     kind: "generic",
     alias,
-    folder: "",
+    folder: initialFolder ?? "",
   };
 };
 
 const createAudioMetadataFormState = (
   file: File,
-  extracted: ExtractedAudioMetadata | null | undefined
+  extracted: ExtractedAudioMetadata | null | undefined,
+  initialFolder?: string
 ): AudioMetadataFormState => {
   const fallbackAlias = stripExtension(file.name);
   const title = deriveTitle(extracted?.title, fallbackAlias);
@@ -1158,7 +1367,7 @@ const createAudioMetadataFormState = (
   return {
     kind: "audio",
     alias,
-    folder: "",
+    folder: initialFolder ?? "",
     title: extracted?.title ?? "",
     artist: artist ?? "",
     album: extracted?.album ?? "",

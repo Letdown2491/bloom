@@ -60,4 +60,10 @@ export default defineConfig({
       sourcemap: false,
     },
   },
+  test: {
+    environment: "jsdom",
+    globals: true,
+    setupFiles: path.resolve(projectRoot, "src/setupTests.ts"),
+    restoreMocks: true,
+  },
 });

@@ -8,20 +8,29 @@ type FilterOption = {
   label: string;
 };
 
-const BASE_FILTER_OPTIONS: FilterOption[] = [
-  { id: "documents", label: "Documents" },
-  { id: "images", label: "Images" },
-  { id: "music", label: "Audio" },
-  { id: "pdfs", label: "PDFs" },
-  { id: "videos", label: "Videos" },
-];
+const FILTER_LABELS: Record<Exclude<FilterMode, "all">, string> = {
+  documents: "Documents",
+  pdfs: "Documents",
+  images: "Images",
+  music: "Audio",
+  videos: "Videos",
+};
 
-const FILTER_OPTIONS: FilterOption[] = [...BASE_FILTER_OPTIONS].sort((a, b) =>
+const DISPLAY_FILTER_OPTIONS: FilterOption[] = (["documents", "images", "music", "videos"] as Array<
+  Exclude<FilterMode, "all">
+>).map(id => ({
+  id,
+  label: FILTER_LABELS[id],
+}));
+
+const FILTER_OPTIONS: FilterOption[] = [...DISPLAY_FILTER_OPTIONS].sort((a, b) =>
   a.label.localeCompare(b.label)
 );
 
-const OPTION_MAP = FILTER_OPTIONS.reduce<Record<Exclude<FilterMode, "all">, FilterOption>>((acc, option) => {
-  acc[option.id] = option;
+const OPTION_MAP = (Object.keys(FILTER_LABELS) as Array<Exclude<FilterMode, "all">>).reduce<
+  Record<Exclude<FilterMode, "all">, FilterOption>
+>((acc, key) => {
+  acc[key] = { id: key, label: FILTER_LABELS[key] };
   return acc;
 }, {} as any);
 

@@ -33,7 +33,7 @@ import { useInViewport } from "../hooks/useInViewport";
 import { useAudioMetadataMap } from "../features/browse/useAudioMetadata";
 import { usePrivateLibrary } from "../context/PrivateLibraryContext";
 import type { PrivateListEntry } from "../lib/privateList";
-import type { DefaultSortOption, SortDirection } from "../context/UserPreferencesContext";
+import { useUserPreferences, type DefaultSortOption, type SortDirection } from "../context/UserPreferencesContext";
 
 export type BlobReplicaSummary = {
   count: number;
@@ -216,6 +216,9 @@ const ReplicaBadge: React.FC<{
   privateIndicator?: boolean;
   privateLabel?: string;
 }> = ({ info, variant, privateIndicator = false, privateLabel }) => {
+  const {
+    preferences: { theme },
+  } = useUserPreferences();
   if (privateIndicator) {
     const label = privateLabel ?? "Private";
     const baseClass =
@@ -241,24 +244,29 @@ const ReplicaBadge: React.FC<{
   const title = info.servers.length
     ? `Available on ${info.servers.map(server => server.name).join(", ")}`
     : `Available on ${info.count} ${info.count === 1 ? "server" : "servers"}`;
-  const baseClass =
-    variant === "grid"
-      ? "bg-slate-950 text-emerald-100 shadow-lg"
-      : "bg-slate-900/85 text-emerald-100 shadow";
+  const themeIsLight = theme === "light";
+  const baseClass = (() => {
+    if (variant === "grid") {
+      return themeIsLight ? "bg-white/90 text-emerald-600 shadow" : "bg-slate-950 text-emerald-100 shadow-lg";
+    }
+    return themeIsLight ? "bg-white text-emerald-600 shadow" : "bg-slate-900/85 text-emerald-100 shadow";
+  })();
   const paddingClass = variant === "grid" ? "px-2 py-1" : "px-2.5 py-0.5";
   const iconSize = variant === "grid" ? 14 : 13;
+  const iconClass = themeIsLight ? "text-emerald-500" : "text-emerald-300";
+  const borderClass = themeIsLight ? "border-emerald-400/70" : "border-emerald-500/60";
 
   return (
     <span
-      className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border border-emerald-500/60 ${baseClass} ${paddingClass} font-semibold text-[11px] tabular-nums cursor-default select-none z-10`}
+      className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border ${borderClass} ${baseClass} ${paddingClass} font-semibold text-[11px] tabular-nums cursor-default select-none z-10`}
       title={title}
       aria-label={title}
       onMouseDown={event => event.stopPropagation()}
       onClick={event => event.stopPropagation()}
       onKeyDown={event => event.stopPropagation()}
     >
-      <SyncIndicatorIcon size={iconSize} className="text-emerald-300" aria-hidden="true" />
-      <span>{info.count}</span>
+      <SyncIndicatorIcon size={iconSize} className={iconClass} aria-hidden="true" />
+      <span className={themeIsLight ? "text-emerald-600" : undefined}>{info.count}</span>
     </span>
   );
 };
@@ -1479,6 +1487,29 @@ const GridCard = React.memo<GridCardProps>(
     const menuRef = useRef<HTMLDivElement | null>(null);
     const menuBoundary = getMenuBoundary?.() ?? null;
     const menuPlacement = useDropdownPlacement(isMenuOpen, dropdownContainerRef, menuRef, menuBoundary);
+    const {
+      preferences: { theme },
+    } = useUserPreferences();
+    const isLightTheme = theme === "light";
+    const dropdownTriggerClass = isLightTheme
+      ? "p-2 shrink-0 flex h-10 w-10 items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-600 transition hover:bg-slate-100"
+      : "p-2 shrink-0 flex h-10 w-10 items-center justify-center rounded-lg bg-slate-800 text-slate-200 transition hover:bg-slate-700";
+    const menuBaseClass = isLightTheme
+      ? "absolute right-0 z-50 w-44 rounded-md border border-slate-300 bg-white p-1 text-slate-700 shadow-xl"
+      : "absolute right-0 z-50 w-44 rounded-md border border-slate-700 bg-slate-900/95 p-1 text-slate-200 shadow-xl backdrop-blur";
+    const focusRingClass = isLightTheme
+      ? "focus:outline-none focus:ring-1 focus:ring-emerald-400 focus:ring-offset-1 focus:ring-offset-white"
+      : "focus:outline-none focus:ring-1 focus:ring-emerald-400 focus:ring-offset-1 focus:ring-offset-slate-900";
+    const makeItemClass = (variant?: "destructive") => {
+      if (variant === "destructive") {
+        return `flex items-center gap-2 rounded-md px-3 py-1.5 text-sm transition ${focusRingClass} ${
+          isLightTheme ? "text-red-600 hover:bg-red-50" : "text-red-300 hover:bg-red-900/40"
+        }`;
+      }
+      return `flex items-center gap-2 rounded-md px-3 py-1.5 text-sm transition ${focusRingClass} ${
+        isLightTheme ? "text-slate-700 hover:bg-slate-100" : "text-slate-200 hover:bg-slate-700"
+      }`;
+    };
     const cardStyle = useMemo<React.CSSProperties>(
       () => ({
         top: 0,
@@ -1803,7 +1834,7 @@ const GridCard = React.memo<GridCardProps>(
           ) : null}
           {previewContent}
           <div className="pointer-events-none absolute inset-x-0 bottom-0 px-3 pb-2">
-            <div className="w-full rounded-md bg-slate-950/75 px-2 py-1 text-xs font-medium text-slate-100 text-center" title={displayName}>
+            <div className="w-full rounded-md bg-slate-950/75 px-2 py-1 text-xs font-medium text-white text-center" title={displayName}>
               <span className="flex max-w-full items-center justify-center gap-1">
                 <span className="truncate">{displayName}</span>
                 {isPrivateItem ? <LockIcon size={12} className="text-amber-300" aria-hidden="true" /> : null}
@@ -1817,7 +1848,7 @@ const GridCard = React.memo<GridCardProps>(
           {dropdownItems.length > 0 ? (
             <div className="relative" ref={registerDropdownRef}>
               <button
-                className="p-2 shrink-0 flex h-10 w-10 items-center justify-center rounded-lg bg-slate-800 text-slate-200 transition hover:bg-slate-700"
+                className={dropdownTriggerClass}
                 onClick={handleMenuToggle}
                 aria-haspopup="true"
                 aria-expanded={isMenuOpen}
@@ -1829,7 +1860,7 @@ const GridCard = React.memo<GridCardProps>(
               {isMenuOpen ? (
                 <div
                   ref={menuRef}
-                  className={`absolute right-0 z-50 w-44 rounded-md border border-slate-700 bg-slate-900/95 p-1 shadow-xl ${menuPlacementClass} ${menuVisibilityClass}`}
+                  className={`${menuBaseClass} ${menuPlacementClass} ${menuVisibilityClass}`}
                   role="menu"
                   aria-label="More actions"
                 >
@@ -1839,11 +1870,7 @@ const GridCard = React.memo<GridCardProps>(
                       href="#"
                       role="menuitem"
                       aria-label={item.ariaLabel ?? item.label}
-                      className={`flex items-center gap-2 rounded-md px-3 py-1.5 text-sm transition focus:outline-none focus:ring-1 focus:ring-emerald-400 ${
-                        item.variant === "destructive"
-                          ? "text-red-300 hover:bg-red-900/40 focus:ring-offset-1 focus:ring-offset-slate-900"
-                          : "text-slate-200 hover:bg-slate-700 focus:ring-offset-1 focus:ring-offset-slate-900"
-                      }`}
+                      className={makeItemClass(item.variant)}
                       onClick={event => {
                         event.preventDefault();
                         event.stopPropagation();
@@ -1918,9 +1945,42 @@ const PreviewDialog: React.FC<{
     }
   };
 
+  const {
+    preferences: { theme },
+  } = useUserPreferences();
+  const isLightTheme = theme === "light";
+  const backdropClass = isLightTheme ? "bg-slate-900/40" : "bg-slate-950/80";
+  const containerBaseClass =
+    "relative flex w-full max-w-4xl flex-col gap-4 rounded-2xl border p-6 shadow-2xl max-h-[calc(100vh-2rem)] overflow-hidden";
+  const containerClass = isLightTheme
+    ? `${containerBaseClass} border-slate-200 bg-white text-slate-700`
+    : `${containerBaseClass} border-slate-800 bg-slate-900/95 text-slate-100`;
+  const headingClass = isLightTheme ? "text-lg font-semibold text-slate-900" : "text-lg font-semibold text-slate-100";
+  const metaContainerClass = isLightTheme
+    ? "mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-600"
+    : "mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-400";
+  const metaLabelClass = isLightTheme ? "text-slate-500" : "text-slate-300";
+  const previewContainerClass = isLightTheme
+    ? "relative flex min-h-[18rem] flex-1 items-center justify-center overflow-hidden rounded-xl border border-slate-200 bg-slate-50 max-h-[calc(100vh-18rem)]"
+    : "relative flex min-h-[18rem] flex-1 items-center justify-center overflow-hidden rounded-xl border border-slate-800 bg-slate-950/60 max-h-[calc(100vh-18rem)]";
+  const fallbackMessageClass = isLightTheme
+    ? "flex h-full w-full flex-col items-center justify-center gap-4 p-6 text-sm text-slate-500"
+    : "flex h-full w-full flex-col items-center justify-center gap-4 p-6 text-sm text-slate-400";
+  const closeButtonClass = isLightTheme
+    ? "absolute right-4 top-4 rounded-full p-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-400 focus:ring-offset-2 focus:ring-offset-white"
+    : "absolute right-4 top-4 rounded-full p-2 text-slate-300 transition hover:bg-slate-800 hover:text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-400 focus:ring-offset-2 focus:ring-offset-slate-900";
+  const footerContainerClass = isLightTheme
+    ? "flex flex-wrap gap-4 text-[11px] text-slate-500"
+    : "flex flex-wrap gap-4 text-[11px] text-slate-500";
+  const hashLabelClass = isLightTheme ? "font-mono break-all text-slate-600" : "font-mono break-all text-slate-400";
+  const directUrlLabelClass = isLightTheme ? "text-slate-600" : "text-slate-300";
+  const copyButtonClass = isLightTheme
+    ? "flex max-w-full items-center gap-1 rounded px-1 text-left text-[11px] text-emerald-600 underline decoration-dotted underline-offset-2 hover:text-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-400 focus:ring-offset-2 focus:ring-offset-white"
+    : "flex max-w-full items-center gap-1 rounded px-1 text-left text-[11px] text-emerald-300 underline decoration-dotted underline-offset-2 hover:text-emerald-200 focus:outline-none focus:ring-2 focus:ring-emerald-400 focus:ring-offset-2 focus:ring-offset-slate-900";
+
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4"
+      className={`fixed inset-0 z-50 flex items-center justify-center p-4 ${backdropClass}`}
       onClick={handleBackdropClick}
       role="presentation"
     >
@@ -1928,44 +1988,48 @@ const PreviewDialog: React.FC<{
         role="dialog"
         aria-modal="true"
         aria-label={`Preview ${displayName}`}
-        className="relative flex w-full max-w-4xl flex-col gap-4 rounded-2xl border border-slate-800 bg-slate-900/95 p-6 shadow-2xl max-h-[calc(100vh-2rem)] overflow-hidden"
+        className={containerClass}
         onClick={event => event.stopPropagation()}
       >
         <button
           type="button"
-          className="absolute right-4 top-4 rounded-full p-2 text-slate-300 transition hover:bg-slate-800 hover:text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-400"
+          className={closeButtonClass}
           onClick={onClose}
           aria-label="Close preview"
         >
           <CancelIcon size={18} />
         </button>
         <div>
-          <h2 className="text-lg font-semibold text-slate-100">{displayName}</h2>
-          <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-400">
+          <h2 className={headingClass}>{displayName}</h2>
+          <div className={metaContainerClass}>
             {sizeLabel && (
               <span>
-                <span className="text-slate-300">Size:</span> {sizeLabel}
+                <span className={metaLabelClass}>Size:</span> {sizeLabel}
               </span>
             )}
-          {updatedLabel && (
+            {updatedLabel && (
+              <span>
+                <span className={metaLabelClass}>Updated:</span> {updatedLabel}
+              </span>
+            )}
             <span>
-              <span className="text-slate-300">Updated:</span> {updatedLabel}
-            </span>
-          )}
-            <span>
-              <span className="text-slate-300">Type:</span> {typeLabel}
+              <span className={metaLabelClass}>Type:</span> {typeLabel}
             </span>
             {originLabel && (
               <span className="truncate">
-                <span className="text-slate-300">Server:</span> {originLabel}
+                <span className={metaLabelClass}>Server:</span> {originLabel}
               </span>
             )}
           </div>
         </div>
-        <div className="relative flex min-h-[18rem] flex-1 items-center justify-center overflow-hidden rounded-xl border border-slate-800 bg-slate-950/60 max-h-[calc(100vh-18rem)]">
+        <div className={previewContainerClass}>
           {previewUnavailable ? (
-            <div className="flex h-full w-full flex-col items-center justify-center gap-4 p-6 text-sm text-slate-400">
-              <FileTypeIcon kind={derivedKind} size={112} className="text-slate-500" />
+            <div className={fallbackMessageClass}>
+              <FileTypeIcon
+                kind={derivedKind}
+                size={112}
+                className={isLightTheme ? "text-slate-400" : "text-slate-500"}
+              />
               <p className="max-w-sm text-center">Preview not available for this file type.</p>
             </div>
           ) : (
@@ -1988,8 +2052,8 @@ const PreviewDialog: React.FC<{
             />
           )}
         </div>
-        <div className="flex flex-wrap gap-4 text-[11px] text-slate-500">
-          <span className="font-mono break-all text-slate-400">Hash: {blob.sha256}</span>
+        <div className={footerContainerClass}>
+          <span className={hashLabelClass}>Hash: {blob.sha256}</span>
           {blob.url && (
             <button
               type="button"
@@ -1998,11 +2062,11 @@ const PreviewDialog: React.FC<{
                 event.stopPropagation();
                 handleDirectUrlCopy();
               }}
-              className="flex max-w-full items-center gap-1 rounded px-1 text-left text-[11px] text-emerald-300 underline decoration-dotted underline-offset-2 hover:text-emerald-200 focus:outline-none focus:ring-2 focus:ring-emerald-400 focus:ring-offset-2 focus:ring-offset-slate-900"
+              className={copyButtonClass}
               title="Copy direct URL"
               aria-label="Copy direct URL"
             >
-              <span className="text-slate-300">Direct URL:</span>
+              <span className={directUrlLabelClass}>Direct URL:</span>
               <span className="truncate font-mono">{blob.url}</span>
               <span className="mt-[1px] text-current"><CopyIcon size={12} /></span>
             </button>
@@ -2529,12 +2593,36 @@ const ListRowComponent: React.FC<ListRowProps> = ({
       : "top-full mt-2 origin-top";
   const menuVisibilityClass = menuPlacement ? "visible opacity-100" : "invisible opacity-0 pointer-events-none";
 
+  const {
+    preferences: { theme },
+  } = useUserPreferences();
+  const isLightTheme = theme === "light";
+  const dropdownTriggerClass = isLightTheme
+    ? "p-2 shrink-0 flex h-10 w-10 items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-600 transition hover:bg-slate-100"
+    : "p-2 shrink-0 flex h-10 w-10 items-center justify-center rounded-lg bg-slate-800 text-slate-200 transition hover:bg-slate-700";
+  const menuBaseClass = isLightTheme
+    ? "absolute right-0 z-30 w-44 rounded-md border border-slate-300 bg-white p-1 text-slate-700 shadow-xl"
+    : "absolute right-0 z-30 w-44 rounded-md border border-slate-700 bg-slate-900/95 p-1 text-slate-200 shadow-xl backdrop-blur";
+  const focusRingClass = isLightTheme
+    ? "focus:outline-none focus:ring-1 focus:ring-emerald-400 focus:ring-offset-1 focus:ring-offset-white"
+    : "focus:outline-none focus:ring-1 focus:ring-emerald-400 focus:ring-offset-1 focus:ring-offset-slate-900";
+  const makeItemClass = (variant?: "destructive") => {
+    if (variant === "destructive") {
+      return `flex items-center gap-2 rounded-md px-3 py-1.5 text-sm transition ${focusRingClass} ${
+        isLightTheme ? "text-red-600 hover:bg-red-50" : "text-red-300 hover:bg-red-900/40"
+      }`;
+    }
+    return `flex items-center gap-2 rounded-md px-3 py-1.5 text-sm transition ${focusRingClass} ${
+      isLightTheme ? "text-slate-700 hover:bg-slate-100" : "text-slate-200 hover:bg-slate-700"
+    }`;
+  };
+
   const dropdownMenu = !showDropdown
     ? null
     : (
         <div className="relative" ref={dropdownRef}>
           <button
-            className="p-2 shrink-0 rounded-lg bg-slate-800 text-slate-200 transition hover:bg-slate-700"
+            className={dropdownTriggerClass}
             onClick={handleMenuToggle}
             aria-haspopup="true"
             aria-expanded={menuOpen}
@@ -2546,7 +2634,7 @@ const ListRowComponent: React.FC<ListRowProps> = ({
           {menuOpen ? (
             <div
               ref={menuRef}
-              className={`absolute right-0 z-30 w-44 rounded-md border border-slate-700 bg-slate-900/95 p-1 shadow-xl ${menuPlacementClass} ${menuVisibilityClass}`}
+              className={`${menuBaseClass} ${menuPlacementClass} ${menuVisibilityClass}`}
               role="menu"
               aria-label="More actions"
             >
@@ -2556,11 +2644,7 @@ const ListRowComponent: React.FC<ListRowProps> = ({
                   href="#"
                   role="menuitem"
                   aria-label={item.ariaLabel ?? item.label}
-                  className={`flex items-center gap-2 rounded-md px-3 py-1.5 text-sm transition focus:outline-none focus:ring-1 focus:ring-emerald-400 ${
-                    item.variant === "destructive"
-                      ? "text-red-300 hover:bg-red-900/40 focus:ring-offset-1 focus:ring-offset-slate-900"
-                      : "text-slate-200 hover:bg-slate-700 focus:ring-offset-1 focus:ring-offset-slate-900"
-                  }`}
+                  className={makeItemClass(item.variant)}
                   onClick={event => {
                     event.preventDefault();
                     event.stopPropagation();
@@ -2760,6 +2844,11 @@ const BlobPreview: React.FC<{
     if (isPreviewableTextType({ mime: effectiveType, name: effectiveName, url })) return "document";
     return "document";
   }, [previewType, effectiveType, effectiveName, url]);
+
+  const {
+    preferences: { theme },
+  } = useUserPreferences();
+  const isLightTheme = theme === "light";
 
   const releaseObjectUrl = useCallback(() => {
     if (objectUrlRef.current) {
@@ -3126,9 +3215,14 @@ const BlobPreview: React.FC<{
   const showLoading = !isStaticPreview && loading && !showMedia && !textPreview;
   const showUnavailable = !isStaticPreview && (failed || (!showMedia && !textPreview && !loading));
 
-  const classNames = `relative flex h-full w-full items-center justify-center overflow-hidden bg-slate-950/80 ${
+  const baseBackgroundClass = isLightTheme ? "bg-white" : "bg-slate-950/80";
+  const classNames = `relative flex h-full w-full items-center justify-center overflow-hidden ${baseBackgroundClass} ${
     className ?? ""
   }`;
+  const textPreviewWrapperClass = isLightTheme ? "px-4 py-3 text-xs text-slate-700" : "px-4 py-3 text-xs text-slate-200";
+  const textPreviewPreClass = isLightTheme
+    ? "line-clamp-6 whitespace-pre-wrap break-words text-[11px] leading-snug text-slate-800"
+    : "line-clamp-6 whitespace-pre-wrap break-words text-[11px] leading-snug";
 
   const blurhashPlaceholder = blurhash ? (
     <BlurhashThumbnail
@@ -3139,9 +3233,18 @@ const BlobPreview: React.FC<{
     />
   ) : null;
 
+  const docBackgroundClass = isLightTheme
+    ? "border border-slate-200 bg-gradient-to-br from-purple-100 via-white to-slate-100"
+    : "border border-slate-800/80 bg-gradient-to-br from-purple-900/70 via-slate-900 to-slate-950";
+  const docIconClass = isLightTheme ? "text-purple-600" : "text-purple-200";
+  const pdfBackgroundClass = isLightTheme
+    ? "border border-slate-200 bg-gradient-to-br from-red-100 via-white to-slate-100"
+    : "border border-slate-800/80 bg-gradient-to-br from-red-900/70 via-slate-900 to-slate-950";
+  const pdfIconClass = isLightTheme ? "text-red-500" : "text-red-200";
+
   const content = textPreview ? (
-    <div className="px-4 py-3 text-xs text-slate-200">
-      <pre className="line-clamp-6 whitespace-pre-wrap break-words text-[11px] leading-snug">
+    <div className={textPreviewWrapperClass}>
+      <pre className={textPreviewPreClass}>
         {textPreview.content}
         {textPreview.truncated ? " …" : ""}
       </pre>
@@ -3188,67 +3291,96 @@ const BlobPreview: React.FC<{
     />
   ) : isDoc ? (
     <div
-      className={`flex h-full w-full items-center justify-center rounded-2xl border border-slate-800/80 bg-gradient-to-br from-purple-900/70 via-slate-900 to-slate-950 transition-opacity duration-200 ${
+      className={`flex h-full w-full items-center justify-center rounded-2xl ${docBackgroundClass} transition-opacity duration-200 ${
         isReady ? "opacity-100" : "opacity-0"
       } ${variant === "dialog" ? "mx-4 my-4" : ""}`}
     >
       <DocumentIcon
         size={fallbackIconSize ?? (variant === "dialog" ? 120 : 56)}
-        className="text-purple-200"
+        className={docIconClass}
         aria-hidden="true"
       />
     </div>
   ) : isPdf ? (
     <div
-      className={`flex h-full w-full items-center justify-center rounded-2xl border border-slate-800/80 bg-gradient-to-br from-red-900/70 via-slate-900 to-slate-950 transition-opacity duration-200 ${
+      className={`flex h-full w-full items-center justify-center rounded-2xl ${pdfBackgroundClass} transition-opacity duration-200 ${
         isReady ? "opacity-100" : "opacity-0"
       } ${variant === "dialog" ? "mx-4 my-4" : ""}`}
     >
       <FileTypeIcon
         kind="pdf"
         size={fallbackIconSize ?? (variant === "dialog" ? 120 : 56)}
-        className="text-red-200"
+        className={pdfIconClass}
         aria-hidden="true"
       />
     </div>
   ) : null;
 
+  const loadingOverlayClass = isLightTheme
+    ? "absolute inset-0 flex items-center justify-center bg-white/80 text-xs text-slate-600 pointer-events-none"
+    : "absolute inset-0 flex items-center justify-center bg-slate-950/70 text-xs text-slate-300 pointer-events-none";
+  const overlayBorderClass = isLightTheme ? "border-slate-200" : "border-slate-800/80";
+
   const overlayConfig = useMemo(() => {
     const baseSize = fallbackIconSize ?? (variant === "dialog" ? 96 : 48);
+    const gradient = (light: string, dark: string) => (isLightTheme ? light : dark);
+    const iconColor = (light: string, dark: string) => (isLightTheme ? light : dark);
     switch (fallbackIconKind) {
       case "music":
         return {
-          background: "bg-gradient-to-br from-emerald-900/70 via-slate-900 to-slate-950",
-          icon: <MusicIcon size={baseSize} className="text-emerald-200" aria-hidden="true" />,
+          background: gradient(
+            "bg-gradient-to-br from-emerald-100 via-white to-slate-100",
+            "bg-gradient-to-br from-emerald-900/70 via-slate-900 to-slate-950"
+          ),
+          icon: <MusicIcon size={baseSize} className={iconColor("text-emerald-600", "text-emerald-200")} aria-hidden="true" />,
         };
       case "video":
         return {
-          background: "bg-gradient-to-br from-sky-900/70 via-slate-900 to-slate-950",
-          icon: <VideoIcon size={baseSize} className="text-sky-200" aria-hidden="true" />,
+          background: gradient(
+            "bg-gradient-to-br from-sky-100 via-white to-slate-100",
+            "bg-gradient-to-br from-sky-900/70 via-slate-900 to-slate-950"
+          ),
+          icon: <VideoIcon size={baseSize} className={iconColor("text-sky-600", "text-sky-200")} aria-hidden="true" />,
         };
       case "pdf":
         return {
-          background: "bg-gradient-to-br from-red-900/70 via-slate-900 to-slate-950",
-          icon: <FileTypeIcon kind="pdf" size={baseSize} className="text-red-200" aria-hidden="true" />,
+          background: gradient(
+            "bg-gradient-to-br from-red-100 via-white to-slate-100",
+            "bg-gradient-to-br from-red-900/70 via-slate-900 to-slate-950"
+          ),
+          icon: <FileTypeIcon kind="pdf" size={baseSize} className={iconColor("text-red-500", "text-red-200")} aria-hidden="true" />,
         };
       case "folder":
         return {
-          background: "bg-gradient-to-br from-amber-900/70 via-slate-900 to-slate-950",
-          icon: <FileTypeIcon kind="folder" size={baseSize} className="text-amber-200" aria-hidden="true" />,
+          background: gradient(
+            "bg-gradient-to-br from-amber-100 via-white to-slate-100",
+            "bg-gradient-to-br from-amber-900/70 via-slate-900 to-slate-950"
+          ),
+          icon: <FileTypeIcon kind="folder" size={baseSize} className={iconColor("text-amber-600", "text-amber-200")} aria-hidden="true" />,
         };
       case "doc":
       case "document":
         return {
-          background: "bg-gradient-to-br from-purple-900/70 via-slate-900 to-slate-950",
-          icon: <DocumentIcon size={baseSize} className="text-purple-200" aria-hidden="true" />,
+          background: gradient(
+            "bg-gradient-to-br from-purple-100 via-white to-slate-100",
+            "bg-gradient-to-br from-purple-900/70 via-slate-900 to-slate-950"
+          ),
+          icon: <DocumentIcon size={baseSize} className={iconColor("text-purple-600", "text-purple-200")} aria-hidden="true" />,
         };
       default:
         return {
-          background: "bg-slate-950/70",
-          icon: <FileTypeIcon kind={fallbackIconKind} size={baseSize} className="text-slate-300" aria-hidden="true" />,
+          background: gradient("bg-slate-200", "bg-slate-950/70"),
+          icon: (
+            <FileTypeIcon
+              kind={fallbackIconKind}
+              size={baseSize}
+              className={iconColor("text-slate-600", "text-slate-300")}
+              aria-hidden="true"
+            />
+          ),
         };
     }
-  }, [fallbackIconKind, fallbackIconSize, variant]);
+  }, [fallbackIconKind, fallbackIconSize, variant, isLightTheme]);
 
   const showBlurhashPlaceholder = Boolean(blurhashPlaceholder && !textPreview && !showMedia && !isStaticPreview);
   const showLoadingOverlay = showLoading && !showBlurhashPlaceholder;
@@ -3262,14 +3394,10 @@ const BlobPreview: React.FC<{
         </div>
       ) : null}
       {content}
-      {showLoadingOverlay && (
-        <div className="absolute inset-0 flex items-center justify-center bg-slate-950/70 text-xs text-slate-300 pointer-events-none">
-          Loading preview…
-        </div>
-      )}
+      {showLoadingOverlay && <div className={loadingOverlayClass}>Loading preview…</div>}
       {showUnavailableOverlay && (
         <div
-          className={`absolute inset-0 flex items-center justify-center rounded-2xl border border-slate-800/80 ${overlayConfig.background} ${
+          className={`absolute inset-0 flex items-center justify-center rounded-2xl border ${overlayBorderClass} ${overlayConfig.background} ${
             variant === "dialog" ? "mx-4 my-4" : ""
           }`}
         >

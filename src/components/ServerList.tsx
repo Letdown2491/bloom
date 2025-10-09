@@ -3,7 +3,7 @@ import type { ManagedServer } from "../hooks/useServers";
 import type { BlossomBlob } from "../lib/blossomClient";
 import type { ServerSnapshot } from "../hooks/useServerData";
 import { deriveServerNameFromUrl } from "../utils/serverName";
-import { CancelIcon, EditIcon, FolderIcon, RefreshIcon, SaveIcon, TrashIcon } from "./icons";
+import { CancelIcon, EditIcon, FolderIcon, RefreshIcon, SaveIcon, TrashIcon, PlusIcon, StarIcon } from "./icons";
 import { useWorkspace } from "../features/workspace/WorkspaceContext";
 import type { FilterMode } from "../types/filter";
 import { prettyBytes } from "../utils/format";
@@ -26,13 +26,13 @@ export type ServerListProps = {
   syncInProgress?: boolean;
   validationError?: string | null;
   showStatusMessage?: (message: string, tone?: StatusMessageTone, duration?: number) => void;
+  compact?: boolean;
 };
 
 type ServerDraft = {
   name: string;
   url: string;
   type: ManagedServer["type"];
-  requiresAuth: boolean;
   sync: boolean;
 };
 
@@ -40,7 +40,6 @@ const createEmptyDraft = (): ServerDraft => ({
   name: "",
   url: "https://",
   type: "blossom",
-  requiresAuth: true,
   sync: false,
 });
 
@@ -58,17 +57,16 @@ const HEALTH_CHECK_TIMEOUT_MS = 8000;
 const HEALTH_RECHECK_TTL_MS = 5 * 60 * 1000;
 const HEALTH_PENDING_GRACE_MS = 12 * 1000;
 
-type CoreFilterSegmentId = Extract<FilterMode, "music" | "images" | "videos" | "pdfs" | "documents">;
+type CoreFilterSegmentId = Extract<FilterMode, "music" | "images" | "videos" | "documents">;
 type FilterSegmentId = CoreFilterSegmentId | "other";
 
-const FILTER_SEGMENTS: FilterSegmentId[] = ["music", "images", "videos", "pdfs", "documents", "other"];
+const FILTER_SEGMENTS: FilterSegmentId[] = ["music", "images", "videos", "documents", "other"];
 
 const SEGMENT_META: Record<FilterSegmentId, { label: string; bar: string; dot: string }> = {
   music: { label: "Audio", bar: "bg-emerald-500", dot: "bg-emerald-300" },
   images: { label: "Images", bar: "bg-sky-500", dot: "bg-sky-300" },
   videos: { label: "Videos", bar: "bg-fuchsia-500", dot: "bg-fuchsia-300" },
-  pdfs: { label: "PDFs", bar: "bg-amber-500", dot: "bg-amber-300" },
-  documents: { label: "Documents", bar: "bg-slate-500", dot: "bg-slate-300" },
+  documents: { label: "Documents", bar: "bg-amber-500", dot: "bg-amber-300" },
   other: { label: "Other", bar: "bg-slate-700", dot: "bg-slate-500" },
 };
 
@@ -94,7 +92,11 @@ const resolveFilterSegment = (blob: BlossomBlob): FilterSegmentId => {
     classificationTarget.type = "audio/*";
   }
 
-  const coreOrder: CoreFilterSegmentId[] = ["music", "images", "videos", "pdfs", "documents"];
+  if (matchesFilter(classificationTarget, "pdfs" as FilterMode)) {
+    return "documents";
+  }
+
+  const coreOrder: CoreFilterSegmentId[] = ["music", "images", "videos", "documents"];
   for (const segment of coreOrder) {
     if (matchesFilter(classificationTarget, segment)) {
       return segment;
@@ -125,20 +127,48 @@ export const ServerList: React.FC<ServerListProps> = ({
   syncInProgress,
   validationError,
   showStatusMessage,
+  compact = false,
 }) => {
   const [isAdding, setIsAdding] = useState(false);
   const [editingUrl, setEditingUrl] = useState<string | null>(null);
   const [draft, setDraft] = useState<ServerDraft>(createEmptyDraft);
-  const [error, setError] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<{ name?: string; url?: string } | null>(null);
   const urlInputRef = useRef<HTMLInputElement | null>(null);
   const [healthMap, setHealthMap] = useState<Record<string, ServerHealth>>({});
   const previousUrlsRef = useRef<string[]>([]);
   const activeControllersRef = useRef<Map<string, AbortController>>(new Map());
   const pendingStartRef = useRef<Set<string>>(new Set());
+  const [expandedUsage, setExpandedUsage] = useState<Record<string, boolean>>({});
   const syncButtonDisabled = Boolean(syncDisabled || disabled || syncInProgress);
-  const syncButtonLabel = syncInProgress ? "Syncing…" : "Sync";
+  const syncButtonLabel = syncInProgress ? "Syncing…" : "Sync Selected";
+  const syncButtonTooltip = syncInProgress
+    ? "Sync in progress…"
+    : "Sync enabled servers to align content. Requires at least two servers with sync enabled.";
 
   const { snapshots, privateBlobs } = useWorkspace();
+
+  const clearFieldErrors = useCallback(() => {
+    setFieldErrors(null);
+  }, []);
+
+  const clearFieldError = useCallback((field: "name" | "url") => {
+    setFieldErrors(prev => {
+      if (!prev?.[field]) return prev;
+      const next = { ...prev, [field]: undefined };
+      if (!next.name && !next.url) return null;
+      return next;
+    });
+  }, []);
+
+  const toggleUsage = useCallback((url: string) => {
+    setExpandedUsage(prev => {
+      const next = { ...prev, [url]: !prev[url] };
+      if (!next[url]) {
+        delete next[url];
+      }
+      return next;
+    });
+  }, []);
 
   const snapshotByUrl = useMemo(() => {
     const map = new Map<string, ServerSnapshot>();
@@ -164,7 +194,6 @@ export const ServerList: React.FC<ServerListProps> = ({
             music: 0,
             images: 0,
             videos: 0,
-            pdfs: 0,
             documents: 0,
             other: 0,
           },
@@ -239,7 +268,6 @@ export const ServerList: React.FC<ServerListProps> = ({
             music: 0,
             images: 0,
             videos: 0,
-            pdfs: 0,
             documents: 0,
             other: 0,
           },
@@ -249,11 +277,26 @@ export const ServerList: React.FC<ServerListProps> = ({
       snapshot.blobs.forEach(blob => includeBlob(snapshot.server.url, blob));
     });
 
-    return map;
-  }, [snapshots, privateBlobs]);
+      return map;
+    }, [snapshots, privateBlobs]);
+
+  useEffect(() => {
+    setExpandedUsage(prev => {
+      const allowed = new Set(servers.map(server => server.url));
+      const retained = Object.keys(prev).filter(url => allowed.has(url));
+      if (retained.length === Object.keys(prev).length) {
+        return prev;
+      }
+      const next: Record<string, boolean> = {};
+      retained.forEach(url => {
+        next[url] = true;
+      });
+      return next;
+    });
+  }, [servers]);
 
   const renderUsageRow = useCallback(
-    (server: ManagedServer) => {
+    (server: ManagedServer, rowId?: string) => {
       const snapshot = snapshotByUrl.get(server.url);
       const usage = usageByServer.get(server.url);
 
@@ -324,8 +367,8 @@ export const ServerList: React.FC<ServerListProps> = ({
       }
 
       return (
-        <tr className="border-t border-slate-900/60">
-          <td colSpan={8} className="px-3 pb-4 pt-2">
+        <tr className="border-t border-slate-900/60" id={rowId}>
+          <td colSpan={6} className="px-3 pb-4 pt-2">
             {content}
           </td>
         </tr>
@@ -537,12 +580,12 @@ export const ServerList: React.FC<ServerListProps> = ({
   const statusStyles = useMemo<Record<ServerHealthStatus, { label: string; dot: string; text: string }>>(
     () => ({
       checking: {
-        label: "Checking…",
+        label: "Connecting",
         dot: "bg-slate-500 animate-pulse",
         text: "text-slate-400",
       },
       online: {
-        label: "Reachable",
+        label: "Connected",
         dot: "bg-emerald-500",
         text: "text-emerald-300",
       },
@@ -552,7 +595,7 @@ export const ServerList: React.FC<ServerListProps> = ({
         text: "text-amber-300",
       },
       offline: {
-        label: "Unreachable",
+        label: "Offline",
         dot: "bg-red-500",
         text: "text-red-400",
       },
@@ -567,7 +610,6 @@ export const ServerList: React.FC<ServerListProps> = ({
     }
 
     const styles = statusStyles[health.status];
-    const latency = typeof health.latencyMs === "number" ? `${health.latencyMs}ms` : null;
 
     return (
       <div className="flex flex-col gap-1">
@@ -575,7 +617,6 @@ export const ServerList: React.FC<ServerListProps> = ({
           <span className={`h-2 w-2 rounded-full ${styles.dot}`} aria-hidden />
           {styles.label}
           {health.status === "auth" && health.httpStatus ? ` (${health.httpStatus})` : null}
-          {latency ? <span className="text-[11px] text-slate-400">{latency}</span> : null}
         </span>
         {showPendingNote ? (
           <span className="text-[11px] text-slate-300">Will refresh after saving</span>
@@ -587,19 +628,18 @@ export const ServerList: React.FC<ServerListProps> = ({
   const beginAdd = () => {
     setEditingUrl(null);
     setDraft(createEmptyDraft());
-    setError(null);
+    clearFieldErrors();
     setIsAdding(true);
   };
 
   const beginEdit = (server: ManagedServer) => {
     setIsAdding(false);
-    setError(null);
+    clearFieldErrors();
     setEditingUrl(server.url);
     setDraft({
       name: server.name,
       url: server.url,
       type: server.type,
-      requiresAuth: Boolean(server.requiresAuth),
       sync: Boolean(server.sync),
     });
   };
@@ -608,12 +648,12 @@ export const ServerList: React.FC<ServerListProps> = ({
     setIsAdding(false);
     setEditingUrl(null);
     setDraft(createEmptyDraft());
-    setError(null);
+    clearFieldErrors();
   };
 
   const reportValidationError = useCallback(
-    (message: string) => {
-      setError(message);
+    (message: string, field: "name" | "url" = "url") => {
+      setFieldErrors({ [field]: message });
       showStatusMessage?.(message, "error");
     },
     [showStatusMessage]
@@ -630,35 +670,37 @@ export const ServerList: React.FC<ServerListProps> = ({
   const handleAddSubmit = () => {
     const trimmedUrl = draft.url.trim();
     if (!trimmedUrl) {
-      reportValidationError("Enter a server URL");
+      reportValidationError("Enter a server URL", "url");
       return;
     }
     if (!/^https?:\/\//i.test(trimmedUrl)) {
-      reportValidationError("URL must start with http:// or https://");
+      reportValidationError("URL must start with http:// or https://", "url");
       return;
     }
     const normalizedUrl = trimmedUrl.replace(/\/$/, "");
     if (servers.some(server => server.url === normalizedUrl)) {
-      reportValidationError("Server already added");
+      reportValidationError("Server already added", "url");
       return;
     }
     const name = draft.name.trim() || deriveServerNameFromUrl(normalizedUrl);
     if (!name) {
-      reportValidationError("Enter a server name");
+      reportValidationError("Enter a server name", "name");
       return;
     }
+
+    const sync = draft.type === "satellite" ? false : draft.sync;
 
     onAdd({
       name,
       url: normalizedUrl,
       type: draft.type,
-      requiresAuth: draft.requiresAuth,
-      sync: draft.sync,
+      requiresAuth: true,
+      sync,
     });
     setIsAdding(false);
     setEditingUrl(null);
     setDraft(createEmptyDraft());
-    setError(null);
+    clearFieldErrors();
   };
 
   const handleEditSubmit = () => {
@@ -666,35 +708,39 @@ export const ServerList: React.FC<ServerListProps> = ({
 
     const trimmedUrl = draft.url.trim();
     if (!trimmedUrl) {
-      reportValidationError("Enter a server URL");
+      reportValidationError("Enter a server URL", "url");
       return;
     }
     if (!/^https?:\/\//i.test(trimmedUrl)) {
-      reportValidationError("URL must start with http:// or https://");
+      reportValidationError("URL must start with http:// or https://", "url");
       return;
     }
     const normalizedUrl = trimmedUrl.replace(/\/$/, "");
     if (servers.some(server => server.url !== editingUrl && server.url === normalizedUrl)) {
-      reportValidationError("Server already added");
+      reportValidationError("Server already added", "url");
       return;
     }
     const name = draft.name.trim() || deriveServerNameFromUrl(normalizedUrl);
     if (!name) {
-      reportValidationError("Enter a server name");
+      reportValidationError("Enter a server name", "name");
       return;
     }
+
+    const original = servers.find(server => server.url === editingUrl);
+    const requiresAuth = draft.type === "satellite" ? true : original?.requiresAuth !== false;
+    const sync = draft.type === "satellite" ? false : draft.sync;
 
     onUpdate(editingUrl, {
       name,
       url: normalizedUrl,
       type: draft.type,
-      requiresAuth: draft.requiresAuth,
-      sync: draft.sync,
+      requiresAuth,
+      sync,
     });
     setEditingUrl(null);
     setIsAdding(false);
     setDraft(createEmptyDraft());
-    setError(null);
+    clearFieldErrors();
   };
 
   const handleToggle = (server: ManagedServer) => {
@@ -705,37 +751,44 @@ export const ServerList: React.FC<ServerListProps> = ({
     }
   };
 
+  const controls = (
+    <>
+      <button
+        onClick={beginAdd}
+        className="inline-flex items-center gap-2 rounded-xl bg-slate-800 px-3 py-2 text-sm text-slate-200 transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
+        disabled={saving || isAdding || Boolean(editingUrl)}
+      >
+        <PlusIcon size={16} />
+        Add Server
+      </button>
+      {onSync ? (
+        <button
+          type="button"
+          onClick={event => {
+            event.preventDefault();
+            onSync?.();
+          }}
+          className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-3 py-2 text-sm text-slate-950 hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-40"
+          disabled={syncButtonDisabled}
+          aria-busy={syncInProgress ? true : undefined}
+          title={syncButtonTooltip}
+        >
+          <RefreshIcon size={16} />
+          {syncButtonLabel}
+        </button>
+      ) : null}
+    </>
+  );
+
+  const containerClass = compact
+    ? "rounded-xl border border-slate-800 bg-slate-900/60 p-4"
+    : "rounded-2xl border border-slate-800 bg-slate-900/70 p-4";
+
   return (
-    <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4">
-      <header className="mb-3 flex items-center justify-between">
-        <div>
-          <h2 className="text-lg font-semibold text-slate-100">Servers</h2>
-          <p className="text-xs text-slate-400">Select where your content lives. Please note that the NIP-96 server spec has been deprecated.</p>
-        </div>
-        <div className="flex gap-2">
-          {onSync ? (
-            <button
-              type="button"
-              onClick={event => {
-                event.preventDefault();
-                onSync?.();
-              }}
-              className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-3 py-2 text-sm text-slate-950 hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-40"
-              disabled={syncButtonDisabled}
-              aria-busy={syncInProgress ? true : undefined}
-            >
-              <RefreshIcon size={16} />
-              {syncButtonLabel}
-            </button>
-          ) : null}
-          <button
-            onClick={beginAdd}
-            className="rounded-xl bg-slate-800 px-3 py-2 text-sm hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
-            disabled={saving || isAdding || Boolean(editingUrl)}
-          >
-            Add Server
-          </button>
-        </div>
+    <section className={containerClass}>
+      <header className={`mb-3 flex flex-wrap items-center ${compact ? "justify-end" : "justify-between"} gap-2`}>
+        {!compact ? <h2 className="text-lg font-semibold text-slate-100">Servers</h2> : null}
+        <div className="flex gap-2">{controls}</div>
       </header>
 
       {(validationError || saving) && (
@@ -758,7 +811,6 @@ export const ServerList: React.FC<ServerListProps> = ({
               <th scope="col" className="py-2 px-3 text-left font-semibold">URL</th>
               <th scope="col" className="w-44 py-2 px-3 text-left font-semibold">Status</th>
               <th scope="col" className="w-32 py-2 px-3 text-left font-semibold">Type</th>
-              <th scope="col" className="w-24 py-2 px-3 text-center font-semibold">Auth</th>
               <th scope="col" className="w-24 py-2 px-3 text-center font-semibold">Sync</th>
               <th scope="col" className="w-28 py-2 px-3 text-center font-semibold">Actions</th>
             </tr>
@@ -772,15 +824,20 @@ export const ServerList: React.FC<ServerListProps> = ({
                     value={draft.name}
                     onChange={event => {
                       setDraft(prev => ({ ...prev, name: event.target.value }));
-                      if (error) setError(null);
+                      clearFieldError("name");
                     }}
-                    className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-200 focus:border-emerald-500 focus:outline-none"
+                    className={`w-full rounded-lg bg-slate-900 px-3 py-2 text-sm text-slate-200 focus:outline-none ${
+                      fieldErrors?.name ? "border border-red-700 focus:border-red-500" : "border border-slate-700 focus:border-emerald-500"
+                    }`}
                     placeholder="Server name"
                     aria-label="Server name"
                     onClick={event => event.stopPropagation()}
                     onKeyDown={handleDraftKeyDown}
                     autoComplete="off"
                   />
+                  {fieldErrors?.name ? (
+                    <p className="mt-1 text-[11px] text-red-400">{fieldErrors.name}</p>
+                  ) : null}
                 </td>
                 <td className="py-3 px-3">
                   <input
@@ -798,15 +855,20 @@ export const ServerList: React.FC<ServerListProps> = ({
                         }
                         return next;
                       });
-                      if (error) setError(null);
+                      clearFieldError("url");
                     }}
-                    className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-200 focus:border-emerald-500 focus:outline-none"
+                    className={`w-full rounded-lg bg-slate-900 px-3 py-2 text-sm text-slate-200 focus:outline-none ${
+                      fieldErrors?.url ? "border border-red-700 focus:border-red-500" : "border border-slate-700 focus:border-emerald-500"
+                    }`}
                     placeholder={draft.type === "satellite" ? "https://satellite.earth/api/v1" : "https://example.com"}
                     aria-label="Server URL"
                     onClick={event => event.stopPropagation()}
                     onKeyDown={handleDraftKeyDown}
                     autoComplete="off"
                   />
+                  {fieldErrors?.url ? (
+                    <p className="mt-1 text-[11px] text-red-400">{fieldErrors.url}</p>
+                  ) : null}
                 </td>
                 <td className="py-3 px-3 text-xs text-slate-300">
                   Health check runs after saving
@@ -819,10 +881,9 @@ export const ServerList: React.FC<ServerListProps> = ({
                       setDraft(prev => ({
                         ...prev,
                         type: nextType,
-                        requiresAuth: nextType === "satellite" ? true : prev.requiresAuth,
                         sync: nextType === "satellite" ? false : prev.sync,
                       }));
-                      if (error) setError(null);
+                      clearFieldErrors();
                     }}
                     className="w-full min-w-[8rem] rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-200 focus:border-emerald-500 focus:outline-none"
                     aria-label="Server type"
@@ -836,51 +897,35 @@ export const ServerList: React.FC<ServerListProps> = ({
                 </td>
                 <td className="py-3 px-3 text-center">
                   <div className="flex justify-center">
-                        <input
-                          type="checkbox"
-                          checked={draft.type === "satellite" ? true : draft.requiresAuth}
-                          onChange={event => {
-                            if (draft.type === "satellite") return;
-                            setDraft(prev => ({ ...prev, requiresAuth: event.target.checked }));
-                            if (error) setError(null);
-                          }}
-                          aria-label="Requires auth"
-                          onClick={event => event.stopPropagation()}
-                          onKeyDown={handleDraftKeyDown}
-                          disabled={saving || draft.type === "satellite"}
-                          readOnly={draft.type === "satellite"}
-                        />
-                  </div>
-                </td>
-                <td className="py-3 px-3 text-center">
-                  <div className="flex justify-center">
-                        <input
-                          type="checkbox"
-                          checked={draft.sync}
-                          onChange={event => {
-                            if (draft.type === "satellite") return;
-                            setDraft(prev => ({ ...prev, sync: event.target.checked }));
-                            if (error) setError(null);
-                          }}
-                          aria-label="Sync server"
-                          onClick={event => event.stopPropagation()}
-                          onKeyDown={handleDraftKeyDown}
-                          disabled={saving || draft.type === "satellite"}
-                          readOnly={draft.type === "satellite"}
-                        />
+                    <input
+                      type="checkbox"
+                      checked={draft.sync}
+                      onChange={event => {
+                        if (draft.type === "satellite") return;
+                        setDraft(prev => ({ ...prev, sync: event.target.checked }));
+                        clearFieldErrors();
+                      }}
+                      aria-label="Sync server"
+                      onClick={event => event.stopPropagation()}
+                      onKeyDown={handleDraftKeyDown}
+                      disabled={saving || draft.type === "satellite"}
+                      readOnly={draft.type === "satellite"}
+                    />
                   </div>
                 </td>
                 <td className="py-3 px-3 text-right">
                   <div className="flex justify-end gap-2">
                     <button
                       type="button"
-                      className="text-xs px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500"
+                      className="inline-flex items-center justify-center gap-2 rounded-lg bg-emerald-600 px-3 py-2 text-xs text-slate-950 transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-60"
+                      disabled={saving}
                       onClick={event => {
                         event.stopPropagation();
                         handleSubmit();
                       }}
                     >
-                      Add
+                      {saving ? <RefreshIcon size={16} className="animate-spin" /> : "Add"}
+                      {saving ? <span className="sr-only">Saving server</span> : null}
                     </button>
                     <button
                       type="button"
@@ -893,41 +938,45 @@ export const ServerList: React.FC<ServerListProps> = ({
                       Cancel
                     </button>
                   </div>
-                  {error && (
-                    <div className="mt-2 text-xs text-red-400 text-right">{error}</div>
-                  )}
                 </td>
               </tr>
             )}
             {servers.map(server => {
               const isEditing = editingUrl === server.url;
               const isDefault = defaultServerUrl === server.url;
+              const usageRowId = `server-usage-${server.url.replace(/[^a-z0-9]/gi, "-")}`;
               const rowHighlightClass = selected === server.url
                 ? "bg-emerald-500/10"
                 : isDefault
                   ? "bg-slate-800/40"
                   : "hover:bg-slate-800/50";
-              const usageRow = renderUsageRow(server);
+              const isUsageExpanded = Boolean(expandedUsage[server.url]);
+              const usageRow = isUsageExpanded ? renderUsageRow(server, usageRowId) : null;
 
               if (isEditing) {
                 return (
                   <React.Fragment key={server.url}>
                     <tr className="border-t border-slate-800 bg-slate-900/70">
-                            <td className="py-3 px-3">
+                      <td className="py-3 px-3">
                         <input
                           type="text"
                           value={draft.name}
                           onChange={event => {
                             setDraft(prev => ({ ...prev, name: event.target.value }));
-                            if (error) setError(null);
+                            clearFieldError("name");
                           }}
-                          className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-200 focus:border-emerald-500 focus:outline-none"
+                          className={`w-full rounded-lg bg-slate-900 px-3 py-2 text-sm text-slate-200 focus:outline-none ${
+                            fieldErrors?.name ? "border border-red-700 focus:border-red-500" : "border border-slate-700 focus:border-emerald-500"
+                          }`}
                           placeholder="Server name"
                           aria-label="Server name"
                           onClick={event => event.stopPropagation()}
                           onKeyDown={handleDraftKeyDown}
                           autoComplete="off"
                         />
+                        {fieldErrors?.name ? (
+                          <p className="mt-1 text-[11px] text-red-400">{fieldErrors.name}</p>
+                        ) : null}
                       </td>
                       <td className="py-3 px-3">
                         <input
@@ -945,15 +994,20 @@ export const ServerList: React.FC<ServerListProps> = ({
                               }
                               return next;
                             });
-                            if (error) setError(null);
+                            clearFieldError("url");
                           }}
-                          className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-200 focus:border-emerald-500 focus:outline-none"
+                          className={`w-full rounded-lg bg-slate-900 px-3 py-2 text-sm text-slate-200 focus:outline-none ${
+                            fieldErrors?.url ? "border border-red-700 focus:border-red-500" : "border border-slate-700 focus:border-emerald-500"
+                          }`}
                           placeholder={draft.type === "satellite" ? "https://satellite.earth/api/v1" : "https://example.com"}
                           aria-label="Server URL"
                           onClick={event => event.stopPropagation()}
                           onKeyDown={handleDraftKeyDown}
                           autoComplete="off"
                         />
+                        {fieldErrors?.url ? (
+                          <p className="mt-1 text-[11px] text-red-400">{fieldErrors.url}</p>
+                        ) : null}
                       </td>
                       <td className="py-3 px-3">{renderHealthCell(server, true)}</td>
                       <td className="py-3 px-3">
@@ -961,19 +1015,18 @@ export const ServerList: React.FC<ServerListProps> = ({
                           value={draft.type}
                           onChange={event => {
                             const nextType = event.target.value as ManagedServer["type"];
-                            setDraft(prev => ({
-                              ...prev,
-                              type: nextType,
-                              requiresAuth: nextType === "satellite" ? true : prev.requiresAuth,
-                              sync: nextType === "satellite" ? false : prev.sync,
-                            }));
-                            if (error) setError(null);
-                          }}
-                          className="w-full min-w-[8rem] rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-200 focus:border-emerald-500 focus:outline-none"
-                          aria-label="Server type"
-                          onClick={event => event.stopPropagation()}
-                          onKeyDown={handleDraftKeyDown}
-                        >
+                        setDraft(prev => ({
+                          ...prev,
+                          type: nextType,
+                          sync: nextType === "satellite" ? false : prev.sync,
+                        }));
+                        clearFieldErrors();
+                      }}
+                      className="w-full min-w-[8rem] rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-200 focus:border-emerald-500 focus:outline-none"
+                      aria-label="Server type"
+                      onClick={event => event.stopPropagation()}
+                      onKeyDown={handleDraftKeyDown}
+                    >
                           <option value="blossom">Blossom</option>
                           <option value="nip96">NIP-96</option>
                           <option value="satellite">Satellite</option>
@@ -983,28 +1036,11 @@ export const ServerList: React.FC<ServerListProps> = ({
                         <div className="flex justify-center">
                           <input
                             type="checkbox"
-                            checked={draft.type === "satellite" ? true : draft.requiresAuth}
-                            onChange={event => {
-                              if (draft.type === "satellite") return;
-                              setDraft(prev => ({ ...prev, requiresAuth: event.target.checked }));
-                              if (error) setError(null);
-                            }}
-                            aria-label="Requires auth"
-                            onClick={event => event.stopPropagation()}
-                            onKeyDown={handleDraftKeyDown}
-                            disabled={saving || draft.type === "satellite"}
-                          />
-                        </div>
-                      </td>
-                      <td className="py-3 px-3 text-center">
-                        <div className="flex justify-center">
-                          <input
-                            type="checkbox"
                             checked={draft.sync}
                             onChange={event => {
                               if (draft.type === "satellite") return;
                               setDraft(prev => ({ ...prev, sync: event.target.checked }));
-                              if (error) setError(null);
+                              clearFieldErrors();
                             }}
                             aria-label="Sync server"
                             onClick={event => event.stopPropagation()}
@@ -1017,7 +1053,8 @@ export const ServerList: React.FC<ServerListProps> = ({
                         <div className="flex justify-end gap-2">
                           <button
                             type="button"
-                            className="flex items-center justify-center rounded-lg bg-emerald-600 p-2 text-slate-50 transition hover:bg-emerald-500"
+                            className="flex items-center justify-center rounded-lg bg-emerald-600 p-2 text-slate-50 transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-60"
+                            disabled={saving}
                             onClick={event => {
                               event.stopPropagation();
                               handleSubmit();
@@ -1040,7 +1077,6 @@ export const ServerList: React.FC<ServerListProps> = ({
                             <CancelIcon size={16} />
                           </button>
                         </div>
-                        {error && <div className="mt-2 text-xs text-red-400 text-right">{error}</div>}
                       </td>
                     </tr>
                     {usageRow}
@@ -1064,9 +1100,27 @@ export const ServerList: React.FC<ServerListProps> = ({
                     className={`border-t border-slate-800 first:border-t-0 cursor-pointer transition-colors focus:outline-none focus:ring-2 focus:ring-emerald-500/60 focus:ring-offset-2 focus:ring-offset-slate-900 ${rowHighlightClass}`}
                   >
                     <td className="py-3 px-3 font-medium text-slate-100">
-                      <div className="flex items-center gap-2">
-                        <FolderIcon size={18} className="text-slate-300" />
-                        <span className="truncate">{server.name}</span>
+                      <div className="flex flex-col gap-2">
+                        <div className="flex items-center gap-2">
+                          <FolderIcon size={18} className="text-slate-300" />
+                          <span className="truncate">{server.name}</span>
+                          {isDefault ? (
+                            <StarIcon size={16} className="text-emerald-300" aria-label="Default server" />
+                          ) : null}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={event => {
+                            event.stopPropagation();
+                            toggleUsage(server.url);
+                          }}
+                          onKeyDown={event => event.stopPropagation()}
+                          className="self-start text-[11px] font-medium text-emerald-300 transition hover:text-emerald-200"
+                          aria-expanded={isUsageExpanded}
+                          aria-controls={usageRowId}
+                        >
+                          {isUsageExpanded ? "Hide server usage" : "View server usage"}
+                        </button>
                       </div>
                     </td>
                     <td className="py-3 px-3 text-xs text-slate-400">
@@ -1075,26 +1129,6 @@ export const ServerList: React.FC<ServerListProps> = ({
                     <td className="py-3 px-3">{renderHealthCell(server)}</td>
                     <td className="py-3 px-3 text-[11px] uppercase tracking-wide text-slate-300">
                       {server.type}
-                    </td>
-                    <td className="py-3 px-3 text-center">
-                      <label
-                        className="inline-flex cursor-not-allowed items-center gap-2 text-xs text-slate-400 opacity-60"
-                        onClick={e => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                        }}
-                        onKeyDown={e => e.stopPropagation()}
-                        aria-disabled
-                        title="Edit this server to change auth"
-                      >
-                        <input
-                          type="checkbox"
-                          checked={server.type === "satellite" ? true : Boolean(server.requiresAuth)}
-                          disabled
-                          readOnly
-                        />
-                        <span className="sr-only">Requires auth</span>
-                      </label>
                     </td>
                     <td className="py-3 px-3 text-center">
                       <label
@@ -1147,7 +1181,7 @@ export const ServerList: React.FC<ServerListProps> = ({
             })}
             {servers.length === 0 && !isAdding && !editingUrl && (
               <tr>
-                <td colSpan={8} className="py-6 px-3 text-sm text-center text-slate-400">
+                <td colSpan={6} className="py-6 px-3 text-sm text-center text-slate-400">
                   No servers yet. Add your first Blossom or NIP-96 server.
                 </td>
               </tr>

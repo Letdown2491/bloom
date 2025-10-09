@@ -12,7 +12,7 @@ import {
   removeShaFromRecord,
   type FolderListRecord,
 } from "../lib/folderList";
-import { containsReservedFolderSegment } from "../utils/blobMetadataStore";
+import { applyFolderUpdate, containsReservedFolderSegment, normalizeFolderPathInput } from "../utils/blobMetadataStore";
 
 const sortRecords = (records: Iterable<FolderListRecord>) =>
   Array.from(records).sort((a, b) => a.path.localeCompare(b.path, undefined, { sensitivity: "base" }));
@@ -40,12 +40,27 @@ export const FolderListProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const [error, setError] = useState<Error | null>(null);
   const foldersRef = useRef(new Map<string, FolderListRecord>());
 
-  const updateState = useCallback((records: FolderListRecord[]) => {
-    const filtered = records.filter(record => record.shas.length > 0);
-    const sorted = sortRecords(filtered);
-    foldersRef.current = new Map(sorted.map(record => [record.path, record]));
-    setFolders(sorted);
+  const hydrateMetadataFromRecords = useCallback((records: FolderListRecord[]) => {
+    records.forEach(record => {
+      const normalizedPath = normalizeFolderPathInput(record.path) ?? null;
+      const updatedAt = record.updatedAt;
+      record.shas.forEach(sha => {
+        if (!sha) return;
+        applyFolderUpdate(undefined, sha, normalizedPath, updatedAt);
+      });
+    });
   }, []);
+
+  const updateState = useCallback(
+    (records: FolderListRecord[]) => {
+      const filtered = records.filter(record => record.shas.length > 0);
+      const sorted = sortRecords(filtered);
+      foldersRef.current = new Map(sorted.map(record => [record.path, record]));
+      setFolders(sorted);
+      hydrateMetadataFromRecords(sorted);
+    },
+    [hydrateMetadataFromRecords]
+  );
 
   const refresh = useCallback(async () => {
     if (!ndk || !user) {

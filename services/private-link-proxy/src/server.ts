@@ -123,6 +123,7 @@ async function decryptEnvelope(event: NostrEvent): Promise<PrivateLinkEnvelope |
       if (parsed.version !== 1) continue;
       return parsed as PrivateLinkEnvelope;
     } catch (error) {
+      logger.error({ err: error, pubkey, alias }, 'decrypt attempt failed');
       continue;
     }
   }

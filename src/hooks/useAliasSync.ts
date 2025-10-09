@@ -2,7 +2,14 @@ import { useEffect, useMemo, useRef } from "react";
 import type { NDKEvent, NDKSubscription } from "@nostr-dev-kit/ndk";
 import { useCurrentPubkey, useNdk } from "../context/NdkContext";
 import { parseNip94Event } from "../lib/nip94";
-import { applyAliasUpdate, rememberAudioMetadata, sanitizeCoverUrl, type BlobAudioMetadata } from "../utils/blobMetadataStore";
+import {
+  applyAliasUpdate,
+  applyFolderUpdate,
+  normalizeFolderPathInput,
+  rememberAudioMetadata,
+  sanitizeCoverUrl,
+  type BlobAudioMetadata,
+} from "../utils/blobMetadataStore";
 import { normalizeRelayOrigin } from "../utils/relays";
 
 const normalizeAliasValue = (value: string | null | undefined) => {
@@ -21,6 +28,11 @@ const applyAliasFromEvent = (event: NDKEvent) => {
   if (!parsed) return;
   const alias = normalizeAliasValue(parsed.name);
   applyAliasUpdate(undefined, parsed.sha256, alias, parsed.createdAt);
+  const folderTag = event.tags?.find(tag => Array.isArray(tag) && tag[0] === "folder");
+  if (folderTag && typeof folderTag[1] === "string") {
+    const folderPath = normalizeFolderPathInput(folderTag[1]) ?? null;
+    applyFolderUpdate(undefined, parsed.sha256, folderPath, event.created_at);
+  }
   const audioMetadata = extractAudioMetadataFromEvent(event);
   if (audioMetadata) {
     const updatedAt = typeof event.created_at === "number" ? event.created_at * 1000 : undefined;

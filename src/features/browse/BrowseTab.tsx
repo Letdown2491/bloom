@@ -38,7 +38,6 @@ const BASE_FILTER_OPTIONS: FilterOption[] = [
   { id: "documents", label: "Documents", icon: DocumentIcon },
   { id: "images", label: "Images", icon: ImageIcon },
   { id: "music", label: "Audio", icon: MusicIcon },
-  { id: "pdfs", label: "PDFs", icon: DocumentIcon },
   { id: "videos", label: "Videos", icon: VideoIcon },
 ];
 
@@ -66,6 +65,7 @@ type BrowseControlsProps = {
   onSelectFilter: (mode: FilterMode) => void;
   filterMode: FilterMode;
   filterMenuRef: React.RefObject<HTMLDivElement>;
+  theme: "dark" | "light";
 };
 
 export const BrowseControls: React.FC<BrowseControlsProps> = ({
@@ -82,7 +82,30 @@ export const BrowseControls: React.FC<BrowseControlsProps> = ({
   onSelectFilter,
   filterMode,
   filterMenuRef,
+  theme,
 }) => {
+  const isLightTheme = theme === "light";
+  const menuContainerClass = isLightTheme
+    ? "absolute right-0 z-50 mt-2 w-48 rounded-xl border border-slate-300 bg-white p-1 text-slate-700 shadow-lg"
+    : "absolute right-0 z-50 mt-2 w-48 rounded-xl border border-slate-800 bg-slate-950/95 p-1 text-slate-100 shadow-lg backdrop-blur";
+  const menuItemClass = (isActive: boolean) =>
+    isLightTheme
+      ? `flex w-full items-center gap-2 px-2 py-2 text-left text-sm transition focus:outline-none ${
+          isActive ? "text-emerald-600" : "text-slate-700 hover:text-emerald-600"
+        }`
+      : `flex w-full items-center gap-2 px-2 py-2 text-left text-sm transition focus:outline-none ${
+          isActive ? "text-emerald-200" : "text-slate-100 hover:text-emerald-300"
+        }`;
+  const menuDividerClass = isLightTheme ? "mt-1 border-t border-slate-200 pt-1" : "mt-1 border-t border-slate-800 pt-1";
+  const clearFiltersClass =
+    filterMode === "all"
+      ? isLightTheme
+        ? "w-full px-2 py-2 text-left text-sm transition focus:outline-none cursor-default text-slate-400"
+        : "w-full px-2 py-2 text-left text-sm transition focus:outline-none cursor-default text-slate-500"
+      : isLightTheme
+      ? "w-full px-2 py-2 text-left text-sm transition focus:outline-none text-slate-700 hover:text-emerald-600"
+      : "w-full px-2 py-2 text-left text-sm transition focus:outline-none text-slate-100 hover:text-emerald-300";
+
   return (
     <>
       <button
@@ -123,10 +146,7 @@ export const BrowseControls: React.FC<BrowseControlsProps> = ({
           <span className="sr-only">{filterButtonAriaLabel}</span>
         </button>
         {isFilterMenuOpen && (
-          <div
-            role="menu"
-            className="absolute right-0 z-50 mt-2 w-48 rounded-xl border border-slate-800 bg-slate-950/95 p-1 shadow-lg backdrop-blur"
-          >
+          <div role="menu" className={menuContainerClass}>
             {FILTER_OPTIONS.map(option => {
               const isActive = filterMode === option.id;
               return (
@@ -139,16 +159,14 @@ export const BrowseControls: React.FC<BrowseControlsProps> = ({
                   }}
                   role="menuitemradio"
                   aria-checked={isActive}
-                  className={`flex w-full items-center gap-2 px-2 py-2 text-left text-sm transition focus:outline-none ${
-                    isActive ? "text-emerald-200" : "text-slate-100 hover:text-emerald-300"
-                  }`}
+                  className={menuItemClass(isActive)}
                 >
                   <option.icon size={16} />
                   <span>{option.label}</span>
                 </a>
               );
             })}
-            <div className="mt-1 border-t border-slate-800 pt-1">
+            <div className={menuDividerClass}>
               <a
                 href="#"
                 onClick={event => {
@@ -159,11 +177,7 @@ export const BrowseControls: React.FC<BrowseControlsProps> = ({
                 }}
                 role="menuitem"
                 aria-disabled={filterMode === "all"}
-                className={`w-full px-2 py-2 text-left text-sm transition focus:outline-none ${
-                  filterMode === "all"
-                    ? "cursor-default text-slate-500"
-                    : "text-slate-100 hover:text-emerald-300"
-                }`}
+                className={clearFiltersClass}
                 tabIndex={filterMode === "all" ? -1 : 0}
               >
                 Clear Filters

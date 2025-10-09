@@ -3,7 +3,7 @@ import { useNdk, type RelayHealth } from "../context/NdkContext";
 import { usePreferredRelays, type RelayPolicy } from "../hooks/usePreferredRelays";
 import { normalizeRelayOrigin, sanitizeRelayUrl } from "../utils/relays";
 import type { EventTemplate } from "../lib/blossomClient";
-import { SaveIcon, TrashIcon, CancelIcon, EditIcon, RelayIcon } from "./icons";
+import { SaveIcon, TrashIcon, CancelIcon, EditIcon, RelayIcon, RefreshIcon, PlusIcon } from "./icons";
 import { loadNdkModule } from "../lib/ndkModule";
 import type { StatusMessageTone } from "../types/status";
 
@@ -145,9 +145,10 @@ const buildNip65Template = (policies: RelayPolicy[]): EventTemplate => {
 
 type RelayListProps = {
   showStatusMessage: (message: string, tone?: StatusMessageTone, duration?: number) => void;
+  compact?: boolean;
 };
 
-const RelayList: React.FC<RelayListProps> = ({ showStatusMessage }) => {
+const RelayList: React.FC<RelayListProps> = ({ showStatusMessage, compact = false }) => {
   const { relayPolicies, loading, refresh } = usePreferredRelays();
   const { relayHealth, ndk, signer } = useNdk();
   const [drafts, setDrafts] = useState<RelayDraft[]>([]);
@@ -157,6 +158,9 @@ const RelayList: React.FC<RelayListProps> = ({ showStatusMessage }) => {
   const pendingSaveRef = useRef<PendingRelaySave | null>(null);
   const retryPendingSaveTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [pendingSaveVersion, setPendingSaveVersion] = useState(0);
+  const [refreshingStatus, setRefreshingStatus] = useState(false);
+  const [refreshCooldownActive, setRefreshCooldownActive] = useState(false);
+  const refreshCooldownTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     setDrafts(policiesToDrafts(relayPolicies));
@@ -166,6 +170,10 @@ const RelayList: React.FC<RelayListProps> = ({ showStatusMessage }) => {
     return () => {
       if (retryPendingSaveTimeout.current) {
         clearTimeout(retryPendingSaveTimeout.current);
+      }
+      if (refreshCooldownTimeoutRef.current) {
+        clearTimeout(refreshCooldownTimeoutRef.current);
+        refreshCooldownTimeoutRef.current = null;
       }
     };
   }, []);
@@ -388,24 +396,70 @@ const RelayList: React.FC<RelayListProps> = ({ showStatusMessage }) => {
     editingSnapshotRef.current = null;
   };
 
+  const startRefreshCooldown = useCallback(() => {
+    if (refreshCooldownTimeoutRef.current) {
+      clearTimeout(refreshCooldownTimeoutRef.current);
+    }
+    setRefreshCooldownActive(true);
+    refreshCooldownTimeoutRef.current = setTimeout(() => {
+      refreshCooldownTimeoutRef.current = null;
+      setRefreshCooldownActive(false);
+    }, 4000);
+  }, []);
+
+  const handleRefreshStatus = useCallback(async () => {
+    if (refreshingStatus || loading || refreshCooldownActive) return;
+    setRefreshingStatus(true);
+    try {
+      await refresh();
+      showStatusMessage("Requested latest relay information.", "info");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to refresh relay information.";
+      showStatusMessage(message, "error");
+    } finally {
+      setRefreshingStatus(false);
+      startRefreshCooldown();
+    }
+  }, [loading, refresh, refreshCooldownActive, refreshingStatus, showStatusMessage, startRefreshCooldown]);
+
+  const refreshDisabled = refreshingStatus || loading || refreshCooldownActive;
+  const refreshTitle = refreshingStatus
+    ? "Refreshing relay information…"
+    : refreshCooldownActive
+    ? "Please wait a moment before refreshing again."
+    : undefined;
+
+  const controls = (
+      <>
+        <button
+          type="button"
+          onClick={handleAddRelay}
+          className="inline-flex items-center gap-2 rounded-xl bg-slate-800 px-3 py-2 text-sm text-slate-200 transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
+          disabled={!canEdit || saving}
+        >
+          <PlusIcon size={16} />
+          Add Relay
+        </button>
+        <button
+          type="button"
+          onClick={handleRefreshStatus}
+          className="inline-flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-900/80 px-3 py-2 text-sm text-slate-200 transition hover:border-slate-600 disabled:cursor-not-allowed disabled:opacity-40"
+          disabled={refreshDisabled}
+          aria-label="Refresh relay status"
+          title={refreshTitle}
+        >
+          <RefreshIcon size={16} className={refreshingStatus ? "animate-spin" : undefined} />
+          <span>{refreshingStatus ? "Refreshing…" : "Refresh"}</span>
+        </button>
+      </>
+  );
+
   return (
     <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4 flex-1 min-h-0">
-      <header className="flex items-center justify-between mb-3">
-        <div>
-          <h2 className="text-lg font-semibold text-slate-100">Relays</h2>
-          <p className="text-xs text-slate-400">Publish your preferred relays (NIP-65) and monitor their status.</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={handleAddRelay}
-            className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-sm disabled:opacity-40 disabled:cursor-not-allowed"
-            disabled={!canEdit || saving}
-          >
-            Add Relay
-          </button>
-        </div>
-      </header>
+      <div className={`mb-3 flex flex-wrap items-center ${compact ? "justify-end" : "justify-between"} gap-2`}>
+        {!compact ? <h2 className="text-lg font-semibold text-slate-100">Relays</h2> : null}
+        <div className="flex items-center gap-2">{controls}</div>
+      </div>
 
       {!canEdit && (
         <div className="mb-3 rounded-xl border border-slate-700 bg-slate-900/80 px-3 py-2 text-xs text-slate-300" role="alert">

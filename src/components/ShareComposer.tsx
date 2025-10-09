@@ -7,6 +7,7 @@ import { PrivateLinkPanel } from "../features/share/PrivateLinkPanel";
 import { PRIVATE_LINK_SERVICE_HOST } from "../constants/privateLinks";
 import { prettyBytes } from "../utils/format";
 import { loadNdkModule, type NdkModule } from "../lib/ndkModule";
+import { useUserPreferences } from "../context/UserPreferencesContext";
 
 export type SharePayload = {
   url: string;
@@ -436,6 +437,10 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
   const [metadataError, setMetadataError] = useState<string | null>(null);
   const [globalError, setGlobalError] = useState<string | null>(null);
   const [profileInfo, setProfileInfo] = useState<ProfileInfo>(() => emptyProfileInfo());
+  const {
+    preferences: { theme },
+  } = useUserPreferences();
+  const isLightTheme = theme === "light";
 
   const runtimeRef = useRef<NdkModule | null>(null);
   const normalizeRelayUrlRef = useRef<NdkModule["normalizeRelayUrl"] | null>(null);
@@ -1194,7 +1199,47 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
     : "flex flex-1 min-h-0 w-full max-w-5xl flex-col lg:flex-row gap-6 mx-auto";
 
   const shareCardClasses = "flex h-full w-full flex-col overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/80 shadow-lg";
-  const previewCardClasses = "hidden lg:flex lg:w-1/2 flex-col rounded-2xl border border-slate-800 bg-slate-900/70";
+  const previewCardClasses = `hidden lg:flex lg:w-1/2 flex-col rounded-2xl border ${
+    isLightTheme ? "border-slate-200 bg-white text-slate-700" : "border-slate-800 bg-slate-900/70 text-slate-100"
+  }`;
+  const previewTitleClass = isLightTheme ? "text-xl font-semibold text-slate-900" : "text-xl font-semibold text-slate-100";
+  const privateLinkCardClass = isLightTheme
+    ? "rounded-xl border border-slate-200 bg-slate-50 p-5 text-sm text-slate-700"
+    : "rounded-xl border border-slate-800 bg-slate-950/70 p-5 text-sm text-slate-200";
+  const privateLinkNameClass = isLightTheme ? "font-medium text-slate-900" : "font-medium text-slate-100";
+  const privateLinkMetaTextClass = isLightTheme ? "text-xs text-slate-500" : "text-xs text-slate-400";
+  const privateLinkHashClass = isLightTheme ? "font-mono text-[11px] text-slate-600" : "font-mono text-[11px] text-slate-300";
+  const privateLinkInfoTextClass = isLightTheme ? "space-y-2 text-xs text-slate-600" : "space-y-2 text-xs text-slate-400";
+  const privateLinkHostClass = isLightTheme ? "font-mono text-slate-700" : "font-mono text-slate-200";
+  const privateLinkMediaContainerClass = isLightTheme
+    ? "mt-4 overflow-hidden rounded-xl border border-slate-200 bg-slate-100"
+    : "mt-4 overflow-hidden rounded-xl border border-slate-800 bg-slate-950/80";
+  const privateLinkLinkPreviewClass = isLightTheme
+    ? "mt-4 rounded-xl border border-slate-200 bg-slate-100 p-4 text-xs text-slate-600"
+    : "mt-4 rounded-xl border border-slate-800 bg-slate-950/80 p-4 text-xs text-slate-300";
+  const privateLinkAnchorClass = isLightTheme
+    ? "mt-1 block truncate font-mono text-[11px] text-emerald-600 hover:text-emerald-500"
+    : "mt-1 block truncate font-mono text-[11px] text-emerald-300 hover:text-emerald-200";
+  const previewMessageCardClass = isLightTheme
+    ? "rounded-xl border border-slate-200 bg-slate-50 p-5"
+    : "rounded-xl border border-slate-800 bg-slate-950/70 p-5";
+  const previewAvatarClass = isLightTheme
+    ? "flex h-12 w-12 items-center justify-center overflow-hidden rounded-full bg-slate-200 text-sm font-semibold text-slate-600"
+    : "flex h-12 w-12 items-center justify-center overflow-hidden rounded-full bg-slate-800 text-sm font-semibold text-slate-300";
+  const previewDisplayNameClass = isLightTheme
+    ? "truncate text-sm font-semibold text-slate-900"
+    : "truncate text-sm font-semibold text-slate-100";
+  const previewHandleClass = isLightTheme ? "truncate text-xs text-slate-500" : "truncate text-xs text-slate-500";
+  const previewNoteTextClass = isLightTheme
+    ? "whitespace-pre-wrap break-words text-sm text-slate-800"
+    : "whitespace-pre-wrap break-words text-sm text-slate-100";
+  const previewPlaceholderClass = isLightTheme ? "text-slate-500" : "text-slate-500";
+  const previewMediaContainerClass = isLightTheme
+    ? "flex max-h-72 w-full items-center justify-center overflow-hidden rounded-xl border border-slate-200 bg-slate-100"
+    : "flex max-h-72 w-full items-center justify-center overflow-hidden rounded-xl border border-slate-800 bg-slate-950/80";
+  const previewActionCircleClass = isLightTheme
+    ? "flex h-9 w-9 items-center justify-center rounded-full bg-slate-100 text-slate-500"
+    : "flex h-9 w-9 items-center justify-center rounded-full bg-slate-900/60 text-slate-300";
 
   const shareAppendix = useMemo(() => {
     if (!payload) return null;
@@ -1506,7 +1551,7 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
         <aside className={previewCardClasses}>
           <div className="flex flex-col gap-5 p-5">
             <div>
-              <h1 className="text-xl font-semibold text-slate-100">
+              <h1 className={previewTitleClass}>
                 {shareMode === "note"
                   ? "Note Preview"
                   : shareMode === "private-link"
@@ -1519,29 +1564,29 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
 
             <div className="flex-1 overflow-auto">
               {shareMode === "private-link" ? (
-                <div className="rounded-xl border border-slate-800 bg-slate-950/70 p-5 text-sm text-slate-200">
+                <div className={privateLinkCardClass}>
                   <div className="mb-4 space-y-1">
                     <div className="text-xs uppercase tracking-wide text-slate-500">File summary</div>
-                    <div className="font-medium text-slate-100">{data.name ?? "Unnamed file"}</div>
+                    <div className={privateLinkNameClass}>{data.name ?? "Unnamed file"}</div>
                     {typeof data.size === "number" && Number.isFinite(data.size) && (
-                      <div className="text-xs text-slate-400">
+                      <div className={privateLinkMetaTextClass}>
                         Size: {prettyBytes(Math.max(0, Math.round(data.size)))}
                       </div>
                     )}
                     {data.sha256 && (
-                      <div className="text-xs text-slate-400">
-                        SHA-256: <span className="font-mono text-[11px] text-slate-300">{data.sha256}</span>
+                      <div className={privateLinkMetaTextClass}>
+                        SHA-256: <span className={privateLinkHashClass}>{data.sha256}</span>
                       </div>
                     )}
                   </div>
-                  <div className="space-y-2 text-xs text-slate-400">
+                  <div className={privateLinkInfoTextClass}>
                     <p>
-                      Private links proxy downloads through <span className="font-mono text-slate-200">{PRIVATE_LINK_SERVICE_HOST}</span>. Recipients only see the proxy URL, never the Blossom endpoint.
+                      Private links proxy downloads through <span className={privateLinkHostClass}>{PRIVATE_LINK_SERVICE_HOST}</span>. Recipients only see the proxy URL, never the Blossom endpoint.
                     </p>
                     <p>Use the controls on the left to generate shareable links for this file.</p>
                   </div>
                   {mediaType === "image" ? (
-                    <div className="mt-4 overflow-hidden rounded-xl border border-slate-800 bg-slate-950/80">
+                    <div className={privateLinkMediaContainerClass}>
                       <img
                         src={data.url}
                         alt={data.name ? `Preview of ${data.name}` : "Shared media preview"}
@@ -1550,13 +1595,13 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
                       />
                     </div>
                   ) : data.url ? (
-                    <div className="mt-4 rounded-xl border border-slate-800 bg-slate-950/80 p-4 text-xs text-slate-300">
+                    <div className={privateLinkLinkPreviewClass}>
                       <div className="uppercase tracking-wide text-slate-500">Link preview</div>
                       <a
                         href={data.url}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="mt-1 block truncate font-mono text-[11px] text-emerald-300 hover:text-emerald-200"
+                        className={privateLinkAnchorClass}
                       >
                         {data.url}
                       </a>
@@ -1564,10 +1609,10 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
                   ) : null}
                 </div>
               ) : (
-                <div className="rounded-xl border border-slate-800 bg-slate-950/70 p-5">
+                <div className={previewMessageCardClass}>
                   <div className="flex flex-col gap-5">
                     <div className="flex items-start gap-4">
-                      <div className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-full bg-slate-800 text-sm font-semibold text-slate-300">
+                      <div className={previewAvatarClass}>
                         {previewAvatar ? (
                           <img
                             src={previewAvatar}
@@ -1580,17 +1625,17 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
                       )}
                     </div>
                     <div className="flex min-w-0 flex-col">
-                      <span className="truncate text-sm font-semibold text-slate-100">{previewDisplayName}</span>
-                      <span className="truncate text-xs text-slate-500">{previewHandle} | just now</span>
+                      <span className={previewDisplayNameClass}>{previewDisplayName}</span>
+                      <span className={previewHandleClass}>{previewHandle} | just now</span>
                     </div>
                   </div>
 
-                  <div className="whitespace-pre-wrap break-words text-sm text-slate-100">
-                    {previewNote ? previewNote : <span className="text-slate-500">Start typing to add a message.</span>}
+                  <div className={previewNoteTextClass}>
+                    {previewNote ? previewNote : <span className={previewPlaceholderClass}>Start typing to add a message.</span>}
                   </div>
 
                   {mediaType && (
-                    <div className="flex max-h-72 w-full items-center justify-center overflow-hidden rounded-xl border border-slate-800 bg-slate-950/80">
+                    <div className={previewMediaContainerClass}>
                       {mediaType === "image" ? (
                         <img
                           src={data.url}
@@ -1616,11 +1661,7 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
                     <div className="pt-1">
                       <div className="flex items-center justify-between text-slate-500">
                         {PREVIEW_ACTIONS.map(action => (
-                          <span
-                            key={action.key}
-                            className="flex h-9 w-9 items-center justify-center rounded-full bg-slate-900/60"
-                            title={action.label}
-                          >
+                          <span key={action.key} className={previewActionCircleClass} title={action.label}>
                             <action.icon className="h-4 w-4" />
                           </span>
                         ))}

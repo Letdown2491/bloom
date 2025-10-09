@@ -53,7 +53,7 @@ export const matchesFilter = (blob: BlossomBlob, filter: FilterMode) => {
     case "pdfs":
       return isPdfBlob(blob);
     case "documents":
-      return isDocumentBlob(blob);
+      return isDocumentBlob(blob) || isPdfBlob(blob);
     case "all":
     default:
       return true;

@@ -7,7 +7,7 @@ import type { TabId } from "../types/tabs";
 import type { FilterMode } from "../types/filter";
 import type { DefaultSortOption } from "../context/UserPreferencesContext";
 import type { SyncStateSnapshot } from "../features/workspace/TransferTabContainer";
-import type { BrowseNavigationState } from "../features/workspace/BrowseTabContainer";
+import type { BrowseActiveListState, BrowseNavigationState } from "../features/workspace/BrowseTabContainer";
 import type { SharePayload, ShareCompletion } from "./ShareComposer";
 import type { ProfileMetadataPayload } from "../features/profile/ProfilePanel";
 import type { NdkContextValue } from "../context/NdkContext";
@@ -69,11 +69,17 @@ export type WorkspaceSectionProps = {
   onProvideBrowseNavigation: (navigation: BrowseNavigationState | null) => void;
   onFilterModeChange: (mode: FilterMode) => void;
   searchQuery: string;
+  onBrowseActiveListChange: (state: BrowseActiveListState | null) => void;
+  browseRestoreState: BrowseActiveListState | null;
+  browseRestoreKey: number | null;
+  onBrowseRestoreHandled: () => void;
+  uploadFolderSuggestion: string | null;
   shareState: ShareWorkflowState["shareState"];
   onClearShareState: () => void;
   onShareComplete: (result: ShareCompletion) => void;
   defaultServerUrl: string | null;
   keepSearchExpanded: boolean;
+  theme: "dark" | "light";
   syncEnabled: boolean;
   syncLoading: boolean;
   syncError: string | null;
@@ -87,6 +93,7 @@ export type WorkspaceSectionProps = {
   onSetShowGridPreviews: (value: boolean) => void;
   onSetShowListPreviews: (value: boolean) => void;
   onSetKeepSearchExpanded: (value: boolean) => void;
+  onSetTheme: (theme: "dark" | "light") => void;
   saving: boolean;
   signer: NdkContextValue["signer"];
   onAddServer: (server: ManagedServer) => void;
@@ -123,11 +130,17 @@ export const WorkspaceSection = memo(function WorkspaceSection({
   onProvideBrowseNavigation,
   onFilterModeChange,
   searchQuery,
+  onBrowseActiveListChange,
+  browseRestoreState,
+  browseRestoreKey,
+  onBrowseRestoreHandled,
+  uploadFolderSuggestion,
   shareState,
   onClearShareState,
   onShareComplete,
   defaultServerUrl,
   keepSearchExpanded,
+  theme,
   syncEnabled,
   syncLoading,
   syncError,
@@ -141,6 +154,7 @@ export const WorkspaceSection = memo(function WorkspaceSection({
   onSetShowGridPreviews,
   onSetShowListPreviews,
   onSetKeepSearchExpanded,
+  onSetTheme,
   saving,
   signer,
   onAddServer,
@@ -171,6 +185,7 @@ export const WorkspaceSection = memo(function WorkspaceSection({
             servers={localServers}
             selectedServer={selectedServer}
             homeNavigationKey={homeNavigationKey}
+            theme={theme}
             showGridPreviews={showGridPreviews}
             showListPreviews={showListPreviews}
             defaultSortOption={defaultSortOption}
@@ -187,6 +202,11 @@ export const WorkspaceSection = memo(function WorkspaceSection({
             onProvideBrowseNavigation={onProvideBrowseNavigation}
             onFilterModeChange={onFilterModeChange}
             searchQuery={searchQuery}
+            onBrowseActiveListChange={onBrowseActiveListChange}
+            browseRestoreState={browseRestoreState}
+            browseRestoreKey={browseRestoreKey}
+            onBrowseRestoreHandled={onBrowseRestoreHandled}
+            uploadFolderSuggestion={uploadFolderSuggestion}
           />
         </Suspense>
 
@@ -265,12 +285,14 @@ export const WorkspaceSection = memo(function WorkspaceSection({
           <SettingsPanelLazy
             servers={localServers}
             defaultServerUrl={defaultServerUrl}
+            selectedServerUrl={selectedServer}
             showIconsPreviews={showGridPreviews}
             showListPreviews={showListPreviews}
             defaultViewMode={defaultViewMode}
             defaultFilterMode={defaultFilterMode}
             defaultSortOption={defaultSortOption}
             keepSearchExpanded={keepSearchExpanded}
+            theme={theme}
             syncEnabled={syncEnabled}
             syncLoading={syncLoading}
             syncError={syncError}
@@ -281,9 +303,20 @@ export const WorkspaceSection = memo(function WorkspaceSection({
             onSetDefaultFilterMode={onSetDefaultFilterMode}
             onSetDefaultSortOption={onSetDefaultSortOption}
             onSetDefaultServer={onSetDefaultServer}
+            onSelectServer={onSelectServer}
+            onAddServer={onAddServer}
+            onUpdateServer={onUpdateServer}
+            onRemoveServer={onRemoveServer}
+            onSyncServers={onSyncSelectedServers}
+            serverSyncDisabled={syncButtonDisabled}
+            serverSyncInProgress={syncBusy}
+            savingServers={saving}
+            serverActionsDisabled={!signer}
+            serverValidationError={serverValidationError}
             onSetShowIconsPreviews={onSetShowGridPreviews}
             onSetShowListPreviews={onSetShowListPreviews}
             onSetKeepSearchExpanded={onSetKeepSearchExpanded}
+            onSetTheme={onSetTheme}
             showStatusMessage={showStatusMessage}
           />
         </Suspense>

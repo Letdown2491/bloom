@@ -6,6 +6,60 @@
   color-scheme: dark;
 }
 
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+
+:root[data-theme="light"] body {
+  background-color: #f8fafc;
+  color: #0f172a;
+}
+
+:root[data-theme="light"] .bg-slate-950,
+:root[data-theme="light"] .bg-slate-900,
+:root[data-theme="light"] .bg-slate-900\/80,
+:root[data-theme="light"] .bg-slate-900\/70,
+:root[data-theme="light"] .bg-slate-900\/60,
+:root[data-theme="light"] .bg-slate-900\/40,
+:root[data-theme="light"] .bg-slate-800,
+:root[data-theme="light"] .bg-slate-800\/70,
+:root[data-theme="light"] .bg-slate-800\/60,
+:root[data-theme="light"] .bg-slate-800\/40,
+:root[data-theme="light"] .bg-slate-700,
+:root[data-theme="light"] .bg-slate-700\/60 {
+  background-color: #ffffff !important;
+}
+
+:root[data-theme="light"] .bg-slate-900\/70 {
+  background-color: rgba(255, 255, 255, 0.85) !important;
+}
+
+:root[data-theme="light"] .border-slate-800,
+:root[data-theme="light"] .border-slate-700,
+:root[data-theme="light"] .border-slate-600 {
+  border-color: #d0d5dd !important;
+}
+
+:root[data-theme="light"] .text-slate-100 {
+  color: #0f172a !important;
+}
+
+:root[data-theme="light"] .text-slate-200 {
+  color: #1e293b !important;
+}
+
+:root[data-theme="light"] .text-slate-300 {
+  color: #334155 !important;
+}
+
+:root[data-theme="light"] .text-slate-400 {
+  color: #475569 !important;
+}
+
+:root[data-theme="light"] .text-slate-500 {
+  color: #64748b !important;
+}
+
 @layer base {
   html {
     @apply overflow-x-hidden;
@@ -27,4 +81,29 @@ input, select, textarea {
 }
 .grid-col {
   @apply rounded-xl bg-slate-900 border border-slate-800 p-3;
+}
+
+:root[data-theme="light"] button:not([role="switch"]) {
+  background-color: #ffffff;
+  color: #0f172a;
+  border-color: #d0d5dd;
+}
+
+:root[data-theme="light"] button:not([role="switch"]):hover {
+  background-color: #f1f5f9;
+}
+
+:root[data-theme="light"] input,
+:root[data-theme="light"] select,
+:root[data-theme="light"] textarea {
+  background-color: #ffffff;
+  border-color: #d0d5dd;
+  color: #0f172a;
+}
+
+:root[data-theme="light"] .card,
+:root[data-theme="light"] .grid-col {
+  background-color: #ffffff;
+  border-color: #e2e8f0;
+  color: #0f172a;
 }

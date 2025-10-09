@@ -2,6 +2,7 @@ import React from "react";
 
 type IconProps = React.SVGProps<SVGSVGElement> & {
   size?: number;
+  title?: string;
 };
 
 function createIcon(path: React.ReactNode) {
@@ -183,6 +184,14 @@ export const StopIcon = createIcon(
   </>
 );
 
+export const WarningIcon = createIcon(
+  <>
+    <path d="m12 4 9 16H3l9-16Z" />
+    <path d="M12 10v4" />
+    <path d="M12 18h.01" />
+  </>
+);
+
 export const FolderIcon = createIcon(
   <>
     <path
@@ -276,6 +285,19 @@ export const CancelIcon = createIcon(
     <circle cx="12" cy="12" r="8" />
     <path d="m15 9-6 6" />
     <path d="m9 9 6 6" />
+  </>
+);
+
+export const PlusIcon = createIcon(
+  <>
+    <path d="M12 5v14" />
+    <path d="M5 12h14" />
+  </>
+);
+
+export const StarIcon = createIcon(
+  <>
+    <path d="m12 4.5 2.18 4.42 4.88.71-3.53 3.44.83 4.86L12 15.68 7.64 18.93l.83-4.86-3.53-3.44 4.88-.71Z" />
   </>
 );
 

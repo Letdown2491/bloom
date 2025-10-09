@@ -345,11 +345,17 @@ export type BrowseTabContainerProps = {
   sortDirection: SortDirection;
   onNavigationChange?: (navigation: BrowseNavigationState | null) => void;
   searchTerm: string;
+  onActiveListChange?: (state: BrowseActiveListState | null) => void;
+  restoreActiveList?: BrowseActiveListState | null;
+  restoreActiveListKey?: number | null;
+  onRestoreActiveList?: () => void;
 };
 
-type ActiveListState =
+export type BrowseActiveListState =
   | { type: "private"; serverUrl: string | null }
   | { type: "folder"; scope: FolderScope; path: string; serverUrl?: string | null };
+
+type ActiveListState = BrowseActiveListState;
 
 export type BrowseNavigationSegment = {
   id: string;
@@ -385,6 +391,10 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
   sortDirection,
   onNavigationChange,
   searchTerm,
+  onActiveListChange,
+  restoreActiveList,
+  restoreActiveListKey,
+  onRestoreActiveList,
 }) => {
   const {
     aggregated,
@@ -406,6 +416,17 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
   const [activeList, setActiveList] = useState<ActiveListState | null>(null);
   const playbackUrlCacheRef = useRef(new Map<string, string>());
   const autoPrivateNavigationRef = useRef<{ previous: ActiveListState | null } | null>(null);
+
+  useEffect(() => {
+    onActiveListChange?.(activeList);
+  }, [activeList, onActiveListChange]);
+
+  useEffect(() => {
+    if (restoreActiveListKey == null) return;
+    setActiveList(() => (restoreActiveList ? { ...restoreActiveList } : null));
+    clearSelection();
+    onRestoreActiveList?.();
+  }, [restoreActiveListKey, restoreActiveList, clearSelection, onRestoreActiveList]);
 
   const metadataSource = useMemo(() => [...aggregated.blobs, ...privateBlobs], [aggregated.blobs, privateBlobs]);
   const metadataMap = useAudioMetadataMap(metadataSource);

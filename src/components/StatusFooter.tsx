@@ -18,6 +18,7 @@ type StatusFooterProps = {
   allServersValue: string;
   showGithubLink: boolean;
   showSupportLink: boolean;
+  theme: "dark" | "light";
 };
 
 export const StatusFooter = memo(function StatusFooter({
@@ -34,6 +35,7 @@ export const StatusFooter = memo(function StatusFooter({
   allServersValue,
   showGithubLink,
   showSupportLink,
+  theme,
 }: StatusFooterProps) {
   if (!isSignedIn) {
     return (
@@ -43,6 +45,23 @@ export const StatusFooter = memo(function StatusFooter({
       />
     );
   }
+
+  const serverTextClass = theme === "light" ? "text-slate-700" : "text-slate-300";
+  const serverBadgeClass =
+    theme === "light"
+      ? "rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs text-slate-700"
+      : "rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-200";
+  const serverSelectClass =
+    theme === "light"
+      ? "rounded-lg border border-slate-300 bg-white px-2 py-1 text-xs text-slate-700 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+      : "rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-200 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500";
+
+  const supportLinkClass =
+    theme === "light"
+      ? "flex items-center gap-2 rounded-lg border border-amber-400/60 bg-amber-200/60 px-3 py-1 text-amber-800 transition hover:border-amber-500 hover:text-amber-700"
+      : "flex items-center gap-2 rounded-lg border border-amber-400/40 bg-amber-500/10 px-3 py-1 text-amber-200 transition hover:border-amber-300 hover:text-amber-100";
+  const supportIconClass = theme === "light" ? "text-amber-700" : undefined;
+  const supportTextClass = theme === "light" ? "font-medium text-amber-800" : "font-medium";
 
   return (
     <footer className="relative border-t border-slate-800 bg-slate-900/70 px-4 py-3 text-xs text-slate-300 flex flex-wrap items-center gap-4 min-h-12">
@@ -69,12 +88,16 @@ export const StatusFooter = memo(function StatusFooter({
 
       {showServerSelector && (
         <div className="flex items-center gap-2">
-          <label htmlFor="status-server" className="flex items-center text-slate-300" aria-label="Server selector">
+          <label
+            htmlFor="status-server"
+            className={`flex items-center ${serverTextClass}`}
+            aria-label="Server selector"
+          >
             <span className="sr-only">Server</span>
             <ServersIcon size={14} aria-hidden="true" />
           </label>
           {localServers.length <= 1 ? (
-            <span className="rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-200">
+            <span className={serverBadgeClass}>
               {localServers[0]?.name || "All servers"}
             </span>
           ) : (
@@ -82,7 +105,7 @@ export const StatusFooter = memo(function StatusFooter({
               id="status-server"
               value={statusSelectValue}
               onChange={onStatusServerChange}
-              className="rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-200 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+              className={serverSelectClass}
             >
               <option value={allServersValue}>All servers</option>
               {localServers.map(server => (
@@ -111,10 +134,10 @@ export const StatusFooter = memo(function StatusFooter({
               href="https://getalby.com/p/invincibleperfection384952"
               target="_blank"
               rel="noopener noreferrer"
-              className="flex items-center gap-2 rounded-lg border border-amber-400/40 bg-amber-500/10 px-3 py-1 text-amber-200 transition hover:border-amber-300 hover:text-amber-100"
+              className={supportLinkClass}
             >
-              <LightningIcon size={14} aria-hidden="true" />
-              <span className="font-medium">Support Bloom</span>
+              <LightningIcon size={14} aria-hidden="true" className={supportIconClass} />
+              <span className={supportTextClass}>Support Bloom</span>
             </a>
           )}
         </div>

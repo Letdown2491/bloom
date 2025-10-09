@@ -16,7 +16,7 @@ import type { BlossomBlob } from "./lib/blossomClient";
 import type { StatusMessageTone } from "./types/status";
 import type { TabId } from "./types/tabs";
 import type { SyncStateSnapshot } from "./features/workspace/TransferTabContainer";
-import type { BrowseNavigationState } from "./features/workspace/BrowseTabContainer";
+import type { BrowseActiveListState, BrowseNavigationState } from "./features/workspace/BrowseTabContainer";
 import type { FilterMode } from "./types/filter";
 import type { ProfileMetadataPayload } from "./features/profile/ProfilePanel";
 import { deriveServerNameFromUrl } from "./utils/serverName";
@@ -29,8 +29,6 @@ import {
   SearchIcon,
   TransferIcon,
   UploadIcon,
-  ServersIcon,
-  RelayIcon,
   SettingsIcon,
   EditIcon,
   LinkIcon,
@@ -68,7 +66,7 @@ const normalizeManagedServer = (server: ManagedServer): ManagedServer => {
   const fallbackName = derivedName || normalizedUrl.replace(/^https?:\/\//, "");
   const name = (server.name || "").trim() || fallbackName;
 
-  const requiresAuth = server.type === "satellite" ? true : Boolean(server.requiresAuth);
+  const requiresAuth = server.type === "satellite" ? true : server.requiresAuth !== false;
   return {
     ...server,
     url: normalizedUrl,
@@ -114,6 +112,7 @@ export default function App() {
     setShowGridPreviews,
     setShowListPreviews,
     setKeepSearchExpanded,
+    setTheme,
     setSyncEnabled,
     syncState,
   } = useUserPreferences();
@@ -134,6 +133,21 @@ export default function App() {
   const [activeBrowseFilter, setActiveBrowseFilter] = useState<FilterMode>(preferences.defaultFilterMode);
   const [homeNavigationKey, setHomeNavigationKey] = useState(0);
   const [browseNavigationState, setBrowseNavigationState] = useState<BrowseNavigationState | null>(null);
+  const [browseActiveList, setBrowseActiveList] = useState<BrowseActiveListState | null>(null);
+  const browseRestoreCounterRef = useRef(0);
+  const [pendingBrowseRestore, setPendingBrowseRestore] = useState<
+    { state: BrowseActiveListState | null; key: number } | null
+  >(null);
+  const [uploadReturnTarget, setUploadReturnTarget] = useState<
+    { tab: TabId; browseActiveList: BrowseActiveListState | null; selectedServer: string | null } | null
+  >(null);
+  const uploadFolderSuggestion = useMemo(() => {
+    const activeList = uploadReturnTarget?.browseActiveList;
+    if (activeList && activeList.type === "folder") {
+      return activeList.path;
+    }
+    return null;
+  }, [uploadReturnTarget]);
   const [isSearchOpen, setIsSearchOpen] = useState(() => keepSearchExpanded);
   const [searchQuery, setSearchQuery] = useState("");
 
@@ -153,6 +167,31 @@ export default function App() {
   const handleFilterModeChange = useCallback((mode: FilterMode) => {
     setActiveBrowseFilter(prev => (prev === mode ? prev : mode));
   }, []);
+
+  const handleBrowseActiveListChange = useCallback((state: BrowseActiveListState | null) => {
+    setBrowseActiveList(state);
+  }, []);
+
+  const handleBrowseRestoreHandled = useCallback(() => {
+    setPendingBrowseRestore(null);
+  }, []);
+
+  const selectTab = useCallback(
+    (nextTab: TabId) => {
+      if (tab === nextTab) return;
+      if (nextTab === "upload") {
+        setUploadReturnTarget({
+          tab,
+          browseActiveList: tab === "browse" && browseActiveList ? { ...browseActiveList } : null,
+          selectedServer,
+        });
+      } else if (tab === "upload") {
+        setUploadReturnTarget(null);
+      }
+      setTab(nextTab);
+    },
+    [tab, browseActiveList, selectedServer]
+  );
 
   const [statusMetrics, setStatusMetrics] = useState<StatusMetrics>({ count: 0, size: 0 });
   const [syncSnapshot, setSyncSnapshot] = useState<SyncStateSnapshot>({
@@ -231,9 +270,9 @@ export default function App() {
 
   useEffect(() => {
     if (tab === "transfer" && selectedBlobs.size === 0) {
-      setTab("upload");
+      selectTab("upload");
     }
-  }, [selectedBlobs.size, tab]);
+  }, [selectedBlobs.size, tab, selectTab]);
 
   useEffect(() => {
     if (!isUserMenuOpen) return;
@@ -279,18 +318,19 @@ export default function App() {
     element.removeAttribute("inert");
   }, [showAuthPrompt]);
 
+
   useEffect(() => {
     if (typeof window === "undefined") return;
     const params = new URLSearchParams(window.location.search);
     const key = params.get("share");
     if (!key) return;
     openShareByKey(key);
-    setTab("share");
+    selectTab("share");
     params.delete("share");
     const nextSearch = params.toString();
     const nextUrl = `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ""}${window.location.hash}`;
     window.history.replaceState({}, "", nextUrl);
-  }, [openShareByKey]);
+  }, [openShareByKey, selectTab]);
 
   useEffect(() => {
     return () => {
@@ -401,6 +441,7 @@ export default function App() {
     showStatusMessage,
   ]);
 
+
   useEffect(() => {
     if (!isRemoteSignerAdopted) return;
     setConnectSignerOpen(false);
@@ -475,9 +516,9 @@ export default function App() {
 
   const handleBreadcrumbHome = useCallback(() => {
     setHomeNavigationKey(value => value + 1);
-    setTab("browse");
+    selectTab("browse");
     browseNavigationState?.onNavigateHome();
-  }, [browseNavigationState]);
+  }, [browseNavigationState, selectTab]);
 
   const handleSyncSelectedServers = useCallback(() => {
     if (syncEnabledServerUrls.length < 2) {
@@ -485,13 +526,13 @@ export default function App() {
       return;
     }
     pendingSyncRef.current = true;
-    setTab("transfer");
+    selectTab("transfer");
     if (syncStarterRef.current) {
       const runner = syncStarterRef.current;
       pendingSyncRef.current = false;
       runner();
     }
-  }, [showStatusMessage, syncEnabledServerUrls.length]);
+  }, [showStatusMessage, syncEnabledServerUrls.length, selectTab]);
 
   const handleSetDefaultServer = useCallback(
     (url: string | null) => {
@@ -548,22 +589,29 @@ export default function App() {
     [setKeepSearchExpanded]
   );
 
+  const handleSetTheme = useCallback(
+    (nextTheme: "dark" | "light") => {
+      setTheme(nextTheme);
+    },
+    [setTheme]
+  );
+
   const handleToggleSearch = useCallback(() => {
     if (keepSearchExpanded) {
-      setTab(prev => (prev === "browse" ? prev : "browse"));
+      selectTab("browse");
       setIsSearchOpen(true);
       return;
     }
     setIsSearchOpen(prev => {
       const next = !prev;
       if (next) {
-        setTab("browse");
+        selectTab("browse");
       } else {
         setSearchQuery("");
       }
       return next;
     });
-  }, [keepSearchExpanded, setTab]);
+  }, [keepSearchExpanded, selectTab]);
 
   const handleSearchChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
     setSearchQuery(event.target.value);
@@ -604,12 +652,12 @@ export default function App() {
   useEffect(() => {
     if (keepSearchExpanded && !showAuthPrompt) {
       setIsSearchOpen(true);
-      setTab(prev => (prev === "browse" ? prev : "browse"));
+      selectTab("browse");
     } else if (!keepSearchExpanded) {
       setIsSearchOpen(prev => (prev ? false : prev));
       setSearchQuery("");
     }
-  }, [keepSearchExpanded, setTab, showAuthPrompt]);
+  }, [keepSearchExpanded, selectTab, showAuthPrompt]);
 
   useEffect(() => {
     if (!keepSearchExpanded && tab !== "browse" && isSearchOpen) {
@@ -802,9 +850,9 @@ export default function App() {
   const handleShareBlob = useCallback(
     (payload: SharePayload) => {
       openShareForPayload(payload);
-      setTab("share");
+      selectTab("share");
     },
-    [openShareForPayload]
+    [openShareForPayload, selectTab]
   );
 
   const handleShareComplete = useCallback(
@@ -825,14 +873,14 @@ export default function App() {
           message += ` ${result.failures} relay${result.failures === 1 ? "" : "s"} reported errors.`;
         }
         showStatusMessage(message, result.failures && result.failures > 0 ? "info" : "success", 5000);
-        setTab("browse");
+        selectTab("browse");
       } else {
         const dmLabel = isPrivateDm ? "private DM" : "DM";
         const message = result.message || (label ? `Failed to send ${dmLabel} to ${label}.` : `Failed to send ${dmLabel}.`);
         showStatusMessage(message, "error", 6000);
       }
     },
-    [completeShareInternal, showStatusMessage]
+    [completeShareInternal, selectTab, showStatusMessage]
   );
 
   const handleUploadCompleted = (success: boolean) => {
@@ -840,7 +888,24 @@ export default function App() {
     servers.forEach(server => {
       queryClient.invalidateQueries({ queryKey: ["server-blobs", server.url] });
     });
-    setTab("browse");
+
+    const previousTab = uploadReturnTarget?.tab;
+    const targetTab: TabId = previousTab && previousTab !== "upload" ? previousTab : "browse";
+
+    if (uploadReturnTarget && uploadReturnTarget.selectedServer !== selectedServer) {
+      setSelectedServer(uploadReturnTarget.selectedServer);
+    }
+
+    if (uploadReturnTarget?.tab === "browse" && uploadReturnTarget.browseActiveList) {
+      browseRestoreCounterRef.current += 1;
+      setPendingBrowseRestore({
+        state: { ...uploadReturnTarget.browseActiveList },
+        key: browseRestoreCounterRef.current,
+      });
+    }
+
+    setUploadReturnTarget(null);
+    selectTab(targetTab);
     showStatusMessage("All files uploaded successfully", "success", 5000);
   };
 
@@ -851,7 +916,7 @@ export default function App() {
     } else {
       setSelectedServer(value);
     }
-    setTab("browse");
+    selectTab("browse");
   };
 
   const toneClassByKey: Record<"muted" | "syncing" | "success" | "warning" | "info" | "error", string> = {
@@ -928,40 +993,28 @@ export default function App() {
     setIsUserMenuOpen(prev => !prev);
   }, []);
 
-  const handleSelectServers = useCallback(() => {
-    setTab("servers");
-    setIsUserMenuOpen(false);
-  }, []);
-
   const handleSelectProfile = useCallback(() => {
-    setTab("profile");
+    selectTab("profile");
     setIsUserMenuOpen(false);
-  }, []);
-
-  const handleSelectRelays = useCallback(() => {
-    setTab("relays");
-    setIsUserMenuOpen(false);
-  }, []);
+  }, [selectTab]);
 
   const handleSelectPrivateLinks = useCallback(() => {
-    setTab("private-links");
+    selectTab("private-links");
     setIsUserMenuOpen(false);
-  }, []);
+  }, [selectTab]);
 
   const handleSelectSettings = useCallback(() => {
-    setTab("settings");
+    selectTab("settings");
     setIsUserMenuOpen(false);
-  }, []);
+  }, [selectTab]);
 
   const userMenuLinks = useMemo(() =>
     [
       { label: "Edit Profile", icon: EditIcon, handler: handleSelectProfile },
       { label: "Private Links", icon: LinkIcon, handler: handleSelectPrivateLinks },
-      { label: "Relays", icon: RelayIcon, handler: handleSelectRelays },
-      { label: "Servers", icon: ServersIcon, handler: handleSelectServers },
       { label: "Settings", icon: SettingsIcon, handler: handleSelectSettings },
     ].sort((a, b) => a.label.localeCompare(b.label)),
-  [handleSelectPrivateLinks, handleSelectProfile, handleSelectRelays, handleSelectServers, handleSelectSettings]
+  [handleSelectPrivateLinks, handleSelectProfile, handleSelectSettings]
   );
 
   const handleDisconnectClick = useCallback(() => {
@@ -995,20 +1048,32 @@ export default function App() {
                 <button
                   type="button"
                   onClick={toggleUserMenu}
-                  className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-full border border-slate-800 bg-slate-900/70 p-0 text-xs text-slate-200 transition hover:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                  className="relative flex h-12 w-12 items-center justify-center rounded-full border border-slate-800 bg-slate-900/70 p-0 text-xs text-slate-200 transition hover:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
                   aria-haspopup="menu"
                   aria-expanded={isUserMenuOpen}
+                  aria-label={isUserMenuOpen ? "Close account menu" : "Open account menu"}
+                  title="Click for more options"
                 >
                   {avatarUrl ? (
                     <img
                       src={avatarUrl}
                       alt="User avatar"
-                      className="block h-full w-full object-cover"
+                      className="block h-full w-full rounded-full object-cover"
                       onError={() => setAvatarUrl(null)}
                     />
                   ) : (
-                    <span className="font-semibold">{userInitials}</span>
+                    <span className="flex h-full w-full items-center justify-center font-semibold">{userInitials}</span>
                   )}
+                  <span
+                    className={`pointer-events-none absolute -bottom-1.5 -right-1.5 z-10 flex h-5 w-5 items-center justify-center rounded-full border shadow-sm ${
+                      preferences.theme === "light"
+                        ? "border-slate-200 bg-white text-slate-900"
+                        : "border-slate-900 bg-slate-950 text-emerald-300"
+                    }`}
+                    aria-hidden="true"
+                  >
+                    <SettingsIcon size={12} />
+                  </span>
                 </button>
                 {isUserMenuOpen && (
                   <div className="absolute right-0 z-50 mt-2 min-w-[10rem] rounded-md bg-slate-900 px-2 py-2 text-sm shadow-lg">
@@ -1072,7 +1137,7 @@ export default function App() {
                   browseHeaderControls={browseHeaderControls}
                   selectedCount={selectedBlobs.size}
                   tab={tab}
-                  onSelectTab={setTab}
+                  onSelectTab={selectTab}
                   navTabs={NAV_TABS}
                   onBreadcrumbHome={handleBreadcrumbHome}
                 />
@@ -1093,18 +1158,24 @@ export default function App() {
                   onRequestRename={handleRequestRename}
                   onRequestFolderRename={handleRequestFolderRename}
                   onRequestShare={handleShareBlob}
-                  onSetTab={setTab}
+                  onSetTab={selectTab}
                   onUploadCompleted={handleUploadCompleted}
                   showStatusMessage={showStatusMessage}
                   onProvideBrowseControls={setBrowseHeaderControls}
                   onProvideBrowseNavigation={setBrowseNavigationState}
                   onFilterModeChange={handleFilterModeChange}
                   searchQuery={searchQuery}
+                  onBrowseActiveListChange={handleBrowseActiveListChange}
+                  browseRestoreState={pendingBrowseRestore?.state ?? null}
+                  browseRestoreKey={pendingBrowseRestore?.key ?? null}
+                  onBrowseRestoreHandled={handleBrowseRestoreHandled}
+                  uploadFolderSuggestion={uploadFolderSuggestion}
                   shareState={shareState}
                   onClearShareState={clearShareState}
                   onShareComplete={handleShareComplete}
                   defaultServerUrl={preferences.defaultServerUrl}
                   keepSearchExpanded={keepSearchExpanded}
+                  theme={preferences.theme}
                   syncEnabled={syncEnabled}
                   syncLoading={syncLoading}
                   syncError={syncError}
@@ -1118,6 +1189,7 @@ export default function App() {
                   onSetShowGridPreviews={handleSetShowPreviewsInGrid}
                   onSetShowListPreviews={handleSetShowPreviewsInList}
                   onSetKeepSearchExpanded={handleSetKeepSearchExpanded}
+                  onSetTheme={handleSetTheme}
                   saving={saving}
                   signer={signer}
                   onAddServer={handleAddServer}
@@ -1147,6 +1219,7 @@ export default function App() {
             allServersValue={ALL_SERVERS_VALUE}
             showGithubLink={showGithubLink}
             showSupportLink={showSupportLink}
+            theme={preferences.theme}
           />
 
           {!showAuthPrompt && renameTarget && (
@@ -1236,7 +1309,7 @@ const LoggedOutPrompt: React.FC<LoggedOutPromptProps> = ({ onConnect, onConnectR
             }}
             className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-slate-900"
           >
-            Connect With Browser Extension
+            Connect With Extension
           </button>
           <button
             onClick={onConnectRemoteSigner}
@@ -1378,6 +1451,7 @@ const MainNavigation = memo(function MainNavigation({
                 onClick={() => onSelectTab(nextTab)}
                 disabled={showAuthPrompt}
                 aria-label={label}
+                title={label}
                 className={`px-3 py-2 text-sm rounded-xl border flex items-center gap-2 transition disabled:cursor-not-allowed disabled:opacity-60 ${
                   isActive
                     ? "border-emerald-500 bg-emerald-500/10 text-emerald-200"

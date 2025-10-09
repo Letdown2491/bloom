@@ -29,7 +29,7 @@ If you want to proxy private links, follow the intructions below. This is option
 cd bloom
 cp .example-env.json .env
 ```
-2. Open .env in in your favorite text editor and enter a hex formatted public key as the value for VITE_PRIVATE_LINK_SERVICE_PUBKEY.
+2. Open .env in in your favorite text editor and enter a hex formatted public key as the value for VITE_PRIVATE_LINK_SERVICE_PUBKEY and change VITE_PRIVATE_LINK_SERVICE_HOST to the host you will be using. For example, for bloomapp.me, I use https://links.bloomapp.me for this variable. If you're not serving this publicly, you can leave the default.
 3. Copy the .env file
 ```bash
 cd services/private-link-proxy
@@ -59,7 +59,7 @@ pnpm preview
 ```
 
 ## Docker
-You can build and run the production bundle inside a container without installing pnpm locally. If you want to use the private link proxy, edit VITE_PRIVATE_LINK_SERVICE_PUBKEY and PRIVATE_LINK_SERVICE_SECRET in Dockerfile as per the instructions in **Setting up the private link proxy (Optional).
+You can build and run the production bundle inside a container without installing pnpm locally. If you want to use the private link proxy, edit VITE_PRIVATE_LINK_SERVICE_PUBKEY and PRIVATE_LINK_SERVICE_SECRET in Dockerfile as per the instructions in **Setting up the private link proxy (Optional)**.
 
 ```bash
 docker build -t bloom-app .
@@ -68,7 +68,7 @@ docker run --rm -p 3000:80 bloom-app
 ```
 
 ### Docker Compose
-If you're using the private link proxy, no additional setup is required beyond the steps in **Setting up the private link proxy (Optional).
+If you're using the private link proxy, no additional setup is required beyond the steps in **Setting up the private link proxy (Optional)**.
 
 ```bash
 docker compose up --build

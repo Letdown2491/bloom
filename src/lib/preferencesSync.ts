@@ -28,6 +28,7 @@ type SerializedPreferences = {
   show_grid_previews: boolean;
   show_list_previews: boolean;
   keep_search_expanded: boolean;
+  theme: "dark" | "light";
 };
 
 const DEFAULT_SERIALIZED_PREFERENCES: SerializedPreferences = {
@@ -39,6 +40,7 @@ const DEFAULT_SERIALIZED_PREFERENCES: SerializedPreferences = {
   show_grid_previews: true,
   show_list_previews: true,
   keep_search_expanded: false,
+  theme: "dark",
 };
 
 const sanitizeFilterMode = (value: unknown): FilterMode => {
@@ -75,6 +77,10 @@ const sanitizeViewMode = (value: unknown): SerializedPreferences["default_view_m
   return value === "grid" ? "grid" : "list";
 };
 
+const sanitizeTheme = (value: unknown): SerializedPreferences["theme"] => {
+  return value === "light" ? "light" : "dark";
+};
+
 export const serializePreferences = (
   preferences: UserPreferences,
   savedSearches: SyncedSavedSearch[],
@@ -92,6 +98,7 @@ export const serializePreferences = (
       show_grid_previews: preferences.showGridPreviews,
       show_list_previews: preferences.showListPreviews,
       keep_search_expanded: preferences.keepSearchExpanded,
+      theme: preferences.theme,
     },
     saved_searches: savedSearches,
   };
@@ -125,6 +132,7 @@ export const deserializePreferences = (
     showGridPreviews: Boolean(rawPreferences.show_grid_previews),
     showListPreviews: Boolean(rawPreferences.show_list_previews),
     keepSearchExpanded: Boolean(rawPreferences.keep_search_expanded),
+    theme: sanitizeTheme(rawPreferences.theme),
   };
 
   const savedSearches: SyncedSavedSearch[] = Array.isArray(source.saved_searches)
@@ -145,6 +153,7 @@ export const deserializePreferences = (
       show_grid_previews: preferences.showGridPreviews,
       show_list_previews: preferences.showListPreviews,
       keep_search_expanded: preferences.keepSearchExpanded,
+      theme: preferences.theme,
     },
     saved_searches: savedSearches,
   };
