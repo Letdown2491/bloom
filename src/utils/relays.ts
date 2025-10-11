@@ -1,4 +1,9 @@
-const FALLBACK_RELAYS = ["wss://relay.primal.net", "wss://relay.damus.io", "wss://nos.lol"] as const;
+const FALLBACK_RELAYS = [
+  "wss://relay.primal.net",
+  "wss://relay.damus.io",
+  "wss://nos.lol",
+  "wss://relay.nsec.app",
+] as const;
 
 export const DEFAULT_PUBLIC_RELAYS: readonly string[] = FALLBACK_RELAYS;
 

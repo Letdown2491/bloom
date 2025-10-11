@@ -261,11 +261,6 @@ export class RequestQueue {
 
     const pendingRequest = this.requests.get(payload.id);
     const inflight = this.inflight.get(payload.id);
-    console.debug("NIP-46 response", {
-      sessionId: session.id,
-      method: pendingRequest?.method ?? "<none>",
-      payload,
-    });
 
     const pendingMethod = pendingRequest?.method;
 

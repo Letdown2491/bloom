@@ -39,10 +39,28 @@ export const StatusFooter = memo(function StatusFooter({
 }: StatusFooterProps) {
   if (!isSignedIn) {
     return (
-      <footer
-        className="relative border-t border-slate-800 bg-slate-900/70 px-4 py-3 min-h-12"
-        aria-hidden="true"
-      />
+      <footer className="border-t border-slate-800 bg-slate-900/70 px-4 py-3 text-xs text-slate-300">
+        <div className="container mx-auto flex flex-wrap items-center justify-between gap-4">
+          <a
+            href="https://github.com/Letdown2491/bloom"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-2 text-slate-200 transition hover:text-emerald-300"
+          >
+            <GithubIcon size={16} aria-hidden="true" />
+            <span className="font-medium">GitHub</span>
+          </a>
+          <a
+            href="https://getalby.com/p/invincibleperfection384952"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-2 rounded-lg border border-amber-400/40 bg-amber-500/10 px-3 py-1 text-amber-200 transition hover:border-amber-300 hover:text-amber-100"
+          >
+            <LightningIcon size={14} aria-hidden="true" />
+            <span className="font-medium">Support Bloom</span>
+          </a>
+        </div>
+      </footer>
     );
   }
 

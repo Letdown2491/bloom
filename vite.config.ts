@@ -32,9 +32,9 @@ export default defineConfig({
     },
   },
   server: {
-    port: 5173,
+    port: 4173,
     strictPort: true,
-    allowedHosts: ['all'],
+    allowedHosts: ['bloomapp.me'],
   },
   build: {
     modulePreload: {

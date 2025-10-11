@@ -102,12 +102,39 @@ export const usePreferredRelays = () => {
 
   useEffect(() => {
     if (!ndk) return;
-    const urls = relayPolicies.map(policy => policy.url);
-    if (urls.length > 0) {
-      ndk.explicitRelayUrls = urls;
-    } else {
-      ndk.explicitRelayUrls = Array.from(DEFAULT_PUBLIC_RELAYS);
-    }
+    const preferredUrls = relayPolicies.length > 0 ? relayPolicies.map(policy => policy.url) : Array.from(DEFAULT_PUBLIC_RELAYS);
+    const sanitized = preferredUrls
+      .map(url => sanitizeRelayUrl(url))
+      .filter((url): url is string => Boolean(url));
+
+    const unique = Array.from(new Set(sanitized.length > 0 ? sanitized : Array.from(DEFAULT_PUBLIC_RELAYS)));
+    ndk.explicitRelayUrls = unique;
+
+    const pool = ndk.pool;
+    if (!pool) return;
+
+    const existing = new Set<string>();
+    pool.relays.forEach((relay: NDKRelay) => {
+      const normalized = sanitizeRelayUrl(relay.url);
+      if (normalized) existing.add(normalized);
+    });
+
+    const seen = new Set<string>();
+    unique.forEach(url => {
+      if (seen.has(url)) return;
+      seen.add(url);
+      if (!existing.has(url)) {
+        ndk.addExplicitRelay(url, undefined, false);
+      }
+    });
+
+    pool.relays.forEach((relay: NDKRelay) => {
+      const normalized = sanitizeRelayUrl(relay.url);
+      if (!normalized) return;
+      if (!seen.has(normalized)) {
+        pool.removeRelay(normalized);
+      }
+    });
   }, [ndk, relayPolicies]);
 
   const poolRelays = useMemo(() => {

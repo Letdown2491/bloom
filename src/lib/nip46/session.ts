@@ -235,7 +235,7 @@ export interface ParsedNostrConnectToken {
   type: "nostrconnect";
   clientPubkey: string;
   relays: string[];
-  secret?: string;
+  secret: string;
   permissions: string[];
   metadata?: RemoteSignerMetadata;
   rawParams: Record<string, string | string[]>;
@@ -335,15 +335,26 @@ export const parseNostrConnectUri = (uri: string): ParsedNostrConnectToken => {
   if (!idPart) throw new Error("nostrconnect URI missing client pubkey");
   const clientPubkey = decodeURIComponent(idPart);
   const params = new URLSearchParams(query);
-  const relays = params.getAll("relay").map(relay => decodeURIComponent(relay));
-  const secret = params.get("secret") ?? undefined;
+  const relayValues = params
+    .getAll("relay")
+    .map(relay => decodeURIComponent(relay).trim())
+    .filter(relay => relay.length > 0);
+  const uniqueRelays = Array.from(new Set(relayValues));
+  if (!uniqueRelays.length) {
+    throw new Error("nostrconnect URI must include at least one relay parameter");
+  }
+  const secretValue = params.get("secret");
+  const secret = secretValue?.trim();
+  if (!secret) {
+    throw new Error("nostrconnect URI must include a non-empty secret parameter");
+  }
   const metadata = decodeMetadata(params.get("metadata"));
   const perms = parsePermissions(params.get("perms"));
 
   return {
     type: "nostrconnect",
     clientPubkey,
-    relays,
+    relays: uniqueRelays,
     secret,
     metadata,
     permissions: perms,

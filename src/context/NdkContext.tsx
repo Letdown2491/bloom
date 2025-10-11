@@ -33,6 +33,9 @@ const NdkContext = createContext<NdkContextValue | undefined>(undefined);
 
 const DEFAULT_RELAYS = [
   "wss://relay.primal.net",
+  "wss://relay.damus.io",
+  "wss://nos.lol",
+  "wss://relay.nsec.app",
 ];
 
 const RELAY_HEALTH_STORAGE_KEY = "bloom.ndk.relayHealth.v1";
@@ -169,16 +172,6 @@ const persistSignerPreference = (preference: PersistedSignerPreference | null) =
   }
 };
 
-const enqueueMicrotask = (cb: () => void) => {
-  if (typeof queueMicrotask === "function") {
-    queueMicrotask(cb);
-    return;
-  }
-  Promise.resolve()
-    .then(cb)
-    .catch(() => undefined);
-};
-
 export const NdkProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const ndkRef = useRef<NdkInstance | null>(null);
   const ndkModuleRef = useRef<NdkModule | null>(null);
@@ -292,30 +285,48 @@ export const NdkProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
 
     const primeKnownRelays = () => {
-      setRelayHealth(current => {
-        const next = new Map<string, RelayHealth>();
-        for (const relay of current) {
-          next.set(relay.url, relay);
-        }
-        const baseRelays = ndk.explicitRelayUrls?.length ? ndk.explicitRelayUrls : DEFAULT_RELAYS;
-        baseRelays.forEach(url => {
-          const normalized = url.replace(/\/$/, "");
-          if (!next.has(normalized)) {
-            next.set(normalized, { url: normalized, status: "connecting", lastError: null, lastEventAt: null });
-          }
-        });
-        pool.relays.forEach(relay => {
-          const url = relay.url;
-          const previous = next.get(url);
-          next.set(url, {
-            url,
-            status: statusFromRelay(relay),
-            lastError: previous?.lastError ?? null,
-            lastEventAt: previous?.lastEventAt ?? null,
-          });
-        });
-        return Array.from(next.values());
+    setRelayHealth(current => {
+      const previousMap = new Map<string, RelayHealth>();
+      current.forEach(entry => {
+        previousMap.set(entry.url, entry);
       });
+
+      const next = new Map<string, RelayHealth>();
+      const baseRelays = ndk.explicitRelayUrls?.length ? ndk.explicitRelayUrls : DEFAULT_RELAYS;
+      baseRelays.forEach(url => {
+        const normalized = url.replace(/\/$/, "");
+        if (!normalized) return;
+        const existing = previousMap.get(normalized);
+        next.set(normalized, existing ?? { url: normalized, status: "connecting", lastError: null, lastEventAt: null });
+      });
+
+      pool.relays.forEach(relay => {
+        const url = relay.url.replace(/\/$/, "");
+        const previous = next.get(url) ?? previousMap.get(url);
+        next.set(url, {
+          url,
+          status: statusFromRelay(relay),
+          lastError: previous?.lastError ?? null,
+          lastEventAt: previous?.lastEventAt ?? null,
+        });
+      });
+
+      const nextArray = Array.from(next.values());
+      const unchanged =
+        nextArray.length === current.length &&
+        nextArray.every((entry, index) => {
+          const currentEntry = current[index];
+          return (
+            currentEntry &&
+            currentEntry.url === entry.url &&
+            currentEntry.status === entry.status &&
+            (currentEntry.lastError ?? null) === (entry.lastError ?? null) &&
+            (currentEntry.lastEventAt ?? null) === (entry.lastEventAt ?? null)
+          );
+        });
+
+      return unchanged ? current : nextArray;
+    });
     };
 
     const flushRelayUpdates = () => {
@@ -375,15 +386,12 @@ export const NdkProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
 
     const scheduleRelayUpdate = () => {
-      if (typeof window === "undefined") {
-        flushRelayUpdates();
-        return;
-      }
       if (relayUpdateScheduledRef.current) {
         return;
       }
       relayUpdateScheduledRef.current = true;
-      enqueueMicrotask(flushRelayUpdates);
+      const schedule = typeof window === "undefined" ? (fn: () => void) => fn() : window.requestAnimationFrame;
+      schedule(() => flushRelayUpdates());
     };
 
     const updateRelay = (url: string, patch: Partial<RelayHealth>) => {

@@ -48,4 +48,5 @@ export interface NostrFilter {
   '#p'?: string[];
   since?: number;
   limit?: number;
+  relays?: string[];
 }

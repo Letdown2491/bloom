@@ -59,7 +59,13 @@ export class Nip46Service {
   async createInvitation(options?: CreateInvitationOptions): Promise<Nip46Invitation> {
     const keypair = generateKeypair();
     const relays = normalizeRelays(options?.relays);
-    const secret = options?.secret ?? generateSecret();
+    if (!relays.length) {
+      throw new Error("NIP-46 invitations must include at least one relay URL.");
+    }
+    let secret = options?.secret?.trim() ?? "";
+    if (!secret) {
+      secret = generateSecret();
+    }
     const permissions = options?.permissions ?? [];
     const metadata = options?.metadata;
 
@@ -160,7 +166,7 @@ export class Nip46Service {
 interface InvitationTokenInput {
   clientPubkey: string;
   relays: string[];
-  secret?: string;
+  secret: string;
   permissions: string[];
   metadata?: RemoteSignerMetadata;
 }
@@ -228,6 +234,15 @@ const buildNostrConnectUri = (token: ParsedNostrConnectToken): string => {
     params.set("perms", token.permissions.join(","));
   }
   if (token.metadata) {
+    if (token.metadata.name) {
+      params.set("name", token.metadata.name);
+    }
+    if (token.metadata.url) {
+      params.set("url", token.metadata.url);
+    }
+    if (token.metadata.image) {
+      params.set("image", token.metadata.image);
+    }
     params.set("metadata", JSON.stringify(token.metadata));
   }
   const query = params.toString();

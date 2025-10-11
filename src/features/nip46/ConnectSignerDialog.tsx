@@ -8,7 +8,8 @@ import { DEFAULT_PUBLIC_RELAYS } from "../../utils/relays";
 
 const BLOOM_METADATA = {
   name: "Bloom",
-  url: "https://github.com/utxo-one/bloom",
+  url: "https://bloomapp.me",
+  image: "https://bloomapp.me/bloom.webp",
   description: "Bloom remote signer pairing",
 } as const;
 
@@ -34,9 +35,9 @@ type ConnectSignerDialogProps = {
 };
 
 export const ConnectSignerDialog: React.FC<ConnectSignerDialogProps> = ({ open, onClose }) => {
-  const { createInvitation } = useNip46Pairing();
-  const { snapshot, sessionManager, service, ready } = useNip46();
-  const { connect: ensureNdkConnection, signer: adoptedSigner } = useNdk();
+  const { createInvitation, pairWithUri } = useNip46Pairing();
+  const { snapshot, sessionManager, service, ready, transportReady } = useNip46();
+  const { ensureConnection, signer: adoptedSigner } = useNdk();
   const [busySessionId, setBusySessionId] = useState<string | null>(null);
   const [invitationSessionId, setInvitationSessionId] = useState<string | null>(null);
   const invitationRef = useRef<string | null>(null);
@@ -46,6 +47,11 @@ export const ConnectSignerDialog: React.FC<ConnectSignerDialogProps> = ({ open, 
   const [qrError, setQrError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [invitationUri, setInvitationUri] = useState<string | null>(null);
+  const [manualUri, setManualUri] = useState("");
+  const [manualError, setManualError] = useState<string | null>(null);
+  const [manualSuccess, setManualSuccess] = useState<string | null>(null);
+  const [manualBusy, setManualBusy] = useState(false);
+  const [activeTab, setActiveTab] = useState<"scan" | "link">("scan");
   const invitationRelays = useMemo(() => DEFAULT_INVITATION_RELAYS, []);
   const attemptedAutoConnectRef = useRef(new Set<string>());
 
@@ -73,8 +79,8 @@ export const ConnectSignerDialog: React.FC<ConnectSignerDialogProps> = ({ open, 
 
   useEffect(() => {
     if (!open) return;
-    void ensureNdkConnection();
-  }, [ensureNdkConnection, open]);
+    void ensureConnection();
+  }, [ensureConnection, open]);
 
   useEffect(() => {
     if (!open) {
@@ -187,6 +193,37 @@ export const ConnectSignerDialog: React.FC<ConnectSignerDialogProps> = ({ open, 
     void generateInvitation();
   }, [activeSessionReady, generateInvitation, invitationBusy, invitationSessionId, open]);
 
+  const handleManualPair = useCallback(async () => {
+    if (!open) return;
+    if (manualBusy) return;
+    const value = manualUri.trim();
+    if (!value) {
+      setManualError("Enter a nostrconnect:// or bunker:// link.");
+      setManualSuccess(null);
+      return;
+    }
+    setManualError(null);
+    setManualSuccess(null);
+    setManualBusy(true);
+    try {
+      const result = await pairWithUri(value);
+      const sessionId = result.session.id;
+      setInvitationSessionId(sessionId);
+      invitationRef.current = sessionId;
+      if (result.session.nostrConnectSecret) {
+        setInvitationUri(buildNostrConnectUriFromSession(result.session));
+      } else {
+        setInvitationUri(null);
+      }
+      setManualUri("");
+      setManualSuccess("Link accepted. Waiting for your signer…");
+    } catch (error) {
+      setManualError(error instanceof Error ? error.message : "Unable to use that link.");
+    } finally {
+      setManualBusy(false);
+    }
+  }, [manualBusy, manualUri, open, pairWithUri]);
+
   useEffect(() => {
     if (!open || !sessionManager) return;
     const errored = snapshot.sessions.filter(
@@ -293,7 +330,7 @@ export const ConnectSignerDialog: React.FC<ConnectSignerDialogProps> = ({ open, 
 
   if (!open) return null;
 
-  if (!ready || !sessionManager || !service) {
+  if (!ready || !transportReady || !sessionManager || !service) {
     return (
       <div className="fixed inset-0 z-30 flex items-center justify-center bg-slate-950/80 px-4 py-6 backdrop-blur">
         <div className="w-full max-w-sm rounded-2xl border border-slate-700 bg-slate-900 p-6 text-center text-sm text-slate-300 shadow-2xl max-h-[calc(100vh-3rem)] overflow-y-auto">
@@ -309,80 +346,197 @@ export const ConnectSignerDialog: React.FC<ConnectSignerDialogProps> = ({ open, 
 
   return (
     <div className="fixed inset-0 z-30 flex items-center justify-center bg-slate-950/80 px-4 py-6 backdrop-blur">
-      <div className="w-full max-w-lg rounded-2xl border border-slate-700 bg-slate-900 p-6 text-slate-200 shadow-2xl max-h-[calc(100vh-3rem)] overflow-y-auto">
-        <div className="flex items-center justify-between gap-4">
-          <h2 className="text-lg font-semibold">Connect Remote Signer</h2>
+      <div className="w-full max-w-3xl overflow-y-auto rounded-2xl border border-slate-700 bg-slate-900 p-6 text-slate-200 shadow-2xl max-h-[calc(100vh-3rem)]">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+          <div>
+            <h2 className="text-lg font-semibold text-slate-100">Connect Remote Signer</h2>
+            <p className="text-sm text-slate-300">
+              Scan the QR code or use a link from your remote signer to approve the connection.
+            </p>
+          </div>
           <button
             type="button"
             onClick={onClose}
-            className="rounded border border-slate-700 px-2 py-1 text-xs text-slate-300 hover:border-slate-600 hover:text-slate-100"
+            className="self-start rounded border border-slate-700 px-2 py-1 text-xs text-slate-300 hover:border-slate-600 hover:text-slate-100"
           >
             Close
           </button>
         </div>
 
-        <p className="mt-3 text-sm text-slate-300">Scan the QR code below with your signer, or copy the link below.</p>
+        <div className="mt-6">
+          <div className="flex flex-col gap-2 rounded-xl border border-slate-800 bg-slate-900/70 p-1 sm:flex-row">
+            <button
+              type="button"
+              onClick={() => setActiveTab("scan")}
+              className={`flex-1 rounded-lg px-3 py-2 text-xs font-semibold transition focus:outline-none focus:ring-2 focus:ring-emerald-400 ${
+                activeTab === "scan"
+                  ? "border border-emerald-500 bg-emerald-500/10 text-emerald-300"
+                  : "border border-transparent bg-transparent text-slate-300 hover:border-slate-700 hover:bg-slate-900"
+              }`}
+            >
+              Scan or copy invitation
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab("link")}
+              className={`flex-1 rounded-lg px-3 py-2 text-xs font-semibold transition focus:outline-none focus:ring-2 focus:ring-emerald-400 ${
+                activeTab === "link"
+                  ? "border border-emerald-500 bg-emerald-500/10 text-emerald-300"
+                  : "border border-transparent bg-transparent text-slate-300 hover:border-slate-700 hover:bg-slate-900"
+              }`}
+            >
+              Use bunker:// link
+            </button>
+          </div>
 
-        <div className="mt-4 space-y-6">
-          <section className="rounded-xl border border-slate-800 bg-slate-900/70 p-4">
-            {invitationError ? <div className="text-xs text-rose-400">{invitationError}</div> : null}
-            <div className="mt-4 flex flex-col items-center gap-4">
-              <div className="flex flex-col items-center gap-2">
-                <div className="flex h-48 w-48 items-center justify-center rounded-xl border border-slate-800 bg-slate-950/60 p-3">
-                  {qrDataUrl ? (
-                    <img src={qrDataUrl} alt="nostrconnect invitation" className="h-full w-full rounded-md" />
-                  ) : invitationBusy ? (
-                    <span className="text-xs text-slate-400">Preparing QR…</span>
-                  ) : (
-                    <span className="text-xs text-slate-400">Waiting for link…</span>
-                  )}
-                </div>
-                {qrError ? <div className="text-[11px] text-rose-400">{qrError}</div> : null}
-                <button
-                  type="button"
-                  onClick={() => void handleCopyInvitation()}
-                  disabled={!invitationUri}
-                  className="w-full break-all rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-xs text-emerald-300 hover:border-emerald-500 hover:text-emerald-200 focus:outline-none focus:ring-2 focus:ring-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
-                  title={invitationUri ?? "Invitation link not ready"}
-                >
-                  {invitationUri ?? "Generating invitation…"}
-                </button>
-                {copied ? <div className="text-[11px] text-emerald-300">Link copied to clipboard</div> : null}
-                {invitationSession?.relays.length ? (
-                  <div className="text-center text-[11px] text-slate-400">
-                    Relays: {invitationSession.relays.join(", ")}
+          <div className="mt-4">
+            {activeTab === "scan" ? (
+              <section className="space-y-5 rounded-xl border border-slate-800 bg-slate-900/70 p-5">
+                {invitationError ? (
+                  <div className="rounded-lg border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-xs text-rose-200">
+                    {invitationError}
                   </div>
                 ) : null}
-              </div>
-              <button
-                type="button"
-                onClick={() => void generateInvitation()}
-                disabled={invitationBusy}
-                className="rounded-lg border border-slate-700 px-4 py-2 text-sm text-slate-300 hover:border-slate-600 hover:text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-400 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {invitationBusy ? "Generating…" : "Regenerate link"}
-              </button>
-            </div>
-          </section>
+                <div className="space-y-3 text-xs text-slate-300">
+                  <p className="font-medium uppercase tracking-wide text-slate-400">How to connect</p>
+                  <ol className="space-y-2">
+                    <li className="flex gap-2">
+                      <span className="mt-0.5 h-5 w-5 shrink-0 rounded-full bg-emerald-600 text-center text-[11px] font-semibold leading-5 text-slate-50">
+                        1
+                      </span>
+                      <span>Open your remote signer and start the pairing flow.</span>
+                    </li>
+                    <li className="flex gap-2">
+                      <span className="mt-0.5 h-5 w-5 shrink-0 rounded-full bg-emerald-600 text-center text-[11px] font-semibold leading-5 text-slate-50">
+                        2
+                      </span>
+                      <span>Scan the QR code or copy the invitation link provided below.</span>
+                    </li>
+                    <li className="flex gap-2">
+                      <span className="mt-0.5 h-5 w-5 shrink-0 rounded-full bg-emerald-600 text-center text-[11px] font-semibold leading-5 text-slate-50">
+                        3
+                      </span>
+                      <span>Approve the request inside your signer. Bloom will connect automatically once approved.</span>
+                    </li>
+                  </ol>
+                </div>
+
+                <div className="flex flex-col items-center gap-4">
+                  <div className="flex h-48 w-48 items-center justify-center rounded-xl border border-slate-800 bg-slate-950/60 p-3">
+                    {qrDataUrl ? (
+                      <img src={qrDataUrl} alt="nostrconnect invitation" className="h-full w-full rounded-md" />
+                    ) : invitationBusy ? (
+                      <span className="text-xs text-slate-400">Preparing QR…</span>
+                    ) : (
+                      <span className="text-xs text-slate-400">Waiting for link…</span>
+                    )}
+                  </div>
+                  {qrError ? <div className="text-[11px] text-rose-400">{qrError}</div> : null}
+
+                  <div className="flex w-full flex-col gap-2">
+                    <button
+                      type="button"
+                      onClick={() => void handleCopyInvitation()}
+                      disabled={!invitationUri}
+                      className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-xs font-medium text-emerald-300 hover:border-emerald-500 hover:text-emerald-200 focus:outline-none focus:ring-2 focus:ring-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
+                      title={invitationUri ?? "Invitation link not ready"}
+                    >
+                      {invitationUri ? "Click to copy Nostr Connect URL" : invitationBusy ? "Preparing invitation…" : "Waiting for invitation…"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void generateInvitation()}
+                      disabled={invitationBusy}
+                      className="rounded-lg border border-slate-700 px-3 py-2 text-xs text-slate-200 hover:border-slate-600 hover:text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-400 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {invitationBusy ? "Generating new link…" : "Regenerate invitation"}
+                    </button>
+                  </div>
+                  {copied ? <div className="text-[11px] text-emerald-300">Link copied to clipboard</div> : null}
+
+                  {invitationUri ? (
+                    <details className="w-full rounded-lg border border-slate-800 bg-slate-950/70 px-3 py-2 text-left text-[11px] text-slate-400">
+                      <summary className="cursor-pointer select-none text-slate-300 hover:text-emerald-300">
+                        Show invitation details
+                      </summary>
+                      <div className="mt-2 space-y-2 break-all">
+                        <div className="font-mono text-slate-400">{invitationUri}</div>
+                        {invitationSession?.relays.length ? (
+                          <div className="text-slate-400">Relays: {invitationSession.relays.join(", ")}</div>
+                        ) : null}
+                      </div>
+                    </details>
+                  ) : null}
+                </div>
+              </section>
+            ) : (
+              <section className="space-y-4 rounded-xl border border-slate-800 bg-slate-900/70 p-5">
+                <div>
+                  <h3 className="text-sm font-semibold text-slate-200">Use a bunker link</h3>
+                  <p className="mt-1 text-xs text-slate-400">
+                    Paste a <code className="rounded bg-slate-800 px-1 py-0.5 text-[10px]">bunker://</code> URL to reuse an existing invitation from your signer.
+                  </p>
+                </div>
+                <form
+                  onSubmit={event => {
+                    event.preventDefault();
+                    void handleManualPair();
+                  }}
+                  className="flex flex-col gap-2"
+                >
+                  <input
+                    type="text"
+                    value={manualUri}
+                    onChange={event => {
+                      setManualUri(event.target.value);
+                      if (manualError) setManualError(null);
+                      if (manualSuccess) setManualSuccess(null);
+                    }}
+                    className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-400"
+                    placeholder="bunker://..."
+                    autoComplete="off"
+                    spellCheck={false}
+                  />
+                  <div className="flex flex-wrap items-center gap-3">
+                    <button
+                      type="submit"
+                      disabled={manualBusy || manualUri.trim().length === 0}
+                      className="rounded-lg border border-slate-700 px-3 py-1.5 text-xs text-slate-200 hover:border-emerald-500 hover:text-emerald-200 focus:outline-none focus:ring-2 focus:ring-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {manualBusy ? "Connecting…" : "Connect"}
+                    </button>
+                    {manualError ? <span className="text-[11px] text-rose-400">{manualError}</span> : null}
+                    {manualSuccess ? <span className="text-[11px] text-emerald-300">{manualSuccess}</span> : null}
+                  </div>
+                </form>
+                <p className="text-[11px] text-slate-400">Tip: bunker links and QR codes from the same signer usually represent the same invitation.</p>
+              </section>
+            )}
+          </div>
         </div>
 
         {activeSessions.length > 0 && (
-          <div className="mt-6 space-y-2 rounded-xl border border-slate-800 bg-slate-900/70 p-4 text-xs">
-            <h3 className="text-sm font-semibold text-slate-200">Connected signers</h3>
-            <ul className="space-y-1">
+          <section className="mt-6 space-y-3 rounded-xl border border-slate-800 bg-slate-900/70 p-5 text-xs">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-slate-200">Saved signers</h3>
+              <span className="text-[11px] text-slate-400">{activeSessions.length} connected</span>
+            </div>
+            <ul className="space-y-2">
               {activeSessions.map(session => (
-                <li key={session.id} className="flex flex-col gap-0.5">
-                  <span className="text-slate-100">
-                    {session.metadata?.name || session.remoteSignerPubkey || session.id}
-                  </span>
-                  <span className="text-slate-400">
-                    Status: {session.userPubkey && !session.lastError ? "active" : session.status}
-                    {session.lastError ? ` • ${session.lastError}` : ""}
-                  </span>
-                  <div className="flex items-center gap-3">
+                <li key={session.id} className="rounded-lg border border-slate-800 bg-slate-950/70 p-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="text-slate-100">
+                      {session.metadata?.name || session.remoteSignerPubkey || session.id}
+                    </div>
+                    <div className="text-[11px] text-slate-400">
+                      {session.userPubkey && !session.lastError ? "Active" : session.status}
+                      {session.lastError ? ` • ${session.lastError}` : ""}
+                    </div>
+                  </div>
+                  <div className="mt-3 flex flex-wrap items-center gap-3">
                     {session.authChallengeUrl ? (
                       <a
-                        className="text-emerald-400 hover:text-emerald-300"
+                        className="text-[11px] text-emerald-400 hover:text-emerald-300"
                         href={session.authChallengeUrl}
                         rel="noreferrer"
                         target="_blank"
@@ -394,14 +548,14 @@ export const ConnectSignerDialog: React.FC<ConnectSignerDialogProps> = ({ open, 
                       type="button"
                       onClick={() => handleReconnect(session.id)}
                       disabled={busySessionId === session.id}
-                      className="text-xs text-slate-300 hover:text-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                      className="text-[11px] text-slate-300 hover:text-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       Retry connect
                     </button>
                     <button
                       type="button"
                       onClick={() => handleRevoke(session.id)}
-                      className="text-xs text-rose-400 hover:text-rose-300"
+                      className="text-[11px] text-rose-400 hover:text-rose-300"
                     >
                       Revoke
                     </button>
@@ -409,7 +563,7 @@ export const ConnectSignerDialog: React.FC<ConnectSignerDialogProps> = ({ open, 
                 </li>
               ))}
             </ul>
-          </div>
+          </section>
         )}
       </div>
     </div>

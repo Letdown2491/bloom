@@ -100,7 +100,12 @@ type PendingSave = {
 export default function App() {
   const queryClient = useQueryClient();
   const { connect, disconnect, user, signer, ndk } = useNdk();
-  const { snapshot: nip46Snapshot, service: nip46Service, ready: nip46Ready } = useNip46();
+  const {
+    snapshot: nip46Snapshot,
+    service: nip46Service,
+    ready: nip46Ready,
+    transportReady: nip46TransportReady,
+  } = useNip46();
   const pubkey = useCurrentPubkey();
   const { servers, saveServers, saving, hasFetchedUserServers } = useServers();
   const {
@@ -198,6 +203,11 @@ export default function App() {
     syncStatus: { state: "idle", progress: 0 },
     syncAutoReady: false,
     allLinkedServersSynced: true,
+  });
+  const [hasNip07Extension, setHasNip07Extension] = useState(() => {
+    if (typeof window === "undefined") return false;
+    const nostr = (window as typeof window & { nostr?: { getPublicKey?: unknown } }).nostr;
+    return Boolean(nostr && typeof nostr.getPublicKey === "function");
   });
   const syncStarterRef = useRef<(() => void) | null>(null);
   const pendingSyncRef = useRef(false);
@@ -308,6 +318,34 @@ export default function App() {
       setIsUserMenuOpen(false);
     }
   }, [user]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const checkAvailability = () => {
+      const nostr = (window as typeof window & { nostr?: { getPublicKey?: unknown } }).nostr;
+      const available = Boolean(nostr && typeof nostr.getPublicKey === "function");
+      setHasNip07Extension(prev => (prev === available ? prev : available));
+    };
+
+    checkAvailability();
+
+    const handleVisibilityChange = () => {
+      if (!document.hidden) {
+        checkAvailability();
+      }
+    };
+
+    window.addEventListener("focus", checkAvailability);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    const timeout = window.setTimeout(checkAvailability, 1500);
+
+    return () => {
+      window.removeEventListener("focus", checkAvailability);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.clearTimeout(timeout);
+    };
+  }, []);
 
   const isSignedIn = Boolean(user);
   const showAuthPrompt = !isSignedIn;
@@ -427,7 +465,10 @@ export default function App() {
     }
 
     setPendingRemoteSignerConnect(true);
-    if (!nip46Ready || !nip46Service) {
+    if (nip46Ready && latestRemoteSignerSession) {
+      setConnectSignerOpen(true);
+    }
+    if (!nip46Ready || !nip46TransportReady || !nip46Service) {
       showStatusMessage("Preparing remote signer support…", "info", 3000);
     } else {
       showStatusMessage("Connecting to remote signer…", "info", 3000);
@@ -438,6 +479,7 @@ export default function App() {
     nip46Ready,
     latestRemoteSignerSession,
     nip46Service,
+    nip46TransportReady,
     showStatusMessage,
   ]);
 
@@ -456,6 +498,7 @@ export default function App() {
   useEffect(() => {
     if (!pendingRemoteSignerConnect) return;
     if (!nip46Ready) return;
+    if (!nip46TransportReady) return;
     if (!nip46Service) return;
 
     const sessionId = latestRemoteSignerSession?.id;
@@ -493,6 +536,7 @@ export default function App() {
     pendingRemoteSignerConnect,
     nip46Ready,
     nip46Service,
+    nip46TransportReady,
     latestRemoteSignerSession,
     hasConnectableRemoteSignerSession,
     showStatusMessage,
@@ -1120,6 +1164,7 @@ export default function App() {
               <LoggedOutPrompt
                 onConnect={connect}
                 onConnectRemoteSigner={handleConnectSignerClick}
+                hasNip07Extension={hasNip07Extension}
               />
             ) : (
               <>
@@ -1289,33 +1334,40 @@ type MainNavigationProps = {
 type LoggedOutPromptProps = {
   onConnect: () => void | Promise<void>;
   onConnectRemoteSigner: () => void;
+  hasNip07Extension: boolean;
 };
 
-const LoggedOutPrompt: React.FC<LoggedOutPromptProps> = ({ onConnect, onConnectRemoteSigner }) => {
+const LoggedOutPrompt: React.FC<LoggedOutPromptProps> = ({
+  onConnect,
+  onConnectRemoteSigner,
+  hasNip07Extension,
+}) => {
   return (
     <div className="flex flex-1 items-center justify-center p-6">
       <div className="flex w-full max-w-md flex-col items-center gap-4 rounded-2xl border border-slate-800 bg-slate-900/70 p-8 text-center shadow-xl">
         <img src="/bloom.webp" alt="Bloom logo" className="w-24 md:w-32 rounded-xl" />
         <div className="space-y-2">
           <h2 className="text-lg font-semibold text-slate-100">Welcome to Bloom</h2>
-          <p className="text-sm text-slate-300">
-            Connect your Nostr account to browse your files, manage uploads, share your library, and more.
+          <p className="text-sm text-slate-300 text-left">
+            Bloom is your Nostr-connected media hub for browsing, uploading, and sharing music, video, and documents across servers. Click below to get started.
           </p>
         </div>
         <div className="flex w-full flex-col gap-2">
-          <button
-            onClick={() => {
-              void onConnect();
-            }}
-            className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-slate-900"
-          >
-            Connect With Extension
-          </button>
+          {hasNip07Extension && (
+            <button
+              onClick={() => {
+                void onConnect();
+              }}
+              className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-slate-900"
+            >
+              Connect With Extension
+            </button>
+          )}
           <button
             onClick={onConnectRemoteSigner}
             className="px-3 py-2 rounded-xl border border-emerald-500/60 bg-transparent text-emerald-300 hover:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-slate-900"
           >
-            Connect With Remote Signer
+            Connect Remote Signer
           </button>
         </div>
       </div>

@@ -128,13 +128,26 @@ export const createNdkTransport = (ndk: NDK): TransportConfig => {
       }
     },
     subscribe: (filters, handler) => {
+      if (!filters.length) {
+        return () => undefined;
+      }
       const runtimePromise = getRuntime();
       const ndkFilters = filters.map(convertFilter);
-      const subscription = ndk.subscribe(ndkFilters, { closeOnEose: false }, {
+      const relayUrls = Array.from(
+        new Set(
+          filters
+            .flatMap(filter => filter.relays ?? [])
+            .map(url => url.replace(/\/*$/, ""))
+            .filter(url => url.length > 0)
+        )
+      );
+      const options = relayUrls.length
+        ? { closeOnEose: false, relayUrls }
+        : { closeOnEose: false };
+      const subscription = ndk.subscribe(ndkFilters, options, {
         onEvent: async ndkEvent => {
           await runtimePromise;
           const raw = ndkEvent.rawEvent();
-          console.debug("NIP-46 raw event", raw);
           handler(raw);
         },
       }) as NDKSubscription;
