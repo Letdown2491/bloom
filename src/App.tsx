@@ -1529,7 +1529,7 @@ const MainNavigation = memo(function MainNavigation({
           >
             <SearchIcon size={16} />
           </button>
-          {browseControlSegments.map((segment, index) => {
+          {browseControlSegments.map((segment) => {
             if (!React.isValidElement(segment)) return null;
             const segmentType = segment.props["data-segment-type"] || (segment.type === "button" ? "icon" : undefined);
             const baseClass = mergeClasses(

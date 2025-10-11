@@ -565,7 +565,6 @@ export const BlobList: React.FC<BlobListProps> = ({
           throw new Error(`Download failed with status ${response.status}`);
         }
 
-        const disposition = response.headers.get("content-disposition") || undefined;
         const mimeHint = response.headers.get("content-type") || undefined;
         const privateEncryption = blob.privateData?.encryption;
         const privateMetadata = blob.privateData?.metadata;
