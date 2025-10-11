@@ -101,11 +101,9 @@ export const WorkspaceProvider: React.FC<WorkspaceProviderProps> = ({
       const metadata = entry.metadata;
       const encryption = entry.encryption;
       const normalizedFolder = normalizeFolderPathInput(metadata?.folderPath ?? undefined) ?? null;
-      const displayName = metadata?.name
-        ? metadata.name
-        : encryption
-          ? `Encrypted ${entry.sha256.slice(0, 8)}`
-          : `Private ${entry.sha256.slice(0, 8)}`;
+      const metadataName =
+        typeof metadata?.name === "string" && metadata.name.trim().length > 0 ? metadata.name.trim() : null;
+      const displayName = metadataName ?? entry.sha256;
       const normalizedSize = (() => {
         if (typeof metadata?.size === "number") return metadata.size;
         if (typeof metadata?.size === "string") {
@@ -137,6 +135,7 @@ export const WorkspaceProvider: React.FC<WorkspaceProviderProps> = ({
         folderPath: normalizedFolder,
         privateData,
         label: PRIVATE_SERVER_NAME,
+        __bloomMetadataName: metadataName,
       };
 
       const [merged] = mergeBlobsWithStoredMetadata(normalizedServerUrl, [baseBlob]);

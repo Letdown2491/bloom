@@ -137,6 +137,7 @@ function normalizeKind(kind?: string): "image" | "video" | undefined {
 function collectFilenameCandidates(blob: BlossomBlob) {
   const candidates: string[] = [];
   const primaryRefs = [
+    blob.__bloomMetadataName,
     blob.name,
     blob.url,
     blob.privateData?.metadata?.name,

@@ -20,9 +20,9 @@ import { deleteSatelliteFile } from "../../lib/satelliteClient";
 import { useNdk, useCurrentPubkey } from "../../context/NdkContext";
 import { isMusicBlob } from "../../utils/blobClassification";
 import { PRIVATE_PLACEHOLDER_SHA, PRIVATE_SERVER_NAME } from "../../constants/private";
-import { applyFolderUpdate, normalizeFolderPathInput } from "../../utils/blobMetadataStore";
+import { applyFolderUpdate, getBlobMetadataName, normalizeFolderPathInput } from "../../utils/blobMetadataStore";
 import type { BlobAudioMetadata } from "../../utils/blobMetadataStore";
-import type { BlobReplicaSummary } from "../../components/BlobList";
+import { isListLikeBlob, type BlobReplicaSummary } from "../../components/BlobList";
 import type { DefaultSortOption, SortDirection } from "../../context/UserPreferencesContext";
 import { buildNip98AuthHeader } from "../../lib/nip98";
 import { decryptPrivateBlob } from "../../lib/privateEncryption";
@@ -438,6 +438,10 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
     (blob: BlossomBlob) => {
       if (!searchQuery.isActive) return true;
 
+      if (isListLikeBlob(blob) || blob.__bloomFolderPlaceholder) {
+        return false;
+      }
+
       const { textTerms, fieldTerms } = searchQuery;
       const privateMetadata = blob.privateData?.metadata;
       const privateAudio = privateMetadata?.audio ?? undefined;
@@ -817,6 +821,15 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
     []
   );
 
+  const privateSearchMatches = useMemo(() => {
+    if (!isSearching) return [] as BlossomBlob[];
+    const base =
+      filterMode === "all"
+        ? privateBlobs
+        : privateBlobs.filter(blob => matchesFilter(blob, filterMode));
+    return base.filter(matchesSearch);
+  }, [filterMode, isSearching, matchesSearch, privateBlobs]);
+
   const aggregatedFilteredBlobs = useMemo(() => {
     const base =
       filterMode === "all"
@@ -824,8 +837,19 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
         : aggregated.blobs.filter(blob => matchesFilter(blob, filterMode));
     const filtered = excludeListedBlobs(base);
     if (!isSearching) return filtered;
-    return filtered.filter(matchesSearch);
-  }, [aggregated.blobs, excludeListedBlobs, filterMode, isSearching, matchesSearch]);
+    const matches = filtered.filter(matchesSearch);
+    if (privateSearchMatches.length === 0) {
+      return matches;
+    }
+    const merged = matches.slice();
+    const seen = new Set(merged.map(blob => blob.sha256));
+    privateSearchMatches.forEach(blob => {
+      if (seen.has(blob.sha256)) return;
+      seen.add(blob.sha256);
+      merged.push(blob);
+    });
+    return merged;
+  }, [aggregated.blobs, excludeListedBlobs, filterMode, isSearching, matchesSearch, privateSearchMatches]);
 
   const aggregatedFolderIndex = useMemo(() => buildFolderIndex(aggregatedFilteredBlobs), [aggregatedFilteredBlobs]);
 
@@ -833,7 +857,7 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
 
   const visibleAggregatedBlobs = useMemo(() => {
     if (hasActiveFilter) {
-      if (privatePlaceholderBlob && hasPrivateMatchingFilter) {
+      if (!isSearching && privatePlaceholderBlob && hasPrivateMatchingFilter) {
         return [privatePlaceholderBlob, ...aggregatedFilteredBlobs];
       }
       return aggregatedFilteredBlobs;
@@ -853,6 +877,7 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
     aggregatedFolderPath,
     hasActiveFilter,
     hasPrivateMatchingFilter,
+    isSearching,
     privatePlaceholderBlob,
     getFolderDisplayName,
   ]);
@@ -939,8 +964,19 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
         : currentSnapshot.blobs.filter(blob => matchesFilter(blob, filterMode));
     const filtered = excludeListedBlobs(base);
     if (!isSearching) return filtered;
-    return filtered.filter(matchesSearch);
-  }, [currentSnapshot, excludeListedBlobs, filterMode, isSearching, matchesSearch]);
+    const matches = filtered.filter(matchesSearch);
+    if (privateSearchMatches.length === 0) {
+      return matches;
+    }
+    const merged = matches.slice();
+    const seen = new Set(merged.map(blob => blob.sha256));
+    privateSearchMatches.forEach(blob => {
+      if (seen.has(blob.sha256)) return;
+      seen.add(blob.sha256);
+      merged.push(blob);
+    });
+    return merged;
+  }, [currentSnapshot, excludeListedBlobs, filterMode, isSearching, matchesSearch, privateSearchMatches]);
 
   const currentFolderIndex = useMemo(
     () => (currentFilteredBlobs ? buildFolderIndex(currentFilteredBlobs) : null),
@@ -953,7 +989,7 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
     if (!currentFilteredBlobs) return undefined;
     const serverInfo = currentSnapshot?.server;
     if (hasActiveFilter) {
-      if (!currentFolderPath && privatePlaceholderBlob && hasPrivateMatchingFilter) {
+      if (!isSearching && !currentFolderPath && privatePlaceholderBlob && hasPrivateMatchingFilter) {
         return [privatePlaceholderBlob, ...currentFilteredBlobs];
       }
       return currentFilteredBlobs;
@@ -977,6 +1013,7 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
     currentSnapshot,
     hasActiveFilter,
     hasPrivateMatchingFilter,
+    isSearching,
     privatePlaceholderBlob,
     currentFolderIndex,
     getFolderDisplayName,
@@ -1632,7 +1669,7 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
       }
       const payload: SharePayload = {
         url: blob.url,
-        name: blob.name ?? null,
+        name: getBlobMetadataName(blob),
         sha256: blob.sha256,
         serverUrl: blob.serverUrl ?? null,
         size: typeof blob.size === "number" ? blob.size : null,

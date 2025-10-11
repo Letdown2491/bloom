@@ -80,13 +80,8 @@ const waitForRelayConnection = async (
 };
 
 const convertFilter = (filter: NostrFilter): NDKFilter => {
-  const converted: NDKFilter = {};
-  if (filter.kinds) converted.kinds = filter.kinds;
-  if (filter.authors) converted.authors = filter.authors;
-  if (filter["#p"]) converted["#p"] = filter["#p"];
-  if (filter.since !== undefined) converted.since = filter.since;
-  if (filter.limit !== undefined) converted.limit = filter.limit;
-  return converted;
+  const { relays: _ignoredRelays, ...rest } = filter;
+  return { ...rest } as NDKFilter;
 };
 
 export const createNdkTransport = (ndk: NDK): TransportConfig => {
@@ -132,7 +127,12 @@ export const createNdkTransport = (ndk: NDK): TransportConfig => {
         return () => undefined;
       }
       const runtimePromise = getRuntime();
-      const ndkFilters = filters.map(convertFilter);
+      const ndkFilters = filters
+        .map(convertFilter)
+        .filter(filter => Object.keys(filter).length > 0);
+      if (!ndkFilters.length) {
+        return () => undefined;
+      }
       const relayUrls = Array.from(
         new Set(
           filters

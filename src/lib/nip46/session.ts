@@ -150,9 +150,21 @@ export class SessionManager {
   async updateSession(id: string, update: Partial<RemoteSignerSession>): Promise<RemoteSignerSession | null> {
     const current = this.sessions.get(id);
     if (!current) return null;
+    let changed = false;
+    const sanitizedEntries: [keyof RemoteSignerSession, RemoteSignerSession[keyof RemoteSignerSession]][] = [];
+    (Object.keys(update) as (keyof RemoteSignerSession)[]).forEach(key => {
+      if (!Object.prototype.hasOwnProperty.call(update, key)) return;
+      const value = update[key];
+      if (value === undefined) return;
+      if (current[key] !== value) {
+        sanitizedEntries.push([key, value]);
+        changed = true;
+      }
+    });
+    if (!changed) return current;
     const next: RemoteSignerSession = {
       ...current,
-      ...update,
+      ...(Object.fromEntries(sanitizedEntries) as Partial<RemoteSignerSession>),
       updatedAt: Date.now(),
     };
     this.sessions.set(id, next);

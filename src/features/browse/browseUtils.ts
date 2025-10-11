@@ -1,27 +1,13 @@
 import type { BlossomBlob } from "../../lib/blossomClient";
 import type { Track } from "../../context/AudioContext";
-import type { BlobAudioMetadata } from "../../utils/blobMetadataStore";
+import { getBlobMetadataName, type BlobAudioMetadata } from "../../utils/blobMetadataStore";
 import { isDocumentBlob, isImageBlob, isMusicBlob, isPdfBlob, isVideoBlob } from "../../utils/blobClassification";
 import type { FilterMode } from "../../types/filter";
 
 const deriveTrackTitle = (blob: BlossomBlob) => {
-  const explicit = blob.name?.trim();
-  if (explicit) return explicit;
-  const rawUrl = blob.url;
-  if (rawUrl) {
-    const segments = rawUrl.split("/");
-    const tail = segments[segments.length - 1];
-    if (tail) {
-      try {
-        const decoded = decodeURIComponent(tail);
-        if (decoded) return decoded;
-      } catch {
-        return tail;
-      }
-      return tail;
-    }
-  }
-  return `${blob.sha256.slice(0, 12)}…`;
+  const metadataName = getBlobMetadataName(blob);
+  if (metadataName) return metadataName;
+  return blob.sha256;
 };
 
 export const createAudioTrack = (

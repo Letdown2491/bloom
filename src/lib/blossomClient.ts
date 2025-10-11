@@ -47,6 +47,7 @@ export type BlossomBlob = {
     servers?: string[];
   };
   folderPath?: string | null;
+  __bloomMetadataName?: string | null;
   __bloomFolderPlaceholder?: boolean;
   __bloomFolderTargetPath?: string | null;
   __bloomFolderScope?: "aggregated" | "server" | "private";

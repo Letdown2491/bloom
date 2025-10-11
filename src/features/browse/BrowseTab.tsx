@@ -47,7 +47,7 @@ const FILTER_OPTIONS: FilterOption[] = [...BASE_FILTER_OPTIONS].sort((a, b) =>
 
 
 const CONTROL_BUTTON_BASE =
-  "flex items-center gap-2 rounded-xl border px-2.5 py-2 text-sm transition focus:outline-none focus:ring-1 focus:ring-emerald-500 disabled:cursor-not-allowed disabled:opacity-60";
+  "flex h-10 items-center gap-2 rounded-xl border px-2.5 py-2 text-sm transition focus:outline-none focus:ring-1 focus:ring-emerald-500 disabled:cursor-not-allowed disabled:opacity-60";
 const CONTROL_BUTTON_DEFAULT = "border-slate-800 bg-slate-900/70 text-slate-300 hover:border-slate-700";
 const CONTROL_BUTTON_ACTIVE = "border-emerald-500 bg-emerald-500/10 text-emerald-200";
 const CONTROL_BUTTON_DISABLED = "border-slate-800 bg-slate-900/70 text-slate-500";
@@ -66,6 +66,10 @@ type BrowseControlsProps = {
   filterMode: FilterMode;
   filterMenuRef: React.RefObject<HTMLDivElement>;
   theme: "dark" | "light";
+  showViewToggle: boolean;
+  showSortToggle: boolean;
+  showFilterButton: boolean;
+  variant?: "default" | "grouped";
 };
 
 export const BrowseControls: React.FC<BrowseControlsProps> = ({
@@ -83,6 +87,10 @@ export const BrowseControls: React.FC<BrowseControlsProps> = ({
   filterMode,
   filterMenuRef,
   theme,
+  showViewToggle,
+  showSortToggle,
+  showFilterButton = true,
+  variant = "default",
 }) => {
   const isLightTheme = theme === "light";
   const menuContainerClass = isLightTheme
@@ -105,30 +113,159 @@ export const BrowseControls: React.FC<BrowseControlsProps> = ({
       : isLightTheme
       ? "w-full px-2 py-2 text-left text-sm transition focus:outline-none text-slate-700 hover:text-emerald-600"
       : "w-full px-2 py-2 text-left text-sm transition focus:outline-none text-slate-100 hover:text-emerald-300";
+  const isGrouped = variant === "grouped";
 
-  return (
-    <>
+  if (isGrouped) {
+    const groupedButtonBase =
+      "flex h-10 shrink-0 items-center gap-2 px-0 text-sm transition focus:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-emerald-500 disabled:cursor-not-allowed disabled:opacity-60";
+    const groupedDefault = "bg-slate-900/70 text-slate-300 hover:bg-slate-900/80";
+    const groupedActive = "bg-emerald-500/10 text-emerald-200 hover:bg-emerald-500/20";
+    const groupedDisabled = "bg-slate-900/70 text-slate-500";
+
+    const buttonClass = (
+      state: "default" | "active" | "disabled",
+      kind: "icon" | "default" = "default"
+    ) => {
+      const extras = kind === "icon" ? " w-11 justify-center" : " px-4";
+      if (state === "active") return `${groupedButtonBase}${extras} ${groupedActive}`;
+      if (state === "disabled") return `${groupedButtonBase}${extras} ${groupedDisabled}`;
+      return `${groupedButtonBase}${extras} ${groupedDefault}`;
+    };
+
+    const groupedControls: React.ReactNode[] = [];
+
+    if (showViewToggle) {
+      groupedControls.push(
+        <button
+          key="view-toggle"
+          type="button"
+          onClick={() => onSelectViewMode(viewMode === "grid" ? "list" : "grid")}
+          disabled={disabled}
+          aria-label={`Switch to ${viewMode === "grid" ? "list" : "grid"} view`}
+          className={buttonClass(disabled ? "disabled" : "default", "icon")}
+          data-segment-type="icon"
+        >
+          {viewMode === "grid" ? <GridIcon size={18} /> : <ListIcon size={18} />}
+        </button>
+      );
+    }
+
+    if (showSortToggle) {
+      groupedControls.push(
+        <button
+          key="sort-toggle"
+          type="button"
+          onClick={onToggleSortDirection}
+          disabled={disabled}
+          aria-label={`Toggle sort direction (${sortDirection === "ascending" ? "ascending" : "descending"})`}
+          className={buttonClass(disabled ? "disabled" : "default", "icon")}
+          data-segment-type="icon"
+        >
+          {sortDirection === "ascending" ? <DoubleChevronUpIcon size={18} /> : <DoubleChevronDownIcon size={18} />}
+        </button>
+      );
+    }
+
+    if (showFilterButton) {
+      groupedControls.push(
+        <div key="filter-menu" className="relative flex items-center" ref={filterMenuRef} data-segment-type="menu-container">
+          <button
+            type="button"
+            onClick={onToggleFilterMenu}
+            disabled={disabled}
+            aria-label={filterButtonAriaLabel}
+            aria-pressed={filterButtonActive}
+            aria-haspopup="menu"
+            aria-expanded={isFilterMenuOpen}
+            title={filterButtonLabel}
+            className={buttonClass(disabled ? "disabled" : filterButtonActive ? "active" : "default", "icon")}
+          >
+            <FilterIcon size={18} />
+            <span className="sr-only">{filterButtonAriaLabel}</span>
+          </button>
+          {isFilterMenuOpen && (
+            <div role="menu" className={menuContainerClass}>
+              {FILTER_OPTIONS.map(option => {
+                const isActive = filterMode === option.id;
+                return (
+                  <a
+                    key={option.id}
+                    href="#"
+                    onClick={event => {
+                      event.preventDefault();
+                      onSelectFilter(option.id);
+                    }}
+                    role="menuitemradio"
+                    aria-checked={isActive}
+                    className={menuItemClass(isActive)}
+                  >
+                    <option.icon size={16} />
+                    <span>{option.label}</span>
+                  </a>
+                );
+              })}
+              <div className={menuDividerClass}>
+                <a
+                  href="#"
+                  onClick={event => {
+                    event.preventDefault();
+                    if (filterMode !== "all") {
+                      onSelectFilter("all");
+                    }
+                  }}
+                  role="menuitem"
+                  aria-disabled={filterMode === "all"}
+                  className={clearFiltersClass}
+                  tabIndex={filterMode === "all" ? -1 : 0}
+                >
+                  Clear Filters
+                </a>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    return <>{groupedControls}</>;
+  }
+
+  const controls: React.ReactNode[] = [];
+  const buttonBaseClass = CONTROL_BUTTON_BASE;
+
+  if (showViewToggle) {
+    controls.push(
       <button
+        key="view-toggle"
         type="button"
         onClick={() => onSelectViewMode(viewMode === "grid" ? "list" : "grid")}
         disabled={disabled}
         aria-label={`Switch to ${viewMode === "grid" ? "list" : "grid"} view`}
-        className={`${CONTROL_BUTTON_BASE} ${disabled ? CONTROL_BUTTON_DISABLED : CONTROL_BUTTON_DEFAULT}`}
+        className={`${buttonBaseClass} ${disabled ? CONTROL_BUTTON_DISABLED : CONTROL_BUTTON_DEFAULT}`}
       >
         {viewMode === "grid" ? <GridIcon size={18} /> : <ListIcon size={18} />}
       </button>
+    );
+  }
 
+  if (showSortToggle) {
+    controls.push(
       <button
+        key="sort-toggle"
         type="button"
         onClick={onToggleSortDirection}
         disabled={disabled}
         aria-label={`Toggle sort direction (${sortDirection === "ascending" ? "ascending" : "descending"})`}
-        className={`${CONTROL_BUTTON_BASE} ${disabled ? CONTROL_BUTTON_DISABLED : CONTROL_BUTTON_DEFAULT}`}
+        className={`${buttonBaseClass} ${disabled ? CONTROL_BUTTON_DISABLED : CONTROL_BUTTON_DEFAULT}`}
       >
         {sortDirection === "ascending" ? <DoubleChevronUpIcon size={18} /> : <DoubleChevronDownIcon size={18} />}
       </button>
+    );
+  }
 
-      <div className="relative" ref={filterMenuRef}>
+  if (showFilterButton) {
+    controls.push(
+      <div key="filter-menu" className="relative" ref={filterMenuRef}>
         <button
           type="button"
           onClick={onToggleFilterMenu}
@@ -138,7 +275,7 @@ export const BrowseControls: React.FC<BrowseControlsProps> = ({
           aria-haspopup="menu"
           aria-expanded={isFilterMenuOpen}
           title={filterButtonLabel}
-          className={`${CONTROL_BUTTON_BASE} ${
+          className={`${buttonBaseClass} ${
             disabled ? CONTROL_BUTTON_DISABLED : filterButtonActive ? CONTROL_BUTTON_ACTIVE : CONTROL_BUTTON_DEFAULT
           }`}
         >
@@ -186,8 +323,10 @@ export const BrowseControls: React.FC<BrowseControlsProps> = ({
           </div>
         )}
       </div>
-    </>
-  );
+    );
+  }
+
+  return <div className="flex items-center gap-3">{controls}</div>;
 };
 
 export type BrowsePanelProps = Omit<BrowseContentProps, "renderBlobList">;

@@ -6,6 +6,7 @@ import { useNip46 } from "./context/Nip46Context";
 import { useServers, ManagedServer, sortServersByName } from "./hooks/useServers";
 import { usePreferredRelays } from "./hooks/usePreferredRelays";
 import { useAliasSync } from "./hooks/useAliasSync";
+import { useIsCompactScreen } from "./hooks/useIsCompactScreen";
 import { useSelection } from "./features/selection/SelectionContext";
 import { useShareWorkflow } from "./features/share/useShareWorkflow";
 import { useAudio } from "./context/AudioContext";
@@ -1396,6 +1397,53 @@ const MainNavigation = memo(function MainNavigation({
   const assignSearchInputRef = (node: HTMLInputElement | null) => {
     searchInputRef.current = node;
   };
+  const isCompactScreen = useIsCompactScreen();
+  const hasBreadcrumbs = Boolean(browseNavigationState?.segments.length);
+  const showBreadcrumbs = !isCompactScreen && hasBreadcrumbs;
+  const mergeClasses = (...classes: Array<string | false | null | undefined>) => classes.filter(Boolean).join(" ");
+  const segmentBaseClass =
+    "flex h-10 shrink-0 items-center gap-2 px-0 text-sm transition focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-emerald-500 disabled:cursor-not-allowed disabled:opacity-60 border-none bg-transparent";
+  const segmentDefaultClass = "text-slate-300 hover:bg-slate-900/80";
+  const segmentActiveClass = "bg-emerald-500/10 text-emerald-200 hover:bg-emerald-500/20";
+  const segmentDisabledClass = "text-slate-500";
+  const searchSegmentState =
+    showAuthPrompt || keepSearchExpanded ? segmentDisabledClass : segmentDefaultClass;
+  const browseControlSegments = browseHeaderControls
+    ? React.Children.toArray(browseHeaderControls).filter(Boolean)
+    : [];
+  const navButtonSegments = navTabs.map((item, index) => {
+    const isUploadTab = item.id === "upload";
+    const isTransferView = tab === "transfer";
+    const showTransfer = isUploadTab && selectedCount > 0;
+    const isActive = tab === item.id || (isUploadTab && (isTransferView || showTransfer));
+    const IconComponent = showTransfer ? TransferIcon : item.icon;
+    const label = showTransfer ? "Transfer" : item.label;
+    const hideLabelOnMobile = isUploadTab;
+    const nextTab: TabId = showTransfer ? "transfer" : item.id;
+    const firstNavSegment = index === 0;
+    return (
+      <button
+        key={item.id}
+        onClick={() => onSelectTab(nextTab)}
+        disabled={showAuthPrompt}
+        aria-label={label}
+        title={label}
+        className={mergeClasses(
+          segmentBaseClass,
+          "px-4 justify-center",
+          isActive ? segmentActiveClass : segmentDefaultClass,
+          firstNavSegment &&
+            "relative before:pointer-events-none before:content-[''] before:absolute before:inset-y-1 before:left-0 before:w-px before:bg-slate-700/80"
+        )}
+        data-segment-type="label"
+      >
+        <IconComponent size={16} />
+        <span className={hideLabelOnMobile ? "hidden whitespace-nowrap text-sm font-medium sm:inline" : "whitespace-nowrap text-sm font-medium"}>
+          {label}
+        </span>
+      </button>
+    );
+  });
 
   return (
     <nav className="flex flex-wrap items-center gap-3 px-4 py-3 border-b border-slate-800 bg-slate-900/60">
@@ -1404,10 +1452,11 @@ const MainNavigation = memo(function MainNavigation({
           type="button"
           onClick={onBreadcrumbHome}
           disabled={showAuthPrompt}
+          aria-label="Home"
           className="px-3 py-2 text-sm rounded-xl border flex items-center gap-2 transition disabled:cursor-not-allowed disabled:opacity-60 border-slate-800 bg-slate-900/70 text-slate-300 hover:border-slate-700"
         >
           <HomeIcon size={16} />
-          <span>Home</span>
+          <span className="hidden sm:inline">Home</span>
         </button>
         {keepSearchExpanded && (
           <button
@@ -1444,7 +1493,7 @@ const MainNavigation = memo(function MainNavigation({
               </button>
             ) : null}
           </div>
-        ) : browseNavigationState && browseNavigationState.segments.length > 0 ? (
+        ) : showBreadcrumbs && browseNavigationState ? (
           <div
             className="flex min-w-0 items-center gap-1 overflow-x-auto whitespace-nowrap text-sm text-slate-200"
             title={`/${browseNavigationState.segments.map(segment => segment.label).join("/")}`}
@@ -1463,58 +1512,37 @@ const MainNavigation = memo(function MainNavigation({
               </React.Fragment>
             ))}
           </div>
-        ) : (
+        ) : !isCompactScreen ? (
           <span className="text-sm text-slate-500">/</span>
-        )}
-      </div>
-      <div className="flex items-center gap-3 min-h-12">
-        <button
-          type="button"
-          onClick={onToggleSearch}
-          disabled={showAuthPrompt || keepSearchExpanded}
-          aria-label="Search files"
-          aria-pressed={isSearchOpen}
-          className="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-800 bg-slate-900/70 text-slate-300 transition hover:border-slate-700 focus:outline-none focus:ring-1 focus:ring-emerald-500 disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          <SearchIcon size={16} />
-        </button>
-        {browseHeaderControls ? (
-          <div className="flex items-center gap-3 min-h-12">{browseHeaderControls}</div>
-        ) : tab === "browse" ? (
-          <div className="flex items-center gap-3 min-h-12" aria-hidden="true">
-            <span className="h-10 w-11 rounded-xl border border-transparent bg-transparent" />
-            <span className="h-10 w-11 rounded-xl border border-transparent bg-transparent" />
-            <span className="h-10 w-11 rounded-xl border border-transparent bg-transparent" />
-          </div>
         ) : null}
-        <div className="flex gap-3 ml-3">
-          {navTabs.map(item => {
-            const isUploadTab = item.id === "upload";
-            const isTransferView = tab === "transfer";
-            const showTransfer = isUploadTab && selectedCount > 0;
-            const isActive = tab === item.id || (isUploadTab && (isTransferView || showTransfer));
-            const IconComponent = showTransfer ? TransferIcon : item.icon;
-            const label = showTransfer ? "Transfer" : item.label;
-            const hideLabelOnMobile = isUploadTab;
-            const nextTab: TabId = showTransfer ? "transfer" : item.id;
-            return (
-              <button
-                key={item.id}
-                onClick={() => onSelectTab(nextTab)}
-                disabled={showAuthPrompt}
-                aria-label={label}
-                title={label}
-                className={`px-3 py-2 text-sm rounded-xl border flex items-center gap-2 transition disabled:cursor-not-allowed disabled:opacity-60 ${
-                  isActive
-                    ? "border-emerald-500 bg-emerald-500/10 text-emerald-200"
-                    : "border-slate-800 bg-slate-900/70 text-slate-300 hover:border-slate-700"
-                }`}
-              >
-                <IconComponent size={16} />
-                <span className={hideLabelOnMobile ? "hidden sm:inline" : undefined}>{label}</span>
-              </button>
+      </div>
+      <div className="flex items-center" role="group" aria-label="Main navigation controls">
+        <div className="flex items-stretch overflow-hidden rounded-xl border border-slate-800 bg-slate-900/70 divide-x divide-slate-800">
+          <button
+            type="button"
+            onClick={onToggleSearch}
+            disabled={showAuthPrompt || keepSearchExpanded}
+            aria-label="Search files"
+            aria-pressed={isSearchOpen}
+            className={mergeClasses(segmentBaseClass, "w-11 justify-center", searchSegmentState)}
+            data-segment-type="icon"
+          >
+            <SearchIcon size={16} />
+          </button>
+          {browseControlSegments.map((segment, index) => {
+            if (!React.isValidElement(segment)) return null;
+            const segmentType = segment.props["data-segment-type"] || (segment.type === "button" ? "icon" : undefined);
+            const baseClass = mergeClasses(
+              segmentType === "label" ? segmentBaseClass + " px-4" : segmentBaseClass + " w-11 justify-center",
+              segmentType === "menu-container" &&
+                "relative before:pointer-events-none before:content-[''] before:absolute before:inset-y-1 before:right-0 before:w-px before:bg-slate-700/80"
             );
+            return React.cloneElement(segment, {
+              className: mergeClasses(baseClass, segment.props.className || ""),
+              "data-segment-type": segmentType,
+            });
           })}
+          {navButtonSegments}
         </div>
       </div>
     </nav>

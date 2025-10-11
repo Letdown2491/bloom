@@ -13,6 +13,7 @@ import {
 import { uploadBlobToNip96 } from "../../lib/nip96Client";
 import { uploadBlobToSatellite } from "../../lib/satelliteClient";
 import { buildNip98AuthHeader } from "../../lib/nip98";
+import { getBlobMetadataName } from "../../utils/blobMetadataStore";
 import type { TransferState } from "../../components/UploadPanel";
 import { BloomHttpError } from "../../lib/httpService";
 import { useNdk, useCurrentPubkey } from "../../context/NdkContext";
@@ -723,7 +724,7 @@ export const TransferTabContainer: React.FC<TransferTabContainerProps> = ({
         for (const { blob, server: sourceServer } of selectedBlobItems) {
           const sha = blob.sha256;
           const transferId = `transfer-${target.url}-${sha}`;
-          const fileName = blob.name || sha;
+          const fileName = getBlobMetadataName(blob) ?? sha;
           const totalSize = blob.size && blob.size > 0 ? blob.size : 1;
           const baseTransfer: TransferState = {
             id: transferId,
@@ -861,7 +862,7 @@ export const TransferTabContainer: React.FC<TransferTabContainerProps> = ({
                   `Unable to fetch ${fileName} from ${serverNameByUrl.get(sourceServer.url) || sourceServer.url}`
                 );
               }
-              const satelliteLabel = blob.name || fileName;
+              const satelliteLabel = getBlobMetadataName(blob) ?? fileName;
               await uploadBlobToSatellite(
                 target.url,
                 streamSource,

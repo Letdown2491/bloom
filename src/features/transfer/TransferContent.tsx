@@ -1,5 +1,6 @@
 import React from "react";
 import { prettyBytes } from "../../utils/format";
+import { getBlobMetadataName } from "../../utils/blobMetadataStore";
 import type { ManagedServer } from "../../hooks/useServers";
 import type { BlossomBlob } from "../../lib/blossomClient";
 import type { TransferState } from "../../components/UploadPanel";
@@ -81,7 +82,7 @@ export const TransferContent: React.FC<TransferContentProps> = ({
               <ul className="mt-1 space-y-1 text-xs text-slate-400">
                 {selectedBlobItems.slice(0, 6).map(item => (
                   <li key={item.blob.sha256} className="flex items-center justify-between gap-3">
-                    <span className="truncate">{item.blob.name || `${item.blob.sha256.slice(0, 12)}…`}</span>
+                    <span className="truncate">{getBlobMetadataName(item.blob) ?? item.blob.sha256}</span>
                     <span>{prettyBytes(item.blob.size || 0)}</span>
                   </li>
                 ))}

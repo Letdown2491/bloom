@@ -2,6 +2,7 @@ import React from "react";
 import type { BrowseNavigationState } from "../features/workspace/BrowseTabContainer";
 import type { TabId } from "../types/tabs";
 import { CloseIcon, HomeIcon, ChevronLeftIcon, ChevronRightIcon, SearchIcon, TransferIcon } from "./icons";
+import { useIsCompactScreen } from "../hooks/useIsCompactScreen";
 
 type NavTab = {
   id: TabId;
@@ -30,6 +31,12 @@ type WorkspaceToolbarProps = {
   navTabs: NavTab[];
 };
 
+const GROUP_BUTTON_BASE =
+  "flex h-10 shrink-0 items-center gap-2 px-0 text-sm transition focus:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-emerald-500 disabled:cursor-not-allowed disabled:opacity-60";
+const GROUP_BUTTON_DEFAULT = "bg-slate-900/70 text-slate-300 hover:bg-slate-900/80";
+const GROUP_BUTTON_ACTIVE = "bg-emerald-500/10 text-emerald-200 hover:bg-emerald-500/20";
+const GROUP_BUTTON_DISABLED = "bg-slate-900/70 text-slate-500";
+
 const WorkspaceToolbarComponent: React.FC<WorkspaceToolbarProps> = ({
   showAuthPrompt,
   keepSearchExpanded,
@@ -50,6 +57,62 @@ const WorkspaceToolbarComponent: React.FC<WorkspaceToolbarProps> = ({
   onSelectTab,
   navTabs,
 }) => {
+  const isCompactScreen = useIsCompactScreen();
+  const hasBreadcrumbs = Boolean(browseNavigationState?.segments.length);
+  const showBreadcrumbs = !isCompactScreen && hasBreadcrumbs;
+  const searchButtonStateClass =
+    showAuthPrompt || keepSearchExpanded ? GROUP_BUTTON_DISABLED : GROUP_BUTTON_DEFAULT;
+  const browseControlsSegments = browseHeaderControls
+    ? React.Children.toArray(browseHeaderControls)
+    : activeTab === "browse"
+    ? [
+        <span
+          key="placeholder-1"
+          className={`${GROUP_BUTTON_BASE} ${GROUP_BUTTON_DEFAULT} w-11 justify-center pointer-events-none select-none`}
+          aria-hidden="true"
+        />,
+        <span
+          key="placeholder-2"
+          className={`${GROUP_BUTTON_BASE} ${GROUP_BUTTON_DEFAULT} w-11 justify-center pointer-events-none select-none`}
+          aria-hidden="true"
+        />,
+        <span
+          key="placeholder-3"
+          className={`${GROUP_BUTTON_BASE} ${GROUP_BUTTON_DEFAULT} w-11 justify-center pointer-events-none select-none`}
+          aria-hidden="true"
+        />,
+      ]
+    : [];
+  const navButtonSegments = navTabs.map(item => {
+    const isUploadTab = item.id === "upload";
+    const isTransferView = activeTab === "transfer";
+    const showTransfer = isUploadTab && selectedBlobCount > 0;
+    const isActive = activeTab === item.id || (isUploadTab && (isTransferView || showTransfer));
+    const IconComponent = showTransfer ? TransferIcon : item.icon;
+    const label = showTransfer ? "Transfer" : item.label;
+    const targetTab = showTransfer ? ("transfer" as TabId) : item.id;
+    const hideLabelOnMobile = isUploadTab;
+    return (
+      <button
+        key={item.id}
+        onClick={() => onSelectTab(targetTab)}
+        disabled={showAuthPrompt}
+        aria-label={label}
+        title={label}
+        className={`${GROUP_BUTTON_BASE} ${isActive ? GROUP_BUTTON_ACTIVE : GROUP_BUTTON_DEFAULT} px-4 justify-center`}
+      >
+        <IconComponent size={16} />
+        <span
+          className={
+            hideLabelOnMobile ? "hidden whitespace-nowrap text-sm font-medium sm:inline" : "whitespace-nowrap text-sm font-medium"
+          }
+        >
+          {label}
+        </span>
+      </button>
+    );
+  });
+
   return (
     <nav className="flex flex-wrap items-center gap-3 px-4 py-3 border-b border-slate-800 bg-slate-900/60">
       <div className="flex items-center gap-2">
@@ -57,10 +120,11 @@ const WorkspaceToolbarComponent: React.FC<WorkspaceToolbarProps> = ({
           type="button"
           onClick={onNavigateHome}
           disabled={showAuthPrompt}
+          aria-label="Home"
           className="px-3 py-2 text-sm rounded-xl border flex items-center gap-2 transition disabled:cursor-not-allowed disabled:opacity-60 border-slate-800 bg-slate-900/70 text-slate-300 hover:border-slate-700"
         >
           <HomeIcon size={16} />
-          <span>Home</span>
+          <span className="hidden sm:inline">Home</span>
         </button>
         {keepSearchExpanded && (
           <button
@@ -97,7 +161,7 @@ const WorkspaceToolbarComponent: React.FC<WorkspaceToolbarProps> = ({
               </button>
             ) : null}
           </div>
-        ) : browseNavigationState && browseNavigationState.segments.length > 0 ? (
+        ) : showBreadcrumbs && browseNavigationState ? (
           <div
             className="flex min-w-0 items-center gap-1 overflow-x-auto whitespace-nowrap text-sm text-slate-200"
             title={`/${browseNavigationState.segments.map(segment => segment.label).join("/")}`}
@@ -116,58 +180,24 @@ const WorkspaceToolbarComponent: React.FC<WorkspaceToolbarProps> = ({
               </React.Fragment>
             ))}
           </div>
-        ) : (
+        ) : !isCompactScreen ? (
           <span className="text-sm text-slate-500">/</span>
-        )}
-      </div>
-      <div className="flex items-center gap-3">
-        <button
-          type="button"
-          onClick={onToggleSearch}
-          disabled={showAuthPrompt || keepSearchExpanded}
-          aria-label="Search files"
-          aria-pressed={isSearchOpen}
-          className="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-800 bg-slate-900/70 text-slate-300 transition hover:border-slate-700 focus:outline-none focus:ring-1 focus:ring-slate-500 disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          <SearchIcon size={16} />
-        </button>
-        {browseHeaderControls ? (
-          <div className="flex items-center gap-3">{browseHeaderControls}</div>
-        ) : activeTab === "browse" ? (
-          <div className="flex items-center gap-3" aria-hidden="true">
-            <span className="h-10 w-11 rounded-xl border border-transparent bg-transparent" />
-            <span className="h-10 w-11 rounded-xl border border-transparent bg-transparent" />
-            <span className="h-10 w-11 rounded-xl border border-transparent bg-transparent" />
-          </div>
         ) : null}
-        <div className="flex gap-3 ml-3">
-          {navTabs.map(item => {
-            const selectedCount = selectedBlobCount;
-            const isUploadTab = item.id === "upload";
-            const isTransferView = activeTab === "transfer";
-            const showTransfer = isUploadTab && selectedCount > 0;
-            const isActive = activeTab === item.id || (isUploadTab && (isTransferView || showTransfer));
-            const IconComponent = showTransfer ? TransferIcon : item.icon;
-            const label = showTransfer ? "Transfer" : item.label;
-            const targetTab = showTransfer ? ("transfer" as TabId) : item.id;
-            const hideLabelOnMobile = isUploadTab;
-            return (
-              <button
-                key={item.id}
-                onClick={() => onSelectTab(targetTab)}
-                disabled={showAuthPrompt}
-                aria-label={label}
-                className={`px-3 py-2 text-sm rounded-xl border flex items-center gap-2 transition disabled:cursor-not-allowed disabled:opacity-60 ${
-                  isActive
-                    ? "border-emerald-500 bg-emerald-500/10 text-emerald-200"
-                    : "border-slate-800 bg-slate-900/70 text-slate-300 hover:border-slate-700"
-                }`}
-              >
-                <IconComponent size={16} />
-                <span className={hideLabelOnMobile ? "hidden sm:inline" : undefined}>{label}</span>
-              </button>
-            );
-          })}
+      </div>
+      <div className="flex items-center" role="group" aria-label="Workspace navigation controls">
+        <div className="flex items-stretch overflow-hidden rounded-xl border border-slate-800 bg-slate-900/70 divide-x divide-slate-800">
+          <button
+            type="button"
+            onClick={onToggleSearch}
+            disabled={showAuthPrompt || keepSearchExpanded}
+            aria-label="Search files"
+            aria-pressed={isSearchOpen}
+            className={`${GROUP_BUTTON_BASE} ${searchButtonStateClass} w-11 justify-center`}
+          >
+            <SearchIcon size={16} />
+          </button>
+          {browseControlsSegments}
+          {navButtonSegments}
         </div>
       </div>
     </nav>

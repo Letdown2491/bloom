@@ -25,7 +25,7 @@ import {
 } from "./icons";
 import { PRIVATE_PLACEHOLDER_SHA } from "../constants/private";
 import type { FileKind } from "./icons";
-import type { BlobAudioMetadata } from "../utils/blobMetadataStore";
+import { getBlobMetadataName, type BlobAudioMetadata } from "../utils/blobMetadataStore";
 import { cachePreviewBlob, getCachedPreviewBlob } from "../utils/blobPreviewCache";
 import { useBlobMetadata } from "../features/browse/useBlobMetadata";
 import { useBlobPreview, type PreviewTarget, canBlobPreview } from "../features/browse/useBlobPreview";
@@ -94,7 +94,7 @@ const isDirectoryLikeMime = (value?: string | null) => {
   return false;
 };
 
-const isListLikeBlob = (blob: BlossomBlob) => {
+export const isListLikeBlob = (blob: BlossomBlob) => {
   if (isDirectoryLikeMime(blob.type)) return true;
   const metadataType = blob.privateData?.metadata?.type;
   if (isDirectoryLikeMime(metadataType)) return true;
@@ -272,7 +272,14 @@ const ReplicaBadge: React.FC<{
 };
 
 const deriveBlobSortName = (blob: BlossomBlob) => {
-  const explicit = blob.name?.trim();
+  const folderName =
+    blob.__bloomFolderPlaceholder || isListLikeBlob(blob)
+      ? blob.name
+      : undefined;
+  if (typeof folderName === "string" && folderName.trim()) {
+    return folderName.trim().toLowerCase();
+  }
+  const explicit = getBlobMetadataName(blob);
   if (explicit) return explicit.toLowerCase();
   if (blob.url) {
     const tail = blob.url.split("/").pop();
@@ -590,8 +597,8 @@ export const BlobList: React.FC<BlobListProps> = ({
           downloadBlob = await response.blob();
         }
 
-        const inferredName = deriveFilename(disposition);
-        const baseName = sanitizeFilename(privateMetadata?.name || inferredName || blob.name || blob.sha256);
+        const metadataName = getBlobMetadataName(blob);
+        const baseName = sanitizeFilename(metadataName ?? blob.sha256);
         const typeHint = privateMetadata?.type || downloadBlob.type || blob.type || mimeHint;
         const extension = inferExtensionFromType(typeHint);
         const filename = ensureExtension(baseName, extension);
@@ -736,6 +743,7 @@ export const BlobList: React.FC<BlobListProps> = ({
 };
 
 const LIST_ROW_HEIGHT = 68;
+const LIST_ROW_HEIGHT_COMPACT = 96;
 const LIST_ROW_GAP = 4;
 
 const ListLayout: React.FC<{
@@ -804,8 +812,16 @@ const ListLayout: React.FC<{
   const [container, setContainer] = useState({ width: 0, height: 0 });
   const [actionsColumnWidth, setActionsColumnWidth] = useState<number | null>(null);
 
-  const handleActionsWidthChange = useCallback((width: number) => {
-    if (!Number.isFinite(width) || width <= 0) return;
+  const listWidth = container.width > 0 ? Math.max(0, container.width - 1) : container.width || 0;
+  const fallbackCompact = typeof window !== "undefined" ? window.innerWidth < 640 : false;
+  const isCompactList = container.width > 0 ? container.width < 640 : fallbackCompact;
+  const listRowHeight = isCompactList ? LIST_ROW_HEIGHT_COMPACT : LIST_ROW_HEIGHT;
+
+  const handleActionsWidthChange = useCallback((width: number | null) => {
+    if (typeof width !== "number" || !Number.isFinite(width) || width <= 0) {
+      setActionsColumnWidth(null);
+      return;
+    }
     setActionsColumnWidth(previous => {
       if (previous === null) return width;
       return Math.abs(previous - width) > 1 ? width : previous;
@@ -814,7 +830,7 @@ const ListLayout: React.FC<{
 
   useEffect(() => {
     setActionsColumnWidth(null);
-  }, [isMusicView]);
+  }, [isMusicView, isCompactList]);
 
   const allSelected = blobs.length > 0 && blobs.every(blob => selected.has(blob.sha256));
   const partiallySelected = !allSelected && blobs.some(blob => selected.has(blob.sha256));
@@ -844,8 +860,6 @@ const ListLayout: React.FC<{
     return () => window.removeEventListener("resize", handleResize);
   }, [blobs.length]);
 
-  const listWidth = container.width > 0 ? Math.max(0, container.width - 1) : container.width || 0;
-
   useLayoutEffect(() => {
     const outer = listOuterRef.current;
     if (!outer) return;
@@ -864,8 +878,8 @@ const ListLayout: React.FC<{
       outer.style.boxSizing = previousBoxSizing;
     };
   }, [listWidth]);
-  const estimatedHeight = (LIST_ROW_HEIGHT + LIST_ROW_GAP) * Math.min(blobs.length, 8);
-  const listHeight = container.height > 0 ? container.height : Math.min(480, Math.max(LIST_ROW_HEIGHT + LIST_ROW_GAP, estimatedHeight));
+  const estimatedHeight = (listRowHeight + LIST_ROW_GAP) * Math.min(blobs.length, 8);
+  const listHeight = container.height > 0 ? container.height : Math.min(480, Math.max(listRowHeight + LIST_ROW_GAP, estimatedHeight));
 
   const headerIndicator = useCallback(
     (key: SortKey) => {
@@ -919,6 +933,9 @@ const ListLayout: React.FC<{
       resolveCoverEntry,
       handleActionsWidthChange,
       getMenuBoundary,
+      isCompactList,
+      listRowHeight,
+      actionsColumnWidth,
     }),
     [
       blobs,
@@ -947,6 +964,9 @@ const ListLayout: React.FC<{
       resolveCoverEntry,
       handleActionsWidthChange,
       getMenuBoundary,
+      isCompactList,
+      listRowHeight,
+      actionsColumnWidth,
     ]
   );
 
@@ -979,6 +999,9 @@ const ListLayout: React.FC<{
         resolveCoverEntry: rowResolveCoverEntry,
         handleActionsWidthChange: rowHandleActionsWidthChange,
         getMenuBoundary: rowGetMenuBoundary,
+        isCompactList: rowIsCompactList,
+        listRowHeight: rowListRowHeight,
+        actionsColumnWidth: rowActionsColumnWidth,
       } = data;
 
       const blob = listBlobs[index];
@@ -986,8 +1009,9 @@ const ListLayout: React.FC<{
 
       const rawTop = typeof style.top === "number" ? style.top : Number.parseFloat(String(style.top ?? 0));
       const top = Number.isFinite(rawTop) ? rawTop + LIST_ROW_GAP / 2 : rawTop;
-      const rawHeight = typeof style.height === "number" ? style.height : Number.parseFloat(String(style.height ?? LIST_ROW_HEIGHT));
-      const height = Number.isFinite(rawHeight) ? rawHeight : LIST_ROW_HEIGHT;
+      const baseRowHeight = rowListRowHeight;
+      const rawHeight = typeof style.height === "number" ? style.height : Number.parseFloat(String(style.height ?? baseRowHeight));
+      const height = Number.isFinite(rawHeight) ? rawHeight : baseRowHeight;
       const replicaSummary = rowReplicaInfo?.get(blob.sha256);
       const isPrivateBlob = Boolean(blob.privateData);
       const trackMetadata = rowAudioMetadata.get(blob.sha256) ?? null;
@@ -1025,11 +1049,13 @@ const ListLayout: React.FC<{
           isMusicListView={rowIsMusicView}
           trackMetadata={trackMetadata}
           onActionsWidthChange={rowHandleActionsWidthChange}
-          showPreviews={rowShowPreviews}
-          isPrivateBlob={isPrivateBlob}
-          coverEntry={coverEntry}
-          getMenuBoundary={rowGetMenuBoundary}
-        />
+        showPreviews={rowShowPreviews}
+        isPrivateBlob={isPrivateBlob}
+        coverEntry={coverEntry}
+        getMenuBoundary={rowGetMenuBoundary}
+        isCompactList={rowIsCompactList}
+        actionsColumnWidth={rowActionsColumnWidth}
+      />
       );
     },
     [itemData, listWidth]
@@ -1084,7 +1110,7 @@ const ListLayout: React.FC<{
           </button>
           <div
             className="hidden w-full justify-center text-center font-semibold text-slate-200 md:flex normal-case"
-            style={actionsColumnWidth ? { width: actionsColumnWidth } : undefined}
+            style={!isCompactList && actionsColumnWidth ? { width: actionsColumnWidth } : undefined}
           >
             Actions
           </div>
@@ -1138,7 +1164,7 @@ const ListLayout: React.FC<{
         </button>
         <div
           className="hidden w-full justify-center text-center font-semibold text-slate-200 md:flex normal-case"
-          style={actionsColumnWidth ? { width: actionsColumnWidth } : undefined}
+          style={!isCompactList && actionsColumnWidth ? { width: actionsColumnWidth } : undefined}
         >
           Actions
         </div>
@@ -1155,10 +1181,10 @@ const ListLayout: React.FC<{
         {blobs.length === 0 ? (
           <div className="p-4 text-sm text-slate-400">No content on this server yet.</div>
         ) : (
-          <VirtualList
-            height={listHeight}
-            itemCount={blobs.length}
-            itemSize={LIST_ROW_HEIGHT + LIST_ROW_GAP}
+        <VirtualList
+          height={listHeight}
+          itemCount={blobs.length}
+          itemSize={listRowHeight + LIST_ROW_GAP}
             width={listWidth}
             onItemsRendered={handleItemsRendered}
             overscanCount={6}
@@ -1671,7 +1697,7 @@ const GridCard = React.memo<GridCardProps>(
           <BlobPreview
             sha={blob.sha256}
             url={previewUrl}
-            name={blob.name || blob.sha256}
+            name={(blob.__bloomFolderPlaceholder || isListLikeBlob(blob) ? blob.name : getBlobMetadataName(blob)) ?? blob.sha256}
             type={blob.type}
             serverUrl={blob.serverUrl ?? baseUrl}
             requiresAuth={previewRequiresAuth}
@@ -2036,7 +2062,7 @@ const PreviewDialog: React.FC<{
             <BlobPreview
               sha={blob.sha256}
               url={previewUrl}
-              name={blob.name || blob.sha256}
+              name={(blob.__bloomFolderPlaceholder || isListLikeBlob(blob) ? blob.name : getBlobMetadataName(blob)) ?? blob.sha256}
               type={blob.type}
               serverUrl={target.baseUrl ?? blob.serverUrl}
               requiresAuth={requiresAuth}
@@ -2129,6 +2155,10 @@ const ListThumbnail: React.FC<{
   const THUMBNAIL_BASE_PX = 48;
   const effectivePixelSize = THUMBNAIL_BASE_PX * devicePixelRatio;
   const shouldLoadCompactCover = effectivePixelSize >= 136;
+  const previewName =
+    blob.__bloomFolderPlaceholder || isListLikeBlob(blob)
+      ? blob.name ?? blob.sha256
+      : getBlobMetadataName(blob) ?? blob.sha256;
 
   if (kind === "music") {
     const fallbackContent = (
@@ -2141,7 +2171,7 @@ const ListThumbnail: React.FC<{
         <div className={containerClass}>
           <AudioCoverImage
             url={coverUrl}
-            alt={`${blob.name || blob.sha256} cover art`}
+            alt={`${previewName} cover art`}
             className="h-full w-full object-cover"
             fallback={fallbackContent}
             requiresAuth={effectiveRequiresAuth}
@@ -2161,7 +2191,7 @@ const ListThumbnail: React.FC<{
             hash={blurhash.hash}
             width={blurhash.width}
             height={blurhash.height}
-            alt={`${blob.name || blob.sha256} preview`}
+            alt={`${previewName} preview`}
           />
         </div>
       );
@@ -2181,7 +2211,7 @@ const ListThumbnail: React.FC<{
         <BlobPreview
           sha={blob.sha256}
           url={previewUrl}
-          name={blob.name || blob.sha256}
+          name={previewName}
           type={blob.type}
           serverUrl={blob.serverUrl ?? baseUrl}
           requiresAuth={effectiveRequiresAuth}
@@ -2282,11 +2312,13 @@ type ListRowProps = {
   replicaSummary?: BlobReplicaSummary;
   isMusicListView: boolean;
   trackMetadata: BlobAudioMetadata | null;
-  onActionsWidthChange: (width: number) => void;
+  onActionsWidthChange: (width: number | null) => void;
   showPreviews: boolean;
   isPrivateBlob?: boolean;
   coverEntry?: PrivateListEntry | null;
   getMenuBoundary?: () => HTMLElement | null;
+  isCompactList: boolean;
+  actionsColumnWidth: number | null;
 };
 
 const ListRowComponent: React.FC<ListRowProps> = ({
@@ -2321,6 +2353,8 @@ const ListRowComponent: React.FC<ListRowProps> = ({
   isPrivateBlob,
   coverEntry,
   getMenuBoundary,
+  isCompactList,
+  actionsColumnWidth,
 }) => {
   const rowStyle = useMemo<React.CSSProperties>(
     () => ({ position: "absolute", top, left, width, height }),
@@ -2369,8 +2403,17 @@ const ListRowComponent: React.FC<ListRowProps> = ({
   const resolvedCoverEntry = coverEntry ?? null;
   const allowThumbnailPreview =
     showPreviews && !allowDialogPreview && (canPreview || (kind === "music" && Boolean(coverUrl)));
+  const actionsStyle =
+    !isCompactList && actionsColumnWidth
+      ? { width: actionsColumnWidth, minHeight: footerHeight }
+      : { minHeight: footerHeight };
 
   const updatedLabel = blob.uploaded ? prettyDate(blob.uploaded) : "—";
+  const sizeLabel = isListBlob ? "—" : prettyBytes(blob.size || 0);
+  const replicaLabel =
+    replicaSummary && replicaSummary.count > 0
+      ? `${replicaSummary.count} server${replicaSummary.count === 1 ? "" : "s"}`
+      : null;
 
   const thumbnail = (
     <div className="relative">
@@ -2407,29 +2450,42 @@ const ListRowComponent: React.FC<ListRowProps> = ({
 
   useLayoutEffect(() => {
     const element = actionsContainerRef.current;
-    if (!element) return;
+    if (!element || isCompactList) {
+      onActionsWidthChange(null);
+      return;
+    }
 
     const notify = () => {
+      if (isCompactList) {
+        onActionsWidthChange(null);
+        return;
+      }
       const width = element.offsetWidth;
-      if (width) onActionsWidthChange(width);
+      onActionsWidthChange(Number.isFinite(width) && width > 0 ? width : null);
     };
 
     notify();
 
-    if (typeof ResizeObserver === "function") {
-      const observer = new ResizeObserver(() => notify());
-      observer.observe(element);
-      return () => observer.disconnect();
-    }
+    const resizeObserver =
+      typeof ResizeObserver === "function"
+        ? new ResizeObserver(() => notify())
+        : null;
+
+    resizeObserver?.observe(element);
 
     if (typeof window !== "undefined") {
       const handleResize = () => notify();
       window.addEventListener("resize", handleResize);
-      return () => window.removeEventListener("resize", handleResize);
+      return () => {
+        resizeObserver?.disconnect();
+        window.removeEventListener("resize", handleResize);
+      };
     }
 
-    return undefined;
-  }, [onActionsWidthChange, menuOpen]);
+    return () => {
+      resizeObserver?.disconnect();
+    };
+  }, [onActionsWidthChange, menuOpen, isCompactList]);
   const dropdownRef = useRef<HTMLDivElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const menuBoundary = getMenuBoundary?.() ?? null;
@@ -2702,8 +2758,8 @@ const ListRowComponent: React.FC<ListRowProps> = ({
         </div>
         <div
           ref={actionsContainerRef}
-          className="col-span-2 flex shrink-0 items-center justify-center gap-2 px-2 md:col-span-1 md:justify-end"
-          style={{ minHeight: footerHeight }}
+        className="col-span-2 flex shrink-0 items-center justify-center gap-2 px-2 md:col-span-1 md:justify-end"
+          style={actionsStyle}
         >
           {primaryAction}
           {shareButton}
@@ -2713,33 +2769,84 @@ const ListRowComponent: React.FC<ListRowProps> = ({
     );
   }
 
+  const metadataInline = (
+    <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-400">
+      <span>{sizeLabel}</span>
+      {updatedLabel !== "—" ? <span>{updatedLabel}</span> : null}
+      {replicaLabel ? <span>{replicaLabel}</span> : null}
+    </div>
+  );
+
+  const hasActions = Boolean(primaryAction || shareButton || dropdownMenu);
+
+  if (isCompactList) {
+    return (
+      <div
+        style={rowStyle}
+        className={`absolute left-0 right-0 flex flex-col gap-3 border-b border-slate-800 px-3 py-3 transition-colors ring-1 ring-transparent ${rowHighlightClass}`}
+        role="row"
+        aria-current={isActiveTrack ? "true" : undefined}
+        onClick={handleRowClick}
+      >
+        <div className="flex items-start gap-3">
+          <input
+            type="checkbox"
+            className="mt-1 h-4 w-4 shrink-0 rounded border-slate-700 bg-slate-900 text-emerald-400 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+            checked={isSelected}
+            onChange={() => onToggle(blob.sha256)}
+            aria-label={`Select ${displayName}`}
+            onClick={event => event.stopPropagation()}
+          />
+          <div className="flex min-w-0 flex-1 gap-3">
+            <div className="flex-shrink-0">{thumbnail}</div>
+            <div className="min-w-0" title={displayName}>
+              <div className="flex min-w-0 flex-wrap items-center gap-2 font-medium text-slate-100">
+                <span className="truncate">{displayName}</span>
+                {isPrivateItem ? <LockIcon size={14} className="text-amber-300" aria-hidden="true" /> : null}
+              </div>
+              {metadataInline}
+            </div>
+          </div>
+        </div>
+        {hasActions ? (
+          <div className="flex flex-wrap items-center gap-2">
+            {primaryAction}
+            {shareButton}
+            {dropdownMenu}
+          </div>
+        ) : null}
+      </div>
+    );
+  }
+
   return (
     <div
       style={rowStyle}
-      className={`absolute left-0 right-0 flex items-center gap-2 border-b border-slate-800 px-2 transition-colors ring-1 ring-transparent ${rowHighlightClass}`}
+      className={`absolute left-0 right-0 flex h-full flex-col gap-3 border-b border-slate-800 px-3 py-3 transition-colors ring-1 ring-transparent md:flex-row md:items-center md:gap-2 md:px-2 md:py-0 ${rowHighlightClass}`}
       role="row"
       aria-current={isActiveTrack ? "true" : undefined}
       onClick={handleRowClick}
     >
-      <div className="flex w-12 justify-center">
-        <input
-          type="checkbox"
-          className="h-4 w-4 rounded border-slate-700 bg-slate-900 text-emerald-400 focus:outline-none focus:ring-1 focus:ring-emerald-500"
-          checked={isSelected}
-          onChange={() => onToggle(blob.sha256)}
-          aria-label={`Select ${displayName}`}
-          onClick={event => event.stopPropagation()}
-        />
-      </div>
-      <div className="flex min-w-0 flex-[2] items-center gap-3">
+      <div className="flex min-w-0 flex-1 items-start gap-3 md:items-center">
+        <div className="flex items-center pt-1 md:pt-0">
+          <input
+            type="checkbox"
+            className="h-4 w-4 rounded border-slate-700 bg-slate-900 text-emerald-400 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+            checked={isSelected}
+            onChange={() => onToggle(blob.sha256)}
+            aria-label={`Select ${displayName}`}
+            onClick={event => event.stopPropagation()}
+          />
+        </div>
         {thumbnail}
         <div className="min-w-0" title={displayName}>
-          <div className="flex min-w-0 items-center gap-2 font-medium text-slate-100">
+          <div className="flex min-w-0 flex-wrap items-center gap-2 font-medium text-slate-100">
             <span className="truncate">{displayName}</span>
             {isPrivateItem ? (
               <LockIcon size={14} className="text-amber-300 flex-shrink-0" aria-hidden="true" />
             ) : null}
           </div>
+          <div className="md:hidden">{metadataInline}</div>
         </div>
       </div>
       <div className="hidden w-20 shrink-0 items-center justify-center text-sm text-slate-200 md:flex">
@@ -2754,11 +2861,11 @@ const ListRowComponent: React.FC<ListRowProps> = ({
       <div className="hidden w-40 shrink-0 px-3 text-xs text-slate-400 md:block" title={updatedLabel !== "—" ? updatedLabel : undefined}>
         {updatedLabel}
       </div>
-      <div className="w-24 shrink-0 px-3 text-sm text-slate-400">{isListBlob ? "—" : prettyBytes(blob.size || 0)}</div>
+      <div className="hidden w-24 shrink-0 px-3 text-sm text-slate-400 md:block">{sizeLabel}</div>
       <div
         ref={actionsContainerRef}
-        className="flex shrink-0 items-center justify-center gap-2 px-2 md:justify-end"
-        style={{ minHeight: footerHeight }}
+        className="flex w-full shrink-0 flex-wrap items-center justify-start gap-2 px-1 md:w-auto md:flex-nowrap md:justify-end md:px-2"
+        style={actionsStyle}
       >
         {primaryAction}
         {shareButton}
@@ -3428,26 +3535,12 @@ const ListRow = React.memo(ListRowComponent, (prev, next) => {
     prev.trackMetadata === next.trackMetadata &&
     prev.showPreviews === next.showPreviews &&
     prev.isPrivateBlob === next.isPrivateBlob &&
-    prev.coverEntry === next.coverEntry
+    prev.coverEntry === next.coverEntry &&
+    prev.isCompactList === next.isCompactList &&
+    prev.actionsColumnWidth === next.actionsColumnWidth
   );
 });
 
-
-function deriveFilename(disposition?: string) {
-  if (!disposition) return undefined;
-  const starMatch = disposition.match(/filename\*\s*=\s*(?:UTF-8''|)([^;]+)/i);
-  if (starMatch?.[1]) {
-    const value = starMatch[1].trim().replace(/^UTF-8''/i, "");
-    try {
-      return decodeURIComponent(value);
-    } catch (error) {
-      return value;
-    }
-  }
-  const quotedMatch = disposition.match(/filename="?([^";]+)"?/i);
-  if (quotedMatch?.[1]) return quotedMatch[1];
-  return undefined;
-}
 
 function buildPreviewUrl(blob: BlossomBlob, baseUrl?: string | null) {
   if (blob.url) return blob.url;
@@ -4038,13 +4131,23 @@ function ensureExtension(filename: string, extension?: string) {
 }
 
 function buildDisplayName(blob: BlossomBlob) {
-  const raw = blob.name || blob.url?.split("/").pop() || blob.sha256;
+  if (blob.__bloomFolderPlaceholder || isListLikeBlob(blob)) {
+    const rawFolderName = blob.name || blob.folderPath || blob.sha256;
+    return sanitizeFilename(rawFolderName);
+  }
+
+  const metadataName = getBlobMetadataName(blob);
+  const raw = metadataName ?? blob.sha256;
   const sanitized = sanitizeFilename(raw);
   const { baseName, extension: existingExtension } = splitNameAndExtension(sanitized);
   const inferredExtension = existingExtension || inferExtensionFromType(blob.type);
 
-  const shouldKeepFullName = blob.type?.startsWith("audio/") && typeof blob.name === "string" && blob.name.trim().length > 0;
-  const displayBase = shouldKeepFullName ? baseName : truncateMiddle(baseName, 12, 12);
+  const shouldKeepFullName = Boolean(metadataName) && blob.type?.startsWith("audio/");
+  const displayBase = metadataName
+    ? shouldKeepFullName
+      ? baseName
+      : truncateMiddle(baseName, 12, 12)
+    : baseName;
 
   return inferredExtension ? `${displayBase}.${inferredExtension}` : displayBase;
 }

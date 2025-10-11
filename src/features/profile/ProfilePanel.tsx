@@ -4,6 +4,7 @@ import { CancelIcon, CopyIcon, RefreshIcon, SaveIcon } from "../../components/ic
 import { useNdk } from "../../context/NdkContext";
 import { useWorkspace } from "../workspace/WorkspaceContext";
 import { isImageBlob } from "../../utils/blobClassification";
+import { getBlobMetadataName } from "../../utils/blobMetadataStore";
 import type { BlossomBlob } from "../../lib/blossomClient";
 import { PRIVATE_SERVER_NAME } from "../../constants/private";
 import type { StatusMessageTone } from "../../types/status";
@@ -183,18 +184,9 @@ const buildBlobUrl = (blob: BlossomBlob): string | null => {
 };
 
 const chooseDisplayName = (blob: BlossomBlob): string => {
-  const candidates = [blob.name, blob.url, blob.folderPath ?? undefined];
-  for (const candidate of candidates) {
-    if (!candidate) continue;
-    const trimmed = candidate.toString().trim();
-    if (trimmed) {
-      const segments = trimmed.split("/");
-      const last = segments[segments.length - 1];
-      if (last) return last;
-      return trimmed;
-    }
-  }
-  return blob.sha256.slice(0, 12);
+  const metadataName = getBlobMetadataName(blob);
+  if (metadataName) return metadataName;
+  return blob.sha256;
 };
 
 const toImageOption = (

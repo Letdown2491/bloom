@@ -11,6 +11,7 @@ import type { FilterMode } from "../../types/filter";
 import { useBrowseControls } from "../browse/useBrowseControls";
 import { BrowseControls } from "../browse/BrowseTab";
 import type { SyncStateSnapshot } from "./TransferTabContainer";
+import { useIsCompactScreen } from "../../hooks/useIsCompactScreen";
 
 const UploadPanelLazy = React.lazy(() =>
   import("../../components/UploadPanel").then(module => ({ default: module.UploadPanel }))
@@ -78,6 +79,7 @@ export const Workspace: React.FC<WorkspaceProps> = ({
   uploadFolderSuggestion,
 }) => {
   const browseControls = useBrowseControls();
+  const isSmallScreen = useIsCompactScreen();
   const {
     viewMode,
     setViewMode,
@@ -94,6 +96,11 @@ export const Workspace: React.FC<WorkspaceProps> = ({
     toggleSortDirection,
   } = browseControls;
   const filterMenuRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (isSmallScreen && viewMode === "list") {
+      setViewMode("grid");
+    }
+  }, [isSmallScreen, setViewMode, viewMode]);
 
   useEffect(() => {
     onFilterModeChange?.(filterMode);
@@ -117,6 +124,10 @@ export const Workspace: React.FC<WorkspaceProps> = ({
         filterMode={filterMode}
         filterMenuRef={filterMenuRef}
         theme={theme}
+        showViewToggle={!isSmallScreen}
+        showSortToggle={!isSmallScreen}
+        showFilterButton={!isSmallScreen}
+        variant="grouped"
       />
     );
   }, [
@@ -133,6 +144,7 @@ export const Workspace: React.FC<WorkspaceProps> = ({
     selectFilter,
     filterMode,
     theme,
+    isSmallScreen,
   ]);
 
   useEffect(() => {

@@ -298,11 +298,34 @@ export function setStoredBlobMetadata(serverUrl: string | undefined, sha256: str
 export function mergeBlobWithStoredMetadata(serverUrl: string | undefined, blob: BlossomBlob): BlossomBlob {
   const stored = getStoredBlobMetadata(serverUrl, blob.sha256);
   const merged: BlossomBlob = { ...blob };
-  if (typeof stored?.name === "string") {
-    merged.name = stored.name;
-  } else if (!merged.name && stored?.name === null) {
-    merged.name = undefined;
+  const currentMetadataName =
+    typeof merged.__bloomMetadataName === "string" && merged.__bloomMetadataName.trim()
+      ? merged.__bloomMetadataName.trim()
+      : null;
+  let metadataName = currentMetadataName;
+
+  const hasStoredName = stored ? Object.prototype.hasOwnProperty.call(stored, "name") : false;
+  let storedNameValue: string | null | undefined;
+  if (hasStoredName) {
+    if (typeof stored?.name === "string") {
+      const trimmed = stored.name.trim();
+      storedNameValue = trimmed.length > 0 ? trimmed : null;
+    } else if (stored?.name == null) {
+      storedNameValue = null;
+    }
   }
+
+  if (typeof storedNameValue === "string") {
+    merged.name = storedNameValue;
+    metadataName = storedNameValue;
+  } else if (hasStoredName && storedNameValue === null) {
+    if (!merged.name) {
+      merged.name = undefined;
+    }
+    metadataName = null;
+  }
+
+  merged.__bloomMetadataName = metadataName ?? null;
   if (stored?.type && !merged.type) {
     merged.type = stored.type;
   }
@@ -446,17 +469,40 @@ function combineGlobalAlias(original: BlossomBlob, merged: BlossomBlob): Blossom
   const global = getStoredBlobMetadata(undefined, merged.sha256);
   if (!global) return merged;
   const combined: BlossomBlob = { ...merged };
-  if (typeof global.name === "string") {
-    combined.name = global.name;
-  } else if (global.name === null && original.name === undefined) {
-    delete combined.name;
+  const currentMetadataName =
+    typeof combined.__bloomMetadataName === "string" && combined.__bloomMetadataName.trim()
+      ? combined.__bloomMetadataName.trim()
+      : null;
+  let metadataName = currentMetadataName;
+
+  const hasGlobalName = Object.prototype.hasOwnProperty.call(global, "name");
+  let globalNameValue: string | null | undefined;
+  if (hasGlobalName) {
+    if (typeof global.name === "string") {
+      const trimmed = global.name.trim();
+      globalNameValue = trimmed.length > 0 ? trimmed : null;
+    } else if (global.name == null) {
+      globalNameValue = null;
+    }
   }
+
+  if (typeof globalNameValue === "string") {
+    combined.name = globalNameValue;
+    metadataName = globalNameValue;
+  } else if (hasGlobalName && globalNameValue === null) {
+    if (original.name === undefined) {
+      delete combined.name;
+    }
+    metadataName = null;
+  }
+
   if (!combined.type && typeof global.type === "string") {
     combined.type = global.type;
   }
   if (Object.prototype.hasOwnProperty.call(global, "folderPath")) {
     combined.folderPath = normalizeFolderPathInput(global.folderPath) ?? null;
   }
+  combined.__bloomMetadataName = metadataName ?? null;
   return combined;
 }
 
@@ -517,6 +563,26 @@ export function sanitizeCoverUrl(value?: string | null): string | undefined {
 }
 
 const RESERVED_FOLDER_KEYWORD = "private";
+
+export function getBlobMetadataName(blob: BlossomBlob): string | null {
+  const direct = blob.__bloomMetadataName;
+  if (typeof direct === "string") {
+    const trimmed = direct.trim();
+    if (trimmed) {
+      return trimmed;
+    }
+  } else if (direct === null) {
+    return null;
+  }
+  const privateName = blob.privateData?.metadata?.name;
+  if (typeof privateName === "string") {
+    const trimmed = privateName.trim();
+    if (trimmed) {
+      return trimmed;
+    }
+  }
+  return null;
+}
 
 const splitFolderSegments = (value: string) =>
   value

@@ -24,6 +24,7 @@ import {
 } from "../../components/icons";
 import { ServerList } from "../../components/ServerList";
 const RelayListLazy = React.lazy(() => import("../../components/RelayList"));
+import { useIsCompactScreen } from "../../hooks/useIsCompactScreen";
 
 type FilterOption = {
   id: FilterMode;
@@ -284,6 +285,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   onSetTheme,
   showStatusMessage,
 }) => {
+  const isSmallScreen = useIsCompactScreen();
   const syncHeadingId = React.useId();
   const syncDescriptionId = React.useId();
   const defaultServerHeadingId = React.useId();
@@ -507,7 +509,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
       description: "Tune how Bloom displays and organises your files by default.",
       icon: SettingsIcon,
       cards: [
-        (
+        !isSmallScreen && (
           <SettingCard
             key="layout"
             headingId={viewHeadingId}
@@ -538,7 +540,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
               onChange={id => onSetDefaultFilterMode(id as FilterMode)}
               labelledBy={filterHeadingId}
               describedBy={filterDescriptionId}
-              className="grid gap-2 sm:grid-cols-2"
             />
           </SettingCard>
         ),
@@ -593,7 +594,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
             </div>
           </SettingCard>
         ),
-        (
+        !isSmallScreen && (
           <SettingCard
             key="list-preview"
             headingId={`${listPreviewHeadingId}-card`}
@@ -732,8 +733,8 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
     onSetShowIconsPreviews,
     listPreviewHeadingId,
     listPreviewDescriptionId,
-    showListPreviews,
-    onSetShowListPreviews,
+  showListPreviews,
+  onSetShowListPreviews,
     searchHeadingId,
     searchDescriptionId,
     keepSearchExpanded,
@@ -755,6 +756,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
     serverSyncInProgress,
     serverValidationError,
     relayStatusHandler,
+    isSmallScreen,
   ]);
 
   const [activeSectionId, setActiveSectionId] = React.useState(() => sections[0]?.id ?? "primary");

@@ -12,6 +12,7 @@ import {
   applyFolderUpdate,
   containsReservedFolderSegment,
   type BlobAudioMetadata,
+  getBlobMetadataName,
 } from "../../utils/blobMetadataStore";
 import { isMusicBlob } from "../../utils/blobClassification";
 import { EditDialog, type EditDialogAudioFields } from "../../components/RenameDialog";
@@ -108,7 +109,7 @@ export const RenameDialog: React.FC<RenameDialogProps> = ({ blob, ndk, signer, r
     setBusy(false);
 
     if (music) {
-      const parsed = parseMusicAlias(blob.name || blob.url || blob.sha256);
+      const parsed = parseMusicAlias(getBlobMetadataName(blob) ?? blob.sha256);
       const nextFields = emptyAudioFields();
       nextFields.title = storedAudio?.title || parsed.title || "";
       nextFields.artist = storedAudio?.artist || parsed.artist || "";
@@ -123,7 +124,7 @@ export const RenameDialog: React.FC<RenameDialogProps> = ({ blob, ndk, signer, r
       setAlias(computeMusicAlias(nextFields.title, nextFields.artist) || (nextFields.title || nextFields.artist || ""));
     } else {
       setAudioFields(emptyAudioFields());
-      setAlias(blob.name ?? "");
+      setAlias(getBlobMetadataName(blob) ?? "");
     }
 
     const storedFolderPath =
@@ -266,7 +267,7 @@ export const RenameDialog: React.FC<RenameDialogProps> = ({ blob, ndk, signer, r
       audioMetadata = metadata;
     } else {
       const trimmed = alias.trim();
-      const currentAlias = (blob.name ?? "").trim();
+      const currentAlias = getBlobMetadataName(blob)?.trim() ?? "";
       if (trimmed.length > 120) {
         setError("Display name is too long (max 120 characters).");
         return;
@@ -356,7 +357,7 @@ export const RenameDialog: React.FC<RenameDialogProps> = ({ blob, ndk, signer, r
           sha256: privateEntry.sha256,
           encryption: privateEntry.encryption,
           metadata: {
-            name: aliasForStore ?? existingMeta.name ?? blob.name ?? blob.sha256,
+            name: aliasForStore ?? existingMeta.name ?? getBlobMetadataName(blob) ?? blob.sha256,
             type: existingMeta.type ?? blob.type,
             size: existingMeta.size ?? blob.size,
             audio: nextAudioMetadata === undefined ? undefined : nextAudioMetadata,

@@ -1301,7 +1301,7 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
                     onClick={() => setShareMode("note")}
                     disabled={publishing}
                   >
-                    Share as note
+                    Via public note
                   </button>
                   <button
                     type="button"
@@ -1313,7 +1313,7 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
                     onClick={() => setShareMode("dm")}
                     disabled={publishing}
                   >
-                    Share via DM
+                    Via DM
                   </button>
                   <button
                     type="button"
@@ -1325,7 +1325,7 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
                     onClick={() => setShareMode("dm-private")}
                     disabled={publishing}
                   >
-                    Share via Private DM
+                    Via private DM
                   </button>
                   <button
                     type="button"
