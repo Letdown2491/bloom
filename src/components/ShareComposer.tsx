@@ -6,6 +6,7 @@ import { nip19 } from "nostr-tools";
 import { PrivateLinkPanel } from "../features/share/PrivateLinkPanel";
 import { PRIVATE_LINK_SERVICE_HOST } from "../constants/privateLinks";
 import { prettyBytes } from "../utils/format";
+import { checkLocalStorageQuota } from "../utils/storageQuota";
 import { loadNdkModule, type NdkModule } from "../lib/ndkModule";
 import { useUserPreferences } from "../context/UserPreferencesContext";
 
@@ -263,6 +264,36 @@ const combineContent = (message: string, appendix: string | null): string => {
   return `${trimmedMessage}${separator}${appendix}`;
 };
 
+const RECIPIENT_CACHE_TTL_MS = 1000 * 60 * 60 * 24 * 30; // 30 days
+const MAX_STORED_RECIPIENTS = 80;
+const CRITICAL_RECIPIENT_LIMIT = 30;
+
+const pruneRecipientProfiles = (profiles: RecipientProfile[], maxCount = MAX_STORED_RECIPIENTS) => {
+  const now = Date.now();
+  const deduped = new Map<string, RecipientProfile>();
+  for (const profile of profiles) {
+    const existing = deduped.get(profile.pubkey);
+    if (!existing) {
+      deduped.set(profile.pubkey, profile);
+      continue;
+    }
+    const existingFetched = existing.lastFetched ?? 0;
+    const incomingFetched = profile.lastFetched ?? 0;
+    if (incomingFetched > existingFetched) {
+      deduped.set(profile.pubkey, profile);
+    }
+  }
+  const filtered = Array.from(deduped.values()).filter(profile => {
+    if (!profile.lastFetched) return true;
+    return now - profile.lastFetched <= RECIPIENT_CACHE_TTL_MS;
+  });
+  filtered.sort((a, b) => (b.lastFetched ?? 0) - (a.lastFetched ?? 0));
+  if (filtered.length > maxCount) {
+    return filtered.slice(0, maxCount);
+  }
+  return filtered;
+};
+
 const readStoredRecipients = (): RecipientProfile[] => {
   if (typeof window === "undefined") return [];
   try {
@@ -288,7 +319,7 @@ const readStoredRecipients = (): RecipientProfile[] => {
         // Ignore decode errors for stored entries.
       }
     }
-    return entries;
+    return pruneRecipientProfiles(entries);
   } catch {
     return [];
   }
@@ -297,7 +328,8 @@ const readStoredRecipients = (): RecipientProfile[] => {
 const storeRecipients = (profiles: RecipientProfile[]) => {
   if (typeof window === "undefined") return;
   try {
-    const serialized = profiles.map(profile => ({
+    const pruned = pruneRecipientProfiles(profiles);
+    const serialized = pruned.map(profile => ({
       pubkey: profile.pubkey,
       displayName: profile.displayName,
       username: profile.username,
@@ -306,6 +338,20 @@ const storeRecipients = (profiles: RecipientProfile[]) => {
       lastFetched: profile.lastFetched ?? Date.now(),
     }));
     window.localStorage.setItem(RECIPIENT_STORAGE_KEY, JSON.stringify(serialized));
+    const quota = checkLocalStorageQuota("share-recipients");
+    if (quota.status === "critical" && pruned.length > CRITICAL_RECIPIENT_LIMIT) {
+      const trimmed = pruneRecipientProfiles(pruned, CRITICAL_RECIPIENT_LIMIT);
+      const trimmedSerialized = trimmed.map(profile => ({
+        pubkey: profile.pubkey,
+        displayName: profile.displayName,
+        username: profile.username,
+        nip05: profile.nip05,
+        picture: profile.picture,
+        lastFetched: profile.lastFetched ?? Date.now(),
+      }));
+      window.localStorage.setItem(RECIPIENT_STORAGE_KEY, JSON.stringify(trimmedSerialized));
+      checkLocalStorageQuota("share-recipients-pruned", { log: false });
+    }
   } catch {
     // Ignore storage errors.
   }

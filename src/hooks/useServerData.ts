@@ -2,7 +2,12 @@ import { useCallback, useEffect, useMemo, useSyncExternalStore, useState } from 
 import { useQueries } from "@tanstack/react-query";
 import { useCurrentPubkey, useNdk } from "../context/NdkContext";
 import type { ManagedServer } from "./useServers";
-import { listUserBlobs, type BlossomBlob } from "../lib/blossomClient";
+import {
+  listUserBlobs,
+  type BlossomBlob,
+  type PrivateBlobMetadata,
+  type PrivateBlobEncryption,
+} from "../lib/blossomClient";
 import { listNip96Files } from "../lib/nip96Client";
 import { listSatelliteFiles } from "../lib/satelliteClient";
 import {
@@ -10,13 +15,16 @@ import {
   subscribeToBlobMetadataChanges,
   getBlobMetadataVersion,
 } from "../utils/blobMetadataStore";
+import { checkLocalStorageQuota } from "../utils/storageQuota";
 
 const filterHiddenBlobTypes = (blobs: BlossomBlob[]) =>
   blobs.filter(blob => (blob.type?.toLowerCase() ?? "") !== "inode/x-empty");
 
-const CACHE_VERSION = 1;
+const CACHE_VERSION = 2;
 const SERVER_CACHE_PREFIX = "bloom.serverSnapshot";
-const MAX_CACHED_BLOBS = 150;
+const MAX_CACHED_BLOBS_PRIMARY = 120;
+const MAX_CACHED_BLOBS_SECONDARY = 60;
+const MAX_CACHED_BLOBS_EMERGENCY = 40;
 
 let snapshotStorageBlocked = false;
 let snapshotStorageWarned = false;
@@ -25,38 +33,112 @@ const isQuotaExceededError = (error: unknown) =>
   error instanceof DOMException &&
   (error.name === "QuotaExceededError" || error.code === 22 || error.name === "NS_ERROR_DOM_QUOTA_REACHED");
 
+type CachedBlobMetadata = Pick<PrivateBlobMetadata, "name" | "type">;
+
+type CachedBlobSnapshot = Pick<
+  BlossomBlob,
+  "sha256" | "size" | "type" | "uploaded" | "name" | "url" | "requiresAuth" | "serverType"
+> & {
+  privateData?: {
+    encryption: PrivateBlobEncryption;
+    metadata?: CachedBlobMetadata;
+  };
+};
+
 type CachedSnapshotPayload = {
   version: number;
   updatedAt: number;
-  blobs: BlossomBlob[];
+  blobs: CachedBlobSnapshot[];
 };
 
 const buildCacheKey = (url: string) => `${SERVER_CACHE_PREFIX}:${encodeURIComponent(url)}`;
 
-const sanitizeCacheableBlob = (blob: BlossomBlob): BlossomBlob => ({
-  sha256: blob.sha256,
-  size: blob.size,
-  type: blob.type,
-  uploaded: blob.uploaded,
-  url: blob.url,
-  name: blob.name,
-  serverUrl: blob.serverUrl,
-  requiresAuth: blob.requiresAuth,
-  serverType: blob.serverType,
-  label: blob.label,
-  infohash: blob.infohash,
-  magnet: blob.magnet,
-});
+const sanitizeCacheableBlob = (blob: BlossomBlob): CachedBlobSnapshot => {
+  const sanitized: CachedBlobSnapshot = {
+    sha256: blob.sha256,
+  };
+
+  if (typeof blob.size === "number" && Number.isFinite(blob.size)) {
+    sanitized.size = blob.size;
+  }
+  if (blob.type) {
+    sanitized.type = blob.type;
+  }
+  if (typeof blob.uploaded === "number" && Number.isFinite(blob.uploaded)) {
+    sanitized.uploaded = Math.trunc(blob.uploaded);
+  }
+  if (typeof blob.name === "string") {
+    sanitized.name = blob.name;
+  }
+  if (typeof blob.url === "string") {
+    sanitized.url = blob.url;
+  }
+  if (typeof blob.requiresAuth === "boolean") {
+    sanitized.requiresAuth = blob.requiresAuth;
+  }
+  if (blob.serverType) {
+    sanitized.serverType = blob.serverType;
+  }
+
+  const encryption = blob.privateData?.encryption;
+  if (encryption) {
+    const cachedEncryption: PrivateBlobEncryption = {
+      algorithm: encryption.algorithm,
+      key: encryption.key,
+      iv: encryption.iv,
+    };
+    const sourceMeta = blob.privateData?.metadata;
+    let cachedMetadata: CachedBlobMetadata | undefined;
+    if (sourceMeta) {
+      const metadata: CachedBlobMetadata = {};
+      if (typeof sourceMeta.name === "string" && sourceMeta.name.trim()) {
+        metadata.name = sourceMeta.name;
+      }
+      if (typeof sourceMeta.type === "string" && sourceMeta.type.trim()) {
+        metadata.type = sourceMeta.type;
+      }
+      cachedMetadata = Object.keys(metadata).length > 0 ? metadata : undefined;
+    }
+    sanitized.privateData = cachedMetadata
+      ? { encryption: cachedEncryption, metadata: cachedMetadata }
+      : { encryption: cachedEncryption };
+  }
+
+  return sanitized;
+};
+
+const decodeCachedBlob = (blob: CachedBlobSnapshot): BlossomBlob => {
+  const decoded: BlossomBlob = {
+    sha256: blob.sha256,
+  };
+  if (typeof blob.size === "number") decoded.size = blob.size;
+  if (blob.type) decoded.type = blob.type;
+  if (typeof blob.uploaded === "number") decoded.uploaded = blob.uploaded;
+  if (typeof blob.name === "string") decoded.name = blob.name;
+  if (typeof blob.url === "string") decoded.url = blob.url;
+  if (typeof blob.requiresAuth === "boolean") decoded.requiresAuth = blob.requiresAuth;
+  if (blob.serverType) decoded.serverType = blob.serverType;
+  if (blob.privateData?.encryption) {
+    decoded.privateData = blob.privateData.metadata
+      ? { encryption: blob.privateData.encryption, metadata: blob.privateData.metadata }
+      : { encryption: blob.privateData.encryption };
+  }
+  return decoded;
+};
 
 const loadCachedSnapshot = (url: string): BlossomBlob[] | null => {
   if (typeof window === "undefined") return null;
   try {
     const raw = window.localStorage.getItem(buildCacheKey(url));
     if (!raw) return null;
-    const payload = JSON.parse(raw) as CachedSnapshotPayload | null;
-    if (!payload || payload.version !== CACHE_VERSION) return null;
+    const payload = JSON.parse(raw) as Partial<CachedSnapshotPayload> | null;
+    if (!payload || typeof payload.version !== "number") return null;
     if (!Array.isArray(payload.blobs)) return null;
-    return payload.blobs as BlossomBlob[];
+    if (payload.version !== CACHE_VERSION) {
+      // Legacy payload: sanitize into the latest shape.
+      return (payload.blobs as BlossomBlob[]).map(sanitizeCacheableBlob).map(decodeCachedBlob);
+    }
+    return (payload.blobs as CachedBlobSnapshot[]).map(decodeCachedBlob);
   } catch (error) {
     console.warn("Unable to read cached server snapshot", error);
     return null;
@@ -65,23 +147,87 @@ const loadCachedSnapshot = (url: string): BlossomBlob[] | null => {
 
 const persistSnapshotCache = (url: string, blobs: BlossomBlob[]) => {
   if (typeof window === "undefined" || snapshotStorageBlocked) return;
-  try {
-    window.localStorage.removeItem(buildCacheKey(url));
-    const trimmed = blobs.slice(0, MAX_CACHED_BLOBS).map(sanitizeCacheableBlob);
+  const key = buildCacheKey(url);
+  const attemptPersist = (limit: number) => {
+    const trimmed = blobs.slice(0, limit).map(sanitizeCacheableBlob);
     const payload: CachedSnapshotPayload = {
       version: CACHE_VERSION,
       updatedAt: Date.now(),
       blobs: trimmed,
     };
-    window.localStorage.setItem(buildCacheKey(url), JSON.stringify(payload));
+    window.localStorage.setItem(key, JSON.stringify(payload));
+  };
+
+  const enforceQuotaAfterPersist = (limitUsed: number) => {
+    let currentLimit = limitUsed;
+    const quota = checkLocalStorageQuota("server-snapshot");
+    if (quota.status !== "critical") return;
+    const fallbackLimits: number[] = [];
+    if (currentLimit > MAX_CACHED_BLOBS_SECONDARY) {
+      fallbackLimits.push(MAX_CACHED_BLOBS_SECONDARY);
+    }
+    if (currentLimit > MAX_CACHED_BLOBS_EMERGENCY) {
+      fallbackLimits.push(MAX_CACHED_BLOBS_EMERGENCY);
+    }
+
+    for (const fallback of fallbackLimits) {
+      try {
+        window.localStorage.removeItem(key);
+        attemptPersist(fallback);
+        const followUp = checkLocalStorageQuota(`server-snapshot-${fallback}`, { log: false });
+        if (followUp.status !== "critical") {
+          if (!snapshotStorageWarned && fallback < currentLimit) {
+            snapshotStorageWarned = true;
+            console.info("Snapshot caching reduced: storage quota pressure detected.");
+          }
+          return;
+        }
+        currentLimit = fallback;
+      } catch (error) {
+        if (isQuotaExceededError(error)) {
+          currentLimit = fallback;
+          continue;
+        }
+        console.warn("Unable to persist cached server snapshot", error);
+        return;
+      }
+    }
+
+    snapshotStorageBlocked = true;
+    window.localStorage.removeItem(key);
+    if (!snapshotStorageWarned) {
+      snapshotStorageWarned = true;
+      console.info("Snapshot caching disabled: storage quota exceeded.");
+    }
+  };
+
+  try {
+    window.localStorage.removeItem(key);
+    attemptPersist(MAX_CACHED_BLOBS_PRIMARY);
+    enforceQuotaAfterPersist(MAX_CACHED_BLOBS_PRIMARY);
   } catch (error) {
     if (isQuotaExceededError(error)) {
-      snapshotStorageBlocked = true;
-      if (!snapshotStorageWarned) {
-        snapshotStorageWarned = true;
-        console.info("Snapshot caching disabled: storage quota exceeded.");
+      try {
+        window.localStorage.removeItem(key);
+        attemptPersist(MAX_CACHED_BLOBS_SECONDARY);
+        if (!snapshotStorageWarned) {
+          snapshotStorageWarned = true;
+          console.info("Snapshot caching reduced: storage quota pressure detected.");
+        }
+        enforceQuotaAfterPersist(MAX_CACHED_BLOBS_SECONDARY);
+        return;
+      } catch (secondaryError) {
+        if (isQuotaExceededError(secondaryError)) {
+          snapshotStorageBlocked = true;
+          if (!snapshotStorageWarned) {
+            snapshotStorageWarned = true;
+            console.info("Snapshot caching disabled: storage quota exceeded.");
+          }
+          return;
+        }
+        console.warn("Unable to persist cached server snapshot", secondaryError);
+        return;
       }
-      return;
     }
     console.warn("Unable to persist cached server snapshot", error);
   }

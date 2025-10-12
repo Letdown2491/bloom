@@ -1,4 +1,5 @@
 import type { BlossomBlob } from "../lib/blossomClient";
+import { checkLocalStorageQuota } from "./storageQuota";
 
 const METADATA_STORAGE_VERSION = "v3";
 
@@ -27,8 +28,11 @@ type StoredMetadata = {
 
 const STORAGE_KEY = `bloom:blob-metadata:${METADATA_STORAGE_VERSION}`;
 const GLOBAL_METADATA_KEY = "__global__";
+const METADATA_STALE_TTL_MS = 1000 * 60 * 60 * 24 * 180; // 180 days
 
-let cache: Record<string, Record<string, StoredMetadata>> | null = null;
+type StoredMetadataRecord = Record<string, Record<string, StoredMetadata>>;
+
+let cache: StoredMetadataRecord | null = null;
 let metadataVersion = 0;
 const listeners = new Set<() => void>();
 
@@ -59,9 +63,16 @@ const flushPendingMetadataWrites = () => {
 
   const entries = Array.from(pendingMetadataWrites.values());
   pendingMetadataWrites.clear();
+  let changed = false;
 
   for (const entry of entries) {
-    setStoredBlobMetadata(entry.serverUrl, entry.sha256, entry.metadata);
+    const didChange = setStoredBlobMetadata(entry.serverUrl, entry.sha256, entry.metadata, { suppressPersist: true });
+    changed = changed || didChange;
+  }
+
+  if (changed) {
+    persist();
+    notifyChange();
   }
 };
 
@@ -87,6 +98,142 @@ const queueStoredBlobMetadata = (serverUrl: string | undefined, sha256: string, 
   scheduleMetadataWrite();
 };
 
+const MS_THRESHOLD = 1_000_000_000_000;
+
+const toStoredSeconds = (value: number | null | undefined): number | undefined => {
+  if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
+  const normalized = Math.max(0, Math.trunc(value));
+  if (normalized > MS_THRESHOLD) {
+    return Math.trunc(normalized / 1000);
+  }
+  return normalized;
+};
+
+const fromStoredSeconds = (value: number | null | undefined): number | undefined => {
+  if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
+  if (value > MS_THRESHOLD) {
+    return Math.trunc(value);
+  }
+  return value * 1000;
+};
+
+const collapseStoredMetadata = (metadata: StoredMetadata): StoredMetadata => {
+  const collapsed: StoredMetadata = {};
+  if (Object.prototype.hasOwnProperty.call(metadata, "name")) {
+    collapsed.name = metadata.name ?? null;
+  }
+  if (Object.prototype.hasOwnProperty.call(metadata, "type")) {
+    collapsed.type = metadata.type ?? null;
+  }
+  if (Object.prototype.hasOwnProperty.call(metadata, "folderPath")) {
+    collapsed.folderPath = metadata.folderPath ?? null;
+  }
+  if (metadata.audio) {
+    collapsed.audio = metadata.audio;
+  }
+  const updatedSeconds = toStoredSeconds(metadata.updatedAt ?? undefined);
+  if (typeof updatedSeconds === "number") {
+    collapsed.updatedAt = updatedSeconds;
+  }
+  const checkedSeconds = toStoredSeconds(metadata.lastCheckedAt ?? undefined);
+  if (typeof checkedSeconds === "number") {
+    collapsed.lastCheckedAt = checkedSeconds;
+  }
+  return collapsed;
+};
+
+const expandStoredMetadata = (metadata?: StoredMetadata): StoredMetadata | undefined => {
+  if (!metadata) return undefined;
+  const expanded: StoredMetadata = {};
+  if (Object.prototype.hasOwnProperty.call(metadata, "name")) {
+    expanded.name = metadata.name ?? null;
+  }
+  if (Object.prototype.hasOwnProperty.call(metadata, "type")) {
+    expanded.type = metadata.type ?? null;
+  }
+  if (Object.prototype.hasOwnProperty.call(metadata, "folderPath")) {
+    expanded.folderPath = metadata.folderPath ?? null;
+  }
+  if (metadata.audio) {
+    expanded.audio = metadata.audio;
+  }
+  const updatedMs = fromStoredSeconds(metadata.updatedAt ?? undefined);
+  if (typeof updatedMs === "number") {
+    expanded.updatedAt = updatedMs;
+  }
+  const checkedMs = fromStoredSeconds(metadata.lastCheckedAt ?? undefined);
+  if (typeof checkedMs === "number") {
+    expanded.lastCheckedAt = checkedMs;
+  }
+  return expanded;
+};
+
+const migrateStoredMetadata = (store: StoredMetadataRecord) => {
+  Object.keys(store).forEach(serverKey => {
+    const serverEntries = store[serverKey];
+    if (!serverEntries) {
+      delete store[serverKey];
+      return;
+    }
+    Object.keys(serverEntries).forEach(sha => {
+      const expanded = expandStoredMetadata(serverEntries[sha]);
+      if (!expanded) {
+        delete serverEntries[sha];
+        return;
+      }
+      const collapsed = collapseStoredMetadata(expanded);
+      if (Object.keys(collapsed).length === 0) {
+        delete serverEntries[sha];
+      } else {
+        serverEntries[sha] = collapsed;
+      }
+    });
+    if (!serverEntries || Object.keys(serverEntries).length === 0) {
+      delete store[serverKey];
+    }
+  });
+};
+
+const pruneStaleMetadataEntries = (store: StoredMetadataRecord, cutoffMs: number) => {
+  const cutoff = Date.now() - cutoffMs;
+  let removed = false;
+  Object.keys(store).forEach(serverKey => {
+    const serverEntries = store[serverKey];
+    if (!serverEntries) {
+      delete store[serverKey];
+      removed = true;
+      return;
+    }
+    Object.keys(serverEntries).forEach(sha => {
+      const expanded = expandStoredMetadata(serverEntries[sha]);
+      if (!expanded) {
+        delete serverEntries[sha];
+        removed = true;
+        return;
+      }
+      const hasContent =
+        (typeof expanded.name === "string" && expanded.name.trim().length > 0) ||
+        (typeof expanded.type === "string" && expanded.type.trim().length > 0) ||
+        (expanded.audio && Object.keys(expanded.audio).length > 0) ||
+        (typeof expanded.folderPath === "string" && expanded.folderPath.trim().length > 0);
+      const freshest =
+        Math.max(
+          typeof expanded.updatedAt === "number" ? expanded.updatedAt : 0,
+          typeof expanded.lastCheckedAt === "number" ? expanded.lastCheckedAt : 0
+        ) || 0;
+      if (!hasContent && freshest > 0 && freshest < cutoff) {
+        delete serverEntries[sha];
+        removed = true;
+      }
+    });
+    if (!serverEntries || Object.keys(serverEntries).length === 0) {
+      delete store[serverKey];
+      removed = true;
+    }
+  });
+  return removed;
+};
+
 function normalizeServerKey(serverUrl?: string) {
   if (!serverUrl) return GLOBAL_METADATA_KEY;
   return serverUrl.replace(/\/+$/, "");
@@ -103,7 +250,8 @@ function readCache() {
     if (!raw) return cache;
     const parsed = JSON.parse(raw);
     if (parsed && typeof parsed === "object") {
-      cache = parsed as Record<string, Record<string, StoredMetadata>>;
+      cache = parsed as StoredMetadataRecord;
+      migrateStoredMetadata(cache);
     }
   } catch (error) {
     cache = {};
@@ -114,7 +262,16 @@ function readCache() {
 function persist() {
   if (typeof window === "undefined" || !cache) return;
   try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(cache));
+    const payload = JSON.stringify(cache);
+    window.localStorage.setItem(STORAGE_KEY, payload);
+    const quota = checkLocalStorageQuota("blob-metadata");
+    if (quota.status === "critical") {
+      const pruned = pruneStaleMetadataEntries(cache, METADATA_STALE_TTL_MS);
+      if (pruned) {
+        window.localStorage.setItem(STORAGE_KEY, JSON.stringify(cache));
+        checkLocalStorageQuota("blob-metadata-pruned", { log: false });
+      }
+    }
   } catch (error) {
     // Ignore persistence errors (quota, privacy mode, etc.).
   }
@@ -145,8 +302,8 @@ export function getStoredBlobMetadata(serverUrl: string | undefined, sha256: str
   const serverKey = normalizeServerKey(serverUrl);
   if (!serverKey) return undefined;
   const store = readCache();
-  const entry = store[serverKey]?.[sha256];
-  const globalEntry = store[GLOBAL_METADATA_KEY]?.[sha256];
+  const entry = expandStoredMetadata(store[serverKey]?.[sha256]);
+  const globalEntry = expandStoredMetadata(store[GLOBAL_METADATA_KEY]?.[sha256]);
   if (entry && globalEntry) {
     const entryUpdated = entry.updatedAt ?? 0;
     const globalUpdated = globalEntry.updatedAt ?? 0;
@@ -158,13 +315,18 @@ export function getStoredBlobMetadata(serverUrl: string | undefined, sha256: str
   return entry ?? globalEntry;
 }
 
-export function setStoredBlobMetadata(serverUrl: string | undefined, sha256: string, metadata: StoredMetadata) {
-  if (!sha256) return;
+export function setStoredBlobMetadata(
+  serverUrl: string | undefined,
+  sha256: string,
+  metadata: StoredMetadata,
+  options?: { suppressPersist?: boolean }
+): boolean {
+  if (!sha256) return false;
   const serverKey = normalizeServerKey(serverUrl);
-  if (!serverKey) return;
+  if (!serverKey) return false;
   const store = readCache();
   const serverStore = store[serverKey] ?? (store[serverKey] = {});
-  const current = serverStore[sha256] ?? {};
+  const current = expandStoredMetadata(serverStore[sha256]) ?? {};
   const nameProvided = Object.prototype.hasOwnProperty.call(metadata, "name");
   const typeProvided = Object.prototype.hasOwnProperty.call(metadata, "type");
   const folderProvided = Object.prototype.hasOwnProperty.call(metadata, "folderPath");
@@ -217,7 +379,7 @@ export function setStoredBlobMetadata(serverUrl: string | undefined, sha256: str
 
   if (checkedProvided) {
     if (typeof metadata.lastCheckedAt === "number" && Number.isFinite(metadata.lastCheckedAt)) {
-      next.lastCheckedAt = metadata.lastCheckedAt;
+      next.lastCheckedAt = Math.max(0, Math.trunc(metadata.lastCheckedAt));
     }
   } else if (typeof current.lastCheckedAt === "number") {
     next.lastCheckedAt = current.lastCheckedAt;
@@ -253,7 +415,7 @@ export function setStoredBlobMetadata(serverUrl: string | undefined, sha256: str
   let nextUpdatedAt: number | undefined;
   if (updatedProvided) {
     if (typeof metadata.updatedAt === "number" && Number.isFinite(metadata.updatedAt)) {
-      nextUpdatedAt = metadata.updatedAt;
+      nextUpdatedAt = Math.max(0, Math.trunc(metadata.updatedAt));
     }
   } else if (contentChanged) {
     nextUpdatedAt = Date.now();
@@ -284,15 +446,17 @@ export function setStoredBlobMetadata(serverUrl: string | undefined, sha256: str
       current.updatedAt === next.updatedAt &&
       current.lastCheckedAt === next.lastCheckedAt;
     if (!unchanged) {
-      serverStore[sha256] = next;
+      serverStore[sha256] = collapseStoredMetadata(next);
       changed = true;
     }
   }
 
-  if (changed) {
+  if (changed && !options?.suppressPersist) {
     persist();
     notifyChange();
   }
+
+  return changed;
 }
 
 export function mergeBlobWithStoredMetadata(serverUrl: string | undefined, blob: BlossomBlob): BlossomBlob {
@@ -323,6 +487,14 @@ export function mergeBlobWithStoredMetadata(serverUrl: string | undefined, blob:
       merged.name = undefined;
     }
     metadataName = null;
+  }
+
+  if (!metadataName && typeof merged.name === "string") {
+    const trimmedName = merged.name.trim();
+    if (trimmedName) {
+      metadataName = trimmedName;
+      merged.name = trimmedName;
+    }
   }
 
   merged.__bloomMetadataName = metadataName ?? null;
@@ -577,6 +749,12 @@ export function getBlobMetadataName(blob: BlossomBlob): string | null {
   const privateName = blob.privateData?.metadata?.name;
   if (typeof privateName === "string") {
     const trimmed = privateName.trim();
+    if (trimmed) {
+      return trimmed;
+    }
+  }
+  if (typeof blob.name === "string") {
+    const trimmed = blob.name.trim();
     if (trimmed) {
       return trimmed;
     }

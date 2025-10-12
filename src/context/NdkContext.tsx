@@ -2,6 +2,7 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 import type { NDKRelay, NDKSigner, NDKUser } from "@nostr-dev-kit/ndk";
 import type { EventTemplate, SignedEvent } from "../lib/blossomClient";
 import { loadNdkModule, type NdkModule } from "../lib/ndkModule";
+import { checkLocalStorageQuota } from "../utils/storageQuota";
 
 type NdkInstance = InstanceType<NdkModule["default"]>;
 
@@ -40,6 +41,12 @@ const DEFAULT_RELAYS = [
 
 const RELAY_HEALTH_STORAGE_KEY = "bloom.ndk.relayHealth.v1";
 const SIGNER_PREFERENCE_STORAGE_KEY = "bloom.ndk.signerPreference.v1";
+const RELAY_HEALTH_TTL_MS = 1000 * 60 * 60 * 24 * 14; // 14 days
+const RELAY_HEALTH_TTL_SECONDS = Math.round(RELAY_HEALTH_TTL_MS / 1000);
+const MAX_PERSISTED_RELAY_ENTRIES = 60;
+const CRITICAL_RELAY_ENTRY_LIMIT = 24;
+const RELAY_HEALTH_PERSIST_IDLE_DELAY_MS = 3000;
+const RELAY_HEALTH_MIN_WRITE_INTERVAL_MS = 15000;
 
 type PersistedSignerPreference = "nip07";
 
@@ -55,6 +62,17 @@ type PersistableRelayHealth = {
   status: RelayHealth["status"];
   lastError?: string | null;
   lastEventAt?: number | null;
+  updatedAt?: number | null;
+};
+
+type RelayPersistenceSnapshot = {
+  payload: PersistableRelayHealth[];
+  serialized: string;
+  map: Map<string, PersistableRelayHealth>;
+};
+
+type RelayPersistenceResult = RelayPersistenceSnapshot & {
+  quotaLimited: boolean;
 };
 
 const normalizeRelayUrl = (url: string | undefined | null) => {
@@ -62,6 +80,158 @@ const normalizeRelayUrl = (url: string | undefined | null) => {
   const trimmed = url.trim();
   if (!trimmed) return null;
   return trimmed.replace(/\/$/, "");
+};
+
+const toEpochSeconds = (value: number | null | undefined): number | null => {
+  if (typeof value !== "number" || !Number.isFinite(value)) return null;
+  const normalized = Math.max(0, Math.trunc(value));
+  if (normalized > 1_000_000_000_000) {
+    return Math.trunc(normalized / 1000);
+  }
+  return normalized;
+};
+
+const secondsToMillis = (value: number | null | undefined): number | null => {
+  if (typeof value !== "number" || !Number.isFinite(value)) return null;
+  if (value > 1_000_000_000_000) {
+    return Math.trunc(value);
+  }
+  return Math.trunc(value * 1000);
+};
+
+const dedupeRelayEntries = (entries: RelayHealth[], maxCount: number) => {
+  const map = new Map<string, RelayHealth>();
+  entries.forEach(entry => {
+    const existing = map.get(entry.url);
+    if (!existing) {
+      map.set(entry.url, entry);
+      return;
+    }
+    const existingTime = existing.lastEventAt ?? 0;
+    const incomingTime = entry.lastEventAt ?? 0;
+    if (incomingTime >= existingTime) {
+      map.set(entry.url, entry);
+    }
+  });
+  const deduped = Array.from(map.values());
+  deduped.sort((a, b) => (b.lastEventAt ?? 0) - (a.lastEventAt ?? 0));
+  if (deduped.length > maxCount) {
+    return deduped.slice(0, maxCount);
+  }
+  return deduped;
+};
+
+const buildRelayHealthSnapshot = (
+  entries: RelayHealth[],
+  previous: Map<string, PersistableRelayHealth>,
+  limit: number
+): RelayPersistenceSnapshot => {
+  const nowMs = Date.now();
+  const nowSeconds = Math.trunc(nowMs / 1000);
+  const deduped = dedupeRelayEntries(entries, limit);
+  const payload: PersistableRelayHealth[] = [];
+  const map = new Map<string, PersistableRelayHealth>();
+
+  deduped.forEach(entry => {
+    const normalizedUrl = normalizeRelayUrl(entry.url);
+    if (!normalizedUrl) return;
+
+    const lastEventMs =
+      typeof entry.lastEventAt === "number" && Number.isFinite(entry.lastEventAt) ? entry.lastEventAt : null;
+    const previousEntry = previous.get(normalizedUrl);
+    const previousFreshMs =
+      typeof previousEntry?.updatedAt === "number" && Number.isFinite(previousEntry.updatedAt)
+        ? previousEntry.updatedAt * 1000
+        : null;
+    const freshestMs = lastEventMs ?? previousFreshMs ?? null;
+    if (freshestMs && nowMs - freshestMs > RELAY_HEALTH_TTL_MS) {
+      return;
+    }
+
+    const lastEventSeconds = toEpochSeconds(lastEventMs) ?? null;
+    const status = entry.status;
+    const lastError = entry.lastError ?? null;
+
+    const prevSameStatus = previousEntry?.status === status;
+    const prevSameError = (previousEntry?.lastError ?? null) === lastError;
+    const prevSameEvent = previousEntry?.lastEventAt === lastEventSeconds;
+    const previousUpdatedAt =
+      typeof previousEntry?.updatedAt === "number" && Number.isFinite(previousEntry.updatedAt)
+        ? previousEntry.updatedAt
+        : lastEventSeconds ?? null;
+
+    const updatedAt =
+      prevSameStatus && prevSameError && prevSameEvent
+        ? previousUpdatedAt ?? nowSeconds
+        : nowSeconds;
+
+    const normalized: PersistableRelayHealth = {
+      url: normalizedUrl,
+      status,
+      lastError,
+      lastEventAt: lastEventSeconds,
+      updatedAt,
+    };
+    payload.push(normalized);
+    map.set(normalizedUrl, normalized);
+  });
+
+  payload.sort((a, b) => {
+    const aEvent = a.lastEventAt ?? 0;
+    const bEvent = b.lastEventAt ?? 0;
+    if (aEvent !== bEvent) return bEvent - aEvent;
+    const aUpdated = a.updatedAt ?? 0;
+    const bUpdated = b.updatedAt ?? 0;
+    if (aUpdated !== bUpdated) return bUpdated - aUpdated;
+    return a.url.localeCompare(b.url);
+  });
+
+  const serialized = payload.length > 0 ? JSON.stringify(payload) : "[]";
+  return { payload, serialized, map };
+};
+
+const persistRelayHealthSnapshot = (snapshot: RelayPersistenceSnapshot): RelayPersistenceResult | null => {
+  if (typeof window === "undefined" || relayHealthStorageBlocked) return null;
+  try {
+    if (snapshot.payload.length === 0) {
+      window.localStorage.removeItem(RELAY_HEALTH_STORAGE_KEY);
+      return { payload: [], serialized: "[]", map: new Map(), quotaLimited: false };
+    }
+
+    let storedPayload = snapshot.payload;
+    let storedSerialized = snapshot.serialized;
+    let quotaLimited = false;
+
+    window.localStorage.removeItem(RELAY_HEALTH_STORAGE_KEY);
+    window.localStorage.setItem(RELAY_HEALTH_STORAGE_KEY, storedSerialized);
+
+    const quota = checkLocalStorageQuota("relay-health");
+    if (quota.status === "critical" && storedPayload.length > CRITICAL_RELAY_ENTRY_LIMIT) {
+      storedPayload = storedPayload.slice(0, CRITICAL_RELAY_ENTRY_LIMIT);
+      storedSerialized = JSON.stringify(storedPayload);
+      window.localStorage.setItem(RELAY_HEALTH_STORAGE_KEY, storedSerialized);
+      checkLocalStorageQuota("relay-health-pruned", { log: false });
+      quotaLimited = true;
+    }
+
+    const map = new Map<string, PersistableRelayHealth>();
+    storedPayload.forEach(entry => {
+      map.set(entry.url, entry);
+    });
+
+    return { payload: storedPayload, serialized: storedSerialized, map, quotaLimited };
+  } catch (error) {
+    if (isQuotaExceededError(error)) {
+      relayHealthStorageBlocked = true;
+      if (!relayHealthStorageWarned) {
+        relayHealthStorageWarned = true;
+        console.info("Relay health caching disabled: storage quota exceeded.");
+      }
+      return null;
+    }
+    console.warn("Unable to persist relay health cache", error);
+    return null;
+  }
 };
 
 const seedRelayHealth = (seed?: RelayHealth[]) => {
@@ -102,49 +272,31 @@ const loadPersistedRelayHealth = (): RelayHealth[] | null => {
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return null;
     const entries: RelayHealth[] = [];
+    const nowSeconds = Math.trunc(Date.now() / 1000);
     parsed.forEach(item => {
       const normalizedUrl = normalizeRelayUrl((item as PersistableRelayHealth)?.url);
       const status = (item as PersistableRelayHealth)?.status;
       if (!normalizedUrl) return;
       if (status !== "connecting" && status !== "connected" && status !== "error") return;
+      const persistedLastEvent = toEpochSeconds((item as PersistableRelayHealth)?.lastEventAt);
+      const persistedUpdatedAt = toEpochSeconds((item as PersistableRelayHealth)?.updatedAt);
+      const freshest = Math.max(persistedLastEvent ?? 0, persistedUpdatedAt ?? 0);
+      if (freshest && freshest > 0 && nowSeconds - freshest > RELAY_HEALTH_TTL_SECONDS) {
+        return;
+      }
       entries.push({
         url: normalizedUrl,
         status,
         lastError: (item as PersistableRelayHealth)?.lastError ?? null,
-        lastEventAt:
-          typeof (item as PersistableRelayHealth)?.lastEventAt === "number"
-            ? (item as PersistableRelayHealth).lastEventAt
-            : null,
+        lastEventAt: secondsToMillis(persistedLastEvent),
       });
     });
-    return entries.length > 0 ? entries : null;
+    if (entries.length === 0) return null;
+    const deduped = dedupeRelayEntries(entries, MAX_PERSISTED_RELAY_ENTRIES);
+    return deduped.length > 0 ? deduped : null;
   } catch (error) {
     console.warn("Unable to load relay health cache", error);
     return null;
-  }
-};
-
-const persistRelayHealth = (entries: RelayHealth[]) => {
-  if (typeof window === "undefined" || relayHealthStorageBlocked) return;
-  try {
-    window.localStorage.removeItem(RELAY_HEALTH_STORAGE_KEY);
-    const payload: PersistableRelayHealth[] = entries.map(entry => ({
-      url: entry.url,
-      status: entry.status,
-      lastError: entry.lastError ?? null,
-      lastEventAt: entry.lastEventAt ?? null,
-    }));
-    window.localStorage.setItem(RELAY_HEALTH_STORAGE_KEY, JSON.stringify(payload));
-  } catch (error) {
-    if (isQuotaExceededError(error)) {
-      relayHealthStorageBlocked = true;
-      if (!relayHealthStorageWarned) {
-        relayHealthStorageWarned = true;
-        console.info("Relay health caching disabled: storage quota exceeded.");
-      }
-      return;
-    }
-    console.warn("Unable to persist relay health cache", error);
   }
 };
 
@@ -184,10 +336,60 @@ export const NdkProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const cached = loadPersistedRelayHealth();
     return seedRelayHealth(cached ?? undefined);
   });
+  const relayHealthRef = useRef<RelayHealth[]>([]);
   const pendingRelayUpdatesRef = useRef<Map<string, Partial<RelayHealth>> | null>(null);
   const relayUpdateScheduledRef = useRef(false);
   const signerPreferenceRef = useRef<PersistedSignerPreference | null>(loadSignerPreference());
   const autoConnectAttemptedRef = useRef(false);
+  const relayPersistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const latestRelaySnapshotRef = useRef<RelayPersistenceSnapshot | null>(null);
+  const lastPersistedRelaySignatureRef = useRef<string | null>(null);
+  const lastPersistedRelayMapRef = useRef<Map<string, PersistableRelayHealth>>(new Map());
+  const lastRelayPersistAtRef = useRef<number>(0);
+  const relayHealthQuotaLimitedRef = useRef(false);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const raw = window.localStorage.getItem(RELAY_HEALTH_STORAGE_KEY);
+      if (!raw) {
+        lastPersistedRelaySignatureRef.current = "[]";
+        lastPersistedRelayMapRef.current = new Map();
+        lastRelayPersistAtRef.current = Date.now();
+        return;
+      }
+      lastPersistedRelaySignatureRef.current = raw;
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        const map = new Map<string, PersistableRelayHealth>();
+        parsed.forEach(item => {
+          const normalizedUrl = normalizeRelayUrl((item as PersistableRelayHealth)?.url);
+          if (!normalizedUrl) return;
+          map.set(normalizedUrl, {
+            url: normalizedUrl,
+            status: (item as PersistableRelayHealth)?.status,
+            lastError: (item as PersistableRelayHealth)?.lastError ?? null,
+            lastEventAt:
+              typeof (item as PersistableRelayHealth)?.lastEventAt === "number"
+                ? (item as PersistableRelayHealth).lastEventAt
+                : null,
+            updatedAt:
+              typeof (item as PersistableRelayHealth)?.updatedAt === "number"
+                ? (item as PersistableRelayHealth).updatedAt
+                : null,
+          });
+        });
+        lastPersistedRelayMapRef.current = map;
+      } else {
+        lastPersistedRelayMapRef.current = new Map();
+      }
+      lastRelayPersistAtRef.current = Date.now();
+    } catch (error) {
+      lastPersistedRelaySignatureRef.current = "[]";
+      lastPersistedRelayMapRef.current = new Map();
+      lastRelayPersistAtRef.current = Date.now();
+    }
+  }, []);
 
   const ensureNdkModule = useCallback(async (): Promise<NdkModule> => {
     if (!ndkModuleRef.current) {
@@ -395,16 +597,18 @@ export const NdkProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
 
     const updateRelay = (url: string, patch: Partial<RelayHealth>) => {
+      const normalized = normalizeRelayUrl(url);
+      if (!normalized) return;
       let pending = pendingRelayUpdatesRef.current;
       if (!pending) {
         pending = new Map();
         pendingRelayUpdatesRef.current = pending;
       }
-      const existing = pending.get(url);
+      const existing = pending.get(normalized);
       if (existing) {
-        pending.set(url, { ...existing, ...patch });
+        pending.set(normalized, { ...existing, ...patch });
       } else {
-        pending.set(url, patch);
+        pending.set(normalized, patch);
       }
       scheduleRelayUpdate();
     };
@@ -428,7 +632,14 @@ export const NdkProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
 
     const handleNotice = (relay: NDKRelay, message?: string) => {
-      updateRelay(relay.url, { status: "error", lastError: message ?? "Relay notice", lastEventAt: Date.now() });
+      const normalizedUrl = normalizeRelayUrl(relay.url);
+      if (!normalizedUrl) return;
+      const current = relayHealthRef.current.find(entry => entry.url === normalizedUrl);
+      const resolvedMessage = message ?? "Relay notice";
+      if (current && current.lastError === resolvedMessage) {
+        return;
+      }
+      updateRelay(normalizedUrl, { lastError: resolvedMessage });
     };
 
     pool.on("relay:connecting", handleConnecting);
@@ -449,8 +660,70 @@ export const NdkProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, [ndk]);
 
   useEffect(() => {
-    persistRelayHealth(relayHealth);
+    if (typeof window === "undefined") return;
+    if (relayPersistTimerRef.current) {
+      clearTimeout(relayPersistTimerRef.current);
+      relayPersistTimerRef.current = null;
+    }
+
+    const builderLimit = relayHealthQuotaLimitedRef.current ? CRITICAL_RELAY_ENTRY_LIMIT : MAX_PERSISTED_RELAY_ENTRIES;
+    const snapshot = buildRelayHealthSnapshot(relayHealth, lastPersistedRelayMapRef.current, builderLimit);
+    latestRelaySnapshotRef.current = snapshot;
+
+    if (relayHealthStorageBlocked) {
+      return;
+    }
+
+    if (lastPersistedRelaySignatureRef.current === snapshot.serialized) {
+      return;
+    }
+
+    const now = Date.now();
+    const timeSinceLast = now - lastRelayPersistAtRef.current;
+    const minIntervalRemaining =
+      timeSinceLast >= RELAY_HEALTH_MIN_WRITE_INTERVAL_MS
+        ? 0
+        : RELAY_HEALTH_MIN_WRITE_INTERVAL_MS - timeSinceLast;
+    const delay = Math.max(RELAY_HEALTH_PERSIST_IDLE_DELAY_MS, minIntervalRemaining);
+
+    relayPersistTimerRef.current = window.setTimeout(() => {
+      const latest = latestRelaySnapshotRef.current;
+      if (!latest) return;
+      if (lastPersistedRelaySignatureRef.current === latest.serialized) return;
+      const result = persistRelayHealthSnapshot(latest);
+      if (result) {
+        lastPersistedRelaySignatureRef.current = result.serialized;
+        lastPersistedRelayMapRef.current = result.map;
+        lastRelayPersistAtRef.current = Date.now();
+        latestRelaySnapshotRef.current = result;
+        relayHealthQuotaLimitedRef.current = result.quotaLimited;
+      }
+      relayPersistTimerRef.current = null;
+    }, delay);
   }, [relayHealth]);
+
+  useEffect(() => {
+    relayHealthRef.current = relayHealth;
+  }, [relayHealth]);
+
+  useEffect(() => {
+    return () => {
+      if (relayPersistTimerRef.current) {
+        clearTimeout(relayPersistTimerRef.current);
+        relayPersistTimerRef.current = null;
+        const latest = latestRelaySnapshotRef.current;
+        if (latest && lastPersistedRelaySignatureRef.current !== latest.serialized) {
+          const result = persistRelayHealthSnapshot(latest);
+          if (result) {
+            lastPersistedRelaySignatureRef.current = result.serialized;
+            lastPersistedRelayMapRef.current = result.map;
+            lastRelayPersistAtRef.current = Date.now();
+            relayHealthQuotaLimitedRef.current = result.quotaLimited;
+          }
+        }
+      }
+    };
+  }, []);
 
   const adoptSigner = useCallback(
     async (nextSigner: NDKSigner | null) => {
