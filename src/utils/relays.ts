@@ -1,6 +1,5 @@
 const FALLBACK_RELAYS = [
   "wss://relay.primal.net",
-  "wss://relay.damus.io",
   "wss://nos.lol",
   "wss://relay.nsec.app",
 ] as const;

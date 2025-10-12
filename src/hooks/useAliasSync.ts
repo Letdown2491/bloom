@@ -70,7 +70,9 @@ export const useAliasSync = (relayUrls: string[], enabled = true) => {
 
       const relayKey = normalizedRelays.slice().sort().join("|");
       const effectKey = `${pubkey}|${relayKey}`;
-      const relaySet = normalizedRelays.length > 0 ? module.NDKRelaySet.fromRelayUrls(normalizedRelays, ndk) : undefined;
+      // NOTE: Not using relaySet to avoid NDK filter merging bugs with empty relay sets
+      // Instead, we subscribe to all connected relays which is more reliable
+      const relaySet: InstanceType<typeof module.NDKRelaySet> | undefined = undefined;
 
       const handleEvent = (event: NDKEvent) => {
         if (disposed) return;
@@ -79,7 +81,13 @@ export const useAliasSync = (relayUrls: string[], enabled = true) => {
 
       if (lastKeyRef.current !== effectKey) {
         try {
-          const events = await ndk.fetchEvents(aliasFilterForAuthor(pubkey), { closeOnEose: true }, relaySet);
+          // Only pass relaySet to fetchEvents if we actually have one
+          const fetchOpts = relaySet
+            ? { closeOnEose: true }
+            : { closeOnEose: true };
+          const events = relaySet
+            ? await ndk.fetchEvents(aliasFilterForAuthor(pubkey), fetchOpts, relaySet)
+            : await ndk.fetchEvents(aliasFilterForAuthor(pubkey), fetchOpts);
           if (!disposed) {
             events.forEach((event: NDKEvent) => handleEvent(event));
           }
@@ -91,7 +99,11 @@ export const useAliasSync = (relayUrls: string[], enabled = true) => {
 
       subscriptionRef.current?.stop();
       const filter = aliasFilterForAuthor(pubkey);
-      const subscription = ndk.subscribe(filter, { closeOnEose: false, relaySet });
+      // relaySet will be undefined if there are no valid relays, which tells NDK to use all connected relays
+      const subscriptionOpts = relaySet
+        ? { closeOnEose: false, relaySet }
+        : { closeOnEose: false };
+      const subscription = ndk.subscribe(filter, subscriptionOpts);
       subscription.on("event", handleEvent);
       activeSubscription = subscription;
       subscriptionRef.current = subscription;

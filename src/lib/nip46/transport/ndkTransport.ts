@@ -39,8 +39,12 @@ const waitForRelayConnection = async (
   timeoutMs = RELAY_CONNECT_TIMEOUT_MS
 ): Promise<boolean> => {
   const runtime = await getRuntime();
+
+  // Ensure relay is in pool before doing anything else
   if (ndk.pool && !ndk.pool.relays.has(relay.url)) {
     ndk.pool.addRelay(relay, false);
+    // Give NDK a tick to properly register the relay in its internal structures
+    await new Promise(resolve => setTimeout(resolve, 0));
   }
 
   if (isConnectedStatus(relay.status as NDKRelayStatus, runtime)) {

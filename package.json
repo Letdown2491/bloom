@@ -23,20 +23,21 @@
     "qrcode": "^1.5.4",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "react-window": "^1.8.9"
+    "react-window": "^1.8.9",
+    "sha256": "link:@noble/hashes/sha256"
   },
   "devDependencies": {
-    "@types/react": "^18.2.0",
-    "@types/react-dom": "^18.2.0",
-    "autoprefixer": "^10.4.19",
     "@testing-library/jest-dom": "^6.4.6",
     "@testing-library/react": "^14.2.1",
     "@testing-library/user-event": "^14.5.2",
+    "@types/react": "^18.2.0",
+    "@types/react-dom": "^18.2.0",
+    "autoprefixer": "^10.4.19",
     "postcss": "^8.4.39",
+    "rollup-plugin-visualizer": "^5.12.0",
     "tailwindcss": "^3.4.10",
     "typescript": "^5.5.4",
     "vite": "^5.4.0",
-    "rollup-plugin-visualizer": "^5.12.0",
     "vitest": "^1.6.0"
   },
   "pnpm": {

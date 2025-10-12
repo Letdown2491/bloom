@@ -13,6 +13,8 @@ const isQuotaExceededError = (error: unknown) =>
 
 export class LocalStorageAdapter implements StorageAdapter {
   private blocked = false;
+  private lastBlockedTime = 0;
+  private readonly RETRY_INTERVAL_MS = 60_000; // Retry after 1 minute
 
   async load(): Promise<SessionSnapshot | null> {
     if (typeof window === "undefined") return null;
@@ -31,13 +33,26 @@ export class LocalStorageAdapter implements StorageAdapter {
   }
 
   async save(snapshot: SessionSnapshot): Promise<void> {
-    if (typeof window === "undefined" || this.blocked) return;
+    if (typeof window === "undefined") return;
+
+    // Allow retry if enough time has passed since last quota error
+    if (this.blocked && Date.now() - this.lastBlockedTime > this.RETRY_INTERVAL_MS) {
+      this.blocked = false;
+    }
+
+    if (this.blocked) return;
+
     try {
       window.localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot));
+      // Clear blocked state on successful save
+      if (this.lastBlockedTime > 0) {
+        this.lastBlockedTime = 0;
+      }
     } catch (error) {
       if (isQuotaExceededError(error)) {
         this.blocked = true;
-        console.warn("Disabling NIP-46 session persistence due to storage quota");
+        this.lastBlockedTime = Date.now();
+        console.warn("NIP-46 session persistence blocked due to storage quota. Will retry in 1 minute.");
         return;
       }
       console.warn("Failed to persist NIP-46 sessions", error);

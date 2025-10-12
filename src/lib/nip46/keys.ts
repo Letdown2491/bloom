@@ -1,7 +1,11 @@
 import { generateSecretKey, getPublicKey } from "nostr-tools/pure";
 
-export const hexToBytes = (hex: string): Uint8Array =>
-  new Uint8Array(hex.match(/.{1,2}/g)?.map(byte => parseInt(byte, 16)) ?? []);
+export const hexToBytes = (hex: string): Uint8Array => {
+  if (hex.length % 2 !== 0) {
+    throw new Error(`Invalid hex string: length must be even, got ${hex.length}`);
+  }
+  return new Uint8Array(hex.match(/.{1,2}/g)?.map(byte => parseInt(byte, 16)) ?? []);
+};
 
 const bytesToHex = (bytes: Uint8Array): string =>
   Array.from(bytes)

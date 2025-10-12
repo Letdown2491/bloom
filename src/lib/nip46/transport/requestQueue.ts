@@ -32,13 +32,25 @@ export class RequestQueue {
   private unsubscribe: (() => void) | null = null;
   private sessionUnsubscribe: (() => void) | null = null;
   private initialized = false;
+  private refreshDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+  private readonly REFRESH_DEBOUNCE_MS = 100;
 
   constructor(private readonly options: QueueOptions) {
     this.sessionUnsubscribe = this.options.sessionManager.onChange(() => {
       if (this.initialized) {
-        this.refreshSubscription();
+        this.debouncedRefreshSubscription();
       }
     });
+  }
+
+  private debouncedRefreshSubscription(): void {
+    if (this.refreshDebounceTimer) {
+      clearTimeout(this.refreshDebounceTimer);
+    }
+    this.refreshDebounceTimer = setTimeout(() => {
+      this.refreshDebounceTimer = null;
+      void this.refreshSubscription();
+    }, this.REFRESH_DEBOUNCE_MS);
   }
 
   async init(): Promise<void> {
@@ -52,6 +64,10 @@ export class RequestQueue {
     this.unsubscribe = null;
     this.sessionUnsubscribe?.();
     this.sessionUnsubscribe = null;
+    if (this.refreshDebounceTimer) {
+      clearTimeout(this.refreshDebounceTimer);
+      this.refreshDebounceTimer = null;
+    }
     this.initialized = false;
     this.requests.clear();
     this.inflight.forEach(record => {
@@ -284,12 +300,19 @@ export class RequestQueue {
     }
 
     const rawError = typeof payload.error === "string" ? payload.error : undefined;
-    const normalizedErrorText = rawError?.toLowerCase() ?? null;
+    const normalizedErrorText = rawError?.toLowerCase().trim() ?? null;
+    // More specific pattern matching for "already connected" errors
+    // Common patterns: "already connected", "connection already exists", "already authorized"
     const isAlreadyConnectedError =
       normalizedErrorText !== null &&
-      normalizedErrorText.includes("already") &&
-      normalizedErrorText.includes("connect") &&
-      (pendingMethod === "connect" || (!pendingMethod && session.status === "active"));
+      (pendingMethod === "connect" || (!pendingMethod && session.status === "active")) &&
+      (normalizedErrorText === "already connected" ||
+        normalizedErrorText.startsWith("already connected") ||
+        normalizedErrorText.startsWith("connection already") ||
+        normalizedErrorText.startsWith("already authorized") ||
+        (normalizedErrorText.includes("already") &&
+          normalizedErrorText.includes("connect") &&
+          normalizedErrorText.split(/\s+/).length <= 5));
     const normalizedPayloadError = isAlreadyConnectedError ? undefined : rawError;
     const responseRecord = isAlreadyConnectedError ? { ...payload, error: undefined } : payload;
 
@@ -300,12 +323,13 @@ export class RequestQueue {
 
     const validateSecret = (): string | undefined => {
       if (!session.nostrConnectSecret) return undefined;
-      const normalized = payload.result?.toLowerCase();
+      const normalized = payload.result?.toLowerCase().trim();
+      const expectedSecret = session.nostrConnectSecret.toLowerCase().trim();
       if (!normalized || normalized === "ack") {
         baseUpdate.nostrConnectSecret = undefined;
         return undefined;
       }
-      if (payload.result === session.nostrConnectSecret) {
+      if (normalized === expectedSecret) {
         baseUpdate.nostrConnectSecret = undefined;
         return undefined;
       }
@@ -314,25 +338,26 @@ export class RequestQueue {
 
     if (!session.remoteSignerPubkey) {
       baseUpdate.remoteSignerPubkey = event.pubkey;
+    } else if (session.remoteSignerPubkey !== event.pubkey) {
+      console.warn(
+        `Ignoring response from unexpected pubkey. Expected ${session.remoteSignerPubkey}, got ${event.pubkey}`
+      );
+      return;
     }
 
     let resultingError: string | undefined;
 
     const finalizeWithoutPending = async () => {
-      resultingError = validateSecret();
-      if (resultingError) {
-        baseUpdate.status = "revoked";
-      } else if (normalizedPayloadError) {
+      // Don't validate secrets for responses without pending requests
+      // (could be late responses, duplicates, or non-connect methods)
+      if (normalizedPayloadError) {
         baseUpdate.status = "pairing";
       } else {
         baseUpdate.status = "active";
       }
-      baseUpdate.lastError = resultingError ?? normalizedPayloadError ?? session.lastError ?? null;
+      baseUpdate.lastError = normalizedPayloadError ?? session.lastError ?? null;
       baseUpdate.pendingRelays = null;
       await this.options.sessionManager.updateSession(session.id, baseUpdate);
-      if (resultingError) {
-        console.warn(resultingError);
-      }
     };
 
     if (!pendingRequest) {
@@ -401,6 +426,11 @@ export class RequestQueue {
     const remoteSignerPubkey = event.pubkey;
     if (!session.remoteSignerPubkey) {
       update.remoteSignerPubkey = remoteSignerPubkey;
+    } else if (session.remoteSignerPubkey !== remoteSignerPubkey) {
+      console.warn(
+        `Ignoring connect request from unexpected pubkey. Expected ${session.remoteSignerPubkey}, got ${remoteSignerPubkey}`
+      );
+      return;
     }
 
     const providedSecret = request.params[1]?.trim();
@@ -408,7 +438,11 @@ export class RequestQueue {
     let responseError: string | undefined = undefined;
 
     const expectSecret = Boolean(session.nostrConnectSecret);
-    if (expectSecret && providedSecret && providedSecret !== session.nostrConnectSecret) {
+    if (
+      expectSecret &&
+      providedSecret &&
+      providedSecret.toLowerCase() !== session.nostrConnectSecret!.toLowerCase()
+    ) {
       update.status = "revoked";
       update.lastError = "Signer failed secret validation";
       responseError = "invalid_secret";

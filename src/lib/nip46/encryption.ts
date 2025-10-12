@@ -24,8 +24,23 @@ const normalizeHexKey = (hex: string, label: string): string => {
   if (!HEX_REGEX.test(trimmed)) {
     throw new Nip46CodecError("NIP46_ENCODE_ERROR", `${label} must be hex-encoded`);
   }
-  if (trimmed.length === 66 && (trimmed.startsWith("02") || trimmed.startsWith("03"))) {
-    return trimmed.slice(2);
+  if (trimmed.length === 66) {
+    // Validate compressed public key format (02/03 prefix + 32 bytes)
+    const prefix = trimmed.substring(0, 2);
+    if (prefix !== "02" && prefix !== "03") {
+      throw new Nip46CodecError(
+        "NIP46_ENCODE_ERROR",
+        `${label} has invalid compressed key prefix: expected 02 or 03, got ${prefix}`
+      );
+    }
+    const uncompressed = trimmed.slice(2);
+    if (uncompressed.length !== 64) {
+      throw new Nip46CodecError(
+        "NIP46_ENCODE_ERROR",
+        `${label} has invalid length after removing compression prefix`
+      );
+    }
+    return uncompressed;
   }
   if (trimmed.length !== 64) {
     throw new Nip46CodecError(
@@ -95,27 +110,5 @@ export const getCodecConfigForAlgorithm = (algorithm: Nip46EncryptionAlgorithm):
     decrypt: createNip04Decrypt,
   };
 };
-
-export const combineCodecConfigs = (
-  primary: Nip46CodecConfig,
-  fallback: Nip46CodecConfig
-): Nip46CodecConfig => ({
-  encrypt: async (plaintext, context) => {
-    try {
-      return await primary.encrypt(plaintext, context);
-    } catch (error) {
-      if (error instanceof Nip46CodecError) throw error;
-      return fallback.encrypt(plaintext, context);
-    }
-  },
-  decrypt: async (ciphertext, context) => {
-    try {
-      return await primary.decrypt(ciphertext, context);
-    } catch (error) {
-      if (error instanceof Nip46CodecError) throw error;
-      return fallback.decrypt(ciphertext, context);
-    }
-  },
-});
 
 export const createDefaultCodecConfig = (): Nip46CodecConfig => getCodecConfigForAlgorithm("nip44");

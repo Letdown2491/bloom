@@ -144,8 +144,15 @@ export const Nip46Provider: React.FC<{ children: React.ReactNode }> = ({ childre
       const tracker = fetchTrackerRef.current;
       const lastProcessed = tracker.get(session.id);
       if (lastProcessed && lastProcessed >= session.updatedAt) return;
-      tracker.set(session.id, session.updatedAt);
-      void service.fetchUserPublicKey(session.id);
+      // Only update tracker after successful fetch
+      void service
+        .fetchUserPublicKey(session.id)
+        .then(() => {
+          tracker.set(session.id, session.updatedAt);
+        })
+        .catch(() => {
+          // Allow retry on next attempt by not updating tracker
+        });
     });
   }, [snapshot, ready, transportReady, service]);
 

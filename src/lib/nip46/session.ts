@@ -189,7 +189,8 @@ export class SessionManager {
     const now = Date.now();
     const baseId =
       input.token.type === "nostrconnect" ? input.token.clientPubkey : input.token.remoteSignerPubkey;
-    const sessionId = `${input.token.type}:${baseId}:${now}`;
+    const randomSuffix = Math.random().toString(36).substring(2, 10);
+    const sessionId = `${input.token.type}:${baseId}:${now}:${randomSuffix}`;
     const relays = Array.from(new Set(input.token.relays.filter(relay => relay.trim().length > 0)));
     const basePermissions =
       input.token.type === "nostrconnect"
