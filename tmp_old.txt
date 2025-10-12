@@ -26,7 +26,7 @@ import { ServerList } from "../../components/ServerList";
 const RelayListLazy = React.lazy(() => import("../../components/RelayList"));
 import { useIsCompactScreen } from "../../hooks/useIsCompactScreen";
 import { useStorageQuota } from "../../hooks/useStorageQuota";
-import { formatBytes } from "../../utils/storageQuota";
+import { formatBytes, type QuotaStatus } from "../../utils/storageQuota";
 
 type FilterOption = {
   id: FilterMode;
@@ -68,18 +68,36 @@ const TONE_CLASS_BY_KEY: Record<StatusTone, string> = {
   muted: "text-slate-400",
 };
 
+const QUOTA_STATUS_META: Record<
+  QuotaStatus,
+  { label: string; badgeClass: string; barClass: string; description: string }
+> = {
+  normal: {
+    label: "Within limits",
+    badgeClass: "border-emerald-500/40 bg-emerald-500/10 text-emerald-200",
+    barClass: "bg-emerald-400",
+    description: "Plenty of room remains for Bloom’s cached preferences and previews.",
+  },
+  warn: {
+    label: "Approaching limit",
+    badgeClass: "border-amber-500/40 bg-amber-500/10 text-amber-200",
+    barClass: "bg-amber-400",
+    description: "Local storage is getting tight—clearing data prevents upload or preview issues.",
+  },
+  critical: {
+    label: "Over limit",
+    badgeClass: "border-red-500/40 bg-red-500/10 text-red-200",
+    barClass: "bg-red-400",
+    description: "Storage is full. Bloom may stop caching previews or storing preferences.",
+  },
+};
+
 const STORAGE_FEEDBACK_CLASS_BY_TONE = {
   success: "text-emerald-300",
   warning: "text-amber-300",
   error: "text-red-300",
 } as const;
 
-
-const getProgressBarClass = (percent: number): string => {
-  if (percent >= 80) return "bg-red-400";
-  if (percent >= 66.6666667) return "bg-amber-400";
-  return "bg-emerald-400";
-};
 const formatRelativeTime = (timestampMs: number): string => {
   const now = Date.now();
   const diff = timestampMs - now;
@@ -333,7 +351,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
     refresh: refreshStorageQuota,
     clear: clearLocalStorageAction,
     isSupported: isStorageSupported,
-    originQuota: originQuotaBytes,
     approximateCacheUsage: approximateCacheBytes,
     cacheSupported,
     cacheEstimate,
@@ -344,12 +361,12 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const [clearingCacheStorage, setClearingCacheStorage] = React.useState(false);
   const [storageFeedback, setStorageFeedback] = React.useState<{ text: string; tone: "success" | "warning" | "error" } | null>(null);
 
+  const storageStatusMeta = QUOTA_STATUS_META[storageSnapshot.status];
   const storageWarnMarkerPercent = React.useMemo(() => {
     if (storageCriticalThreshold <= 0) return 1;
     return Math.max(0, Math.min(1, storageWarnThreshold / storageCriticalThreshold));
   }, [storageWarnThreshold, storageCriticalThreshold]);
   const storageProgressWidth = React.useMemo(() => Math.max(0, Math.min(100, storageUsagePercent * 100)), [storageUsagePercent]);
-  const storageBarClass = React.useMemo(() => getProgressBarClass(storageProgressWidth), [storageProgressWidth]);
   const cacheUsageDisplay = React.useMemo(() => {
     if (cacheEstimate && cacheEstimate.totalBytes != null) {
       return formatBytes(cacheEstimate.totalBytes);
@@ -360,26 +377,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
     return null;
   }, [approximateCacheBytes, cacheEstimate]);
   const cacheEntriesCount = cacheEstimate?.entryCount ?? null;
-  const cacheUsageBytes = React.useMemo(
-    () => (cacheEstimate && cacheEstimate.totalBytes != null ? cacheEstimate.totalBytes : approximateCacheBytes ?? 0),
-    [cacheEstimate, approximateCacheBytes]
-  );
-  const cacheCapacityBytes = React.useMemo(() => {
-    if (originQuotaBytes && originQuotaBytes > 0) {
-      return originQuotaBytes;
-    }
-    if (storageCriticalThreshold > 0) {
-      return storageCriticalThreshold;
-    }
-    return Math.max(cacheUsageBytes, 1);
-  }, [originQuotaBytes, storageCriticalThreshold, cacheUsageBytes]);
-  const cacheProgressWidth = React.useMemo(() => {
-    if (cacheCapacityBytes <= 0) {
-      return cacheUsageBytes > 0 ? 100 : 0;
-    }
-    return Math.max(0, Math.min(100, (cacheUsageBytes / cacheCapacityBytes) * 100));
-  }, [cacheUsageBytes, cacheCapacityBytes]);
-  const cacheBarClass = getProgressBarClass(cacheProgressWidth);
 
   const handleStorageRefresh = React.useCallback(() => {
     setStorageFeedback(null);
@@ -803,116 +800,107 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
       {
         id: "storage",
         label: "Storage Settings",
-        description: "Review how Bloom uses browser storage.",
+        description: "Review how Bloom uses browser storage and reset cached data.",
         icon: DownloadIcon,
         cards: [
         (
-          <div key="storage-widgets" className="grid gap-4 lg:grid-cols-2">
-            <SettingCard key="storage-local" headingId={localStorageHeadingId} title="Local storage">
-              {!isStorageSupported ? (
-                <p className="text-xs text-slate-500">Local storage is unavailable in this environment, so Bloom keeps settings in memory only.</p>
-              ) : (
-                <>
-                  <div className="space-y-2">
-                    <div className="relative h-2 w-full overflow-hidden rounded-full bg-slate-800" role="presentation">
+          <SettingCard key="storage-local" headingId={localStorageHeadingId} title="Local storage">
+            {!isStorageSupported ? (
+              <p className="text-xs text-slate-500">Local storage is unavailable in this environment, so Bloom keeps settings in memory only.</p>
+            ) : (
+              <>
+                <div className="space-y-2">
+                  <div className="relative h-2 w-full overflow-hidden rounded-full bg-slate-800" role="presentation">
+                    <div
+                      className={`h-full ${storageStatusMeta.barClass}`}
+                      style={{ width: `${Math.max(2, storageProgressWidth).toFixed(1)}%` }}
+                    />
+                    {storageWarnMarkerPercent > 0 && storageWarnMarkerPercent < 1 ? (
                       <div
-                        className={`h-full ${storageBarClass}`}
-                        style={{ width: `${Math.max(2, storageProgressWidth).toFixed(1)}%` }}
+                        className="absolute top-0 bottom-0 w-px bg-amber-400/70"
+                        style={{ left: `${(storageWarnMarkerPercent * 100).toFixed(1)}%` }}
+                        aria-hidden
                       />
-                      {storageWarnMarkerPercent > 0 && storageWarnMarkerPercent < 1 ? (
-                        <div
-                          className="absolute top-0 bottom-0 w-px bg-amber-400/70"
-                          style={{ left: `${(storageWarnMarkerPercent * 100).toFixed(1)}%` }}
-                          aria-hidden
-                        />
-                      ) : null}
-                    </div>
-                    <div className="flex justify-between text-[11px] text-slate-500">
-                      <span>Warn {formatBytes(storageWarnThreshold)}</span>
-                      <span>Critical {formatBytes(storageCriticalThreshold)}</span>
-                    </div>
+                    ) : null}
                   </div>
-                  <dl className="mt-3 space-y-1 text-xs text-slate-400">
-                    <div className="flex justify-between">
-                      <dt>Usage</dt>
-                      <dd className="text-slate-200">
-                        {formatBytes(storageSnapshot.totalBytes)} of {formatBytes(storageCriticalThreshold)}
-                      </dd>
-                    </div>
-                    <div className="flex justify-between">
-                      <dt>Keys managed</dt>
-                      <dd className="text-slate-200">{storageManagedKeys.length}</dd>
-                    </div>
-                  </dl>
-                  <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
-                    <button
-                      type="button"
-                      onClick={handleClearLocalStorage}
-                      disabled={clearingLocalStorage}
-                      className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-slate-900 ${
-                        clearingLocalStorage ? "cursor-not-allowed border-slate-600 text-slate-500" : "border-emerald-500/70 text-emerald-200 hover:border-emerald-400 hover:text-emerald-100"
-                      }`}
-                    >
-                      {clearingLocalStorage ? "Clearing…" : "Clear local storage"}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleStorageRefresh}
-                      className="rounded-lg border border-slate-600 px-3 py-1.5 text-xs font-medium text-slate-200 transition hover:border-emerald-500 hover:text-emerald-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-slate-900"
-                    >
-                      Refresh
-                    </button>
+                  <div className="flex justify-between text-[11px] text-slate-500">
+                    <span>Warn {formatBytes(storageWarnThreshold)}</span>
+                    <span>Critical {formatBytes(storageCriticalThreshold)}</span>
                   </div>
-                </>
-              )}
-            </SettingCard>
-            <SettingCard key="storage-cache" headingId={cacheStorageHeadingId} title="Cache storage">
-              {cacheSupported ? (
-                <>
-                  <div className="space-y-2">
-                    <div className="relative h-2 w-full overflow-hidden rounded-full bg-slate-800" role="presentation">
-                      <div className={`h-full ${cacheBarClass}`} style={{ width: `${Math.max(2, cacheProgressWidth).toFixed(1)}%` }} />
-                    </div>
-                    <div className="flex justify-between text-[11px] text-slate-500">
-                      <span>0MB</span>
-                      <span>{formatBytes(cacheCapacityBytes)}</span>
-                    </div>
+                </div>
+                <dl className="mt-3 space-y-1 text-xs text-slate-400">
+                  <div className="flex justify-between">
+                    <dt>Usage</dt>
+                    <dd className="text-slate-200">
+                      {formatBytes(storageSnapshot.totalBytes)} of {formatBytes(storageCriticalThreshold)}
+                    </dd>
                   </div>
-                  <dl className="mt-3 space-y-1 text-xs text-slate-400">
-                    <div className="flex justify-between">
-                      <dt>Usage</dt>
-                      <dd className="text-slate-200">{cacheUsageDisplay ?? "Unknown"}</dd>
-                    </div>
-                    <div className="flex justify-between">
-                      <dt>Previews cached</dt>
-                      <dd className="text-slate-200">{cacheEntriesCount ?? "—"}</dd>
-                    </div>
-                  </dl>
-                  <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
-                    <button
-                      type="button"
-                      onClick={handleClearCacheStorage}
-                      disabled={clearingCacheStorage}
-                      className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-slate-900 ${
-                        clearingCacheStorage ? "cursor-not-allowed border-slate-600 text-slate-500" : "border-emerald-500/70 text-emerald-200 hover-border-emerald-400 hover:text-emerald-100"
-                      }`}
-                    >
-                      {clearingCacheStorage ? "Clearing…" : "Clear preview cache"}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleStorageRefresh}
-                      className="rounded-lg border border-slate-600 px-3 py-1.5 text-xs font-medium text-slate-200 transition hover:border-emerald-500 hover:text-emerald-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-slate-900"
-                    >
-                      Refresh
-                    </button>
+                  <div className="flex justify-between">
+                    <dt>Entries managed</dt>
+                    <dd className="text-slate-200">{storageManagedKeys.length}</dd>
                   </div>
-                </>
-              ) : (
-                <p className="text-xs text-slate-500">Cache Storage is unavailable, so Bloom skips storing preview thumbnails on this device.</p>
-              )}
-            </SettingCard>
-          </div>
+                </dl>
+                <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={handleClearLocalStorage}
+                    disabled={clearingLocalStorage}
+                    className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-slate-900 ${
+                      clearingLocalStorage ? "cursor-not-allowed border-slate-600 text-slate-500" : "border-emerald-500/70 text-emerald-200 hover:border-emerald-400 hover:text-emerald-100"
+                    }`}
+                  >
+                    {clearingLocalStorage ? "Clearing…" : "Clear local storage"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleStorageRefresh}
+                    className="rounded-lg border border-slate-600 px-3 py-1.5 text-xs font-medium text-slate-200 transition hover:border-emerald-500 hover:text-emerald-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-slate-900"
+                  >
+                    Refresh
+                  </button>
+                </div>
+              </>
+            )}
+          </SettingCard>
+        ),
+        (
+          <SettingCard key="storage-cache" headingId={cacheStorageHeadingId} title="Cache storage">
+            {cacheSupported ? (
+              <>
+                <dl className="mt-3 space-y-1 text-xs text-slate-400">
+                  <div className="flex justify-between">
+                    <dt>Usage</dt>
+                    <dd className="text-slate-200">{cacheUsageDisplay ?? "Unknown"}</dd>
+                  </div>
+                  <div className="flex justify-between">
+                    <dt>Entries cached</dt>
+                    <dd className="text-slate-200">{cacheEntriesCount ?? "—"}</dd>
+                  </div>
+                </dl>
+                <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={handleClearCacheStorage}
+                    disabled={clearingCacheStorage}
+                    className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-slate-900 ${
+                      clearingCacheStorage ? "cursor-not-allowed border-slate-600 text-slate-500" : "border-emerald-500/70 text-emerald-200 hover-border-emerald-400 hover:text-emerald-100"
+                    }`}
+                  >
+                    {clearingCacheStorage ? "Clearing…" : "Clear preview cache"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleStorageRefresh}
+                    className="rounded-lg border border-slate-600 px-3 py-1.5 text-xs font-medium text-slate-200 transition hover:border-emerald-500 hover:text-emerald-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-slate-900"
+                  >
+                    Refresh
+                  </button>
+                </div>
+              </>
+            ) : (
+              <p className="text-xs text-slate-500">Cache Storage is unavailable, so Bloom skips storing preview thumbnails on this device.</p>
+            )}
+          </SettingCard>
         ),
         (
           <div key="storage-note" className="text-xs text-slate-400">
@@ -1048,7 +1036,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
     storageCriticalThreshold,
     storageWarnThreshold,
     storageManagedKeys.length,
-    storageBarClass,
+    storageStatusMeta.barClass,
     storageProgressWidth,
     storageWarnMarkerPercent,
     storageFeedback,
@@ -1061,10 +1049,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
     cacheSupported,
     cacheUsageDisplay,
     cacheEntriesCount,
-    cacheProgressWidth,
-    cacheCapacityBytes,
-    cacheBarClass,
-    originQuotaBytes,
   ]);
 
   const [activeSectionId, setActiveSectionId] = React.useState(() => sections[0]?.id ?? "primary");

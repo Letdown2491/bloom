@@ -1,6 +1,6 @@
-import { checkLocalStorageQuota, estimateEntryBytes } from "./storageQuota";
+import { BLOOM_PREVIEW_CACHE_NAME, checkLocalStorageQuota, estimateEntryBytes } from "./storageQuota";
 
-const CACHE_NAME = "bloom:preview-cache:v1";
+const CACHE_NAME = BLOOM_PREVIEW_CACHE_NAME;
 const LOCAL_STORAGE_PREFIX = "bloom:preview-cache:v1:";
 const MAX_CACHE_BYTES = 4 * 1024 * 1024; // 4MB cap to avoid storing very large previews
 const MAX_LOCAL_STORAGE_ENTRY_BYTES = 120 * 1024; // single preview cap (~120KB)
