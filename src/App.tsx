@@ -136,7 +136,6 @@ export default function App() {
   });
   const [tab, setTab] = useState<TabId>("browse");
   const [browseHeaderControls, setBrowseHeaderControls] = useState<React.ReactNode | null>(null);
-  const [activeBrowseFilter, setActiveBrowseFilter] = useState<FilterMode>(preferences.defaultFilterMode);
   const [homeNavigationKey, setHomeNavigationKey] = useState(0);
   const [browseNavigationState, setBrowseNavigationState] = useState<BrowseNavigationState | null>(null);
   const [browseActiveList, setBrowseActiveList] = useState<BrowseActiveListState | null>(null);
@@ -170,8 +169,9 @@ export default function App() {
 
   const { enabled: syncEnabled, loading: syncLoading, error: syncError, pending: syncPending, lastSyncedAt: syncLastSyncedAt } = syncState;
 
-  const handleFilterModeChange = useCallback((mode: FilterMode) => {
-    setActiveBrowseFilter(prev => (prev === mode ? prev : mode));
+  const handleFilterModeChange = useCallback((_mode: FilterMode) => {
+    void _mode;
+    // Music mode no longer requires tracking the active browse filter at the app level.
   }, []);
 
   const handleBrowseActiveListChange = useCallback((state: BrowseActiveListState | null) => {
@@ -274,10 +274,6 @@ export default function App() {
       setDefaultServerUrl(null);
     }
   }, [servers, hasFetchedUserServers, preferences.defaultServerUrl, setDefaultServerUrl]);
-
-  useEffect(() => {
-    setActiveBrowseFilter(preferences.defaultFilterMode);
-  }, [preferences.defaultFilterMode]);
 
   useEffect(() => {
     if (tab === "transfer" && selectedBlobs.size === 0) {
@@ -600,7 +596,6 @@ export default function App() {
     (mode: FilterMode) => {
       if (preferences.defaultFilterMode === mode) return;
       setDefaultFilterMode(mode);
-      setActiveBrowseFilter(mode);
     },
     [preferences.defaultFilterMode, setDefaultFilterMode]
   );
@@ -1067,8 +1062,7 @@ export default function App() {
     disconnect();
   }, [disconnect]);
 
-  const isInlineMusicPlayerActive = tab === "browse" && activeBrowseFilter === "music";
-  const shouldShowFloatingPlayer = Boolean(audio.current) && !isInlineMusicPlayerActive;
+  const shouldShowFloatingPlayer = Boolean(audio.current);
 
   return (
     <div className="flex min-h-screen max-h-screen flex-col overflow-hidden bg-slate-950 text-slate-100">
@@ -1251,6 +1245,12 @@ export default function App() {
             )}
           </div>
 
+          {shouldShowFloatingPlayer && (
+            <Suspense fallback={null}>
+              <AudioPlayerCardLazy audio={audio} variant="docked" />
+            </Suspense>
+          )}
+
           <StatusFooter
             isSignedIn={isSignedIn}
             localServers={localServers}
@@ -1302,12 +1302,6 @@ export default function App() {
             />
           </Suspense>
         </div>
-
-        {shouldShowFloatingPlayer && (
-          <Suspense fallback={null}>
-            <AudioPlayerCardLazy audio={audio} />
-          </Suspense>
-        )}
       </div>
     </div>
   );
@@ -1517,7 +1511,7 @@ const MainNavigation = memo(function MainNavigation({
         ) : null}
       </div>
       <div className="flex items-center" role="group" aria-label="Main navigation controls">
-        <div className="flex items-stretch overflow-hidden rounded-xl border border-slate-800 bg-slate-900/70 divide-x divide-slate-800">
+        <div className="flex items-stretch rounded-xl border border-slate-800 bg-slate-900/70 divide-x divide-slate-800">
           <button
             type="button"
             onClick={onToggleSearch}

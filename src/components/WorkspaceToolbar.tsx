@@ -185,7 +185,7 @@ const WorkspaceToolbarComponent: React.FC<WorkspaceToolbarProps> = ({
         ) : null}
       </div>
       <div className="flex items-center" role="group" aria-label="Workspace navigation controls">
-        <div className="flex items-stretch overflow-hidden rounded-xl border border-slate-800 bg-slate-900/70 divide-x divide-slate-800">
+        <div className="flex items-stretch rounded-xl border border-slate-800 bg-slate-900/70 divide-x divide-slate-800">
           <button
             type="button"
             onClick={onToggleSearch}

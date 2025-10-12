@@ -1,7 +1,8 @@
-import React, { Suspense } from "react";
+import React, { Suspense, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { FilterMode } from "../../types/filter";
 import { BrowseContent, type BrowseContentProps } from "./BrowseContent";
-import { useAudio, type AudioContextValue } from "../../context/AudioContext";
+import type { AudioContextValue } from "../../context/AudioContext";
 import type { BlobListProps } from "../../components/BlobList";
 import {
   GridIcon,
@@ -44,6 +45,101 @@ const BASE_FILTER_OPTIONS: FilterOption[] = [
 const FILTER_OPTIONS: FilterOption[] = [...BASE_FILTER_OPTIONS].sort((a, b) =>
   a.label.localeCompare(b.label)
 );
+
+const MARQUEE_GAP_PX = 48;
+
+let marqueeStylesInjected = false;
+const ensureMarqueeStyles = () => {
+  if (marqueeStylesInjected || typeof document === "undefined") return;
+  const style = document.createElement("style");
+  style.textContent = `
+@keyframes bloom-marquee {
+  0% {
+    transform: translateX(0);
+  }
+  100% {
+    transform: translateX(calc(-1 * var(--bloom-marquee-distance, 0px)));
+  }
+}
+`;
+  document.head.appendChild(style);
+  marqueeStylesInjected = true;
+};
+
+type ScrollingTextProps = {
+  children: React.ReactNode;
+  className?: string;
+};
+
+const ScrollingText: React.FC<ScrollingTextProps> = ({ children, className = "" }) => {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const contentRef = useRef<HTMLSpanElement | null>(null);
+  const [state, setState] = useState<{ scroll: boolean; width: number }>({ scroll: false, width: 0 });
+
+  useEffect(() => {
+    const container = containerRef.current;
+    const content = contentRef.current;
+    if (!container || !content) return;
+
+    const update = () => {
+      const overflow = content.scrollWidth > container.clientWidth + 1;
+      const width = overflow ? content.scrollWidth : 0;
+      setState(prev => {
+        if (prev.scroll === overflow && (!overflow || prev.width === width)) {
+          return prev;
+        }
+        return { scroll: overflow, width };
+      });
+    };
+
+    update();
+
+    if (typeof ResizeObserver !== "undefined") {
+      const observer = new ResizeObserver(update);
+      observer.observe(container);
+      observer.observe(content);
+      return () => observer.disconnect();
+    }
+
+    window.addEventListener("resize", update);
+    return () => {
+      window.removeEventListener("resize", update);
+    };
+  }, [children]);
+
+  useEffect(() => {
+    if (state.scroll) {
+      ensureMarqueeStyles();
+    }
+  }, [state.scroll]);
+
+  const animationDuration = state.scroll ? Math.max(12, state.width / 40) : 0;
+  const animationStyle = state.scroll
+    ? ({
+        animation: `bloom-marquee ${animationDuration}s linear infinite`,
+        ["--bloom-marquee-distance" as any]: `${state.width + MARQUEE_GAP_PX}px`,
+      } as React.CSSProperties)
+    : undefined;
+
+  return (
+    <div ref={containerRef} className={`relative overflow-hidden ${className}`}>
+      <div className="flex w-max items-center" style={animationStyle}>
+        <span ref={contentRef} className="inline-block min-w-0 whitespace-nowrap">
+          {children}
+        </span>
+        {state.scroll && (
+          <span
+            aria-hidden="true"
+            className="inline-block min-w-0 whitespace-nowrap"
+            style={{ marginLeft: `${MARQUEE_GAP_PX}px` }}
+          >
+            {children}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+};
 
 
 const CONTROL_BUTTON_BASE =
@@ -94,8 +190,8 @@ export const BrowseControls: React.FC<BrowseControlsProps> = ({
 }) => {
   const isLightTheme = theme === "light";
   const menuContainerClass = isLightTheme
-    ? "absolute right-0 z-50 mt-2 w-48 rounded-xl border border-slate-300 bg-white p-1 text-slate-700 shadow-lg"
-    : "absolute right-0 z-50 mt-2 w-48 rounded-xl border border-slate-800 bg-slate-950/95 p-1 text-slate-100 shadow-lg backdrop-blur";
+    ? "absolute right-0 top-full z-50 mt-2 w-48 rounded-xl border border-slate-300 bg-white p-1 text-slate-700 shadow-lg"
+    : "absolute right-0 top-full z-50 mt-2 w-48 rounded-xl border border-slate-800 bg-slate-950/95 p-1 text-slate-100 shadow-lg backdrop-blur";
   const menuItemClass = (isActive: boolean) =>
     isLightTheme
       ? `flex w-full items-center gap-2 px-2 py-2 text-left text-sm transition focus:outline-none ${
@@ -332,7 +428,6 @@ export const BrowseControls: React.FC<BrowseControlsProps> = ({
 export type BrowsePanelProps = Omit<BrowseContentProps, "renderBlobList">;
 
 export const BrowsePanel: React.FC<BrowsePanelProps> = props => {
-  const audio = useAudio();
   const renderBlobList = (blobListProps: BlobListProps) => (
     <Suspense
       fallback={
@@ -345,15 +440,8 @@ export const BrowsePanel: React.FC<BrowsePanelProps> = props => {
     </Suspense>
   );
 
-  const showInlinePlayer = props.filterMode === "music" && Boolean(audio.current);
-
   return (
     <div className="flex flex-1 min-h-0 flex-col">
-      {showInlinePlayer && (
-        <div className="mb-4">
-          <AudioPlayerCard audio={audio} variant="inline" />
-        </div>
-      )}
       <BrowseContent {...props} renderBlobList={renderBlobList} />
     </div>
   );
@@ -361,7 +449,7 @@ export const BrowsePanel: React.FC<BrowsePanelProps> = props => {
 
 type AudioPlayerCardProps = {
   audio: AudioContextValue;
-  variant?: "floating" | "inline";
+  variant?: "floating" | "docked";
 };
 
 const formatTime = (value: number) => {
@@ -372,11 +460,12 @@ const formatTime = (value: number) => {
 };
 
 export const AudioPlayerCard: React.FC<AudioPlayerCardProps> = ({ audio, variant = "floating" }) => {
-  if (!audio.current) return null;
+  const currentTrack = audio.current;
+  if (!currentTrack) return null;
 
   const scrubberMax = audio.duration > 0 ? audio.duration : Math.max(audio.currentTime || 0, 1);
   const scrubberValue = Math.min(audio.currentTime || 0, scrubberMax);
-  const scrubberDisabled = !audio.current || audio.duration <= 0;
+  const scrubberDisabled = audio.duration <= 0;
 
   const handleScrub: React.ChangeEventHandler<HTMLInputElement> = event => {
     const next = Number(event.target.value);
@@ -384,14 +473,9 @@ export const AudioPlayerCard: React.FC<AudioPlayerCardProps> = ({ audio, variant
     audio.seek(next);
   };
 
-  const isInline = variant === "inline";
-  const containerClass = isInline
-    ? "w-full box-border overflow-hidden rounded-xl border border-slate-800 bg-slate-900/80 px-6 pt-4 pb-3 text-sm text-slate-200 shadow"
-    : "fixed bottom-4 right-4 w-full max-w-sm rounded-xl border border-slate-800 bg-slate-900/85 px-4 py-3 text-sm text-slate-200 shadow-lg";
-  const coverContainerClass = isInline
-    ? "relative mx-auto aspect-square w-28 overflow-hidden rounded-lg border border-slate-800 bg-slate-900 sm:w-32 md:mx-0 md:w-36 md:flex-shrink-0 md:self-start"
-    : "relative h-14 w-14 overflow-hidden rounded-lg border border-slate-800 bg-slate-900";
-  const progressLabelWidth = isInline ? "w-12" : "w-10";
+  const isDocked = variant === "docked";
+  const coverContainerClass = "relative h-14 w-14 overflow-hidden rounded-lg border border-slate-800 bg-slate-900";
+  const progressLabelWidth = isDocked ? "w-12" : "w-10";
 
   const buttonBaseClass = (disabled: boolean) =>
     `flex items-center justify-center transition focus:outline-none focus:ring-1 focus:ring-emerald-400 rounded-lg h-10 w-10 ${
@@ -407,159 +491,100 @@ export const AudioPlayerCard: React.FC<AudioPlayerCardProps> = ({ audio, variant
         : "bg-slate-100 text-slate-900 hover:bg-slate-200"
     }`;
 
-  const renderControls = (layout: "inline" | "floating") => {
+  const renderControls = (layout: "floating" | "docked", options?: { bare?: boolean }) => {
     const containerClass =
-      layout === "inline"
-        ? "flex flex-wrap items-center justify-center gap-2"
-        : "flex items-center justify-between gap-2";
+      layout === "floating"
+        ? "flex items-center justify-center gap-2"
+        : "flex flex-wrap items-center justify-center gap-2 md:justify-end";
 
     const repeatButtonClass =
       audio.repeatMode === "track"
         ? "bg-emerald-700 text-slate-100 hover:bg-emerald-600"
         : "bg-slate-800 hover:bg-slate-700 text-slate-200";
 
-    const stopButtonClass =
-      "flex h-10 w-10 items-center justify-center rounded-lg bg-red-600 text-slate-100 transition hover:bg-red-500 focus:outline-none focus:ring-1 focus:ring-red-300";
+    const controls: React.ReactNode[] = [
+      <button
+        key="shuffle"
+        type="button"
+        onClick={audio.shuffleQueue}
+        disabled={audio.queue.length < 2}
+        className={buttonBaseClass(audio.queue.length < 2)}
+        aria-label="Shuffle queue"
+      >
+        <ShuffleIcon size={18} />
+        <span className="sr-only">Shuffle</span>
+      </button>,
+      <button
+        key="previous"
+        type="button"
+        onClick={audio.previous}
+        disabled={!audio.hasPrevious}
+        className={buttonBaseClass(!audio.hasPrevious)}
+        aria-label="Play previous track"
+      >
+        <PreviousIcon size={18} />
+        <span className="sr-only">Previous</span>
+      </button>,
+      <button
+        key="toggle"
+        type="button"
+          onClick={() => audio.toggle(currentTrack, audio.queue)}
+        className={playButtonClass}
+        aria-label={audio.status === "playing" ? "Pause track" : "Play track"}
+      >
+        {audio.status === "playing" ? <PauseIcon size={20} /> : <PlayIcon size={20} />}
+        <span className="sr-only">{audio.status === "playing" ? "Pause" : "Play"}</span>
+      </button>,
+      <button
+        key="next"
+        type="button"
+        onClick={audio.next}
+        disabled={!audio.hasNext}
+        className={buttonBaseClass(!audio.hasNext)}
+        aria-label="Play next track"
+      >
+        <NextIcon size={18} />
+        <span className="sr-only">Next</span>
+      </button>,
+      <button
+        key="repeat"
+        type="button"
+        onClick={audio.toggleRepeatMode}
+        aria-label="Toggle repeat mode"
+        aria-pressed={audio.repeatMode === "track"}
+        className={`flex h-10 w-10 items-center justify-center rounded-lg transition focus:outline-none focus:ring-1 focus:ring-emerald-400 ${repeatButtonClass}`}
+      >
+        {audio.repeatMode === "track" ? <RepeatOneIcon size={18} /> : <RepeatIcon size={18} />}
+        <span className="sr-only">
+          {audio.repeatMode === "track" ? "Repeat current track" : "Repeat entire queue"}
+        </span>
+      </button>,
+    ];
 
-    return (
-      <div className={containerClass}>
-        <button
-          type="button"
-          onClick={audio.shuffleQueue}
-          disabled={audio.queue.length < 2}
-          className={buttonBaseClass(audio.queue.length < 2)}
-          aria-label="Shuffle queue"
-        >
-          <ShuffleIcon size={18} />
-          <span className="sr-only">Shuffle</span>
-        </button>
-        <button
-          type="button"
-          onClick={audio.previous}
-          disabled={!audio.hasPrevious}
-          className={buttonBaseClass(!audio.hasPrevious)}
-          aria-label="Play previous track"
-        >
-          <PreviousIcon size={18} />
-          <span className="sr-only">Previous</span>
-        </button>
-        <button
-          type="button"
-          onClick={() => audio.toggle(audio.current!, audio.queue)}
-          className={playButtonClass}
-          aria-label={audio.status === "playing" ? "Pause track" : "Play track"}
-        >
-          {audio.status === "playing" ? <PauseIcon size={20} /> : <PlayIcon size={20} />}
-          <span className="sr-only">{audio.status === "playing" ? "Pause" : "Play"}</span>
-        </button>
-        <button
-          type="button"
-          onClick={audio.next}
-          disabled={!audio.hasNext}
-          className={buttonBaseClass(!audio.hasNext)}
-          aria-label="Play next track"
-        >
-          <NextIcon size={18} />
-          <span className="sr-only">Next</span>
-        </button>
-        <button
-          type="button"
-          onClick={audio.toggleRepeatMode}
-          aria-label="Toggle repeat mode"
-          aria-pressed={audio.repeatMode === "track"}
-          className={`flex h-10 w-10 items-center justify-center rounded-lg transition focus:outline-none focus:ring-1 focus:ring-emerald-400 ${repeatButtonClass}`}
-        >
-          {audio.repeatMode === "track" ? <RepeatOneIcon size={18} /> : <RepeatIcon size={18} />}
-          <span className="sr-only">
-            {audio.repeatMode === "track" ? "Repeat current track" : "Repeat entire queue"}
-          </span>
-        </button>
-        <button
-          type="button"
-          onClick={audio.stop}
-          className={stopButtonClass}
-          aria-label="Stop playback"
-        >
-          <StopIcon size={18} />
-          <span className="sr-only">Stop</span>
-        </button>
-      </div>
-    );
+    if (options?.bare) {
+      return controls;
+    }
+
+    return <div className={containerClass}>{controls}</div>;
   };
 
-  if (isInline) {
-    const songTitle = audio.current.title || audio.current.url;
-    const artistName = audio.current.artist?.trim();
-    const year = audio.current?.year;
-    const yearLabel =
-      typeof year === "number"
-        ? ` (${year})`
-        : typeof year === "string" && year.trim()
-          ? ` (${year.trim()})`
-          : "";
-    const infoLine = artistName ? `${songTitle} by ${artistName}${yearLabel}` : songTitle;
-
-    return (
-      <div className={containerClass}>
-        <div className="grid gap-4 md:grid-cols-[auto,1fr] md:items-stretch">
-          {audio.current.coverUrl && (
-            <div className={coverContainerClass}>
-              <img
-                src={audio.current.coverUrl}
-                alt="Album art"
-                className="h-full w-full object-cover"
-                loading="lazy"
-                draggable={false}
-                onError={event => {
-                  event.currentTarget.style.display = "none";
-                }}
-              />
-            </div>
-          )}
-          <div className="flex min-w-0 flex-col gap-3">
-            <div className="min-w-0">
-              <div className="text-[11px] uppercase tracking-wide text-slate-400">Now playing</div>
-              <div className="text-base font-semibold text-slate-50 truncate">{infoLine}</div>
-            </div>
-            <div className="flex flex-col gap-2">
-              <div className="flex justify-center">
-                {renderControls("inline")}
-              </div>
-              <div className="flex min-w-0 items-center gap-3">
-                <span className={`text-xs tabular-nums text-slate-400 ${progressLabelWidth}`}>
-                  {formatTime(audio.currentTime)}
-                </span>
-                <input
-                  type="range"
-                  min={0}
-                  max={scrubberMax}
-                  step={0.1}
-                  value={scrubberValue}
-                  onChange={handleScrub}
-                  disabled={scrubberDisabled}
-                  aria-label="Seek through current track"
-                  aria-valuetext={formatTime(scrubberValue)}
-                  className="flex-1 h-1.5 cursor-pointer appearance-none rounded-full bg-slate-800 accent-emerald-500"
-                />
-                <span className={`text-xs tabular-nums text-slate-400 text-right ${progressLabelWidth}`}>
-                  {audio.duration > 0 ? formatTime(audio.duration) : "--:--"}
-                </span>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className={containerClass}>
-      <div className="flex flex-col gap-3">
+  const songTitle = currentTrack.title || currentTrack.url;
+  const artistName = currentTrack.artist?.trim();
+  const year = currentTrack?.year;
+  const yearLabel =
+    typeof year === "number"
+      ? ` (${year})`
+      : typeof year === "string" && year.trim()
+        ? ` (${year.trim()})`
+        : "";
+  const renderFloatingCard = () => (
+    <div className="relative w-full max-w-sm rounded-xl border border-slate-800 bg-slate-900/85 px-4 py-2 text-xs text-slate-200 shadow-lg pointer-events-auto">
+      <div className="flex flex-col gap-2.5">
         <div className="flex items-start gap-3">
-          {audio.current.coverUrl && (
+          {currentTrack.coverUrl && (
             <div className={`${coverContainerClass} flex-shrink-0`}>
               <img
-                src={audio.current.coverUrl}
+                src={currentTrack.coverUrl}
                 alt="Album art"
                 className="h-full w-full object-cover"
                 loading="lazy"
@@ -572,15 +597,18 @@ export const AudioPlayerCard: React.FC<AudioPlayerCardProps> = ({ audio, variant
           )}
           <div className="min-w-0 flex-1">
             <div className="text-[11px] uppercase tracking-wide text-slate-400">Now playing</div>
-            <div className="text-sm font-medium text-slate-100 truncate">
-              {audio.current.title || audio.current.url}
-            </div>
-            {audio.current.artist && (
-              <div className="text-xs text-slate-400 truncate">{audio.current.artist}</div>
+            <ScrollingText className="min-w-0 text-sm font-medium text-slate-100">
+              {songTitle}
+            </ScrollingText>
+            {artistName && (
+              <ScrollingText className="min-w-0 text-xs text-slate-400">
+                {artistName}
+                {yearLabel}
+              </ScrollingText>
             )}
           </div>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2.5">
           <span className={`text-xs tabular-nums text-slate-400 ${progressLabelWidth}`}>
             {formatTime(audio.currentTime)}
           </span>
@@ -602,8 +630,165 @@ export const AudioPlayerCard: React.FC<AudioPlayerCardProps> = ({ audio, variant
         </div>
         {renderControls("floating")}
       </div>
+      <div className="mt-1.5 flex justify-end">
+        <button
+          type="button"
+          onClick={audio.stop}
+          aria-label="Stop playback"
+          className="flex h-10 w-10 items-center justify-center rounded-lg bg-red-600 text-slate-100 transition hover:bg-red-500 focus:outline-none focus:ring-1 focus:ring-red-300"
+        >
+          <StopIcon size={18} />
+          <span className="sr-only">Stop</span>
+        </button>
+      </div>
     </div>
   );
+
+  if (isDocked) {
+    return (
+      <div className="border-t border-slate-800 bg-slate-900/70 px-4 py-2 text-sm text-slate-200">
+        <div className="flex flex-col gap-3.5 md:gap-4">
+          <div className="flex items-center justify-between gap-2.5 md:hidden">
+            <div className="flex min-w-0 items-center gap-3">
+              {currentTrack.coverUrl && (
+                <div className="flex h-12 w-12 flex-shrink-0 overflow-hidden rounded-lg border border-slate-800 bg-slate-900">
+                  <img
+                    src={currentTrack.coverUrl}
+                    alt="Album art"
+                    className="h-full w-full object-cover"
+                    loading="lazy"
+                    draggable={false}
+                    onError={event => {
+                      event.currentTarget.style.display = "none";
+                    }}
+                  />
+                </div>
+              )}
+              <div className="min-w-0 text-left">
+                <div className="text-[11px] uppercase tracking-wide text-slate-400">Now playing</div>
+                <ScrollingText className="min-w-0 text-sm font-semibold text-slate-100">
+                  {songTitle}
+                </ScrollingText>
+                {artistName && (
+                  <ScrollingText className="min-w-0 text-xs text-slate-400">
+                    {artistName}
+                    {yearLabel}
+                  </ScrollingText>
+                )}
+              </div>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => audio.toggle(currentTrack, audio.queue)}
+                className={playButtonClass}
+                aria-label={audio.status === "playing" ? "Pause track" : "Play track"}
+              >
+                {audio.status === "playing" ? <PauseIcon size={20} /> : <PlayIcon size={20} />}
+                <span className="sr-only">{audio.status === "playing" ? "Pause" : "Play"}</span>
+              </button>
+              <button
+                type="button"
+                onClick={audio.next}
+                disabled={!audio.hasNext}
+                className={`flex items-center justify-center rounded-lg transition focus:outline-none focus:ring-1 focus:ring-emerald-400 ${
+                  !audio.hasNext
+                    ? "h-9 w-9 bg-slate-800/50 text-slate-500 cursor-not-allowed"
+                    : "h-9 w-9 bg-slate-800 text-slate-200 hover:bg-slate-700"
+                }`}
+                aria-label="Play next track"
+              >
+                <NextIcon size={18} />
+                <span className="sr-only">Next</span>
+              </button>
+              <button
+                type="button"
+                onClick={audio.stop}
+                aria-label="Stop playback"
+                className="flex h-9 w-9 items-center justify-center rounded-lg bg-red-600 text-slate-100 transition hover:bg-red-500 focus:outline-none focus:ring-1 focus:ring-red-300"
+              >
+                <StopIcon size={18} />
+                <span className="sr-only">Stop</span>
+              </button>
+            </div>
+          </div>
+
+          <div className="hidden items-center gap-5 md:flex">
+            <div className="flex min-w-0 items-center gap-3">
+              {currentTrack.coverUrl && (
+                <div className="flex h-12 w-12 flex-shrink-0 overflow-hidden rounded-lg border border-slate-800 bg-slate-900">
+                  <img
+                    src={currentTrack.coverUrl}
+                    alt="Album art"
+                    className="h-full w-full object-cover"
+                    loading="lazy"
+                    draggable={false}
+                    onError={event => {
+                      event.currentTarget.style.display = "none";
+                    }}
+                  />
+                </div>
+              )}
+              <div className="min-w-0 text-left">
+                <div className="text-[11px] uppercase tracking-wide text-slate-400">Now playing</div>
+                <ScrollingText className="min-w-0 text-sm font-semibold text-slate-100">
+                  {songTitle}
+                </ScrollingText>
+                {artistName && (
+                  <ScrollingText className="min-w-0 text-xs text-slate-400">
+                    {artistName}
+                    {yearLabel}
+                  </ScrollingText>
+                )}
+              </div>
+            </div>
+            <div className="flex flex-1 items-center gap-3.5">
+              <span className="w-14 text-xs tabular-nums text-slate-400">{formatTime(audio.currentTime)}</span>
+              <input
+                type="range"
+                min={0}
+                max={scrubberMax}
+                step={0.1}
+                value={scrubberValue}
+                onChange={handleScrub}
+                disabled={scrubberDisabled}
+                aria-label="Seek through current track"
+                aria-valuetext={formatTime(scrubberValue)}
+                className="flex-1 h-1.5 min-w-[340px] cursor-pointer appearance-none rounded-full bg-slate-800 accent-emerald-500"
+              />
+              <span className="w-14 text-right text-xs tabular-nums text-slate-400">
+                {audio.duration > 0 ? formatTime(audio.duration) : "--:--"}
+              </span>
+            </div>
+            <div className="flex items-center justify-end gap-1.5">
+              {renderControls("docked", { bare: true })}
+              <button
+                type="button"
+                onClick={audio.stop}
+                aria-label="Stop playback"
+                className="flex h-10 w-10 items-center justify-center rounded-lg bg-red-600 text-slate-100 transition hover:bg-red-500 focus:outline-none focus:ring-1 focus:ring-red-300"
+              >
+                <StopIcon size={18} />
+                <span className="sr-only">Stop</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const floatingContent = (
+    <div className="fixed bottom-4 left-4 right-4 sm:left-auto sm:right-4 z-40 pointer-events-none">
+      {renderFloatingCard()}
+    </div>
+  );
+
+  if (typeof document !== "undefined") {
+    return createPortal(floatingContent, document.body);
+  }
+
+  return floatingContent;
 };
 
 export default BrowsePanel;

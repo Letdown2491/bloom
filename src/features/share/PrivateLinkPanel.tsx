@@ -326,5 +326,3 @@ export const PrivateLinkPanel: React.FC<PrivateLinkPanelProps> = ({ payload, onS
     </div>
   );
 };
-
-export default PrivateLinkPanel;

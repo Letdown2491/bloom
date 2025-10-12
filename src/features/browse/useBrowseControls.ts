@@ -16,17 +16,6 @@ const FILTER_LABELS: Record<Exclude<FilterMode, "all">, string> = {
   videos: "Videos",
 };
 
-const DISPLAY_FILTER_OPTIONS: FilterOption[] = (["documents", "images", "music", "videos"] as Array<
-  Exclude<FilterMode, "all">
->).map(id => ({
-  id,
-  label: FILTER_LABELS[id],
-}));
-
-const FILTER_OPTIONS: FilterOption[] = [...DISPLAY_FILTER_OPTIONS].sort((a, b) =>
-  a.label.localeCompare(b.label)
-);
-
 const OPTION_MAP = (Object.keys(FILTER_LABELS) as Array<Exclude<FilterMode, "all">>).reduce<
   Record<Exclude<FilterMode, "all">, FilterOption>
 >((acc, key) => {
@@ -128,5 +117,3 @@ export const useBrowseControls = () => {
     toggleSortDirection,
   };
 };
-
-export const getFilterOptions = () => FILTER_OPTIONS;
