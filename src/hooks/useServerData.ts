@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useSyncExternalStore, useState } from "react";
-import { useQueries } from "@tanstack/react-query";
+import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore, useState } from "react";
+import { useQueries, useQueryClient } from "@tanstack/react-query";
 import { useCurrentPubkey, useNdk } from "../context/NdkContext";
 import type { ManagedServer } from "./useServers";
 import {
@@ -49,6 +49,11 @@ type CachedSnapshotPayload = {
   version: number;
   updatedAt: number;
   blobs: CachedBlobSnapshot[];
+};
+
+type CachedServerSnapshot = {
+  blobs: BlossomBlob[];
+  updatedAt?: number;
 };
 
 const buildCacheKey = (url: string) => `${SERVER_CACHE_PREFIX}:${encodeURIComponent(url)}`;
@@ -126,7 +131,7 @@ const decodeCachedBlob = (blob: CachedBlobSnapshot): BlossomBlob => {
   return decoded;
 };
 
-const loadCachedSnapshot = (url: string): BlossomBlob[] | null => {
+const loadCachedSnapshot = (url: string): CachedServerSnapshot | null => {
   if (typeof window === "undefined") return null;
   try {
     const raw = window.localStorage.getItem(buildCacheKey(url));
@@ -134,11 +139,15 @@ const loadCachedSnapshot = (url: string): BlossomBlob[] | null => {
     const payload = JSON.parse(raw) as Partial<CachedSnapshotPayload> | null;
     if (!payload || typeof payload.version !== "number") return null;
     if (!Array.isArray(payload.blobs)) return null;
+    const updatedAt = typeof payload.updatedAt === "number" ? payload.updatedAt : undefined;
+    let blobs: BlossomBlob[];
     if (payload.version !== CACHE_VERSION) {
       // Legacy payload: sanitize into the latest shape.
-      return (payload.blobs as BlossomBlob[]).map(sanitizeCacheableBlob).map(decodeCachedBlob);
+      blobs = (payload.blobs as BlossomBlob[]).map(sanitizeCacheableBlob).map(decodeCachedBlob);
+      return { blobs, updatedAt };
     }
-    return (payload.blobs as CachedBlobSnapshot[]).map(decodeCachedBlob);
+    blobs = (payload.blobs as CachedBlobSnapshot[]).map(decodeCachedBlob);
+    return { blobs, updatedAt };
   } catch (error) {
     console.warn("Unable to read cached server snapshot", error);
     return null;
@@ -148,11 +157,12 @@ const loadCachedSnapshot = (url: string): BlossomBlob[] | null => {
 const persistSnapshotCache = (url: string, blobs: BlossomBlob[]) => {
   if (typeof window === "undefined" || snapshotStorageBlocked) return;
   const key = buildCacheKey(url);
+  const timestamp = Date.now();
   const attemptPersist = (limit: number) => {
     const trimmed = blobs.slice(0, limit).map(sanitizeCacheableBlob);
     const payload: CachedSnapshotPayload = {
       version: CACHE_VERSION,
-      updatedAt: Date.now(),
+      updatedAt: timestamp,
       blobs: trimmed,
     };
     window.localStorage.setItem(key, JSON.stringify(payload));
@@ -275,6 +285,7 @@ const buildServerMap = (servers: ManagedServer[]) => {
 };
 
 export const useServerData = (servers: ManagedServer[], options?: UseServerDataOptions) => {
+  const queryClient = useQueryClient();
   const pubkey = useCurrentPubkey();
   const { signer, signEventTemplate, status: ndkStatus, connectionError: ndkError } = useNdk();
   const metadataVersion = useSyncExternalStore(
@@ -306,8 +317,8 @@ export const useServerData = (servers: ManagedServer[], options?: UseServerDataO
     return ordered;
   }, [servers, prioritizedServerUrls, foregroundServerUrl]);
 
-  const [cachedSnapshots, setCachedSnapshots] = useState<Map<string, BlossomBlob[]>>(() => {
-    const map = new Map<string, BlossomBlob[]>();
+  const [cachedSnapshots, setCachedSnapshots] = useState<Map<string, CachedServerSnapshot>>(() => {
+    const map = new Map<string, CachedServerSnapshot>();
     if (typeof window === "undefined") return map;
     servers.forEach(server => {
       const cached = loadCachedSnapshot(server.url);
@@ -539,6 +550,7 @@ export const useServerData = (servers: ManagedServer[], options?: UseServerDataO
     queries: servers.map(server => {
       const isActive = activeServerUrls.has(server.url);
       const cached = cachedSnapshots.get(server.url);
+      const cachedBlobs = cached?.blobs;
       return {
         queryKey: ["server-blobs", server.url, pubkey, server.type],
         enabled:
@@ -547,10 +559,13 @@ export const useServerData = (servers: ManagedServer[], options?: UseServerDataO
           (server.type === "satellite"
             ? Boolean(signEventTemplate)
             : !server.requiresAuth || !!signer),
-        initialData: cached,
-        staleTime: 1000 * 60,
+        initialData: cachedBlobs,
+        initialDataUpdatedAt: cached?.updatedAt,
+        staleTime: 0,
+        refetchOnMount: "always" as const,
+        refetchOnWindowFocus: true,
         queryFn: async (): Promise<BlossomBlob[]> => {
-          if (!pubkey) return cached ?? [];
+          if (!pubkey) return cachedBlobs ?? [];
           if (server.type === "blossom") {
             const blobs = await listUserBlobs(
               server.url,
@@ -582,7 +597,7 @@ export const useServerData = (servers: ManagedServer[], options?: UseServerDataO
     return servers.map((server, index) => {
       const query = queries[index];
       const cached = cachedSnapshots.get(server.url);
-      const rawBlobs = (query?.data as BlossomBlob[] | undefined) ?? cached ?? [];
+      const rawBlobs = (query?.data as BlossomBlob[] | undefined) ?? cached?.blobs ?? [];
       const fetchStatus = query?.fetchStatus;
       const isActive = activeServerUrls.has(server.url);
       return {
@@ -600,17 +615,27 @@ export const useServerData = (servers: ManagedServer[], options?: UseServerDataO
       if (snapshot.isError) return;
       if (!snapshot.blobs.length) return;
       const cached = cachedSnapshots.get(snapshot.server.url);
-      if (areBlobListsEqual(cached, snapshot.blobs)) return;
+      if (areBlobListsEqual(cached?.blobs, snapshot.blobs)) return;
       persistSnapshotCache(snapshot.server.url, snapshot.blobs);
       setCachedSnapshots(prev => {
         const existing = prev.get(snapshot.server.url);
-        if (areBlobListsEqual(existing, snapshot.blobs)) return prev;
+        if (areBlobListsEqual(existing?.blobs, snapshot.blobs)) return prev;
         const next = new Map(prev);
-        next.set(snapshot.server.url, snapshot.blobs);
+        next.set(snapshot.server.url, {
+          blobs: snapshot.blobs,
+          updatedAt: Date.now(),
+        });
         return next;
       });
     });
   }, [snapshots, cachedSnapshots]);
+
+  const lastMetadataVersionRef = useRef(metadataVersion);
+  useEffect(() => {
+    if (lastMetadataVersionRef.current === metadataVersion) return;
+    lastMetadataVersionRef.current = metadataVersion;
+    queryClient.invalidateQueries({ queryKey: ["server-blobs"] });
+  }, [metadataVersion, queryClient]);
 
   const { distribution, aggregated } = useMemo(() => {
     const entryMap = new Map<string, { blob: BlossomBlob; servers: string[] }>();
