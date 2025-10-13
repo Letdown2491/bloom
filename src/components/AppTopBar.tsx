@@ -37,7 +37,7 @@ const AppTopBarComponent: React.FC<AppTopBarProps> = ({
   return (
     <header className="flex flex-wrap items-center gap-4">
       <div className="flex items-center gap-3">
-        <img src="/bloom.webp" alt="Bloom logo" className="h-10 w-10 rounded-xl object-cover" />
+        <img src="/bloom.webp" alt="Bloom logo" className="h-6 w-6 rounded-md object-cover md:h-10 md:w-10 md:rounded-xl" />
         <div>
           <h1 className="text-2xl font-semibold">Bloom</h1>
           <p className="hidden md:block text-xs text-slate-400">
@@ -51,7 +51,7 @@ const AppTopBarComponent: React.FC<AppTopBarProps> = ({
             <button
               type="button"
               onClick={onToggleUserMenu}
-              className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-full border border-slate-800 bg-slate-900/70 p-0 text-xs text-slate-200 transition hover:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+              className="flex h-8 w-8 items-center justify-center overflow-hidden rounded-full border border-slate-800 bg-slate-900/70 p-0 text-xs text-slate-200 transition hover:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 md:h-12 md:w-12"
               aria-haspopup="menu"
               aria-expanded={isUserMenuOpen}
               disabled={showAuthPrompt}

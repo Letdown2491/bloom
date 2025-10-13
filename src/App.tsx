@@ -1068,11 +1068,11 @@ export default function App() {
     <div className="flex min-h-screen max-h-screen flex-col overflow-hidden bg-slate-950 text-slate-100">
       <div className="mx-auto flex w-full flex-1 min-h-0 flex-col gap-6 overflow-hidden px-6 py-8 max-w-7xl box-border">
         <header className="flex flex-wrap items-center gap-4">
-          <div className="flex items-center gap-3 min-h-12">
+          <div className="flex items-center gap-3 min-h-[32px] md:min-h-12">
             <img
               src="/bloom.webp"
               alt="Bloom logo"
-              className="h-10 w-10 rounded-xl object-cover"
+              className="h-6 w-6 rounded-md object-cover md:h-10 md:w-10 md:rounded-xl"
             />
             <div>
               <h1 className="text-2xl font-semibold">Bloom</h1>
@@ -1087,7 +1087,7 @@ export default function App() {
                 <button
                   type="button"
                   onClick={toggleUserMenu}
-                  className="relative flex h-12 w-12 items-center justify-center rounded-full border border-slate-800 bg-slate-900/70 p-0 text-xs text-slate-200 transition hover:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                  className="relative flex h-8 w-8 items-center justify-center rounded-full border border-slate-800 bg-slate-900/70 p-0 text-xs text-slate-200 transition hover:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 md:h-12 md:w-12"
                   aria-haspopup="menu"
                   aria-expanded={isUserMenuOpen}
                   aria-label={isUserMenuOpen ? "Close account menu" : "Open account menu"}

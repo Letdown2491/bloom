@@ -415,6 +415,7 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
   const { deleteFolder, foldersByPath, getFolderDisplayName, removeBlobFromFolder } = useFolderLists();
   const [activeList, setActiveList] = useState<ActiveListState | null>(null);
   const playbackUrlCacheRef = useRef(new Map<string, string>());
+  const lastPlayRequestRef = useRef<string | undefined>();
   const autoPrivateNavigationRef = useRef<{ previous: ActiveListState | null } | null>(null);
 
   useEffect(() => {
@@ -1415,28 +1416,39 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
   );
 
   const buildQueueForPlayback = useCallback(
-    async (focusBlob: BlossomBlob) => {
+    async (focusBlob: BlossomBlob, existingFocusTrack?: Track | null) => {
       const source = musicQueueSource.length ? musicQueueSource : [focusBlob];
       const tracks: Track[] = [];
+      const seenKeys = new Set<string>();
 
+      const registerTrack = (track: Track | null | undefined) => {
+        if (!track) return;
+        const key = track.id ?? track.url;
+        if (!key || seenKeys.has(key)) return;
+        seenKeys.add(key);
+        tracks.push(track);
+      };
+
+      if (existingFocusTrack) {
+        registerTrack(existingFocusTrack);
+      }
+
+      const existingFocusId = existingFocusTrack?.id ?? null;
       for (const item of source) {
+        if (existingFocusId && item.sha256 === existingFocusId) continue;
         try {
           const track = await buildTrackForBlob(item);
-          if (track && !tracks.some(existing => existing.id === track.id)) {
-            tracks.push(track);
-          }
+          registerTrack(track);
         } catch (error) {
           console.warn("Failed to prepare track", error);
         }
       }
 
-      let focusTrack = tracks.find(track => track.id === focusBlob.sha256) ?? null;
+      let focusTrack = existingFocusTrack ?? tracks.find(track => track.id === focusBlob.sha256) ?? null;
       if (!focusTrack) {
         try {
           focusTrack = await buildTrackForBlob(focusBlob);
-          if (focusTrack) {
-            tracks.push(focusTrack);
-          }
+          registerTrack(focusTrack);
         } catch (error) {
           console.warn("Unable to prepare selected track", error);
         }
@@ -1691,23 +1703,43 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
         openFolderFromInfo(folderInfo);
         return;
       }
+      if (audio.current?.id === blob.sha256) {
+        audio.toggle(audio.current, audio.queue);
+        return;
+      }
       void (async () => {
         try {
-          const { focusTrack, queue } = await buildQueueForPlayback(blob);
+          const focusTrack = await buildTrackForBlob(blob);
           if (!focusTrack) {
             showStatusMessage("Unable to play this track.", "error", 4000);
             return;
           }
-          audio.toggle(focusTrack, queue);
+          const requestKey = focusTrack.id ?? focusTrack.url;
+          lastPlayRequestRef.current = requestKey;
+          audio.toggle(focusTrack, [focusTrack]);
+          void (async () => {
+            try {
+              const { queue } = await buildQueueForPlayback(blob, focusTrack);
+              if (!queue.length) return;
+              const currentKey = requestKey;
+              if (!currentKey) return;
+              if (lastPlayRequestRef.current !== currentKey) return;
+              if (audio.current && audio.current.url !== focusTrack.url) return;
+              audio.replaceQueue(queue);
+            } catch (error) {
+              console.warn("Failed to build playback queue", error);
+            }
+          })();
         } catch (error) {
-      const message = error instanceof Error ? error.message : "Playback failed.";
-      showStatusMessage(message, "error", 4000);
-    }
-  })();
-},
+          const message = error instanceof Error ? error.message : "Playback failed.";
+          showStatusMessage(message, "error", 4000);
+        }
+      })();
+    },
     [
       audio,
       buildQueueForPlayback,
+      buildTrackForBlob,
       extractFolderInfo,
       isPlaceholderBlob,
       openFolderFromInfo,
