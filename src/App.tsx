@@ -10,7 +10,7 @@ import { useIsCompactScreen } from "./hooks/useIsCompactScreen";
 import { useSelection } from "./features/selection/SelectionContext";
 import { useShareWorkflow } from "./features/share/useShareWorkflow";
 import { useAudio } from "./context/AudioContext";
-import { useUserPreferences, type DefaultSortOption } from "./context/UserPreferencesContext";
+import { useUserPreferences, type DefaultSortOption, type SortDirection } from "./context/UserPreferencesContext";
 
 import type { ShareCompletion, SharePayload } from "./components/ShareComposer";
 import type { BlossomBlob } from "./lib/blossomClient";
@@ -21,6 +21,7 @@ import type { BrowseActiveListState, BrowseNavigationState } from "./features/wo
 import type { FilterMode } from "./types/filter";
 import type { ProfileMetadataPayload } from "./features/profile/ProfilePanel";
 import { deriveServerNameFromUrl } from "./utils/serverName";
+import { useDialog } from "./context/DialogContext";
 
 import {
   ChevronRightIcon,
@@ -119,9 +120,11 @@ export default function App() {
     setShowListPreviews,
     setKeepSearchExpanded,
     setTheme,
+    setSortDirection,
     setSyncEnabled,
     syncState,
   } = useUserPreferences();
+  const { confirm } = useDialog();
   const { effectiveRelays } = usePreferredRelays();
   useAliasSync(effectiveRelays, Boolean(pubkey));
 
@@ -608,6 +611,14 @@ export default function App() {
     [preferences.defaultSortOption, setDefaultSortOption]
   );
 
+  const handleSetSortDirection = useCallback(
+    (direction: SortDirection) => {
+      if (preferences.sortDirection === direction) return;
+      setSortDirection(direction);
+    },
+    [preferences.sortDirection, setSortDirection]
+  );
+
   const handleSetShowPreviewsInGrid = useCallback(
     (value: boolean) => {
       setShowGridPreviews(value);
@@ -863,29 +874,36 @@ export default function App() {
     }
   };
 
-  const handleRemoveServer = (url: string) => {
-    const target = localServers.find(server => server.url === url);
-    if (!target) return;
+  const handleRemoveServer = useCallback(
+    async (url: string) => {
+      const target = localServers.find(server => server.url === url);
+      if (!target) return;
 
-    if (typeof window !== "undefined") {
-      const confirmed = window.confirm(`Remove ${target.name || target.url}?`);
+      const confirmed = await confirm({
+        title: "Remove server",
+        message: `Remove ${target.name || target.url}?`,
+        confirmLabel: "Remove",
+        cancelLabel: "Cancel",
+        tone: "danger",
+      });
       if (!confirmed) return;
-    }
 
-    const nextServers = localServers.filter(server => server.url !== url);
-    if (nextServers.length === localServers.length) {
-      return;
-    }
+      const nextServers = localServers.filter(server => server.url !== url);
+      if (nextServers.length === localServers.length) {
+        return;
+      }
 
-    const committed = persistServers(nextServers, { successMessage: "Server removed" });
-    if (!committed) {
-      return;
-    }
+      const committed = persistServers(nextServers, { successMessage: "Server removed" });
+      if (!committed) {
+        return;
+      }
 
-    if (selectedServer === url) {
-      setSelectedServer(null);
-    }
-  };
+      if (selectedServer === url) {
+        setSelectedServer(null);
+      }
+    },
+    [confirm, localServers, persistServers, selectedServer, setSelectedServer]
+  );
 
   const handleShareBlob = useCallback(
     (payload: SharePayload) => {
@@ -1192,6 +1210,7 @@ export default function App() {
                   showGridPreviews={preferences.showGridPreviews}
                   showListPreviews={preferences.showListPreviews}
                   defaultSortOption={preferences.defaultSortOption}
+                  sortDirection={preferences.sortDirection}
                   onStatusMetricsChange={handleStatusMetricsChange}
                   onSyncStateChange={handleSyncStateChange}
                   onProvideSyncStarter={handleProvideSyncStarter}
@@ -1225,6 +1244,7 @@ export default function App() {
                   onSetDefaultViewMode={handleSetDefaultViewMode}
                   onSetDefaultFilterMode={handleSetDefaultFilterMode}
                   onSetDefaultSortOption={handleSetDefaultSortOption}
+                  onSetSortDirection={handleSetSortDirection}
                   onSetDefaultServer={handleSetDefaultServer}
                   onSetShowGridPreviews={handleSetShowPreviewsInGrid}
                   onSetShowListPreviews={handleSetShowPreviewsInList}

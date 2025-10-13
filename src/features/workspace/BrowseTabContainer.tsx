@@ -28,6 +28,7 @@ import { buildNip98AuthHeader } from "../../lib/nip98";
 import { decryptPrivateBlob } from "../../lib/privateEncryption";
 import type { Track } from "../../context/AudioContext";
 import type { PrivateListEntry } from "../../lib/privateList";
+import { useDialog } from "../../context/DialogContext";
 
 const BrowsePanelLazy = React.lazy(() =>
   import("../browse/BrowseTab").then(module => ({ default: module.BrowsePanel }))
@@ -413,6 +414,7 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
   const pubkey = useCurrentPubkey();
   const { entriesBySha, removeEntries } = usePrivateLibrary();
   const { deleteFolder, foldersByPath, getFolderDisplayName, removeBlobFromFolder } = useFolderLists();
+  const { confirm } = useDialog();
   const [activeList, setActiveList] = useState<ActiveListState | null>(null);
   const playbackUrlCacheRef = useRef(new Map<string, string>());
   const lastPlayRequestRef = useRef<string | undefined>();
@@ -1487,10 +1489,17 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
 
         const itemCount = record.shas.length;
         const displayName = getFolderDisplayName(normalizedPath) || record.name || normalizedPath;
-        const prompt = itemCount
+        const message = itemCount
           ? `Delete folder "${displayName}" and move ${itemCount === 1 ? "its item" : `${itemCount} items`} to Home?`
           : `Delete folder "${displayName}"?`;
-        if (!window.confirm(prompt)) return;
+        const confirmed = await confirm({
+          title: "Delete folder",
+          message,
+          confirmLabel: "Delete",
+          cancelLabel: "Cancel",
+          tone: "danger",
+        });
+        if (!confirmed) return;
 
         try {
           const deletedRecord = await deleteFolder(normalizedPath);
@@ -1548,7 +1557,13 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
           showStatusMessage("There are no private files to delete.", "info", 2000);
           return;
         }
-        const confirmed = window.confirm("Delete all files in your Private list?");
+        const confirmed = await confirm({
+          title: "Delete private files",
+          message: "Delete all files in your Private list?",
+          confirmLabel: "Delete",
+          cancelLabel: "Cancel",
+          tone: "danger",
+        });
         if (!confirmed) return;
         const shas = privateEntries.map(entry => entry.sha256);
         try {
@@ -1571,9 +1586,13 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
         showStatusMessage("Select a server to manage private files.", "error", 3000);
         return;
       }
-      const confirmed = window.confirm(
-        `Delete ${blob.sha256.slice(0, 10)}… from ${targetServer.name}?`
-      );
+      const confirmed = await confirm({
+        title: "Delete file",
+        message: `Delete ${blob.sha256.slice(0, 10)}… from ${targetServer.name}?`,
+        confirmLabel: "Delete",
+        cancelLabel: "Cancel",
+        tone: "danger",
+      });
       if (!confirmed) return;
       const requiresSigner = Boolean(targetServer.requiresAuth);
       if (requiresSigner && !signer) {
@@ -1637,6 +1656,7 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
       queryClient,
       removeBlobFromFolder,
       removeEntries,
+      confirm,
       selectManyBlobs,
       setActiveList,
       showStatusMessage,

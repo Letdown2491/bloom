@@ -7,6 +7,7 @@ import { Nip46Provider } from "../context/Nip46Context";
 import { UserPreferencesProvider } from "../context/UserPreferencesContext";
 import { PrivateLibraryProvider } from "../context/PrivateLibraryContext";
 import { FolderListProvider } from "../context/FolderListContext";
+import { DialogProvider } from "../context/DialogContext";
 
 const client = new QueryClient({
   defaultOptions: {
@@ -26,7 +27,9 @@ export const AppProviders: React.FC<{ children: React.ReactNode }> = ({ children
             <UserPreferencesProvider>
               <PrivateLibraryProvider>
                 <FolderListProvider>
-                  <SelectionProvider>{children}</SelectionProvider>
+                  <DialogProvider>
+                    <SelectionProvider>{children}</SelectionProvider>
+                  </DialogProvider>
                 </FolderListProvider>
               </PrivateLibraryProvider>
             </UserPreferencesProvider>

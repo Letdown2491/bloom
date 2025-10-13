@@ -6,6 +6,7 @@ import type { EventTemplate } from "../lib/blossomClient";
 import { SaveIcon, TrashIcon, CancelIcon, EditIcon, RelayIcon, RefreshIcon, PlusIcon } from "./icons";
 import { loadNdkModule } from "../lib/ndkModule";
 import type { StatusMessageTone } from "../types/status";
+import { useDialog } from "../context/DialogContext";
 
 const statusStyles: Record<RelayHealth["status"], { label: string; dot: string; text: string }> = {
   error: {
@@ -146,11 +147,13 @@ const buildNip65Template = (policies: RelayPolicy[]): EventTemplate => {
 type RelayListProps = {
   showStatusMessage: (message: string, tone?: StatusMessageTone, duration?: number) => void;
   compact?: boolean;
+  onProvideActions?: (actions: React.ReactNode | null) => void;
 };
 
-const RelayList: React.FC<RelayListProps> = ({ showStatusMessage, compact = false }) => {
+const RelayList: React.FC<RelayListProps> = ({ showStatusMessage, compact = false, onProvideActions }) => {
   const { relayPolicies, loading, refresh } = usePreferredRelays();
   const { relayHealth, ndk, signer } = useNdk();
+  const { confirm } = useDialog();
   const [drafts, setDrafts] = useState<RelayDraft[]>([]);
   const [saving, setSaving] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -318,7 +321,7 @@ const RelayList: React.FC<RelayListProps> = ({ showStatusMessage, compact = fals
     [attemptSave, ndk, queuePendingSave, relayPolicies, saving, showStatusMessage, signer]
   );
 
-  const handleAddRelay = () => {
+  const handleAddRelay = useCallback(() => {
     const id = createDraftId();
     setDrafts(prev => [
       ...prev,
@@ -331,27 +334,36 @@ const RelayList: React.FC<RelayListProps> = ({ showStatusMessage, compact = fals
     ]);
     editingSnapshotRef.current = null;
     setEditingId(id);
-  };
+  }, []);
 
-  const handleRemoveRelay = (id: string) => {
-    const confirmed = typeof window !== "undefined" ? window.confirm("Remove this relay?") : true;
-    if (!confirmed) return;
+  const handleRemoveRelay = useCallback(
+    async (id: string) => {
+      const confirmed = await confirm({
+        title: "Remove relay",
+        message: "Remove this relay?",
+        confirmLabel: "Remove",
+        cancelLabel: "Cancel",
+        tone: "danger",
+      });
+      if (!confirmed) return;
 
-    const nextDrafts = drafts.filter(item => item.id !== id);
-    if (nextDrafts.length === drafts.length) return;
+      const nextDrafts = drafts.filter(item => item.id !== id);
+      if (nextDrafts.length === drafts.length) return;
 
-    const committed = persistRelayPolicies(nextDrafts, { successMessage: "Relay removed." });
-    if (!committed) {
-      return;
-    }
+      const committed = persistRelayPolicies(nextDrafts, { successMessage: "Relay removed." });
+      if (!committed) {
+        return;
+      }
 
-    if (editingId === id) {
-      setEditingId(null);
-      editingSnapshotRef.current = null;
-    }
+      if (editingId === id) {
+        setEditingId(null);
+        editingSnapshotRef.current = null;
+      }
 
-    setDrafts(nextDrafts);
-  };
+      setDrafts(nextDrafts);
+    },
+    [confirm, drafts, editingId, persistRelayPolicies]
+  );
 
   const beginEdit = (id: string) => {
     if (!canEdit) return;
@@ -429,7 +441,8 @@ const RelayList: React.FC<RelayListProps> = ({ showStatusMessage, compact = fals
     ? "Please wait a moment before refreshing again."
     : undefined;
 
-  const controls = (
+  const controls = useMemo(
+    () => (
       <>
         <button
           type="button"
@@ -452,14 +465,26 @@ const RelayList: React.FC<RelayListProps> = ({ showStatusMessage, compact = fals
           <span>{refreshingStatus ? "Refreshing…" : "Refresh"}</span>
         </button>
       </>
+    ),
+    [canEdit, handleAddRelay, handleRefreshStatus, refreshDisabled, refreshTitle, refreshingStatus, saving]
   );
+
+  useEffect(() => {
+    if (!onProvideActions) return;
+    onProvideActions(controls);
+    return () => {
+      onProvideActions(null);
+    };
+  }, [controls, onProvideActions]);
 
   return (
     <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4 flex-1 min-h-0">
-      <div className={`mb-3 flex flex-wrap items-center ${compact ? "justify-end" : "justify-between"} gap-2`}>
-        {!compact ? <h2 className="text-lg font-semibold text-slate-100">Relays</h2> : null}
-        <div className="flex items-center gap-2">{controls}</div>
-      </div>
+      {!compact ? (
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-lg font-semibold text-slate-100">Relays</h2>
+          <div className="flex items-center gap-2">{controls}</div>
+        </div>
+      ) : null}
 
       {!canEdit && (
         <div className="mb-3 rounded-xl border border-slate-700 bg-slate-900/80 px-3 py-2 text-xs text-slate-300" role="alert">
@@ -649,7 +674,9 @@ const RelayList: React.FC<RelayListProps> = ({ showStatusMessage, compact = fals
                           </button>
                           <button
                             type="button"
-                            onClick={() => handleRemoveRelay(draft.id)}
+                            onClick={() => {
+                              void handleRemoveRelay(draft.id);
+                            }}
                             className="inline-flex items-center justify-center rounded-lg bg-red-900/80 px-2 py-2 text-slate-100 hover:bg-red-800 disabled:opacity-40 disabled:cursor-not-allowed"
                             disabled={!canEdit}
                             aria-label="Remove relay"

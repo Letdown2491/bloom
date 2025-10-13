@@ -1,7 +1,7 @@
 import React from "react";
 import type { FilterMode } from "../../types/filter";
 import type { ManagedServer } from "../../hooks/useServers";
-import type { DefaultSortOption } from "../../context/UserPreferencesContext";
+import type { DefaultSortOption, SortDirection } from "../../context/UserPreferencesContext";
 import type { StatusMessageTone } from "../../types/status";
 import { WorkspaceProvider } from "../workspace/WorkspaceContext";
 import {
@@ -21,6 +21,8 @@ import {
   RelayIcon,
   GithubIcon,
   LightningIcon,
+  DoubleChevronUpIcon,
+  DoubleChevronDownIcon,
 } from "../../components/icons";
 import { ServerList } from "../../components/ServerList";
 const RelayListLazy = React.lazy(() => import("../../components/RelayList"));
@@ -55,6 +57,11 @@ const SORT_OPTIONS: { id: DefaultSortOption; label: string; Icon: typeof GridIco
   { id: "servers", label: "Servers", Icon: ServersIcon },
   { id: "updated", label: "Updated", Icon: RefreshIcon },
   { id: "size", label: "Size", Icon: DownloadIcon },
+];
+
+const SORT_DIRECTION_OPTIONS: SegmentedOption[] = [
+  { id: "ascending", label: "Ascending", Icon: DoubleChevronUpIcon },
+  { id: "descending", label: "Descending", Icon: DoubleChevronDownIcon },
 ];
 
 const VIEW_MODE_OPTIONS: SegmentedOption[] = [
@@ -164,23 +171,27 @@ type SettingCardProps = {
   description?: string;
   className?: string;
   children: React.ReactNode;
+  actions?: React.ReactNode;
 };
 
-const SettingCard: React.FC<SettingCardProps> = ({ headingId, descriptionId, title, description, className, children }) => (
+const SettingCard: React.FC<SettingCardProps> = ({ headingId, descriptionId, title, description, className, actions, children }) => (
   <section
     aria-labelledby={headingId}
     aria-describedby={description ? descriptionId : undefined}
     className={`rounded-2xl border border-slate-800 bg-slate-900/70 p-6 shadow-sm ${className ?? ""}`}
   >
-    <div className="space-y-1">
-      <h3 id={headingId} className="text-sm font-semibold text-slate-100">
-        {title}
-      </h3>
-      {description ? (
-        <p id={descriptionId} className="text-xs text-slate-400">
-          {description}
-        </p>
-      ) : null}
+    <div className="flex flex-wrap items-start justify-between gap-3">
+      <div className="space-y-1">
+        <h3 id={headingId} className="text-sm font-semibold text-slate-100">
+          {title}
+        </h3>
+        {description ? (
+          <p id={descriptionId} className="text-xs text-slate-400">
+            {description}
+          </p>
+        ) : null}
+      </div>
+      {actions ? <div className="flex flex-wrap items-center gap-2">{actions}</div> : null}
     </div>
     <div className="mt-4 text-sm text-slate-200">{children}</div>
   </section>
@@ -193,36 +204,63 @@ type SegmentedControlProps = {
   labelledBy: string;
   describedBy?: string;
   className?: string;
+  variant?: "default" | "compact";
 };
 
-const SegmentedControl: React.FC<SegmentedControlProps> = ({ options, value, onChange, labelledBy, describedBy, className }) => (
-  <div
-    role="radiogroup"
-    aria-labelledby={labelledBy}
-    aria-describedby={describedBy}
-    className={className ?? "grid gap-2 sm:grid-cols-2"}
-  >
-    {options.map(option => {
-      const isActive = value === option.id;
-      return (
-        <button
-          key={option.id}
-          type="button"
-          role="radio"
-          aria-checked={isActive}
-          tabIndex={isActive ? 0 : -1}
-          onClick={() => onChange(option.id)}
-          className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm transition focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-slate-900 ${
-            isActive ? "border-emerald-500 bg-emerald-500/10 text-emerald-200" : "border-slate-500/60 text-slate-200 hover:border-slate-400"
-          }`}
-        >
-          {option.Icon ? <option.Icon size={16} /> : null}
-          <span>{option.label}</span>
-        </button>
-      );
-    })}
-  </div>
-);
+const SegmentedControl: React.FC<SegmentedControlProps> = ({
+  options,
+  value,
+  onChange,
+  labelledBy,
+  describedBy,
+  className,
+  variant = "default",
+}) => {
+  const containerClass =
+    className ??
+    (variant === "compact" ? "flex flex-wrap gap-2" : "grid gap-2 sm:grid-cols-2");
+
+  const baseButtonClass =
+    variant === "compact"
+      ? "flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs transition focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-slate-900"
+      : "flex items-center gap-2 rounded-lg border px-3 py-2 text-sm transition focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-slate-900";
+
+  const activeClass = variant === "compact"
+    ? "border-emerald-500 bg-emerald-500/10 text-emerald-200"
+    : "border-emerald-500 bg-emerald-500/10 text-emerald-200";
+  const inactiveClass = variant === "compact"
+    ? "border-slate-600/70 text-slate-200 hover:border-slate-400"
+    : "border-slate-500/60 text-slate-200 hover:border-slate-400";
+
+  const iconSize = variant === "compact" ? 14 : 16;
+
+  return (
+    <div
+      role="radiogroup"
+      aria-labelledby={labelledBy}
+      aria-describedby={describedBy}
+      className={containerClass}
+    >
+      {options.map(option => {
+        const isActive = value === option.id;
+        return (
+          <button
+            key={option.id}
+            type="button"
+            role="radio"
+            aria-checked={isActive}
+            tabIndex={isActive ? 0 : -1}
+            onClick={() => onChange(option.id)}
+            className={`${baseButtonClass} ${isActive ? activeClass : inactiveClass}`}
+          >
+            {option.Icon ? <option.Icon size={iconSize} /> : null}
+            <span>{option.label}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+};
 
 type SettingsPanelProps = {
   servers: ManagedServer[];
@@ -231,6 +269,7 @@ type SettingsPanelProps = {
   defaultViewMode: "grid" | "list";
   defaultFilterMode: FilterMode;
   defaultSortOption: DefaultSortOption;
+  sortDirection: SortDirection;
   showIconsPreviews: boolean;
   showListPreviews: boolean;
   keepSearchExpanded: boolean;
@@ -244,6 +283,7 @@ type SettingsPanelProps = {
   onSetDefaultViewMode: (mode: "grid" | "list") => void;
   onSetDefaultFilterMode: (mode: FilterMode) => void;
   onSetDefaultSortOption: (option: DefaultSortOption) => void;
+  onSetSortDirection: (direction: SortDirection) => void;
   onSetDefaultServer: (url: string | null) => void;
   onSelectServer: (url: string | null) => void;
   onAddServer: (server: ManagedServer) => void;
@@ -269,6 +309,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   defaultViewMode,
   defaultFilterMode,
   defaultSortOption,
+  sortDirection,
   showIconsPreviews,
   showListPreviews,
   keepSearchExpanded,
@@ -282,6 +323,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   onSetDefaultViewMode,
   onSetDefaultFilterMode,
   onSetDefaultSortOption,
+  onSetSortDirection,
   onSetDefaultServer,
   onSelectServer,
   onAddServer,
@@ -314,6 +356,8 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const filterDescriptionId = React.useId();
   const sortHeadingId = React.useId();
   const sortDescriptionId = React.useId();
+  const sortDirectionHeadingId = React.useId();
+  const sortDirectionDescriptionId = React.useId();
   const iconsPreviewHeadingId = React.useId();
   const iconsPreviewDescriptionId = React.useId();
   const listPreviewHeadingId = React.useId();
@@ -323,6 +367,8 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const localStorageHeadingId = React.useId();
   const cacheStorageHeadingId = React.useId();
   const storageFeedbackId = React.useId();
+  const [serverActions, setServerActions] = React.useState<React.ReactNode | null>(null);
+  const [relayActions, setRelayActions] = React.useState<React.ReactNode | null>(null);
 
   const {
     snapshot: storageSnapshot,
@@ -677,6 +723,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
               onChange={id => onSetDefaultViewMode(id as "grid" | "list")}
               labelledBy={viewHeadingId}
               describedBy={viewDescriptionId}
+              variant="compact"
             />
           </SettingCard>
         ),
@@ -694,6 +741,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
               onChange={id => onSetDefaultFilterMode(id as FilterMode)}
               labelledBy={filterHeadingId}
               describedBy={filterDescriptionId}
+              variant="compact"
             />
           </SettingCard>
         ),
@@ -711,7 +759,25 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
               onChange={id => onSetDefaultSortOption(id as DefaultSortOption)}
               labelledBy={sortHeadingId}
               describedBy={sortDescriptionId}
-              className="grid gap-2 sm:grid-cols-2"
+              variant="compact"
+            />
+          </SettingCard>
+        ),
+        (
+          <SettingCard
+            key="sorting-direction"
+            headingId={sortDirectionHeadingId}
+            descriptionId={sortDirectionDescriptionId}
+            title="Default sort direction"
+            description="Set whether Bloom sorts items ascending or descending by default."
+          >
+            <SegmentedControl
+              options={SORT_DIRECTION_OPTIONS}
+              value={sortDirection}
+              onChange={id => onSetSortDirection(id as SortDirection)}
+              labelledBy={sortDirectionHeadingId}
+              describedBy={sortDirectionDescriptionId}
+              variant="compact"
             />
           </SettingCard>
         ),
@@ -937,7 +1003,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
             key="relays-panel"
             fallback={<div className="text-sm text-slate-400">Loading relays…</div>}
           >
-            <RelayListLazy showStatusMessage={relayStatusHandler} compact />
+            <RelayListLazy showStatusMessage={relayStatusHandler} compact onProvideActions={setRelayActions} />
           </React.Suspense>
         ),
       ],
@@ -971,6 +1037,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
               validationError={serverValidationError}
               showStatusMessage={showStatusMessage}
               compact
+              onProvideActions={setServerActions}
             />
           </WorkspaceProvider>,
         ],
@@ -1006,8 +1073,12 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
     onSetDefaultFilterMode,
     sortHeadingId,
     sortDescriptionId,
+    sortDirectionHeadingId,
+    sortDirectionDescriptionId,
     defaultSortOption,
     onSetDefaultSortOption,
+    sortDirection,
+    onSetSortDirection,
     filterSegmentOptions,
     sortSegmentOptions,
     iconsPreviewHeadingId,
@@ -1038,8 +1109,11 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
     serverSyncDisabled,
     serverSyncInProgress,
     serverValidationError,
+    serverActions,
+    relayActions,
     relayStatusHandler,
     isSmallScreen,
+    relayActions,
     localStorageHeadingId,
     cacheStorageHeadingId,
     storageFeedbackId,
@@ -1136,9 +1210,20 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
             .filter(section => section.id === activeSectionId)
             .map(section => (
               <div key={section.id} id={section.id} className="space-y-4">
-                <div className="space-y-1">
-                  <h3 className="text-lg font-semibold text-slate-100">{section.label}</h3>
-                  <p className="text-xs text-slate-400">{section.description}</p>
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="space-y-1">
+                    <h3 className="text-lg font-semibold text-slate-100">{section.label}</h3>
+                    <p className="text-xs text-slate-400">{section.description}</p>
+                  </div>
+                  {(() => {
+                    const actions =
+                      section.id === "servers"
+                        ? serverActions
+                        : section.id === "relays"
+                          ? relayActions
+                          : null;
+                    return actions ? <div className="flex flex-wrap items-center gap-2">{actions}</div> : null;
+                  })()}
                 </div>
                 <div className="space-y-4">
                   {section.cards.map((card, index) => (

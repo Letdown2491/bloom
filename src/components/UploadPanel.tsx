@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from "react";
+import React, { useCallback, useMemo, useRef, useState } from "react";
 import pLimit from "p-limit";
 import type { AxiosProgressEvent } from "axios";
 import type { ManagedServer } from "../hooks/useServers";
@@ -25,6 +25,7 @@ import type { PrivateListEntry } from "../lib/privateList";
 import { useFolderLists } from "../context/FolderListContext";
 import { loadNdkModule } from "../lib/ndkModule";
 import { FolderIcon, LockIcon, WarningIcon } from "./icons";
+import { useDialog } from "../context/DialogContext";
 
 const RESIZE_OPTIONS = [
   { id: 0, label: "Original" },
@@ -166,6 +167,7 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
   const { upsertEntries: upsertPrivateEntries } = usePrivateLibrary();
   const pubkey = useCurrentPubkey();
   const { addBlobToFolder, resolveFolderPath } = useFolderLists();
+  const { prompt } = useDialog();
   const normalizedFolderSuggestion = useMemo(() => {
     if (defaultFolderPath === undefined) return undefined;
     const normalized = normalizeFolderPathInput(defaultFolderPath);
@@ -238,6 +240,41 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
       noFolderCount,
     };
   }, [entries]);
+
+  const handleApplyFolderToAll = useCallback(async () => {
+    const value = await prompt({
+      title: "Apply folder to files",
+      message: "Enter a folder path to apply to all files (e.g. Photos/Trips).",
+      placeholder: "Photos/Trips",
+      confirmLabel: "Apply",
+      cancelLabel: "Cancel",
+      tone: "info",
+      validate: input => {
+        if (!input.trim()) {
+          return "Folder path cannot be empty.";
+        }
+        const normalized = normalizeFolderPathInput(input);
+        if (normalized === null) {
+          return 'Folder names cannot include the word "private".';
+        }
+        return null;
+      },
+    });
+    if (value === null) return;
+    const normalized = normalizeFolderPathInput(value);
+    if (!normalized) return;
+    setEntries(prev =>
+      prev.map(entry => {
+        if (entry.metadata.kind === "audio") {
+          return { ...entry, metadata: { ...entry.metadata, folder: normalized } };
+        }
+        if (entry.metadata.kind === "generic") {
+          return { ...entry, metadata: { ...entry.metadata, folder: normalized } };
+        }
+        return entry;
+      })
+    );
+  }, [prompt, setEntries]);
 
   React.useEffect(() => {
     setSelectedServers(prev => {
@@ -810,30 +847,7 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
                     type="button"
                     className="rounded-lg border border-slate-700 px-2 py-1 text-xs font-medium text-slate-200 hover:border-emerald-400 hover:text-emerald-200"
                     onClick={() => {
-                      const raw = window.prompt("Enter folder path to apply to all files (e.g. Photos/Trips):");
-                      if (raw === null) return;
-                      const trimmed = raw.trim();
-                      if (!trimmed) {
-                        window.alert("Folder path cannot be empty.");
-                        return;
-                      }
-                      const normalized = normalizeFolderPathInput(trimmed);
-                      if (normalized === undefined) return;
-                      if (normalized === null) {
-                        window.alert("Folder names cannot include the word 'private'.");
-                        return;
-                      }
-                      setEntries(prev =>
-                        prev.map(entry => {
-                          if (entry.metadata.kind === "audio") {
-                            return { ...entry, metadata: { ...entry.metadata, folder: normalized } };
-                          }
-                          if (entry.metadata.kind === "generic") {
-                            return { ...entry, metadata: { ...entry.metadata, folder: normalized } };
-                          }
-                          return entry;
-                        })
-                      );
+                      void handleApplyFolderToAll();
                     }}
                   >
                     Apply folder…

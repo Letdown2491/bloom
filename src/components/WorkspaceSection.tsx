@@ -5,7 +5,7 @@ import type { BlossomBlob } from "../lib/blossomClient";
 import type { StatusMessageTone } from "../types/status";
 import type { TabId } from "../types/tabs";
 import type { FilterMode } from "../types/filter";
-import type { DefaultSortOption } from "../context/UserPreferencesContext";
+import type { DefaultSortOption, SortDirection } from "../context/UserPreferencesContext";
 import type { SyncStateSnapshot } from "../features/workspace/TransferTabContainer";
 import type { BrowseActiveListState, BrowseNavigationState } from "../features/workspace/BrowseTabContainer";
 import type { SharePayload, ShareCompletion } from "./ShareComposer";
@@ -56,6 +56,7 @@ export type WorkspaceSectionProps = {
   showGridPreviews: boolean;
   showListPreviews: boolean;
   defaultSortOption: DefaultSortOption;
+  sortDirection: SortDirection;
   onStatusMetricsChange: (metrics: { count: number; size: number }) => void;
   onSyncStateChange: (snapshot: SyncStateSnapshot) => void;
   onProvideSyncStarter: (runner: () => void) => void;
@@ -89,6 +90,7 @@ export type WorkspaceSectionProps = {
   onSetDefaultViewMode: (mode: "grid" | "list") => void;
   onSetDefaultFilterMode: (mode: FilterMode) => void;
   onSetDefaultSortOption: (option: DefaultSortOption) => void;
+  onSetSortDirection: (direction: SortDirection) => void;
   onSetDefaultServer: (url: string | null) => void;
   onSetShowGridPreviews: (value: boolean) => void;
   onSetShowListPreviews: (value: boolean) => void;
@@ -117,6 +119,7 @@ export const WorkspaceSection = memo(function WorkspaceSection({
   showGridPreviews,
   showListPreviews,
   defaultSortOption,
+  sortDirection,
   onStatusMetricsChange,
   onSyncStateChange,
   onProvideSyncStarter,
@@ -150,6 +153,7 @@ export const WorkspaceSection = memo(function WorkspaceSection({
   onSetDefaultViewMode,
   onSetDefaultFilterMode,
   onSetDefaultSortOption,
+  onSetSortDirection,
   onSetDefaultServer,
   onSetShowGridPreviews,
   onSetShowListPreviews,
@@ -291,6 +295,7 @@ export const WorkspaceSection = memo(function WorkspaceSection({
             defaultViewMode={defaultViewMode}
             defaultFilterMode={defaultFilterMode}
             defaultSortOption={defaultSortOption}
+            sortDirection={sortDirection}
             keepSearchExpanded={keepSearchExpanded}
             theme={theme}
             syncEnabled={syncEnabled}
@@ -302,6 +307,7 @@ export const WorkspaceSection = memo(function WorkspaceSection({
             onSetDefaultViewMode={onSetDefaultViewMode}
             onSetDefaultFilterMode={onSetDefaultFilterMode}
             onSetDefaultSortOption={onSetDefaultSortOption}
+            onSetSortDirection={onSetSortDirection}
             onSetDefaultServer={onSetDefaultServer}
             onSelectServer={onSelectServer}
             onAddServer={onAddServer}

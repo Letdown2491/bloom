@@ -27,6 +27,7 @@ export type ServerListProps = {
   validationError?: string | null;
   showStatusMessage?: (message: string, tone?: StatusMessageTone, duration?: number) => void;
   compact?: boolean;
+  onProvideActions?: (actions: React.ReactNode | null) => void;
 };
 
 type ServerDraft = {
@@ -128,6 +129,7 @@ export const ServerList: React.FC<ServerListProps> = ({
   validationError,
   showStatusMessage,
   compact = false,
+  onProvideActions,
 }) => {
   const [isAdding, setIsAdding] = useState(false);
   const [editingUrl, setEditingUrl] = useState<string | null>(null);
@@ -625,12 +627,12 @@ export const ServerList: React.FC<ServerListProps> = ({
     );
   };
 
-  const beginAdd = () => {
+  const beginAdd = useCallback(() => {
     setEditingUrl(null);
     setDraft(createEmptyDraft());
     clearFieldErrors();
     setIsAdding(true);
-  };
+  }, [clearFieldErrors]);
 
   const beginEdit = (server: ManagedServer) => {
     setIsAdding(false);
@@ -751,34 +753,47 @@ export const ServerList: React.FC<ServerListProps> = ({
     }
   };
 
-  const controls = (
-    <>
-      <button
-        onClick={beginAdd}
-        className="inline-flex items-center gap-2 rounded-xl bg-slate-800 px-3 py-2 text-sm text-slate-200 transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
-        disabled={saving || isAdding || Boolean(editingUrl)}
-      >
-        <PlusIcon size={16} />
-        Add Server
-      </button>
-      {onSync ? (
+  const hasServers = servers.length > 0;
+
+  const controls = useMemo(
+    () => (
+      <>
         <button
-          type="button"
-          onClick={event => {
-            event.preventDefault();
-            onSync?.();
-          }}
-          className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-3 py-2 text-sm text-slate-950 hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-40"
-          disabled={syncButtonDisabled}
-          aria-busy={syncInProgress ? true : undefined}
-          title={syncButtonTooltip}
+          onClick={beginAdd}
+          className="inline-flex items-center gap-2 rounded-xl bg-slate-800 px-3 py-2 text-sm text-slate-200 transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
+          disabled={saving || isAdding || Boolean(editingUrl)}
         >
-          <RefreshIcon size={16} />
-          {syncButtonLabel}
+          <PlusIcon size={16} />
+          Add Server
         </button>
-      ) : null}
-    </>
+        {onSync ? (
+          <button
+            type="button"
+            onClick={event => {
+              event.preventDefault();
+              onSync?.();
+            }}
+            className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-3 py-2 text-sm text-slate-950 hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-40"
+            disabled={syncButtonDisabled}
+            aria-busy={syncInProgress ? true : undefined}
+            title={syncButtonTooltip}
+          >
+            <RefreshIcon size={16} />
+            {syncButtonLabel}
+          </button>
+        ) : null}
+      </>
+    ),
+    [beginAdd, editingUrl, isAdding, onSync, saving, syncButtonDisabled, syncButtonLabel, syncButtonTooltip, syncInProgress]
   );
+
+  useEffect(() => {
+    if (!onProvideActions) return undefined;
+    onProvideActions(controls);
+    return () => {
+      onProvideActions(null);
+    };
+  }, [controls, onProvideActions]);
 
   const containerClass = compact
     ? "rounded-xl border border-slate-800 bg-slate-900/60 p-4"
@@ -786,10 +801,12 @@ export const ServerList: React.FC<ServerListProps> = ({
 
   return (
     <section className={containerClass}>
-      <header className={`mb-3 flex flex-wrap items-center ${compact ? "justify-end" : "justify-between"} gap-2`}>
-        {!compact ? <h2 className="text-lg font-semibold text-slate-100">Servers</h2> : null}
-        <div className="flex gap-2">{controls}</div>
-      </header>
+      {!compact ? (
+        <header className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-lg font-semibold text-slate-100">Servers</h2>
+          <div className="flex gap-2">{controls}</div>
+        </header>
+      ) : null}
 
       {(validationError || saving) && (
         <div
@@ -803,6 +820,41 @@ export const ServerList: React.FC<ServerListProps> = ({
           {validationError || "Saving changes…"}
         </div>
       )}
+      {!hasServers && !isAdding ? (
+        <div className="mb-4 rounded-2xl border border-slate-800 bg-slate-950/70 p-5">
+          <h3 className="text-base font-semibold text-slate-100">Choose a server type to get started</h3>
+          <ul className="mt-3 flex flex-col gap-3 text-sm text-slate-300">
+            <li>
+              <strong>
+                <a
+                  href="https://github.com/nostr-protocol/nips/blob/master/B7.md"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-emerald-300 hover:text-emerald-200"
+                >
+                  Blossom servers (NIP-B7)
+                </a>
+              </strong>{" "}
+              – Stand-alone media hosts that speak the Blossom HTTP API. They accept uploads and deletions via NIP-98, expose predictable blob URLs,
+              and let Bloom mirror content across multiple instances. Bloom can automatically sync as soon as you add at least two servers and enable sync.
+            </li>
+            <li>
+              <strong>
+                <a
+                  href="https://github.com/nostr-protocol/nips/blob/master/96.md"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-emerald-300 hover:text-emerald-200"
+                >
+                  NIP-96 servers
+                </a>
+              </strong>{" "}
+              – Legacy media-upload relays that wrap Nostr events in an HTTP workflow. The standard is deprecated—stick with Blossom when you can, but Bloom still supports NIP-96 if you need compatibility with older infrastructure.
+            </li>
+          </ul>
+        </div>
+      ) : null}
+      {(hasServers || isAdding) && (
       <div className="overflow-x-auto">
         <table className="min-w-full table-fixed text-sm text-slate-300">
           <thead className="text-[11px] uppercase tracking-wide text-slate-300">
@@ -1189,6 +1241,7 @@ export const ServerList: React.FC<ServerListProps> = ({
           </tbody>
         </table>
       </div>
+      )}
     </section>
   );
 };

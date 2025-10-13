@@ -34,6 +34,7 @@ import { useAudioMetadataMap } from "../features/browse/useAudioMetadata";
 import { usePrivateLibrary } from "../context/PrivateLibraryContext";
 import type { PrivateListEntry } from "../lib/privateList";
 import { useUserPreferences, type DefaultSortOption, type SortDirection } from "../context/UserPreferencesContext";
+import { useDialog } from "../context/DialogContext";
 
 export type BlobReplicaSummary = {
   count: number;
@@ -341,6 +342,7 @@ export const BlobList: React.FC<BlobListProps> = ({
 
   const audioMetadata = useAudioMetadataMap(decoratedBlobs);
   const { entriesBySha } = usePrivateLibrary();
+  const { alert: showDialogAlert } = useDialog();
 
   const resolveCoverEntry = useCallback(
     (coverUrl?: string | null) => {
@@ -611,17 +613,20 @@ export const BlobList: React.FC<BlobListProps> = ({
         anchor.remove();
       } catch (error) {
         console.error("Failed to download blob", error);
-        if (typeof window !== "undefined") {
-          const message = error instanceof Error ? error.message : "Failed to download blob.";
-          window.alert(message);
-        }
+        const message = error instanceof Error ? error.message : "Failed to download blob.";
+        void showDialogAlert({
+          title: "Download failed",
+          message,
+          acknowledgeLabel: "Close",
+          tone: "danger",
+        });
       } finally {
         if (objectUrl) {
           URL.revokeObjectURL(objectUrl);
         }
       }
     },
-    [signTemplate, serverType]
+    [showDialogAlert, signTemplate, serverType]
   );
 
   const listBlobs = useMemo(() => {
