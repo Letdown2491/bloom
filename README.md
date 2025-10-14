@@ -23,7 +23,7 @@ If you wish to set up the event proxy to serve private links (links to files wit
 
 ## Setting up the private link proxy (Optional)
 
-If you want to proxy private links, follow the intructions below. This is optional, but recommended.
+If you want to proxy private links, follow the instructions below. This is optional, but recommended.
 
 1. Copy the Bloom env template:
    ```bash
