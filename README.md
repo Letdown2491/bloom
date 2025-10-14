@@ -24,25 +24,30 @@ If you wish to set up the event proxy to serve private links (links to files wit
 ## Setting up the private link proxy (Optional)
 
 If you want to proxy private links, follow the intructions below. This is optional, but recommended.
-1. Copy the .env file
-```bash
-cd bloom
-cp .example-env.json .env
-```
-2. Open .env in in your favorite text editor and enter a hex formatted public key as the value for VITE_PRIVATE_LINK_SERVICE_PUBKEY and change VITE_PRIVATE_LINK_SERVICE_HOST to the host you will be using. For example, for bloomapp.me, I use https://links.bloomapp.me for this variable. If you're not serving this publicly, you can leave the default.
-3. Copy the .env file
-```bash
-cd services/private-link-proxy
-cp .example-env.json .env
-```
-4. Open .env in in your favorite text editor and enter the hex formatted private key for your public key from step 2 in PRIVATE_LINK_SERVICE_SECRET.
-5. Start the proxy
-```bash
-pnpm install
-pnpm build
-pnpm start
-# The proxy will start listening at http://localhost:8787
-```
+
+1. Copy the Bloom env template:
+   ```bash
+   cp .env-example .env
+   ```
+2. Edit `.env` and set:
+   - `VITE_PRIVATE_LINK_SERVICE_PUBKEY` to the hex public key that will publish private link aliases.
+   - `VITE_PRIVATE_LINK_SERVICE_HOST` to the URL where the proxy will be reachable (defaults to `http://localhost:8787`).
+3. Copy the proxy env template:
+   ```bash
+   cd services/private-link-proxy
+   cp .env.example .env
+   ```
+4. Edit `services/private-link-proxy/.env` and configure the service:
+   - `PRIVATE_LINK_SERVICE_SECRET` must be the hex private key that matches the public key from step 2.
+   - `RELAY_URLS` should list the relays (comma-separated) Bloom uses to resolve aliases.
+   - Optional overrides: `PORT` (proxy listen port), `BLOSSOM_REQUEST_HEADERS` (forwarded headers such as auth tokens), `CACHE_TTL_SECONDS`.
+5. While still in `services/private-link-proxy`, install dependencies and start the proxy:
+   ```bash
+   pnpm install
+   pnpm build
+   pnpm start
+   # The proxy will start listening at http://localhost:8787 by default
+   ```
 
 ## Development Build
 ```bash
