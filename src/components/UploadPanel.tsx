@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useRef, useState } from "react";
+import React, { useCallback, useId, useMemo, useRef, useState } from "react";
 import pLimit from "p-limit";
 import type { AxiosProgressEvent } from "axios";
 import type { ManagedServer } from "../hooks/useServers";
@@ -24,7 +24,7 @@ import { usePrivateLibrary } from "../context/PrivateLibraryContext";
 import type { PrivateListEntry } from "../lib/privateList";
 import { useFolderLists } from "../context/FolderListContext";
 import { loadNdkModule } from "../lib/ndkModule";
-import { FolderIcon, LockIcon, WarningIcon } from "./icons";
+import { FolderIcon, LockIcon, WarningIcon, UploadIcon } from "./icons";
 import { useDialog } from "../context/DialogContext";
 
 const RESIZE_OPTIONS = [
@@ -160,8 +160,10 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
   const [resizeOption, setResizeOption] = useState(0);
   const [busy, setBusy] = useState(false);
   const [transfers, setTransfers] = useState<TransferState[]>([]);
+  const [isDragActive, setIsDragActive] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const pendingSelectionRef = useRef(0);
+  const dropZoneDescriptionId = useId();
   const queryClient = useQueryClient();
   const { signEventTemplate, ndk, signer, user } = useNdk();
   const { upsertEntries: upsertPrivateEntries } = usePrivateLibrary();
@@ -348,6 +350,92 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
       setEntries(nextEntries);
     }
   };
+
+  const handlePickFiles = useCallback(() => {
+    if (busy) return;
+    fileInputRef.current?.click();
+  }, [busy]);
+
+  const handleDropZoneKeyDown = useCallback(
+    (event: React.KeyboardEvent<HTMLDivElement>) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        handlePickFiles();
+      }
+    },
+    [handlePickFiles]
+  );
+
+  const hasFiles = useCallback((event: React.DragEvent<HTMLDivElement>) => {
+    const dataTransfer = event.dataTransfer;
+    if (!dataTransfer) return false;
+    if (dataTransfer.items && dataTransfer.items.length > 0) {
+      return Array.from(dataTransfer.items).some(item => item.kind === "file");
+    }
+    const types = dataTransfer.types ? Array.from(dataTransfer.types) : [];
+    if (types.includes("Files")) return true;
+    return dataTransfer.files && dataTransfer.files.length > 0;
+  }, []);
+
+  const handleDragEnter = useCallback(
+    (event: React.DragEvent<HTMLDivElement>) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (busy) return;
+      if (!hasFiles(event)) return;
+      setIsDragActive(true);
+    },
+    [busy, hasFiles]
+  );
+
+  const handleDragOver = useCallback(
+    (event: React.DragEvent<HTMLDivElement>) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (!hasFiles(event)) {
+        if (event.dataTransfer) {
+          event.dataTransfer.dropEffect = "none";
+        }
+        return;
+      }
+      if (event.dataTransfer) {
+        event.dataTransfer.dropEffect = busy ? "none" : "copy";
+      }
+      if (busy) return;
+      setIsDragActive(true);
+    },
+    [busy, hasFiles]
+  );
+
+  const handleDragLeave = useCallback((event: React.DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const nextTarget = event.relatedTarget as Node | null;
+    if (nextTarget && event.currentTarget.contains(nextTarget)) {
+      return;
+    }
+    setIsDragActive(false);
+  }, []);
+
+  const handleDrop = useCallback(
+    (event: React.DragEvent<HTMLDivElement>) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (!hasFiles(event)) {
+        setIsDragActive(false);
+        return;
+      }
+      setIsDragActive(false);
+      if (busy) return;
+      const fileList = event.dataTransfer?.files ?? null;
+      if (!fileList || fileList.length === 0) return;
+      void handleFilesSelected(fileList);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
+    },
+    [busy, handleFilesSelected, hasFiles]
+  );
 
   const toggleMetadataVisibility = (id: string) => {
     setEntries(prev => prev.map(entry => (entry.id === id ? { ...entry, showMetadata: !entry.showMetadata } : entry)));
@@ -771,24 +859,52 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
         <p className="text-xs text-slate-400">After adding a file for upload, you will be able to edit metadata before publishing to your selected server. Bloom will automatically post metadata for music files with embedded ID3 tags.</p>
       </header>
       <div className="space-y-3">
-        <div>
-          <label className="text-sm text-slate-300">Choose files</label>
-          <input
-            type="file"
-            multiple
-            ref={fileInputRef}
-            onChange={e => {
-              void handleFilesSelected(e.target.files);
-            }}
-            className="mt-1 w-full"
-          />
-          {signerMissing && (
-            <div className="mt-2 text-xs text-red-400">Connect your NIP-07 signer to upload.</div>
-          )}
-          {folderNamesInvalid && (
-            <div className="mt-2 text-xs text-red-400">Folder names cannot include the word "private".</div>
-          )}
+        <div className="space-y-2">
+          <span className="text-sm text-slate-300">Files</span>
+          <div
+            role="button"
+            tabIndex={busy ? -1 : 0}
+            aria-disabled={busy}
+            aria-describedby={dropZoneDescriptionId}
+            onClick={handlePickFiles}
+            onKeyDown={handleDropZoneKeyDown}
+            onDragEnter={handleDragEnter}
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
+            className={`relative flex min-h-[160px] w-full flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed px-6 py-10 text-center transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 ${
+              isDragActive ? "border-emerald-400 bg-emerald-500/10" : "border-slate-700 bg-slate-900/60"
+            } ${
+              busy ? "cursor-not-allowed opacity-60" : "cursor-pointer hover:border-emerald-400"
+            }`}
+          >
+            <UploadIcon size={32} className="text-emerald-300" aria-hidden="true" />
+            <div className="text-sm font-semibold text-slate-100">
+              {isDragActive ? "Release to add files" : "Drag and drop files here"}
+            </div>
+            <div id={dropZoneDescriptionId} className="text-xs text-slate-400">
+              {busy ? "Uploads are in progress. Finish before adding more files." : "Or click to browse your device"}
+            </div>
+            <input
+              id="upload-panel-input"
+              type="file"
+              multiple
+              ref={fileInputRef}
+              onChange={e => {
+                setIsDragActive(false);
+                void handleFilesSelected(e.target.files);
+              }}
+              className="sr-only"
+              tabIndex={-1}
+            />
+          </div>
         </div>
+        {signerMissing && (
+          <div className="text-xs text-red-400">Connect your NIP-07 signer to upload.</div>
+        )}
+        {folderNamesInvalid && (
+          <div className="text-xs text-red-400">Folder names cannot include the word "private".</div>
+        )}
         {uploadSummary && entries.length > 1 && (
           <div className="rounded-xl border border-slate-800 bg-slate-950/60 px-4 py-3 text-sm text-slate-200 space-y-2">
             <div className="flex flex-wrap items-center gap-3">
