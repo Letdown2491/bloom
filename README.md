@@ -64,20 +64,30 @@ pnpm preview
 ```
 
 ## Docker
-You can build and run the production bundle inside a container without installing pnpm locally. If you want to use the private link proxy, edit VITE_PRIVATE_LINK_SERVICE_PUBKEY and PRIVATE_LINK_SERVICE_SECRET in Dockerfile as per the instructions in **Setting up the private link proxy (Optional)**.
+You can build and run the production bundle inside a container without installing pnpm locally. Provide the proxy values as build arguments (replace them inline or export them in your shell) before running the container.
 
 ```bash
-docker build -t bloom-app .
-docker run --rm -p 3000:80 bloom-app
+docker build \
+  --build-arg VITE_PRIVATE_LINK_SERVICE_HOST=${VITE_PRIVATE_LINK_SERVICE_HOST:-http://localhost:8787} \
+  --build-arg VITE_PRIVATE_LINK_SERVICE_PUBKEY=${VITE_PRIVATE_LINK_SERVICE_PUBKEY:-CHANGE_THIS_BEFORE_BUILDING} \
+  -t bloom-web .
+docker run --rm -p 3000:80 bloom-web
 # open http://localhost:3000
 ```
 
+To run the private link proxy alongside the web container, build the proxy stage and supply the environment file you configured in **Setting up the private link proxy (Optional)**:
+
+```bash
+docker build --target private-link-proxy -t bloom-private-link-proxy .
+docker run --rm --env-file services/private-link-proxy/.env -p 8787:8787 bloom-private-link-proxy
+```
+
 ### Docker Compose
-If you're using the private link proxy, no additional setup is required beyond the steps in **Setting up the private link proxy (Optional)**.
+Docker Compose builds both containers with your `.env` values and starts them together. Make sure `.env` and `services/private-link-proxy/.env` exist from the earlier setup steps before running the command below.
 
 ```bash
 docker compose up --build
 # open http://localhost:3000
 ```
 
-The Compose service mirrors the standalone Docker image and listens on port 3000 by default. Adjust the published port in `compose.yaml` if you need to run multiple instances side by side.
+The `web` service publishes port 80 to `3000` by default. Override `PRIVATE_LINK_PROXY_PORT` in your environment if you need the proxy on a different host port.

@@ -2,6 +2,9 @@ services:
   web:
     build:
       context: .
+      args:
+        VITE_PRIVATE_LINK_SERVICE_HOST: ${VITE_PRIVATE_LINK_SERVICE_HOST:-http://localhost:8787}
+        VITE_PRIVATE_LINK_SERVICE_PUBKEY: ${VITE_PRIVATE_LINK_SERVICE_PUBKEY:-CHANGE_THIS_BEFORE_BUILDING}
     env_file:
       - .env
     depends_on:
