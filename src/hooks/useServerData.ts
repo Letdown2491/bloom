@@ -29,6 +29,27 @@ const MAX_CACHED_BLOBS_EMERGENCY = 40;
 let snapshotStorageBlocked = false;
 let snapshotStorageWarned = false;
 
+const scheduleIdleWork = (work: () => void) => {
+  if (typeof window === "undefined") {
+    work();
+    return undefined;
+  }
+  const win = window as typeof window & {
+    requestIdleCallback?: (callback: IdleRequestCallback, options?: IdleRequestOptions) => number;
+    cancelIdleCallback?: (handle: number) => void;
+  };
+  if (typeof win.requestIdleCallback === "function") {
+    const handle = win.requestIdleCallback(() => work(), { timeout: 150 });
+    return () => {
+      win.cancelIdleCallback?.(handle);
+    };
+  }
+  const timeout = window.setTimeout(work, 32);
+  return () => window.clearTimeout(timeout);
+};
+
+const pendingSnapshotPersistCancels = new Map<string, () => void>();
+
 const isQuotaExceededError = (error: unknown) =>
   error instanceof DOMException &&
   (error.name === "QuotaExceededError" || error.code === 22 || error.name === "NS_ERROR_DOM_QUOTA_REACHED");
@@ -154,8 +175,7 @@ const loadCachedSnapshot = (url: string): CachedServerSnapshot | null => {
   }
 };
 
-const persistSnapshotCache = (url: string, blobs: BlossomBlob[]) => {
-  if (typeof window === "undefined" || snapshotStorageBlocked) return;
+const persistSnapshotCacheNow = (url: string, blobs: BlossomBlob[]) => {
   const key = buildCacheKey(url);
   const timestamp = Date.now();
   const attemptPersist = (limit: number) => {
@@ -240,6 +260,23 @@ const persistSnapshotCache = (url: string, blobs: BlossomBlob[]) => {
       }
     }
     console.warn("Unable to persist cached server snapshot", error);
+  }
+};
+
+const persistSnapshotCache = (url: string, blobs: BlossomBlob[]) => {
+  if (typeof window === "undefined" || snapshotStorageBlocked) return;
+  const cancelExisting = pendingSnapshotPersistCancels.get(url);
+  if (cancelExisting) {
+    cancelExisting();
+    pendingSnapshotPersistCancels.delete(url);
+  }
+  const snapshot = blobs.slice();
+  const cancel = scheduleIdleWork(() => {
+    pendingSnapshotPersistCancels.delete(url);
+    persistSnapshotCacheNow(url, snapshot);
+  });
+  if (cancel) {
+    pendingSnapshotPersistCancels.set(url, cancel);
   }
 };
 
@@ -551,6 +588,7 @@ export const useServerData = (servers: ManagedServer[], options?: UseServerDataO
       const isActive = activeServerUrls.has(server.url);
       const cached = cachedSnapshots.get(server.url);
       const cachedBlobs = cached?.blobs;
+      const hasCachedData = Boolean(cachedBlobs?.length);
       return {
         queryKey: ["server-blobs", server.url, pubkey, server.type],
         enabled:
@@ -561,9 +599,10 @@ export const useServerData = (servers: ManagedServer[], options?: UseServerDataO
             : !server.requiresAuth || !!signer),
         initialData: cachedBlobs,
         initialDataUpdatedAt: cached?.updatedAt,
-        staleTime: 0,
-        refetchOnMount: "always" as const,
-        refetchOnWindowFocus: true,
+        staleTime: 60_000,
+        refetchOnMount: hasCachedData ? false : "always",
+        refetchOnWindowFocus: false,
+        refetchOnReconnect: false,
         queryFn: async (): Promise<BlossomBlob[]> => {
           if (!pubkey) return cachedBlobs ?? [];
           if (server.type === "blossom") {

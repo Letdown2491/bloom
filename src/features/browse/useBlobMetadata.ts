@@ -118,17 +118,47 @@ export const useBlobMetadata = (blobs: BlossomBlob[], options?: MetadataOptions)
     setVisibilitySignal(signal => signal + 1);
   }, []);
 
+  const previousSchedulerConfigRef = useRef<{
+    baseUrl?: string;
+    requiresAuth: boolean;
+    serverType: ServerType;
+    ttlMs: number;
+    signTemplate?: SignTemplate;
+  }>();
+
   useEffect(() => {
     const resolvedMetaSnapshot = resolvedMetaRef.current;
     const detectedKindsSnapshot = detectedKindsRef.current;
     const scheduler = metadataSchedulerRef.current;
-    scheduler.generation += 1;
-    scheduler.queue = [];
-    scheduler.running = 0;
-    const generation = scheduler.generation;
 
-    metadataAbortControllers.current.forEach(controller => controller.abort());
-    metadataAbortControllers.current.clear();
+    const nextConfig = {
+      baseUrl,
+      requiresAuth,
+      serverType,
+      ttlMs,
+      signTemplate,
+    } as const;
+
+    const previousConfig = previousSchedulerConfigRef.current;
+    const shouldResetScheduler =
+      !previousConfig ||
+      previousConfig.baseUrl !== nextConfig.baseUrl ||
+      previousConfig.requiresAuth !== nextConfig.requiresAuth ||
+      previousConfig.serverType !== nextConfig.serverType ||
+      previousConfig.ttlMs !== nextConfig.ttlMs ||
+      previousConfig.signTemplate !== nextConfig.signTemplate;
+
+    previousSchedulerConfigRef.current = nextConfig;
+
+    if (shouldResetScheduler) {
+      scheduler.generation += 1;
+      scheduler.queue = [];
+      scheduler.running = 0;
+      metadataAbortControllers.current.forEach(controller => controller.abort());
+      metadataAbortControllers.current.clear();
+    }
+
+    const generation = scheduler.generation;
 
     const enqueue = (task: () => Promise<void>) => {
       const execute = () => {

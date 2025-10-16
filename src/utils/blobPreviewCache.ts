@@ -5,6 +5,7 @@ const LOCAL_STORAGE_PREFIX = "bloom:preview-cache:v1:";
 const MAX_CACHE_BYTES = 4 * 1024 * 1024; // 4MB cap to avoid storing very large previews
 const MAX_LOCAL_STORAGE_ENTRY_BYTES = 120 * 1024; // single preview cap (~120KB)
 const MAX_LOCAL_STORAGE_TOTAL_BYTES = 400 * 1024; // total fallback cap (~400KB)
+const LOCAL_STORAGE_INLINE_LIMIT_BYTES = 60 * 1024; // keep main-thread base64 work tiny
 const LOCAL_STORAGE_META_KEY = `${LOCAL_STORAGE_PREFIX}__meta__`;
 const LOCAL_STORAGE_META_VERSION = 1;
 
@@ -22,6 +23,25 @@ type PreviewMetaRecord = {
 let previewMetaCache: Map<string, PreviewMetaEntry> | null = null;
 let previewMetaDirty = false;
 let previewMetaPersistScheduled = false;
+
+const scheduleIdleWork = (work: () => void) => {
+  if (typeof window === "undefined") {
+    work();
+    return undefined;
+  }
+  const win = window as typeof window & {
+    requestIdleCallback?: (callback: IdleRequestCallback, options?: IdleRequestOptions) => number;
+    cancelIdleCallback?: (handle: number) => void;
+  };
+  if (typeof win.requestIdleCallback === "function") {
+    const handle = win.requestIdleCallback(() => work(), { timeout: 150 });
+    return () => win.cancelIdleCallback?.(handle);
+  }
+  const timeout = window.setTimeout(work, 32);
+  return () => window.clearTimeout(timeout);
+};
+
+const pendingLocalStorageWriteCancels = new Map<string, () => void>();
 
 function normalizeServerKey(serverUrl?: string) {
   if (!serverUrl) return "default";
@@ -87,37 +107,61 @@ async function readFromLocalStorage(key: string): Promise<Blob | null> {
 
 async function writeToLocalStorage(key: string, blob: Blob) {
   if (typeof window === "undefined") return;
-  if (blob.size === 0) return;
-  try {
-    const dataUrl = await new Promise<string>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onerror = () => reject(reader.error);
-      reader.onload = () => {
-        const result = reader.result;
-        if (typeof result === "string") resolve(result);
-        else reject(new Error("Failed to encode preview"));
-      };
-      reader.readAsDataURL(blob);
-    });
-    const storageKey = `${LOCAL_STORAGE_PREFIX}${key}`;
-    const entrySize = estimateEntryBytes(storageKey, dataUrl);
-    if (!ensurePreviewStorageCapacity(key, entrySize)) {
-      return;
-    }
-    try {
-      window.localStorage.setItem(storageKey, dataUrl);
-      const now = Date.now();
-      updatePreviewMetaEntry(key, { size: entrySize, updatedAt: now, lastAccessed: now });
-      const quota = checkLocalStorageQuota("preview-cache");
-      if (quota.status === "critical") {
-        ensurePreviewStorageCapacity(key, 0);
+  if (blob.size === 0 || blob.size > LOCAL_STORAGE_INLINE_LIMIT_BYTES) return;
+  await new Promise<void>(resolve => {
+    const performWrite = async () => {
+      try {
+        const dataUrl = await new Promise<string>((resolveData, rejectData) => {
+          const reader = new FileReader();
+          reader.onerror = () => rejectData(reader.error);
+          reader.onload = () => {
+            const result = reader.result;
+            if (typeof result === "string") resolveData(result);
+            else rejectData(new Error("Failed to encode preview"));
+          };
+          reader.readAsDataURL(blob);
+        });
+        const storageKey = `${LOCAL_STORAGE_PREFIX}${key}`;
+        const entrySize = estimateEntryBytes(storageKey, dataUrl);
+        if (!ensurePreviewStorageCapacity(key, entrySize)) {
+          resolve();
+          return;
+        }
+        try {
+          window.localStorage.setItem(storageKey, dataUrl);
+          const now = Date.now();
+          updatePreviewMetaEntry(key, { size: entrySize, updatedAt: now, lastAccessed: now });
+          const quota = checkLocalStorageQuota("preview-cache");
+          if (quota.status === "critical") {
+            ensurePreviewStorageCapacity(key, 0);
+          }
+        } catch (error) {
+          deletePreviewStorageEntry(key);
+        }
+      } catch (error) {
+        deletePreviewStorageEntry(key);
+      } finally {
+        resolve();
       }
-    } catch (error) {
-      deletePreviewStorageEntry(key);
+    };
+
+    const cancelExisting = pendingLocalStorageWriteCancels.get(key);
+    if (cancelExisting) {
+      cancelExisting();
+      pendingLocalStorageWriteCancels.delete(key);
     }
-  } catch (error) {
-    deletePreviewStorageEntry(key);
-  }
+
+    const cancel = scheduleIdleWork(() => {
+      pendingLocalStorageWriteCancels.delete(key);
+      void performWrite();
+    });
+
+    if (cancel) {
+      pendingLocalStorageWriteCancels.set(key, cancel);
+    } else {
+      void performWrite();
+    }
+  });
 }
 
 async function readFromCacheStorage(key: string): Promise<Blob | null> {

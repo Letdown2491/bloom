@@ -3360,16 +3360,6 @@ const BlobPreview: React.FC<{
       }
     };
 
-    const useDirectUrl = () => {
-      if (cancelled) return;
-      clearCachedPreviewSrc(previewKey);
-      releaseObjectUrl();
-      lastLoadedKeyRef.current = previewKey;
-      lastFailureKeyRef.current = null;
-      setSrc(url);
-      setIsReady(true);
-    };
-
     const showTextPreview = async (blobData: Blob, mimeHint?: string | null) => {
       const normalizedMime = mimeHint ?? blobData.type ?? effectiveType;
       const shouldRenderText =
@@ -3502,17 +3492,17 @@ const BlobPreview: React.FC<{
         }
 
         if (!requiresAuth) {
-        const resolvedMime = mimeHint ?? effectiveType;
-        if (resolvedMime === "application/pdf" || isPdfType(resolvedMime, effectiveName ?? url)) {
-          setPreviewType(previous => (previous === "pdf" ? previous : "pdf"));
-        } else if (isDocType(resolvedMime, effectiveName ?? url)) {
-          setPreviewType(previous => (previous === "doc" ? previous : "doc"));
-        } else if (resolvedMime?.startsWith("image/") && previewType !== "image") {
-          setPreviewType("image");
-        } else if (resolvedMime?.startsWith("video/") && previewType !== "video") {
-          setPreviewType("video");
-        }
-        useDirectUrl();
+          const resolvedMime = mimeHint ?? effectiveType;
+          if (resolvedMime === "application/pdf" || isPdfType(resolvedMime, effectiveName ?? url)) {
+            setPreviewType(previous => (previous === "pdf" ? previous : "pdf"));
+          } else if (isDocType(resolvedMime, effectiveName ?? url)) {
+            setPreviewType(previous => (previous === "doc" ? previous : "doc"));
+          } else if (resolvedMime?.startsWith("image/") && previewType !== "image") {
+            setPreviewType("image");
+          } else if (resolvedMime?.startsWith("video/") && previewType !== "video") {
+            setPreviewType("video");
+          }
+          assignObjectUrl(blobData);
           setLoading(false);
           finalizeRequest();
           return;
