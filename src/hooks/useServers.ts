@@ -15,7 +15,6 @@ export type ManagedServer = {
 };
 
 const DEFAULT_SERVERS: ManagedServer[] = [
-  { name: "Nostrcheck", url: "https://nostrcheck.me", type: "nip96", requiresAuth: true, sync: false },
   { name: "Primal", url: "https://blossom.primal.net", type: "blossom", requiresAuth: true, sync: false },
 ];
 
