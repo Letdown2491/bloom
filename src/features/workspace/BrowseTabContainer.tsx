@@ -22,6 +22,7 @@ import { isMusicBlob } from "../../utils/blobClassification";
 import { PRIVATE_PLACEHOLDER_SHA, PRIVATE_SERVER_NAME } from "../../constants/private";
 import { applyFolderUpdate, getBlobMetadataName, normalizeFolderPathInput } from "../../utils/blobMetadataStore";
 import type { BlobAudioMetadata } from "../../utils/blobMetadataStore";
+import type { FolderListVisibility } from "../../lib/folderList";
 import { isListLikeBlob, type BlobReplicaSummary } from "../../components/BlobList";
 import type { DefaultSortOption, SortDirection } from "../../context/UserPreferencesContext";
 import { buildNip98AuthHeader } from "../../lib/nip98";
@@ -29,6 +30,7 @@ import { decryptPrivateBlob } from "../../lib/privateEncryption";
 import type { Track } from "../../context/AudioContext";
 import type { PrivateListEntry } from "../../lib/privateList";
 import { useDialog } from "../../context/DialogContext";
+import type { FolderShareHint, ShareFolderRequest } from "../../types/shareFolder";
 
 const BrowsePanelLazy = React.lazy(() =>
   import("../browse/BrowseTab").then(module => ({ default: module.BrowsePanel }))
@@ -331,6 +333,9 @@ export type BrowseTabContainerProps = {
   onRequestRename: (blob: BlossomBlob) => void;
   onRequestFolderRename: (path: string) => void;
   onRequestShare: (payload: SharePayload) => void;
+  onShareFolder: (request: ShareFolderRequest) => void;
+  onUnshareFolder: (request: ShareFolderRequest) => void;
+  folderShareBusyPath?: string | null;
   onSetTab: (tab: TabId) => void;
   showStatusMessage: (message: string, tone?: StatusMessageTone, duration?: number) => void;
   viewMode: "grid" | "list";
@@ -362,6 +367,7 @@ export type BrowseNavigationSegment = {
   id: string;
   label: string;
   onNavigate: () => void;
+  visibility?: FolderListVisibility | null;
 };
 
 export type BrowseNavigationState = {
@@ -377,6 +383,9 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
   onRequestRename,
   onRequestFolderRename,
   onRequestShare,
+  onShareFolder,
+  onUnshareFolder,
+  folderShareBusyPath = null,
   onSetTab,
   showStatusMessage,
   viewMode,
@@ -399,6 +408,7 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
 }) => {
   const {
     aggregated,
+    snapshots,
     blobReplicaInfo,
     browsingAllServers,
     currentSnapshot,
@@ -413,7 +423,7 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
   const { signer, signEventTemplate } = useNdk();
   const pubkey = useCurrentPubkey();
   const { entriesBySha, removeEntries } = usePrivateLibrary();
-  const { deleteFolder, foldersByPath, getFolderDisplayName, removeBlobFromFolder } = useFolderLists();
+  const { deleteFolder, foldersByPath, getFolderDisplayName, removeBlobFromFolder, resolveFolderPath } = useFolderLists();
   const { confirm } = useDialog();
   const [activeList, setActiveList] = useState<ActiveListState | null>(null);
   const playbackUrlCacheRef = useRef(new Map<string, string>());
@@ -1090,6 +1100,170 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
     } as { scope: FolderScope; path: string; serverUrl?: string | null };
   };
 
+  const blobVariantsBySha = useMemo(() => {
+    const map = new Map<string, BlossomBlob[]>();
+    const register = (blob: BlossomBlob | null | undefined) => {
+      if (!blob?.sha256) return;
+      const key = blob.sha256.toLowerCase();
+      const existing = map.get(key);
+      if (existing) {
+        const alreadyPresent = existing.some(entry => {
+          if (entry === blob) return true;
+          const sameUrl = entry.url && blob.url ? entry.url === blob.url : false;
+          const sameServer = entry.serverUrl && blob.serverUrl ? entry.serverUrl === blob.serverUrl : false;
+          return sameUrl && sameServer;
+        });
+        if (!alreadyPresent) {
+          existing.push(blob);
+        }
+      } else {
+        map.set(key, [blob]);
+      }
+    };
+
+    aggregated.blobs.forEach(register);
+    snapshots.forEach(snapshot => {
+      snapshot.blobs.forEach(register);
+    });
+    privateBlobs.forEach(register);
+
+    return map;
+  }, [aggregated.blobs, snapshots, privateBlobs]);
+
+  const collectFolderBlobs = useCallback(
+    (scope: FolderScope, normalizedPath: string, serverUrl?: string | null) => {
+      const sanitizedPath = normalizedPath ?? "";
+      const normalizedServer = serverUrl ? normalizeServerUrl(serverUrl) : null;
+      const hasUrl = (value: unknown): value is string => typeof value === "string" && value.trim().length > 0;
+      const normalizePath = (value?: string | null) => normalizeFolderPathInput(value ?? undefined) ?? "";
+
+      const mergeWithFallback = (primary: BlossomBlob, fallback: BlossomBlob): BlossomBlob => {
+        if (primary === fallback) return primary;
+        const merged: BlossomBlob = { ...primary };
+        const applyFallback = <K extends keyof BlossomBlob>(key: K) => {
+          const current = merged[key];
+          const isMissing =
+            current === undefined ||
+            current === null ||
+            (typeof current === "string" && current.trim().length === 0);
+          if (!isMissing) return;
+          const fallbackValue = fallback[key];
+          if (fallbackValue !== undefined) {
+            (merged as BlossomBlob)[key] = fallbackValue as BlossomBlob[K];
+          }
+        };
+
+        (["url", "serverUrl", "serverType", "requiresAuth", "size", "type", "name", "label", "uploaded", "infohash", "magnet", "nip94"] as (keyof BlossomBlob)[]).forEach(applyFallback);
+        return merged;
+      };
+
+      const resolveSharableBlob = (blob: BlossomBlob): BlossomBlob => {
+        if (!blob.sha256) return blob;
+        if (hasUrl(blob.url)) return blob;
+        const variants = blobVariantsBySha.get(blob.sha256.toLowerCase());
+        if (!variants?.length) return blob;
+        const withUrl = variants.filter(candidate => hasUrl(candidate.url));
+        if (!withUrl.length) return blob;
+
+        const blobPath = normalizePath(blob.folderPath);
+        const matchesPath = (candidate: BlossomBlob) => normalizePath(candidate.folderPath) === (sanitizedPath || blobPath);
+        const matchesServer = (candidate: BlossomBlob) =>
+          normalizedServer ? normalizeMaybeServerUrl(candidate.serverUrl) === normalizedServer : true;
+
+        const pickCandidate =
+          withUrl.find(candidate => matchesServer(candidate) && matchesPath(candidate) && candidate.requiresAuth !== true) ??
+          withUrl.find(candidate => matchesServer(candidate) && candidate.requiresAuth !== true) ??
+          withUrl.find(candidate => matchesPath(candidate) && candidate.requiresAuth !== true) ??
+          withUrl.find(candidate => matchesServer(candidate)) ??
+          withUrl.find(candidate => matchesPath(candidate)) ??
+          withUrl.find(candidate => candidate.requiresAuth !== true) ??
+          withUrl[0];
+
+        if (!pickCandidate) return blob;
+        return mergeWithFallback(blob, pickCandidate);
+      };
+
+      const matchesPath = (blob: BlossomBlob) => {
+        if (blob.__bloomFolderPlaceholder) return false;
+        if (blob.__bloomFolderScope === "private") return false;
+        const blobPath = normalizeFolderPathInput(blob.folderPath ?? undefined) ?? "";
+        return blobPath === sanitizedPath;
+      };
+      const matchesServer = (blob: BlossomBlob) => {
+        if (!normalizedServer) return true;
+        const blobServer = blob.serverUrl ? normalizeServerUrl(blob.serverUrl) : null;
+        return blobServer === normalizedServer;
+      };
+
+      let source: readonly BlossomBlob[] = aggregated.blobs;
+      if (scope === "server") {
+        if (normalizedServer && currentSnapshot?.server && normalizeMaybeServerUrl(currentSnapshot.server.url) === normalizedServer) {
+          source = currentSnapshot.blobs;
+        } else if (normalizedServer) {
+          source = aggregated.blobs.filter(blob => matchesServer(blob));
+        } else if (currentSnapshot?.blobs) {
+          source = currentSnapshot.blobs;
+        }
+      }
+
+      const deduped = new Map<string, BlossomBlob>();
+      source.forEach(blob => {
+        if (!matchesPath(blob)) return;
+        if (!matchesServer(blob)) return;
+        if (!blob.sha256) return;
+        const key = blob.sha256.toLowerCase();
+        const resolved = resolveSharableBlob(blob);
+        const existing = deduped.get(key);
+        if (!existing) {
+          deduped.set(key, resolved);
+          return;
+        }
+        const existingHasUrl = hasUrl(existing.url);
+        const resolvedHasUrl = hasUrl(resolved.url);
+        const existingPublic = existing.requiresAuth !== true;
+        const resolvedPublic = resolved.requiresAuth !== true;
+        if (
+          (!existingHasUrl && resolvedHasUrl) ||
+          (existingHasUrl === resolvedHasUrl && !existingPublic && resolvedPublic)
+        ) {
+          deduped.set(key, mergeWithFallback(resolved, existing));
+        }
+      });
+      return Array.from(deduped.values());
+    },
+    [aggregated.blobs, blobVariantsBySha, currentSnapshot, normalizeMaybeServerUrl]
+  );
+
+  const handleShareFolderHint = useCallback(
+    (hint: FolderShareHint) => {
+      const normalizedPath = normalizeFolderPathInput(hint.path ?? undefined) ?? "";
+      if (!normalizedPath) return;
+      const blobs = collectFolderBlobs(hint.scope, normalizedPath, hint.serverUrl ?? null);
+      onShareFolder({
+        path: normalizedPath,
+        scope: hint.scope,
+        serverUrl: hint.serverUrl ?? null,
+        blobs,
+      });
+    },
+    [collectFolderBlobs, onShareFolder]
+  );
+
+  const handleUnshareFolderHint = useCallback(
+    (hint: FolderShareHint) => {
+      const normalizedPath = normalizeFolderPathInput(hint.path ?? undefined) ?? "";
+      if (!normalizedPath) return;
+      const blobs = collectFolderBlobs(hint.scope, normalizedPath, hint.serverUrl ?? null);
+      onUnshareFolder({
+        path: normalizedPath,
+        scope: hint.scope,
+        serverUrl: hint.serverUrl ?? null,
+        blobs,
+      });
+    },
+    [collectFolderBlobs, onUnshareFolder]
+  );
+
   const isPrivateAggregated = isPrivateView && !privateScopeUrl;
 
   const privateSnapshot = useMemo(() => {
@@ -1692,7 +1866,21 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
       }
       const folderInfo = extractFolderInfo(blob);
       if (folderInfo) {
-        openFolderFromInfo(folderInfo);
+        if (blob.__bloomFolderIsParentLink || folderInfo.scope === "private") {
+          openFolderFromInfo(folderInfo);
+          return;
+        }
+        const normalizedPath = normalizeFolderPathInput(folderInfo.path ?? undefined) ?? "";
+        if (!normalizedPath) {
+          openFolderFromInfo(folderInfo);
+          return;
+        }
+        const shareHint: FolderShareHint = {
+          path: normalizedPath,
+          scope: folderInfo.scope === "server" ? "server" : "aggregated",
+          serverUrl: folderInfo.serverUrl ?? null,
+        };
+        handleShareFolderHint(shareHint);
         return;
       }
       if (!blob.url) {
@@ -1709,7 +1897,16 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
       onRequestShare(payload);
       onSetTab("share");
     },
-    [extractFolderInfo, isPlaceholderBlob, onRequestShare, onSetTab, openFolderFromInfo, openPrivateList, showStatusMessage]
+    [
+      extractFolderInfo,
+      handleShareFolderHint,
+      isPlaceholderBlob,
+      onRequestShare,
+      onSetTab,
+      openFolderFromInfo,
+      openPrivateList,
+      showStatusMessage,
+    ]
   );
 
   const handlePlayBlob = useCallback(
@@ -1882,6 +2079,8 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
         const targetPath = pathSegments.slice(0, index + 1).join("/");
         const label = getFolderDisplayName(targetPath) || segment;
         const id = `${activeList.scope}:${targetPath || "__root__"}:${activeList.serverUrl ?? "all"}`;
+        const canonicalPath = resolveFolderPath(targetPath);
+        const record = canonicalPath ? foldersByPath.get(canonicalPath) ?? null : null;
         segments.push({
           id,
           label,
@@ -1892,6 +2091,7 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
               serverUrl: activeList.serverUrl ?? null,
             });
           },
+          visibility: record?.visibility ?? null,
         });
       });
 
@@ -1899,7 +2099,7 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
     }
 
     return segments;
-  }, [activeList, getFolderDisplayName, isSearching, openFolderFromInfo, openPrivateList]);
+  }, [activeList, foldersByPath, getFolderDisplayName, isSearching, openFolderFromInfo, openPrivateList]);
 
   const navigationState = useMemo<BrowseNavigationState>(() => ({
     segments: breadcrumbSegments,
@@ -1933,26 +2133,30 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
             browsingAllServers={effectiveBrowsingAllServers}
             aggregatedBlobs={effectiveAggregatedBlobs}
             currentSnapshot={effectiveCurrentSnapshot}
-            currentVisibleBlobs={effectiveCurrentVisibleBlobs}
-            selectedBlobs={selectedBlobs}
-            signTemplate={effectiveSignTemplate}
-            replicaInfo={effectiveReplicaInfo}
-            onToggle={handleToggleBlob}
-            onSelectMany={handleSelectManyBlobs}
-            onDelete={handleDeleteBlob}
-            onCopy={handleCopyUrl}
-            onShare={handleShareBlob}
-            onRename={handleRenameBlob}
-            onPlay={handlePlayBlob}
-            currentTrackUrl={audio.current?.url}
-            currentTrackStatus={audio.status}
-            filterMode={filterMode}
-            showGridPreviews={showGridPreviews}
-            showListPreviews={showListPreviews}
-            onOpenList={handleOpenListBlob}
-            defaultSortOption={defaultSortOption}
-            sortDirection={sortDirection}
-          />
+          currentVisibleBlobs={effectiveCurrentVisibleBlobs}
+          selectedBlobs={selectedBlobs}
+          signTemplate={effectiveSignTemplate}
+          replicaInfo={effectiveReplicaInfo}
+          onToggle={handleToggleBlob}
+          onSelectMany={handleSelectManyBlobs}
+          onDelete={handleDeleteBlob}
+          onCopy={handleCopyUrl}
+          onShare={handleShareBlob}
+          onRename={handleRenameBlob}
+          onPlay={handlePlayBlob}
+          currentTrackUrl={audio.current?.url}
+          currentTrackStatus={audio.status}
+          filterMode={filterMode}
+          showGridPreviews={showGridPreviews}
+          showListPreviews={showListPreviews}
+          onOpenList={handleOpenListBlob}
+          defaultSortOption={defaultSortOption}
+          sortDirection={sortDirection}
+          folderRecords={foldersByPath}
+          onShareFolder={handleShareFolderHint}
+          onUnshareFolder={handleUnshareFolderHint}
+          folderShareBusyPath={folderShareBusyPath}
+        />
         </Suspense>
       </div>
     </div>

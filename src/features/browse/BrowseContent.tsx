@@ -4,6 +4,8 @@ import type { ServerSnapshot } from "../../hooks/useServerData";
 import type { BlobListProps, BlobReplicaSummary } from "../../components/BlobList";
 import type { FilterMode } from "../../types/filter";
 import type { DefaultSortOption, SortDirection } from "../../context/UserPreferencesContext";
+import type { FolderShareHint } from "../../types/shareFolder";
+import type { FolderListRecord } from "../../lib/folderList";
 
 export type BrowseContentProps = {
   viewMode: "grid" | "list";
@@ -21,6 +23,10 @@ export type BrowseContentProps = {
   onShare: (blob: BlossomBlob) => void;
   onRename: (blob: BlossomBlob) => void;
   onPlay: (blob: BlossomBlob) => void;
+  onShareFolder?: (hint: FolderShareHint) => void;
+  folderRecords?: Map<string, FolderListRecord>;
+  onUnshareFolder?: (hint: FolderShareHint) => void;
+  folderShareBusyPath?: string | null;
   currentTrackUrl?: string;
   currentTrackStatus?: "idle" | "playing" | "paused";
   filterMode: FilterMode;
@@ -48,6 +54,10 @@ export const BrowseContent: React.FC<BrowseContentProps> = ({
   onShare,
   onRename,
   onPlay,
+  folderRecords,
+  onShareFolder,
+  onUnshareFolder,
+  folderShareBusyPath,
   currentTrackUrl,
   currentTrackStatus,
   filterMode,
@@ -70,6 +80,7 @@ export const BrowseContent: React.FC<BrowseContentProps> = ({
     | "onShare"
     | "onRename"
     | "onPlay"
+    | "onShareFolder"
     | "currentTrackUrl"
     | "currentTrackStatus"
     | "isMusicView"
@@ -78,6 +89,9 @@ export const BrowseContent: React.FC<BrowseContentProps> = ({
     | "onOpenList"
     | "defaultSortOption"
     | "sortDirection"
+    | "folderRecords"
+    | "onUnshareFolder"
+    | "folderShareBusyPath"
   > = {
     selected: selectedBlobs,
     viewMode,
@@ -96,6 +110,10 @@ export const BrowseContent: React.FC<BrowseContentProps> = ({
     onOpenList,
     defaultSortOption,
     sortDirection,
+    folderRecords,
+    onShareFolder,
+    onUnshareFolder,
+    folderShareBusyPath,
   };
 
   if (browsingAllServers) {

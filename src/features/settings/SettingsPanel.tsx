@@ -3,6 +3,8 @@ import type { FilterMode } from "../../types/filter";
 import type { ManagedServer } from "../../hooks/useServers";
 import type { DefaultSortOption, SortDirection } from "../../context/UserPreferencesContext";
 import type { StatusMessageTone } from "../../types/status";
+import type { ShareFolderRequest } from "../../types/shareFolder";
+import type { FolderListRecord } from "../../lib/folderList";
 import { WorkspaceProvider } from "../workspace/WorkspaceContext";
 import {
   GridIcon,
@@ -23,12 +25,20 @@ import {
   LightningIcon,
   DoubleChevronUpIcon,
   DoubleChevronDownIcon,
+  ShareIcon,
+  FolderIcon,
+  LockIcon,
 } from "../../components/icons";
 import { ServerList } from "../../components/ServerList";
 const RelayListLazy = React.lazy(() => import("../../components/RelayList"));
 import { useIsCompactScreen } from "../../hooks/useIsCompactScreen";
 import { useStorageQuota } from "../../hooks/useStorageQuota";
 import { formatBytes } from "../../utils/storageQuota";
+import { useFolderLists } from "../../context/FolderListContext";
+import { encodeFolderNaddr, isPrivateFolderName } from "../../lib/folderList";
+import { usePreferredRelays } from "../../hooks/usePreferredRelays";
+import { useCurrentPubkey } from "../../context/NdkContext";
+import { DEFAULT_PUBLIC_RELAYS, sanitizeRelayUrl } from "../../utils/relays";
 
 type FilterOption = {
   id: FilterMode;
@@ -80,6 +90,42 @@ const STORAGE_FEEDBACK_CLASS_BY_TONE = {
   warning: "text-amber-300",
   error: "text-red-300",
 } as const;
+
+const DEFAULT_SHARE_ORIGIN = "https://bloomapp.me";
+
+const VISIBILITY_OPTIONS: SegmentedOption[] = [
+  { id: "private", label: "Only you", Icon: LockIcon },
+  { id: "public", label: "Public", Icon: ShareIcon },
+];
+
+const collectRelayHints = (relays: readonly string[]): string[] => {
+  const normalized = new Set<string>();
+  relays.forEach(url => {
+    const sanitized = sanitizeRelayUrl(url);
+    if (sanitized) {
+      normalized.add(sanitized);
+    }
+  });
+  return Array.from(normalized);
+};
+
+const buildShareLink = (
+  record: FolderListRecord,
+  fallbackPubkey: string | null,
+  relays: readonly string[],
+  origin: string
+): { naddr: string; url: string } | null => {
+  const ownerPubkey = record.pubkey ?? fallbackPubkey;
+  if (!ownerPubkey) return null;
+  const relayHints = Array.isArray(relays) && relays.length > 0 ? relays : undefined;
+  const naddr = encodeFolderNaddr(record, ownerPubkey, relayHints);
+  if (!naddr) return null;
+  const trimmedOrigin = origin.replace(/\/+$/, "") || DEFAULT_SHARE_ORIGIN;
+  return {
+    naddr,
+    url: `${trimmedOrigin}/folders/${encodeURIComponent(naddr)}`,
+  };
+};
 
 
 const getProgressBarClass = (percent: number): string => {
@@ -165,37 +211,55 @@ const SwitchControl: React.FC<SwitchControlProps> = ({ id, checked, onToggle, di
 };
 
 type SettingCardProps = {
-  headingId: string;
+  headingId?: string;
   descriptionId?: string;
-  title: string;
+  title?: string;
   description?: string;
   className?: string;
   children: React.ReactNode;
   actions?: React.ReactNode;
 };
 
-const SettingCard: React.FC<SettingCardProps> = ({ headingId, descriptionId, title, description, className, actions, children }) => (
-  <section
-    aria-labelledby={headingId}
-    aria-describedby={description ? descriptionId : undefined}
-    className={`rounded-2xl border border-slate-800 bg-slate-900/70 p-6 shadow-sm ${className ?? ""}`}
-  >
-    <div className="flex flex-wrap items-start justify-between gap-3">
-      <div className="space-y-1">
-        <h3 id={headingId} className="text-sm font-semibold text-slate-100">
-          {title}
-        </h3>
-        {description ? (
-          <p id={descriptionId} className="text-xs text-slate-400">
-            {description}
-          </p>
-        ) : null}
-      </div>
-      {actions ? <div className="flex flex-wrap items-center gap-2">{actions}</div> : null}
-    </div>
-    <div className="mt-4 text-sm text-slate-200">{children}</div>
-  </section>
-);
+const SettingCard: React.FC<SettingCardProps> = ({
+  headingId,
+  descriptionId,
+  title,
+  description,
+  className,
+  actions,
+  children,
+}) => {
+  const hasHeaderContent = Boolean(title || description || actions);
+  const labelledBy = title && headingId ? headingId : undefined;
+  const describedBy = description && descriptionId ? descriptionId : undefined;
+
+  return (
+    <section
+      aria-labelledby={labelledBy}
+      aria-describedby={describedBy}
+      className={`rounded-2xl border border-slate-800 bg-slate-900/70 p-6 shadow-sm ${className ?? ""}`}
+    >
+      {hasHeaderContent ? (
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="space-y-1">
+            {title ? (
+              <h3 id={headingId} className="text-sm font-semibold text-slate-100">
+                {title}
+              </h3>
+            ) : null}
+            {description ? (
+              <p id={descriptionId} className="text-xs text-slate-400">
+                {description}
+              </p>
+            ) : null}
+          </div>
+          {actions ? <div className="flex flex-wrap items-center gap-2">{actions}</div> : null}
+        </div>
+      ) : null}
+      <div className={`${hasHeaderContent ? "mt-4" : ""} text-sm text-slate-200`}>{children}</div>
+    </section>
+  );
+};
 
 type SegmentedControlProps = {
   options: SegmentedOption[];
@@ -205,6 +269,7 @@ type SegmentedControlProps = {
   describedBy?: string;
   className?: string;
   variant?: "default" | "compact";
+  disabled?: boolean;
 };
 
 const SegmentedControl: React.FC<SegmentedControlProps> = ({
@@ -215,6 +280,7 @@ const SegmentedControl: React.FC<SegmentedControlProps> = ({
   describedBy,
   className,
   variant = "default",
+  disabled = false,
 }) => {
   const containerClass =
     className ??
@@ -226,11 +292,15 @@ const SegmentedControl: React.FC<SegmentedControlProps> = ({
       : "flex items-center gap-2 rounded-lg border px-3 py-2 text-sm transition focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-slate-900";
 
   const activeClass = variant === "compact"
-    ? "border-emerald-500 bg-emerald-500/10 text-emerald-200"
-    : "border-emerald-500 bg-emerald-500/10 text-emerald-200";
+      ? "border-emerald-500 bg-emerald-500/10 text-emerald-200"
+      : "border-emerald-500 bg-emerald-500/10 text-emerald-200";
   const inactiveClass = variant === "compact"
     ? "border-slate-600/70 text-slate-200 hover:border-slate-400"
     : "border-slate-500/60 text-slate-200 hover:border-slate-400";
+  const disabledClass =
+    variant === "compact"
+      ? "cursor-not-allowed border-slate-700/60 text-slate-500 opacity-60"
+      : "cursor-not-allowed border-slate-700/60 text-slate-500 opacity-60";
 
   const iconSize = variant === "compact" ? 14 : 16;
 
@@ -249,9 +319,16 @@ const SegmentedControl: React.FC<SegmentedControlProps> = ({
             type="button"
             role="radio"
             aria-checked={isActive}
-            tabIndex={isActive ? 0 : -1}
-            onClick={() => onChange(option.id)}
-            className={`${baseButtonClass} ${isActive ? activeClass : inactiveClass}`}
+            tabIndex={disabled ? -1 : isActive ? 0 : -1}
+            onClick={() => {
+              if (disabled) return;
+              onChange(option.id);
+            }}
+            disabled={disabled}
+            aria-disabled={disabled ? "true" : undefined}
+            className={`${baseButtonClass} ${
+              disabled ? disabledClass : isActive ? activeClass : inactiveClass
+            }`}
           >
             {option.Icon ? <option.Icon size={iconSize} /> : null}
             <span>{option.label}</span>
@@ -300,6 +377,9 @@ type SettingsPanelProps = {
   onSetKeepSearchExpanded: (value: boolean) => void;
   onSetTheme: (theme: "dark" | "light") => void;
   showStatusMessage?: (message: string, tone?: StatusMessageTone, duration?: number) => void;
+  onShareFolder: (request: ShareFolderRequest) => void;
+  onUnshareFolder: (request: ShareFolderRequest) => void;
+  folderShareBusyPath: string | null;
 };
 
 export const SettingsPanel: React.FC<SettingsPanelProps> = ({
@@ -340,6 +420,9 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   onSetKeepSearchExpanded,
   onSetTheme,
   showStatusMessage,
+  onShareFolder,
+  onUnshareFolder,
+  folderShareBusyPath,
 }) => {
   const isSmallScreen = useIsCompactScreen();
   const syncHeadingId = React.useId();
@@ -369,6 +452,19 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const storageFeedbackId = React.useId();
   const [serverActions, setServerActions] = React.useState<React.ReactNode | null>(null);
   const [relayActions, setRelayActions] = React.useState<React.ReactNode | null>(null);
+  const { folders } = useFolderLists();
+  const { effectiveRelays } = usePreferredRelays();
+  const currentPubkey = useCurrentPubkey();
+  const shareRelayHints = React.useMemo(
+    () => collectRelayHints(effectiveRelays.length > 0 ? effectiveRelays : DEFAULT_PUBLIC_RELAYS),
+    [effectiveRelays]
+  );
+  const shareOrigin = React.useMemo(() => {
+    if (typeof window !== "undefined" && window.location?.origin) {
+      return window.location.origin;
+    }
+    return DEFAULT_SHARE_ORIGIN;
+  }, []);
 
   const {
     snapshot: storageSnapshot,
@@ -577,6 +673,156 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   );
 
   const sections = React.useMemo(() => {
+    const shareableFolders = folders
+      .filter(record => record.path && record.path.trim().length > 0 && !isPrivateFolderName(record.name))
+      .map(record => {
+        const normalizedPath = record.path ?? "";
+        const segments = normalizedPath.split("/").filter(Boolean);
+        const depth = segments.length;
+        const parentPath = depth > 0 ? segments.slice(0, -1).join("/") : "";
+        return { record, depth, parentPath };
+      })
+      .sort((a, b) => (a.record.path || "").localeCompare(b.record.path || "", undefined, { sensitivity: "base" }));
+
+    const folderSharingCards = [
+      (
+        <SettingCard key="folder-sharing">
+          {shareableFolders.length === 0 ? (
+            <p className="text-sm text-slate-400">Create a folder with files in the library view to enable public sharing.</p>
+          ) : (
+            <div className="space-y-2">
+              {shareableFolders.map(({ record, depth }) => {
+                const pathLabel = `/${record.path}`;
+                const isPublic = record.visibility === "public";
+                const isBusy = folderShareBusyPath === record.path;
+                const sanitizedIdSource = record.path || record.name || "folder";
+                const folderLabelId = `folder-sharing-${sanitizedIdSource.replace(/[^a-zA-Z0-9_-]/g, "-").toLowerCase()}`;
+                const guideDepth = Math.max(depth - 1, 0);
+                const indentGuides =
+                  guideDepth > 0 ? (
+                    <div className="flex shrink-0 text-slate-100" aria-hidden="true">
+                      {Array.from({ length: guideDepth }).map((_, levelIndex) => {
+                        const isLast = levelIndex === guideDepth - 1;
+                        return (
+                          <div key={`${record.path}-guide-${levelIndex}`} className="relative h-full w-6">
+                            <div
+                              className="absolute left-1/2 border-l border-current"
+                              style={{ top: 0, bottom: isLast ? "50%" : 0 }}
+                            />
+                            {isLast ? (
+                              <div
+                                className="absolute left-1/2 right-0 border-t border-current"
+                                style={{ top: "50%" }}
+                              />
+                            ) : null}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : null;
+                const visibilityValue = isPublic ? "public" : "private";
+                const shareRequest = { path: record.path, scope: "aggregated" as const, serverUrl: null };
+                const shareLink = isPublic ? buildShareLink(record, currentPubkey, shareRelayHints, shareOrigin) : null;
+                const shareUrl = shareLink?.url ?? null;
+                const handleCopyLink = async () => {
+                  if (isBusy) return;
+                  if (!shareUrl) {
+                    onShareFolder(shareRequest);
+                    return;
+                  }
+                  if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+                    try {
+                      await navigator.clipboard.writeText(shareUrl);
+                      showStatusMessage?.("Share link copied to clipboard.", "success", 2500);
+                      return;
+                    } catch {
+                      // fall through
+                    }
+                  }
+                  showStatusMessage?.("Copy unavailable. Opening share dialog to manage the link.", "warning", 4000);
+                  onShareFolder(shareRequest);
+                };
+                const labelContent = (
+                  <>
+                    <FolderIcon
+                      size={16}
+                      aria-hidden="true"
+                      className={`${
+                        isPublic ? "text-slate-100 transition group-hover:text-emerald-200" : "text-slate-100"
+                      }`}
+                    />
+                    <span className="flex min-w-0 items-center gap-1">
+                      <span id={folderLabelId} className="truncate">
+                        {record.name || pathLabel}
+                      </span>
+                      {isPublic ? (
+                        <ShareIcon
+                          size={14}
+                          className="text-slate-100 transition group-hover:text-emerald-200"
+                          aria-hidden="true"
+                        />
+                      ) : null}
+                    </span>
+                  </>
+                );
+                return (
+                  <div key={record.path} className="flex items-stretch">
+                    {indentGuides}
+                    <div
+                      className={`flex flex-1 flex-col gap-3 rounded-xl border border-slate-800 bg-slate-950/70 px-4 py-3 sm:flex-row sm:items-center sm:justify-between ${
+                        isBusy ? "opacity-80" : ""
+                      }`}
+                    >
+                      <div className="min-w-0 flex-1 space-y-2">
+                        {isPublic ? (
+                          <button
+                            type="button"
+                            onClick={handleCopyLink}
+                            disabled={isBusy}
+                            title="Copy share link"
+                            className={`group inline-flex items-center gap-2 rounded-md px-1.5 py-1 text-sm font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-900 ${
+                              isBusy
+                                ? "cursor-not-allowed text-slate-500"
+                                : "text-slate-100 hover:text-emerald-100"
+                            }`}
+                          >
+                            {labelContent}
+                          </button>
+                        ) : (
+                          <div className="flex items-center gap-2 text-sm font-medium text-slate-100">
+                            {labelContent}
+                          </div>
+                        )}
+                        <p className="break-all text-xs text-slate-500">{pathLabel}</p>
+                      </div>
+                      <div className="flex w-full flex-wrap items-center justify-end gap-2 sm:w-auto sm:flex-none">
+                        <SegmentedControl
+                          options={VISIBILITY_OPTIONS}
+                          value={visibilityValue}
+                          onChange={nextValue => {
+                            if (nextValue === visibilityValue || isBusy) return;
+                            if (nextValue === "public") {
+                              onShareFolder(shareRequest);
+                            } else {
+                              onUnshareFolder(shareRequest);
+                            }
+                          }}
+                          labelledBy={folderLabelId}
+                          variant="compact"
+                          className="flex flex-wrap justify-end gap-2"
+                          disabled={isBusy}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </SettingCard>
+      ),
+    ];
+
     const baseSections = [
       {
         id: "primary",
@@ -1044,8 +1290,27 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
       },
     ];
 
-    return baseSections.slice().sort((a, b) => a.label.localeCompare(b.label));
+    const sectionsWithShare = [
+      ...baseSections,
+      {
+        id: "sharing",
+        label: "Folder Sharing",
+        description: "Manage which folders Bloom shares publicly.",
+        icon: ShareIcon,
+        cards: folderSharingCards,
+      },
+    ];
+
+    return sectionsWithShare.sort((a, b) => a.label.localeCompare(b.label));
   }, [
+    folders,
+    folderShareBusyPath,
+    currentPubkey,
+    shareRelayHints,
+    shareOrigin,
+    showStatusMessage,
+    onShareFolder,
+    onUnshareFolder,
     syncEnabled,
     syncHeadingId,
     syncDescriptionId,

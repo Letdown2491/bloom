@@ -11,6 +11,7 @@ import {
   publishFolderList,
   removeShaFromRecord,
   type FolderListRecord,
+  type FolderListVisibility,
 } from "../lib/folderList";
 import { applyFolderUpdate, containsReservedFolderSegment, normalizeFolderPathInput } from "../utils/blobMetadataStore";
 
@@ -29,6 +30,7 @@ type FolderListContextValue = {
   getFolderDisplayName: (path: string) => string;
   resolveFolderPath: (path: string) => string;
   deleteFolder: (path: string) => Promise<FolderListRecord | null>;
+  setFolderVisibility: (path: string, visibility: FolderListVisibility) => Promise<FolderListRecord | null>;
 };
 
 const FolderListContext = createContext<FolderListContextValue | undefined>(undefined);
@@ -210,6 +212,25 @@ export const FolderListProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     [ndk, resolveFolderPath, signer, updateState, user]
   );
 
+  const setFolderVisibility = useCallback(
+    async (path: string, visibility: FolderListVisibility) => {
+      const normalizedPath = resolveFolderPath(path);
+      if (!normalizedPath) return null;
+      const existing =
+        foldersRef.current.get(normalizedPath) ?? buildDefaultFolderRecord(normalizedPath, { shas: [] });
+      if (existing.visibility === visibility) {
+        return existing;
+      }
+      const updated: FolderListRecord = {
+        ...existing,
+        visibility,
+      };
+      await publishAndStore(updated);
+      return updated;
+    },
+    [publishAndStore, resolveFolderPath]
+  );
+
   const foldersByPath = useMemo(() => new Map(folders.map(record => [record.path, record])), [folders]);
 
   const getFolderDisplayName = useCallback(
@@ -237,6 +258,7 @@ export const FolderListProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       getFolderDisplayName,
       resolveFolderPath,
       deleteFolder,
+      setFolderVisibility,
     }),
     [
       folders,
@@ -250,6 +272,7 @@ export const FolderListProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       getFolderDisplayName,
       resolveFolderPath,
       deleteFolder,
+      setFolderVisibility,
     ]
   );
 

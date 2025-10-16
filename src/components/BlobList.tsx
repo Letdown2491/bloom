@@ -25,7 +25,7 @@ import {
 } from "./icons";
 import { PRIVATE_PLACEHOLDER_SHA } from "../constants/private";
 import type { FileKind } from "./icons";
-import { getBlobMetadataName, type BlobAudioMetadata } from "../utils/blobMetadataStore";
+import { getBlobMetadataName, normalizeFolderPathInput, type BlobAudioMetadata } from "../utils/blobMetadataStore";
 import { cachePreviewBlob, getCachedPreviewBlob } from "../utils/blobPreviewCache";
 import { useBlobMetadata } from "../features/browse/useBlobMetadata";
 import { useBlobPreview, type PreviewTarget, canBlobPreview } from "../features/browse/useBlobPreview";
@@ -35,6 +35,8 @@ import { usePrivateLibrary } from "../context/PrivateLibraryContext";
 import type { PrivateListEntry } from "../lib/privateList";
 import { useUserPreferences, type DefaultSortOption, type SortDirection } from "../context/UserPreferencesContext";
 import { useDialog } from "../context/DialogContext";
+import type { FolderListRecord } from "../lib/folderList";
+import type { FolderShareHint, ShareFolderScope } from "../types/shareFolder";
 
 export type BlobReplicaSummary = {
   count: number;
@@ -59,6 +61,10 @@ export type BlobListProps = {
   onShare?: (blob: BlossomBlob) => void;
   onRename?: (blob: BlossomBlob) => void;
   onOpenList?: (blob: BlossomBlob) => void;
+  folderRecords?: Map<string, FolderListRecord>;
+  onShareFolder?: (hint: FolderShareHint) => void;
+  onUnshareFolder?: (hint: FolderShareHint) => void;
+  folderShareBusyPath?: string | null;
   currentTrackUrl?: string;
   currentTrackStatus?: "idle" | "playing" | "paused";
   showGridPreviews?: boolean;
@@ -307,6 +313,10 @@ export const BlobList: React.FC<BlobListProps> = ({
   onShare,
   onRename,
   onOpenList,
+  folderRecords,
+  onShareFolder,
+  onUnshareFolder,
+  folderShareBusyPath = null,
   currentTrackUrl,
   currentTrackStatus,
   showGridPreviews = true,
@@ -692,6 +702,10 @@ export const BlobList: React.FC<BlobListProps> = ({
           onShare={onShare}
           onRename={onRename}
           onOpenList={onOpenList}
+          folderRecords={folderRecords}
+          onShareFolder={onShareFolder}
+          onUnshareFolder={onUnshareFolder}
+          folderShareBusyPath={folderShareBusyPath}
           currentTrackUrl={currentTrackUrl}
           currentTrackStatus={currentTrackStatus}
           detectedKinds={detectedKinds}
@@ -702,37 +716,41 @@ export const BlobList: React.FC<BlobListProps> = ({
           requestMetadata={requestMetadata}
           replicaInfo={replicaInfo}
           isMusicView={isMusicView}
-        audioMetadata={audioMetadata}
-        showPreviews={showListPreviews}
-        resolveCoverEntry={resolveCoverEntry}
-      />
-    ) : (
-      <GridLayout
-        blobs={gridBlobs}
-        baseUrl={baseUrl}
-        requiresAuth={requiresAuth}
-        signTemplate={signTemplate}
-        serverType={serverType}
-        selected={selected}
-        onToggle={onToggle}
-        onDelete={onDelete}
-        onDownload={handleDownload}
-        onPreview={handlePreview}
-        onPlay={onPlay}
-        onShare={onShare}
-        onRename={onRename}
-        onOpenList={onOpenList}
-        currentTrackUrl={currentTrackUrl}
-        currentTrackStatus={currentTrackStatus}
-        detectedKinds={detectedKinds}
-        onDetect={handleDetect}
-        onBlobVisible={requestMetadata}
-        replicaInfo={replicaInfo}
-        audioMetadata={audioMetadata}
-        showPreviews={showGridPreviews}
-        resolveCoverEntry={resolveCoverEntry}
-      />
-    )}
+          audioMetadata={audioMetadata}
+          showPreviews={showListPreviews}
+          resolveCoverEntry={resolveCoverEntry}
+        />
+      ) : (
+        <GridLayout
+          blobs={gridBlobs}
+          baseUrl={baseUrl}
+          requiresAuth={requiresAuth}
+          signTemplate={signTemplate}
+          serverType={serverType}
+          selected={selected}
+          onToggle={onToggle}
+          onDelete={onDelete}
+          onDownload={handleDownload}
+          onPreview={handlePreview}
+          onPlay={onPlay}
+          onShare={onShare}
+          onRename={onRename}
+          onOpenList={onOpenList}
+          folderRecords={folderRecords}
+          onShareFolder={onShareFolder}
+          onUnshareFolder={onUnshareFolder}
+          folderShareBusyPath={folderShareBusyPath}
+          currentTrackUrl={currentTrackUrl}
+          currentTrackStatus={currentTrackStatus}
+          detectedKinds={detectedKinds}
+          onDetect={handleDetect}
+          onBlobVisible={requestMetadata}
+          replicaInfo={replicaInfo}
+          audioMetadata={audioMetadata}
+          showPreviews={showGridPreviews}
+          resolveCoverEntry={resolveCoverEntry}
+        />
+      )}
       {previewTarget && (
         <PreviewDialog
           target={previewTarget}
@@ -766,6 +784,10 @@ const ListLayout: React.FC<{
   onShare?: (blob: BlossomBlob) => void;
   onRename?: (blob: BlossomBlob) => void;
   onOpenList?: (blob: BlossomBlob) => void;
+  folderRecords?: Map<string, FolderListRecord>;
+  onShareFolder?: (hint: FolderShareHint) => void;
+  onUnshareFolder?: (hint: FolderShareHint) => void;
+  folderShareBusyPath?: string | null;
   currentTrackUrl?: string;
   currentTrackStatus?: "idle" | "playing" | "paused";
   detectedKinds: DetectedKindMap;
@@ -795,6 +817,10 @@ const ListLayout: React.FC<{
   onShare,
   onRename,
   onOpenList,
+  folderRecords,
+  onShareFolder,
+  onUnshareFolder,
+  folderShareBusyPath,
   currentTrackUrl,
   currentTrackStatus,
   detectedKinds,
@@ -925,6 +951,10 @@ const ListLayout: React.FC<{
       onShare,
       onRename,
       onOpenList,
+      folderRecords,
+      onShareFolder,
+      onUnshareFolder,
+      folderShareBusyPath,
       currentTrackUrl,
       currentTrackStatus,
       detectedKinds,
@@ -956,6 +986,10 @@ const ListLayout: React.FC<{
       onShare,
       onRename,
       onOpenList,
+      folderRecords,
+      onShareFolder,
+      onUnshareFolder,
+      folderShareBusyPath,
       currentTrackUrl,
       currentTrackStatus,
       detectedKinds,
@@ -1006,6 +1040,10 @@ const ListLayout: React.FC<{
         isCompactList: rowIsCompactList,
         listRowHeight: rowListRowHeight,
         actionsColumnWidth: rowActionsColumnWidth,
+        folderRecords: rowFolderRecords,
+        onShareFolder: rowOnShareFolder,
+        onUnshareFolder: rowOnUnshareFolder,
+        folderShareBusyPath: rowFolderShareBusyPath,
       } = data;
 
       const blob = listBlobs[index];
@@ -1044,6 +1082,10 @@ const ListLayout: React.FC<{
           onShare={rowOnShare}
           onRename={rowOnRename}
           onOpenList={rowOnOpenList}
+          folderRecords={rowFolderRecords}
+          onShareFolder={rowOnShareFolder}
+          onUnshareFolder={rowOnUnshareFolder}
+          folderShareBusyPath={rowFolderShareBusyPath}
           currentTrackUrl={rowCurrentTrackUrl}
           currentTrackStatus={rowCurrentTrackStatus}
           detectedKind={detectedKind}
@@ -1053,13 +1095,13 @@ const ListLayout: React.FC<{
           isMusicListView={rowIsMusicView}
           trackMetadata={trackMetadata}
           onActionsWidthChange={rowHandleActionsWidthChange}
-        showPreviews={rowShowPreviews}
-        isPrivateBlob={isPrivateBlob}
-        coverEntry={coverEntry}
-        getMenuBoundary={rowGetMenuBoundary}
-        isCompactList={rowIsCompactList}
-        actionsColumnWidth={rowActionsColumnWidth}
-      />
+          showPreviews={rowShowPreviews}
+          isPrivateBlob={isPrivateBlob}
+          coverEntry={coverEntry}
+          getMenuBoundary={rowGetMenuBoundary}
+          isCompactList={rowIsCompactList}
+          actionsColumnWidth={rowActionsColumnWidth}
+        />
       );
     },
     [itemData, listWidth]
@@ -1218,6 +1260,10 @@ const GridLayout: React.FC<{
   onShare?: (blob: BlossomBlob) => void;
   onRename?: (blob: BlossomBlob) => void;
   onOpenList?: (blob: BlossomBlob) => void;
+  folderRecords?: Map<string, FolderListRecord>;
+  onShareFolder?: (hint: FolderShareHint) => void;
+  onUnshareFolder?: (hint: FolderShareHint) => void;
+  folderShareBusyPath?: string | null;
   currentTrackUrl?: string;
   currentTrackStatus?: "idle" | "playing" | "paused";
   detectedKinds: DetectedKindMap;
@@ -1242,6 +1288,10 @@ const GridLayout: React.FC<{
   onShare,
   onRename,
   onOpenList,
+  folderRecords,
+  onShareFolder,
+  onUnshareFolder,
+  folderShareBusyPath,
   currentTrackUrl,
   currentTrackStatus,
   detectedKinds,
@@ -1420,6 +1470,10 @@ const GridLayout: React.FC<{
               onShare={onShare}
               onRename={onRename}
               onOpenList={onOpenList}
+              folderRecords={folderRecords}
+              onShareFolder={onShareFolder}
+              onUnshareFolder={onUnshareFolder}
+              folderShareBusyPath={folderShareBusyPath}
               onDetect={onDetect}
               onBlobVisible={onBlobVisible}
               replicaSummary={replicaInfo?.get(blob.sha256)}
@@ -1466,6 +1520,10 @@ type GridCardProps = {
   onShare?: (blob: BlossomBlob) => void;
   onRename?: (blob: BlossomBlob) => void;
   onOpenList?: (blob: BlossomBlob) => void;
+  folderRecords?: Map<string, FolderListRecord>;
+  onShareFolder?: (hint: FolderShareHint) => void;
+  onUnshareFolder?: (hint: FolderShareHint) => void;
+  folderShareBusyPath?: string | null;
   onDetect: (sha: string, kind: "image" | "video") => void;
   onBlobVisible: (sha: string) => void;
   replicaSummary?: BlobReplicaSummary;
@@ -1502,6 +1560,10 @@ const GridCard = React.memo<GridCardProps>(
     onShare,
     onRename,
     onOpenList,
+    folderRecords,
+    onShareFolder,
+    onUnshareFolder,
+    folderShareBusyPath,
     onDetect,
     onBlobVisible,
     replicaSummary,
@@ -1530,15 +1592,17 @@ const GridCard = React.memo<GridCardProps>(
     const focusRingClass = isLightTheme
       ? "focus:outline-none focus:ring-1 focus:ring-emerald-400 focus:ring-offset-1 focus:ring-offset-white"
       : "focus:outline-none focus:ring-1 focus:ring-emerald-400 focus:ring-offset-1 focus:ring-offset-slate-900";
-    const makeItemClass = (variant?: "destructive") => {
-      if (variant === "destructive") {
-        return `flex items-center gap-2 rounded-md px-3 py-1.5 text-sm transition ${focusRingClass} ${
-          isLightTheme ? "text-red-600 hover:bg-red-50" : "text-red-300 hover:bg-red-900/40"
-        }`;
-      }
-      return `flex items-center gap-2 rounded-md px-3 py-1.5 text-sm transition ${focusRingClass} ${
-        isLightTheme ? "text-slate-700 hover:bg-slate-100" : "text-slate-200 hover:bg-slate-700"
-      }`;
+    const makeItemClass = (variant?: "destructive", disabled?: boolean) => {
+      const base = `flex items-center gap-2 rounded-md px-3 py-1.5 text-sm transition ${focusRingClass}`;
+      const variantClass = variant === "destructive"
+        ? isLightTheme
+          ? "text-red-600 hover:bg-red-50"
+          : "text-red-300 hover:bg-red-900/40"
+        : isLightTheme
+          ? "text-slate-700 hover:bg-slate-100"
+          : "text-slate-200 hover:bg-slate-700";
+      const disabledClass = disabled ? "cursor-not-allowed opacity-50 hover:bg-transparent" : "";
+      return `${base} ${variantClass} ${disabledClass}`.trim();
     };
     const cardStyle = useMemo<React.CSSProperties>(
       () => ({
@@ -1575,6 +1639,37 @@ const GridCard = React.memo<GridCardProps>(
     const playButtonLabel = isActivePlaying ? "Pause" : "Play";
     const playButtonAria = isActivePlaying ? "Pause audio" : "Play audio";
     const displayName = buildDisplayName(blob);
+    const folderInfo = blob.__bloomFolderPlaceholder
+      ? {
+          scope: blob.__bloomFolderScope ?? "aggregated",
+          path: blob.__bloomFolderTargetPath ?? "",
+          serverUrl: blob.serverUrl ?? null,
+          isParent: Boolean(blob.__bloomFolderIsParentLink),
+        }
+      : null;
+    const normalizedFolderPath = folderInfo ? normalizeFolderPathInput(folderInfo.path ?? undefined) ?? "" : null;
+    const folderRecord =
+      normalizedFolderPath && folderRecords ? folderRecords.get(normalizedFolderPath) ?? null : null;
+    const folderShareable =
+      Boolean(
+        folderInfo &&
+          !folderInfo.isParent &&
+          folderInfo.scope !== "private" &&
+          normalizedFolderPath !== null &&
+          folderRecord
+      );
+    const shareBusy = normalizedFolderPath ? folderShareBusyPath === normalizedFolderPath : false;
+    const folderVisibility = folderRecord?.visibility ?? "private";
+    const folderShareScope: ShareFolderScope = folderInfo?.scope === "server" ? "server" : "aggregated";
+    const folderIsShared = Boolean(folderInfo && !folderInfo.isParent && folderRecord?.visibility === "public");
+    const folderShareHint: FolderShareHint | null =
+      folderShareable && normalizedFolderPath
+        ? {
+            path: normalizedFolderPath,
+            scope: folderShareScope,
+            serverUrl: folderInfo?.serverUrl ?? blob.serverUrl ?? null,
+          }
+        : null;
 
     const handleMenuToggle = useCallback<React.MouseEventHandler<HTMLButtonElement>>(
       event => {
@@ -1604,8 +1699,36 @@ const GridCard = React.memo<GridCardProps>(
         onSelect: () => void;
         ariaLabel?: string;
         variant?: "destructive";
+        disabled?: boolean;
       };
       const items: DropdownItem[] = [];
+      if (folderShareHint && onShareFolder) {
+        if (folderVisibility === "public" && onUnshareFolder) {
+          items.push({
+            key: "unshare-folder",
+            label: shareBusy ? "Unsharing…" : "Unshare Folder",
+            icon: <LockIcon size={14} />, 
+            ariaLabel: "Unshare folder",
+            onSelect: () => {
+              if (shareBusy) return;
+              onUnshareFolder({ ...folderShareHint });
+            },
+            disabled: shareBusy,
+          });
+        } else {
+          items.push({
+            key: "share-folder",
+            label: shareBusy ? "Sharing…" : "Share Folder",
+            icon: <ShareIcon size={14} />, 
+            ariaLabel: "Share folder",
+            onSelect: () => {
+              if (shareBusy) return;
+              onShareFolder({ ...folderShareHint });
+            },
+            disabled: shareBusy,
+          });
+        }
+      }
       if (blob.url && !isListBlob) {
         items.push({
           key: "download",
@@ -1640,7 +1763,20 @@ const GridCard = React.memo<GridCardProps>(
       });
 
       return items;
-    }, [blob, isAudio, isListBlob, isPrivateList, onDelete, onDownload, onRename]);
+    }, [
+      blob,
+      folderShareHint,
+      onShareFolder,
+      onUnshareFolder,
+      shareBusy,
+      folderVisibility,
+      isAudio,
+      isListBlob,
+      isPrivateList,
+      onDelete,
+      onDownload,
+      onRename,
+    ]);
 
     const handleMenuItemSelect = useCallback(
       (callback: () => void) => {
@@ -1737,6 +1873,30 @@ const GridCard = React.memo<GridCardProps>(
     ]);
 
     const shareButton = useMemo(() => {
+      if (folderShareHint && onShareFolder) {
+        const disabled = shareBusy;
+        const title = disabled
+          ? "Sharing folder…"
+          : folderVisibility === "public"
+            ? "Show share link"
+            : "Share folder";
+        return (
+          <button
+            className="p-2 shrink-0 flex h-10 w-10 items-center justify-center rounded-lg bg-slate-800 text-slate-200 transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-slate-800"
+            onClick={event => {
+              event.stopPropagation();
+              if (disabled) return;
+              onShareFolder({ ...folderShareHint });
+            }}
+            aria-label="Share folder"
+            title={title}
+            type="button"
+            disabled={disabled}
+          >
+            <ShareIcon size={16} />
+          </button>
+        );
+      }
       if (!onShare) return null;
       const disabled = isPrivateItem || !blob.url;
       const title = disabled
@@ -1761,7 +1921,16 @@ const GridCard = React.memo<GridCardProps>(
           <ShareIcon size={16} />
         </button>
       );
-    }, [blob, isAudio, isPrivateItem, onShare]);
+    }, [
+      blob,
+      folderShareHint,
+      onShareFolder,
+      shareBusy,
+      folderVisibility,
+      isAudio,
+      isPrivateItem,
+      onShare,
+    ]);
 
     const primaryAction = useMemo(() => {
       const primaryActionBaseClass =
@@ -1865,10 +2034,11 @@ const GridCard = React.memo<GridCardProps>(
           {previewContent}
           <div className="pointer-events-none absolute inset-x-0 bottom-0 px-3 pb-2">
             <div className="w-full rounded-md bg-slate-950/75 px-2 py-1 text-xs font-medium text-white text-center" title={displayName}>
-              <span className="flex max-w-full items-center justify-center gap-1">
-                <span className="truncate">{displayName}</span>
-                {isPrivateItem ? <LockIcon size={12} className="text-amber-300" aria-hidden="true" /> : null}
-              </span>
+                <span className="flex max-w-full items-center justify-center gap-1">
+                  <span className="truncate">{displayName}</span>
+                  {folderIsShared ? <ShareIcon size={12} className="text-white" aria-hidden="true" /> : null}
+                  {isPrivateItem ? <LockIcon size={12} className="text-amber-300" aria-hidden="true" /> : null}
+                </span>
             </div>
           </div>
         </div>
@@ -1900,10 +2070,12 @@ const GridCard = React.memo<GridCardProps>(
                       href="#"
                       role="menuitem"
                       aria-label={item.ariaLabel ?? item.label}
-                      className={makeItemClass(item.variant)}
+                      className={makeItemClass(item.variant, item.disabled)}
+                      aria-disabled={item.disabled || undefined}
                       onClick={event => {
                         event.preventDefault();
                         event.stopPropagation();
+                        if (item.disabled) return;
                         handleMenuItemSelect(item.onSelect);
                       }}
                     >
@@ -2308,6 +2480,10 @@ type ListRowProps = {
   onShare?: (blob: BlossomBlob) => void;
   onRename?: (blob: BlossomBlob) => void;
   onOpenList?: (blob: BlossomBlob) => void;
+  folderRecords?: Map<string, FolderListRecord>;
+  onShareFolder?: (hint: FolderShareHint) => void;
+  onUnshareFolder?: (hint: FolderShareHint) => void;
+  folderShareBusyPath?: string | null;
   currentTrackUrl?: string;
   currentTrackStatus?: "idle" | "playing" | "paused";
   detectedKind?: "image" | "video";
@@ -2344,6 +2520,10 @@ const ListRowComponent: React.FC<ListRowProps> = ({
   onShare,
   onRename,
   onOpenList,
+  folderRecords,
+  onShareFolder,
+  onUnshareFolder,
+  folderShareBusyPath,
   currentTrackUrl,
   currentTrackStatus,
   detectedKind,
@@ -2379,6 +2559,37 @@ const ListRowComponent: React.FC<ListRowProps> = ({
   const showButtonClass = `${primaryActionBaseClass} bg-emerald-700/70 text-slate-100 hover:bg-emerald-600`;
   const playPauseIcon = isActivePlaying ? <PauseIcon size={16} /> : <PlayIcon size={16} />;
   const displayName = buildDisplayName(blob);
+  const folderInfo = blob.__bloomFolderPlaceholder
+    ? {
+        scope: blob.__bloomFolderScope ?? "aggregated",
+        path: blob.__bloomFolderTargetPath ?? "",
+        serverUrl: blob.serverUrl ?? null,
+        isParent: Boolean(blob.__bloomFolderIsParentLink),
+      }
+    : null;
+  const normalizedFolderPath = folderInfo ? normalizeFolderPathInput(folderInfo.path ?? undefined) ?? "" : null;
+  const folderRecord =
+    normalizedFolderPath && folderRecords ? folderRecords.get(normalizedFolderPath) ?? null : null;
+  const folderShareable =
+    Boolean(
+      folderInfo &&
+        !folderInfo.isParent &&
+        folderInfo.scope !== "private" &&
+        normalizedFolderPath !== null &&
+        folderRecord
+    );
+  const shareBusy = normalizedFolderPath ? folderShareBusyPath === normalizedFolderPath : false;
+  const folderVisibility = folderRecord?.visibility ?? "private";
+  const folderShareScope: ShareFolderScope = folderInfo?.scope === "server" ? "server" : "aggregated";
+  const folderIsShared = Boolean(folderInfo && !folderInfo.isParent && folderRecord?.visibility === "public");
+  const folderShareHint: FolderShareHint | null =
+    folderShareable && normalizedFolderPath
+      ? {
+          path: normalizedFolderPath,
+          scope: folderShareScope,
+          serverUrl: folderInfo?.serverUrl ?? blob.serverUrl ?? null,
+        }
+      : null;
   const trackMetadata = trackMetadataProp ?? undefined;
   const canPreview = canBlobPreview(blob, detectedKind, kind);
   const allowDialogPreview = kind === "pdf" || kind === "doc" || kind === "document";
@@ -2572,33 +2783,56 @@ const ListRowComponent: React.FC<ListRowProps> = ({
       </button>
     ) : null;
 
-  const shareButton = onShare
-    ? (() => {
-        const disabled = isPrivateItem || !blob.url;
-        const ariaLabel = isMusicListView ? "Share track" : "Share blob";
-        const title = disabled
-          ? isPrivateItem
-            ? "Private files cannot be shared"
-            : "Share available once file link is ready"
-          : "Share";
-        return (
-          <button
-            className="p-2 shrink-0 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-slate-800"
-            onClick={event => {
-              if (disabled) return;
-              event.stopPropagation();
-              onShare?.(blob);
-            }}
-            aria-label={ariaLabel}
-            title={title}
-            type="button"
-            disabled={disabled}
-          >
-            <ShareIcon size={16} />
-          </button>
-        );
-      })()
-    : null;
+    const shareButton = (() => {
+    if (folderShareHint && onShareFolder) {
+      const disabled = shareBusy;
+      const title = disabled
+        ? "Sharing folder…"
+        : folderVisibility === "public"
+          ? "Show share link"
+          : "Share folder";
+      return (
+        <button
+          className="p-2 shrink-0 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-slate-800"
+          onClick={event => {
+            event.stopPropagation();
+            if (disabled) return;
+            onShareFolder(folderShareHint);
+          }}
+          aria-label="Share folder"
+          title={title}
+          type="button"
+          disabled={disabled}
+        >
+          <ShareIcon size={16} />
+        </button>
+      );
+    }
+    if (!onShare) return null;
+    const disabled = isPrivateItem || !blob.url;
+    const ariaLabel = isMusicListView ? "Share track" : "Share blob";
+    const title = disabled
+      ? isPrivateItem
+        ? "Private files cannot be shared"
+        : "Share available once file link is ready"
+      : "Share";
+    return (
+      <button
+        className="p-2 shrink-0 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-slate-800"
+        onClick={event => {
+          if (disabled) return;
+          event.stopPropagation();
+          onShare?.(blob);
+        }}
+        aria-label={ariaLabel}
+        title={title}
+        type="button"
+        disabled={disabled}
+      >
+        <ShareIcon size={16} />
+      </button>
+    );
+  })();
 
   type DropdownItem = {
     key: string;
@@ -2607,9 +2841,38 @@ const ListRowComponent: React.FC<ListRowProps> = ({
     onSelect: () => void;
     ariaLabel?: string;
     variant?: "destructive";
+    disabled?: boolean;
   };
 
   const dropdownItems: DropdownItem[] = [];
+
+  if (folderShareHint && onShareFolder) {
+    if (folderVisibility === "public" && onUnshareFolder) {
+      dropdownItems.push({
+        key: "unshare-folder",
+        label: shareBusy ? "Unsharing…" : "Unshare Folder",
+        icon: <LockIcon size={14} />,
+        ariaLabel: "Unshare folder",
+        onSelect: () => {
+          if (shareBusy) return;
+          onUnshareFolder({ ...folderShareHint });
+        },
+        disabled: shareBusy,
+      });
+    } else {
+      dropdownItems.push({
+        key: "share-folder",
+        label: shareBusy ? "Sharing…" : "Share Folder",
+        icon: <ShareIcon size={14} />,
+        ariaLabel: "Share folder",
+        onSelect: () => {
+          if (shareBusy) return;
+          onShareFolder({ ...folderShareHint });
+        },
+        disabled: shareBusy,
+      });
+    }
+  }
 
   if (!isListBlob && blob.url) {
     dropdownItems.push({
@@ -2666,15 +2929,18 @@ const ListRowComponent: React.FC<ListRowProps> = ({
   const focusRingClass = isLightTheme
     ? "focus:outline-none focus:ring-1 focus:ring-emerald-400 focus:ring-offset-1 focus:ring-offset-white"
     : "focus:outline-none focus:ring-1 focus:ring-emerald-400 focus:ring-offset-1 focus:ring-offset-slate-900";
-  const makeItemClass = (variant?: "destructive") => {
-    if (variant === "destructive") {
-      return `flex items-center gap-2 rounded-md px-3 py-1.5 text-sm transition ${focusRingClass} ${
-        isLightTheme ? "text-red-600 hover:bg-red-50" : "text-red-300 hover:bg-red-900/40"
-      }`;
-    }
-    return `flex items-center gap-2 rounded-md px-3 py-1.5 text-sm transition ${focusRingClass} ${
-      isLightTheme ? "text-slate-700 hover:bg-slate-100" : "text-slate-200 hover:bg-slate-700"
-    }`;
+  const makeItemClass = (variant?: "destructive", disabled?: boolean) => {
+    const base = `flex items-center gap-2 rounded-md px-3 py-1.5 text-sm transition ${focusRingClass}`;
+    const variantClass =
+      variant === "destructive"
+        ? isLightTheme
+          ? "text-red-600 hover:bg-red-50"
+          : "text-red-300 hover:bg-red-900/40"
+        : isLightTheme
+          ? "text-slate-700 hover:bg-slate-100"
+          : "text-slate-200 hover:bg-slate-700";
+    const disabledClass = disabled ? "cursor-not-allowed opacity-50 hover:bg-transparent" : "";
+    return `${base} ${variantClass} ${disabledClass}`.trim();
   };
 
   const dropdownMenu = !showDropdown
@@ -2704,10 +2970,12 @@ const ListRowComponent: React.FC<ListRowProps> = ({
                   href="#"
                   role="menuitem"
                   aria-label={item.ariaLabel ?? item.label}
-                  className={makeItemClass(item.variant)}
+                  className={makeItemClass(item.variant, item.disabled)}
+                  aria-disabled={item.disabled || undefined}
                   onClick={event => {
                     event.preventDefault();
                     event.stopPropagation();
+                    if (item.disabled) return;
                     item.onSelect();
                     setMenuOpen(false);
                   }}
@@ -2743,8 +3011,9 @@ const ListRowComponent: React.FC<ListRowProps> = ({
           {thumbnail}
         </div>
         <div className="min-w-0">
-          <div className="truncate font-medium text-slate-100" title={displayName}>
-            {trackTitle}
+          <div className="flex items-center gap-2 truncate font-medium text-slate-100" title={displayName}>
+            <span className="truncate">{trackTitle}</span>
+            {folderIsShared ? <ShareIcon size={14} className="shrink-0" aria-hidden="true" /> : null}
           </div>
           <div className="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-slate-400 md:hidden">
             <span className="truncate">{artistName || "—"}</span>
@@ -2806,6 +3075,7 @@ const ListRowComponent: React.FC<ListRowProps> = ({
             <div className="min-w-0" title={displayName}>
               <div className="flex min-w-0 flex-wrap items-center gap-2 font-medium text-slate-100">
                 <span className="truncate">{displayName}</span>
+                {folderIsShared ? <ShareIcon size={14} className="text-slate-100" aria-hidden="true" /> : null}
                 {isPrivateItem ? <LockIcon size={14} className="text-amber-300" aria-hidden="true" /> : null}
               </div>
               {metadataInline}

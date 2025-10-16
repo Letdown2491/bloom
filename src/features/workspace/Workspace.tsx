@@ -12,6 +12,7 @@ import { useBrowseControls } from "../browse/useBrowseControls";
 import { BrowseControls } from "../browse/BrowseTab";
 import type { SyncStateSnapshot } from "./TransferTabContainer";
 import { useIsCompactScreen } from "../../hooks/useIsCompactScreen";
+import type { ShareFolderRequest } from "../../types/shareFolder";
 
 const UploadPanelLazy = React.lazy(() =>
   import("../../components/UploadPanel").then(module => ({ default: module.UploadPanel }))
@@ -33,6 +34,9 @@ type WorkspaceProps = {
   onRequestRename: (blob: BlossomBlob) => void;
   onRequestFolderRename: (path: string) => void;
   onRequestShare: (payload: SharePayload) => void;
+  onShareFolder: (request: ShareFolderRequest) => void;
+  onUnshareFolder: (request: ShareFolderRequest) => void;
+  folderShareBusyPath: string | null;
   onSetTab: (tab: TabId) => void;
   onUploadCompleted: (success: boolean) => void;
   showStatusMessage: (message: string, tone?: StatusMessageTone, duration?: number) => void;
@@ -64,6 +68,9 @@ export const Workspace: React.FC<WorkspaceProps> = ({
   onRequestRename,
   onRequestFolderRename,
   onRequestShare,
+  onShareFolder,
+  onUnshareFolder,
+  folderShareBusyPath,
   onSetTab,
   homeNavigationKey,
   onUploadCompleted,
@@ -172,6 +179,9 @@ export const Workspace: React.FC<WorkspaceProps> = ({
           onRequestRename={onRequestRename}
           onRequestFolderRename={onRequestFolderRename}
           onRequestShare={onRequestShare}
+          onShareFolder={onShareFolder}
+          onUnshareFolder={onUnshareFolder}
+          folderShareBusyPath={folderShareBusyPath}
           onSetTab={onSetTab}
           showStatusMessage={showStatusMessage}
           viewMode={viewMode}

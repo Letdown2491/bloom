@@ -12,6 +12,7 @@ import type { SharePayload, ShareCompletion } from "./ShareComposer";
 import type { ProfileMetadataPayload } from "../features/profile/ProfilePanel";
 import type { NdkContextValue } from "../context/NdkContext";
 import type { useShareWorkflow } from "../features/share/useShareWorkflow";
+import type { ShareFolderRequest } from "../types/shareFolder";
 
 import { WorkspaceProvider } from "../features/workspace/WorkspaceContext";
 
@@ -63,6 +64,9 @@ export type WorkspaceSectionProps = {
   onRequestRename: (blob: BlossomBlob) => void;
   onRequestFolderRename: (path: string) => void;
   onRequestShare: (payload: SharePayload) => void;
+  onShareFolder: (request: ShareFolderRequest) => void;
+  onUnshareFolder: (request: ShareFolderRequest) => void;
+  folderShareBusyPath: string | null;
   onSetTab: (tab: TabId) => void;
   onUploadCompleted: (success: boolean) => void;
   showStatusMessage: (message: string, tone?: StatusMessageTone, duration?: number) => void;
@@ -126,6 +130,9 @@ export const WorkspaceSection = memo(function WorkspaceSection({
   onRequestRename,
   onRequestFolderRename,
   onRequestShare,
+  onShareFolder,
+  onUnshareFolder,
+  folderShareBusyPath,
   onSetTab,
   onUploadCompleted,
   showStatusMessage,
@@ -196,10 +203,13 @@ export const WorkspaceSection = memo(function WorkspaceSection({
             onStatusMetricsChange={onStatusMetricsChange}
             onSyncStateChange={onSyncStateChange}
             onProvideSyncStarter={onProvideSyncStarter}
-            onRequestRename={onRequestRename}
-            onRequestFolderRename={onRequestFolderRename}
-            onRequestShare={onRequestShare}
-            onSetTab={onSetTab}
+          onRequestRename={onRequestRename}
+          onRequestFolderRename={onRequestFolderRename}
+          onRequestShare={onRequestShare}
+          onShareFolder={onShareFolder}
+          onUnshareFolder={onUnshareFolder}
+          folderShareBusyPath={folderShareBusyPath}
+          onSetTab={onSetTab}
             onUploadCompleted={onUploadCompleted}
             showStatusMessage={showStatusMessage}
             onProvideBrowseControls={onProvideBrowseControls}
@@ -324,6 +334,9 @@ export const WorkspaceSection = memo(function WorkspaceSection({
             onSetKeepSearchExpanded={onSetKeepSearchExpanded}
             onSetTheme={onSetTheme}
             showStatusMessage={showStatusMessage}
+            onShareFolder={onShareFolder}
+            onUnshareFolder={onUnshareFolder}
+            folderShareBusyPath={folderShareBusyPath}
           />
         </Suspense>
       )}

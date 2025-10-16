@@ -1,7 +1,15 @@
 import React from "react";
 import type { BrowseNavigationState } from "../features/workspace/BrowseTabContainer";
 import type { TabId } from "../types/tabs";
-import { CloseIcon, HomeIcon, ChevronLeftIcon, ChevronRightIcon, SearchIcon, TransferIcon } from "./icons";
+import {
+  CloseIcon,
+  HomeIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
+  SearchIcon,
+  TransferIcon,
+  ShareIcon,
+} from "./icons";
 import { useIsCompactScreen } from "../hooks/useIsCompactScreen";
 
 type NavTab = {
@@ -175,7 +183,12 @@ const WorkspaceToolbarComponent: React.FC<WorkspaceToolbarProps> = ({
                   disabled={showAuthPrompt}
                   className="max-w-[10rem] truncate rounded-lg border border-slate-800 bg-slate-900/70 px-2 py-1 text-left transition hover:border-slate-700 disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  {segment.label}
+                    <span className="flex items-center gap-1">
+                      <span className="truncate">{segment.label}</span>
+                      {segment.visibility === "public" ? (
+                        <ShareIcon size={12} className="shrink-0 text-slate-200" aria-hidden="true" />
+                      ) : null}
+                    </span>
                 </button>
               </React.Fragment>
             ))}

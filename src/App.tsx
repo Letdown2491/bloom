@@ -8,6 +8,7 @@ import { usePreferredRelays } from "./hooks/usePreferredRelays";
 import { useAliasSync } from "./hooks/useAliasSync";
 import { useIsCompactScreen } from "./hooks/useIsCompactScreen";
 import { useSelection } from "./features/selection/SelectionContext";
+import { useFolderLists } from "./context/FolderListContext";
 import { useShareWorkflow } from "./features/share/useShareWorkflow";
 import { useAudio } from "./context/AudioContext";
 import { useUserPreferences, type DefaultSortOption, type SortDirection } from "./context/UserPreferencesContext";
@@ -22,6 +23,9 @@ import type { FilterMode } from "./types/filter";
 import type { ProfileMetadataPayload } from "./features/profile/ProfilePanel";
 import { deriveServerNameFromUrl } from "./utils/serverName";
 import { useDialog } from "./context/DialogContext";
+import { DEFAULT_PUBLIC_RELAYS, sanitizeRelayUrl } from "./utils/relays";
+import { buildNip94EventTemplate } from "./lib/nip94";
+import { ShareFolderRequest } from "./types/shareFolder";
 
 import {
   ChevronRightIcon,
@@ -37,8 +41,16 @@ import {
   LogoutIcon,
 } from "./components/icons";
 import { FolderRenameDialog } from "./components/FolderRenameDialog";
+import { FolderShareDialog } from "./components/FolderShareDialog";
 import { StatusFooter } from "./components/StatusFooter";
 import { WorkspaceSection } from "./components/WorkspaceSection";
+import {
+  encodeFolderNaddr,
+  isPrivateFolderName,
+  buildFolderEventTemplate,
+  type FolderListRecord,
+  type FolderFileHint,
+} from "./lib/folderList";
 
 const ConnectSignerDialogLazy = React.lazy(() =>
   import("./features/nip46/ConnectSignerDialog").then(module => ({ default: module.ConnectSignerDialog }))
@@ -53,6 +65,7 @@ const AudioPlayerCardLazy = React.lazy(() =>
 );
 
 const NAV_TABS = [{ id: "upload" as const, label: "Upload", icon: UploadIcon }];
+const FOLDER_METADATA_FETCH_TIMEOUT_MS = 7000;
 
 const ALL_SERVERS_VALUE = "__all__";
 
@@ -99,9 +112,26 @@ type PendingSave = {
   backoffUntil?: number;
 };
 
+type FolderShareDialogState = {
+  record: FolderListRecord;
+  naddr: string;
+  shareUrl: string;
+};
+
+const collectRelayUrls = (relays: readonly string[]) => {
+  const set = new Set<string>();
+  relays.forEach(url => {
+    const normalized = sanitizeRelayUrl(url);
+    if (normalized) {
+      set.add(normalized);
+    }
+  });
+  return Array.from(set);
+};
+
 export default function App() {
   const queryClient = useQueryClient();
-  const { connect, disconnect, user, signer, ndk } = useNdk();
+  const { connect, disconnect, user, signer, ndk, getModule } = useNdk();
   const {
     snapshot: nip46Snapshot,
     service: nip46Service,
@@ -169,6 +199,9 @@ export default function App() {
   } = useShareWorkflow();
 
   const audio = useAudio();
+  const { foldersByPath, resolveFolderPath, setFolderVisibility } = useFolderLists();
+  const [folderShareBusyPath, setFolderShareBusyPath] = useState<string | null>(null);
+  const [folderShareDialog, setFolderShareDialog] = useState<FolderShareDialogState | null>(null);
 
   const { enabled: syncEnabled, loading: syncLoading, error: syncError, pending: syncPending, lastSyncedAt: syncLastSyncedAt } = syncState;
 
@@ -426,6 +459,392 @@ export default function App() {
     },
     []
   );
+
+  const ensureRelayConnections = useCallback(
+    async (relayUrls: readonly string[]) => {
+      if (!ndk) return;
+      const targets = collectRelayUrls(relayUrls);
+      if (!targets.length) return;
+      let attemptedConnection = false;
+      targets.forEach(url => {
+        const relay = ndk.pool?.relays.get(url);
+        if (relay) {
+          if (typeof relay.connect === "function") {
+            try {
+              relay.connect();
+              attemptedConnection = true;
+            } catch (error) {
+              console.warn("Unable to connect to relay", url, error);
+            }
+          }
+          return;
+        }
+        try {
+          ndk.addExplicitRelay(url, undefined, true);
+          attemptedConnection = true;
+        } catch (error) {
+          console.warn("Unable to add relay for sharing", url, error);
+        }
+      });
+      if (attemptedConnection) {
+        try {
+          await ndk.connect();
+        } catch (error) {
+          console.warn("Failed to establish relay connections for sharing", error);
+        }
+      }
+    },
+    [ndk]
+  );
+
+  const ensureFolderListOnRelays = useCallback(
+    async (record: FolderListRecord, relayUrls: readonly string[], blobs?: BlossomBlob[]) => {
+      if (!ndk || !signer || !user) return record;
+      const sanitizedRelays = collectRelayUrls(relayUrls.length ? relayUrls : DEFAULT_PUBLIC_RELAYS);
+      if (!sanitizedRelays.length) return record;
+      await ensureRelayConnections(sanitizedRelays);
+
+      const shaSet = new Set<string>();
+      record.shas.forEach(sha => {
+        if (typeof sha === "string" && sha.length === 64) {
+          shaSet.add(sha.toLowerCase());
+        }
+      });
+      blobs?.forEach(blob => {
+        if (blob?.sha256 && blob.sha256.length === 64) {
+          shaSet.add(blob.sha256.toLowerCase());
+        }
+      });
+      const shas = Array.from(shaSet).sort((a, b) => a.localeCompare(b));
+
+      const baseHints = record.fileHints ?? {};
+      const hintMap: Record<string, FolderFileHint> = {};
+      shas.forEach(sha => {
+        const existing = baseHints[sha];
+        hintMap[sha] = existing ? { ...existing, sha } : { sha };
+      });
+
+      const registerBlobHint = (blob?: BlossomBlob | null) => {
+        if (!blob?.sha256 || blob.sha256.length !== 64) return;
+        const sha = blob.sha256.toLowerCase();
+        if (!hintMap[sha]) {
+          hintMap[sha] = { sha };
+        }
+        const entry = hintMap[sha];
+        const normalizedServer = blob.serverUrl ? blob.serverUrl.replace(/\/+$/, "") : undefined;
+        const fallbackUrl = normalizedServer ? `${normalizedServer}/${blob.sha256}` : undefined;
+        const resolvedUrl = blob.url?.trim() || fallbackUrl;
+        if (resolvedUrl) entry.url = resolvedUrl;
+        if (normalizedServer) entry.serverUrl = normalizedServer;
+        if (typeof blob.requiresAuth === "boolean") entry.requiresAuth = blob.requiresAuth;
+        if (blob.serverType) entry.serverType = blob.serverType;
+        if (blob.type) entry.mimeType = blob.type;
+        if (typeof blob.size === "number" && Number.isFinite(blob.size)) entry.size = blob.size;
+        if (blob.name) entry.name = blob.name;
+      };
+
+      blobs?.forEach(registerBlobHint);
+
+      const effectiveHints = Object.fromEntries(
+        Object.entries(hintMap).filter(([, hint]) => {
+          if (!hint) return false;
+          if (hint.url && hint.url.trim()) return true;
+          if (hint.serverUrl && hint.serverUrl.trim()) return true;
+          if (typeof hint.requiresAuth === "boolean") return true;
+          if (hint.mimeType) return true;
+          if (typeof hint.size === "number" && Number.isFinite(hint.size)) return true;
+          if (hint.name) return true;
+          return false;
+        })
+      );
+
+      const shareRecord: FolderListRecord = {
+        ...record,
+        shas,
+        pubkey: record.pubkey ?? user.pubkey,
+        fileHints: Object.keys(effectiveHints).length > 0 ? effectiveHints : record.fileHints,
+      };
+
+      try {
+        const module = await getModule();
+        const relaySet = module.NDKRelaySet.fromRelayUrls(sanitizedRelays, ndk);
+        const createdAt = Math.floor(Date.now() / 1000);
+        const template = buildFolderEventTemplate(shareRecord, shareRecord.pubkey ?? user.pubkey, {
+          createdAt,
+          fileHints: shareRecord.fileHints ? Object.values(shareRecord.fileHints) : undefined,
+        });
+        const event = new module.NDKEvent(ndk);
+        event.kind = template.kind;
+        event.pubkey = template.pubkey;
+        event.created_at = template.created_at;
+        event.tags = template.tags;
+        event.content = template.content;
+        await event.sign();
+        await event.publish(relaySet);
+      } catch (error) {
+        console.warn("Failed to republish folder list to share relays", error);
+      }
+
+      return shareRecord;
+    },
+    [ensureRelayConnections, getModule, ndk, signer, user]
+  );
+
+  const ensureFolderMetadataOnRelays = useCallback(
+    async (record: FolderListRecord, relayUrls: readonly string[], blobs?: BlossomBlob[]) => {
+      if (!ndk) return;
+      const sanitizedRelays = collectRelayUrls(relayUrls.length ? relayUrls : DEFAULT_PUBLIC_RELAYS);
+      if (!sanitizedRelays.length) return;
+      await ensureRelayConnections(sanitizedRelays);
+      const module = await getModule();
+      const relaySet = module.NDKRelaySet.fromRelayUrls(sanitizedRelays, ndk);
+      const shas = Array.from(new Set(record.shas.map(sha => sha?.toLowerCase()).filter(Boolean) as string[]));
+      if (!shas.length) return;
+
+      const blobLookup = new Map<string, BlossomBlob>();
+      blobs?.forEach(blob => {
+        if (blob?.sha256) {
+          blobLookup.set(blob.sha256.toLowerCase(), blob);
+        }
+      });
+
+      let fetchedEvents: Set<any> = new Set();
+      let metadataFetchTimedOut = false;
+      let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+      try {
+        const metadataFetch = ndk.fetchEvents(
+          [
+            { kinds: [1063], "#x": shas, limit: shas.length },
+            { kinds: [1063], "#ox": shas, limit: shas.length },
+          ],
+          { closeOnEose: true, groupable: false },
+          relaySet
+        );
+        fetchedEvents = (await Promise.race([
+          metadataFetch.finally(() => {
+            if (timeoutHandle) {
+              clearTimeout(timeoutHandle);
+              timeoutHandle = null;
+            }
+          }),
+          new Promise<Set<any>>(resolve => {
+            timeoutHandle = setTimeout(() => {
+              metadataFetchTimedOut = true;
+              timeoutHandle = null;
+              resolve(new Set());
+            }, FOLDER_METADATA_FETCH_TIMEOUT_MS);
+          }),
+        ])) as Set<any>;
+      } catch (error) {
+        console.warn("Unable to fetch existing file metadata for share", error);
+      } finally {
+        if (timeoutHandle) {
+          clearTimeout(timeoutHandle);
+          timeoutHandle = null;
+        }
+      }
+      if (metadataFetchTimedOut) {
+        console.warn(
+          `Timed out after ${FOLDER_METADATA_FETCH_TIMEOUT_MS}ms while fetching metadata events for shared items`
+        );
+      }
+
+      const found = new Set<string>();
+      const publishTasks: Promise<void>[] = [];
+
+      fetchedEvents.forEach(raw => {
+        if (!raw || !Array.isArray(raw.tags)) return;
+        const shaTag = raw.tags.find((tag: unknown) =>
+          Array.isArray(tag) && (tag[0] === "x" || tag[0] === "ox") && typeof tag[1] === "string"
+        ) as string[] | undefined;
+        if (!shaTag || typeof shaTag[1] !== "string") return;
+        const sha = shaTag[1].toLowerCase();
+        if (!shas.includes(sha)) return;
+        found.add(sha);
+        const event = new module.NDKEvent(ndk, raw);
+        publishTasks.push(
+          event.publish(relaySet).then(() => undefined).catch(error => {
+            console.warn("Failed to republish metadata event", error);
+          })
+        );
+      });
+
+      const missing = shas.filter(sha => !found.has(sha));
+      if (missing.length && signer) {
+        missing.forEach(sha => {
+          const blob = blobLookup.get(sha);
+          if (!blob || !blob.url) return;
+          const template = buildNip94EventTemplate({ blob });
+          const event = new module.NDKEvent(ndk, template);
+          publishTasks.push(
+            (async () => {
+              await event.sign();
+              await event.publish(relaySet);
+            })().catch(error => {
+              console.warn("Failed to publish metadata for", sha, error);
+            })
+          );
+          found.add(sha);
+        });
+      }
+
+      await Promise.all(publishTasks);
+
+      if (shas.some(sha => !found.has(sha))) {
+        console.warn("Some shared items are missing metadata events", shas.filter(sha => !found.has(sha)));
+      }
+    },
+    [getModule, ndk, signer]
+  );
+
+  const handleShareFolder = useCallback(
+    async (request: ShareFolderRequest) => {
+      const normalizedPath = resolveFolderPath(request.path);
+      if (typeof normalizedPath !== "string") {
+        showStatusMessage("Folder not found.", "error", 4000);
+        return;
+      }
+      const record = foldersByPath.get(normalizedPath);
+      if (!record) {
+        showStatusMessage("Folder details unavailable.", "error", 4000);
+        return;
+      }
+      if (isPrivateFolderName(record.name)) {
+        showStatusMessage("The Private folder cannot be shared.", "info", 3500);
+        return;
+      }
+      if (record.visibility === "public") {
+        const existingHintRecord =
+          folderShareDialog?.record?.path === record.path ? folderShareDialog.record : record;
+        const ownerPubkey = existingHintRecord.pubkey ?? user?.pubkey ?? null;
+        const relayCandidates = effectiveRelays.length ? effectiveRelays : Array.from(DEFAULT_PUBLIC_RELAYS);
+        const relayHints = collectRelayUrls(relayCandidates);
+        const naddrExisting = encodeFolderNaddr(
+          existingHintRecord,
+          ownerPubkey,
+          relayHints.length ? relayHints : undefined
+        );
+        const originExisting =
+          typeof window !== "undefined" && window.location?.origin ? window.location.origin : "https://bloomapp.me";
+        if (!naddrExisting) {
+          showStatusMessage("Unable to build a share link for this folder.", "error", 4500);
+          return;
+        }
+        const shareUrlExisting = `${originExisting}/folders/${encodeURIComponent(naddrExisting)}`;
+        setFolderShareDialog({ record: existingHintRecord, naddr: naddrExisting, shareUrl: shareUrlExisting });
+        return;
+      }
+      if (folderShareBusyPath && folderShareBusyPath !== normalizedPath) {
+        showStatusMessage("Another folder is updating. Please wait.", "info", 2500);
+        return;
+      }
+      if (folderShareBusyPath === normalizedPath) {
+        showStatusMessage("Folder sharing in progress…", "info", 2500);
+        return;
+      }
+      setFolderShareBusyPath(normalizedPath);
+      try {
+        let nextRecord = record;
+        showStatusMessage("Making folder public…", "info", 2500);
+        const published = await setFolderVisibility(normalizedPath, "public");
+        nextRecord = published ?? record;
+        showStatusMessage("Folder is now public.", "success", 2500);
+        if (nextRecord.visibility !== "public") {
+          showStatusMessage("Unable to share this folder right now.", "error", 4500);
+          return;
+        }
+        const relayCandidates = effectiveRelays.length ? effectiveRelays : Array.from(DEFAULT_PUBLIC_RELAYS);
+        const relayHints = collectRelayUrls(relayCandidates);
+        if (!relayHints.length) {
+          showStatusMessage("Configure at least one relay before sharing.", "error", 4000);
+          return;
+        }
+        const shareRecord = await ensureFolderListOnRelays(nextRecord, relayHints, request.blobs);
+        const ownerPubkey = shareRecord.pubkey ?? user?.pubkey ?? null;
+        const naddr = encodeFolderNaddr(shareRecord, ownerPubkey, relayHints);
+        if (!naddr) {
+          showStatusMessage("Unable to build a share link for this folder.", "error", 4500);
+          return;
+        }
+        const origin =
+          typeof window !== "undefined" && window.location?.origin ? window.location.origin : "https://bloomapp.me";
+        const shareUrl = `${origin}/folders/${encodeURIComponent(naddr)}`;
+        setFolderShareDialog({ record: shareRecord, naddr, shareUrl });
+        showStatusMessage("Share link ready.", "success", 2000);
+        void (async () => {
+          try {
+            await ensureFolderMetadataOnRelays(shareRecord, relayHints, request.blobs);
+          } catch (metadataError) {
+            console.warn("Failed to publish folder metadata for share", metadataError);
+            showStatusMessage(
+              "Some file details are still publishing. Previews may take a bit longer to appear.",
+              "warning",
+              5000
+            );
+          }
+        })();
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Failed to share folder.";
+        showStatusMessage(message, "error", 5000);
+      } finally {
+        setFolderShareBusyPath(null);
+      }
+    },
+    [
+      resolveFolderPath,
+      foldersByPath,
+      folderShareBusyPath,
+      setFolderVisibility,
+      ensureFolderListOnRelays,
+      ensureFolderMetadataOnRelays,
+      showStatusMessage,
+      effectiveRelays,
+      user?.pubkey,
+    ]
+  );
+
+  const handleUnshareFolder = useCallback(
+    async (request: ShareFolderRequest) => {
+      const normalizedPath = resolveFolderPath(request.path);
+      if (typeof normalizedPath !== "string") {
+        showStatusMessage("Folder not found.", "error", 4000);
+        return;
+      }
+      const record = foldersByPath.get(normalizedPath);
+      if (!record) {
+        showStatusMessage("Folder details unavailable.", "error", 4000);
+        return;
+      }
+      if (record.visibility !== "public") {
+        showStatusMessage("This folder is already private.", "info", 2500);
+        return;
+      }
+      if (folderShareBusyPath && folderShareBusyPath !== normalizedPath) {
+        showStatusMessage("Another folder is updating. Please wait.", "info", 2500);
+        return;
+      }
+      if (folderShareBusyPath === normalizedPath) {
+        showStatusMessage("Folder update in progress…", "info", 2500);
+        return;
+      }
+      setFolderShareBusyPath(normalizedPath);
+      try {
+        await setFolderVisibility(normalizedPath, "private");
+        showStatusMessage("Folder is now private. Shared links will stop working soon.", "success", 4000);
+        setFolderShareDialog(current => (current && current.record.path === normalizedPath ? null : current));
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Failed to update folder visibility.";
+        showStatusMessage(message, "error", 5000);
+      } finally {
+        setFolderShareBusyPath(null);
+      }
+    },
+    [resolveFolderPath, foldersByPath, folderShareBusyPath, setFolderVisibility, showStatusMessage]
+  );
+
+  const handleCloseFolderShareDialog = useCallback(() => {
+    setFolderShareDialog(null);
+  }, []);
 
   const handleProfileUpdated = useCallback((metadata: ProfileMetadataPayload) => {
     const nextAvatarUrl = typeof metadata.picture === "string" && metadata.picture.trim() ? metadata.picture.trim() : null;
@@ -1214,10 +1633,13 @@ export default function App() {
                   onStatusMetricsChange={handleStatusMetricsChange}
                   onSyncStateChange={handleSyncStateChange}
                   onProvideSyncStarter={handleProvideSyncStarter}
-                  onRequestRename={handleRequestRename}
-                  onRequestFolderRename={handleRequestFolderRename}
-                  onRequestShare={handleShareBlob}
-                  onSetTab={selectTab}
+                onRequestRename={handleRequestRename}
+                onRequestFolderRename={handleRequestFolderRename}
+                onRequestShare={handleShareBlob}
+                onShareFolder={handleShareFolder}
+                onUnshareFolder={handleUnshareFolder}
+                folderShareBusyPath={folderShareBusyPath}
+                onSetTab={selectTab}
                   onUploadCompleted={handleUploadCompleted}
                   showStatusMessage={showStatusMessage}
                   onProvideBrowseControls={setBrowseHeaderControls}
@@ -1314,6 +1736,16 @@ export default function App() {
               onStatus={showStatusMessage}
             />
           )}
+
+          {folderShareDialog ? (
+            <FolderShareDialog
+              record={folderShareDialog.record}
+              shareUrl={folderShareDialog.shareUrl}
+              naddr={folderShareDialog.naddr}
+              onClose={handleCloseFolderShareDialog}
+              onStatus={showStatusMessage}
+            />
+          ) : null}
 
           <Suspense fallback={null}>
             <ConnectSignerDialogLazy
