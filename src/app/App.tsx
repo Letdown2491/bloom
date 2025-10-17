@@ -1122,12 +1122,11 @@ export default function App() {
   useEffect(() => {
     if (keepSearchExpanded && !showAuthPrompt) {
       setIsSearchOpen(true);
-      selectTab("browse");
     } else if (!keepSearchExpanded) {
       setIsSearchOpen(prev => (prev ? false : prev));
       setSearchQuery("");
     }
-  }, [keepSearchExpanded, selectTab, showAuthPrompt]);
+  }, [keepSearchExpanded, showAuthPrompt]);
 
   useEffect(() => {
     if (!keepSearchExpanded && tab !== "browse" && isSearchOpen) {
@@ -1708,6 +1707,8 @@ export default function App() {
             showGithubLink={showGithubLink}
             showSupportLink={showSupportLink}
             theme={preferences.theme}
+            userMenuItems={userMenuLinks}
+            onDisconnect={handleDisconnectClick}
           />
 
           {!showAuthPrompt && renameTarget && (
@@ -1796,7 +1797,25 @@ const LoggedOutPrompt: React.FC<LoggedOutPromptProps> = ({
         <div className="space-y-2">
           <h2 className="text-lg font-semibold text-slate-100">Welcome to Bloom</h2>
           <p className="text-sm text-slate-300 text-left">
-            Bloom is your Nostr-connected media hub for browsing, uploading, and sharing music, video, and documents across servers. Click below to get started.
+            Browse, upload, and share music, video, and documents on any{" "}
+            <a
+              href="https://github.com/nostr-protocol/nips/blob/master/B7.md"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-emerald-300 underline decoration-emerald-500/60 underline-offset-2 transition hover:text-emerald-200"
+            >
+              Blossom
+            </a>{" "}
+            and{" "}
+            <a
+              href="https://github.com/nostr-protocol/nips/blob/master/96.md"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-emerald-300 underline decoration-emerald-500/60 underline-offset-2 transition hover:text-emerald-200"
+            >
+              NIP-96
+            </a>
+            -compatible servers. All your media stays decentralized, secure, and instantly accessible.
           </p>
         </div>
         <div className="flex w-full flex-col gap-2">
@@ -1815,6 +1834,19 @@ const LoggedOutPrompt: React.FC<LoggedOutPromptProps> = ({
             className="px-3 py-2 rounded-xl border border-emerald-500/60 bg-transparent text-emerald-300 hover:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-slate-900"
           >
             Connect Remote Signer
+          </button>
+          <div className="flex items-center justify-center gap-2 text-xs uppercase tracking-wide text-slate-500">
+            <span className="h-px w-6 bg-slate-800" aria-hidden="true" />
+            <span>or</span>
+            <span className="h-px w-6 bg-slate-800" aria-hidden="true" />
+          </div>
+          <button
+            onClick={() => {
+              window.open("https://start.nostr.net/", "_blank", "noopener");
+            }}
+            className="px-3 py-2 rounded-xl border border-slate-700 bg-slate-900/80 text-slate-200 transition hover:border-emerald-400 hover:text-emerald-200 hover:bg-slate-900/60 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-slate-900"
+          >
+            Learn more about Nostr
           </button>
         </div>
       </div>
@@ -1852,8 +1884,11 @@ const MainNavigation = memo(function MainNavigation({
   const segmentDefaultClass = "text-slate-300 hover:bg-slate-900/80";
   const segmentActiveClass = "bg-emerald-500/10 text-emerald-200 hover:bg-emerald-500/20";
   const segmentDisabledClass = "text-slate-500";
-  const searchSegmentState =
-    showAuthPrompt || keepSearchExpanded ? segmentDisabledClass : segmentDefaultClass;
+  const searchSegmentState = showAuthPrompt
+    ? segmentDisabledClass
+    : isSearchOpen
+      ? segmentActiveClass
+      : segmentDefaultClass;
   const browseControlSegments = browseHeaderControls
     ? React.Children.toArray(browseHeaderControls).filter(Boolean)
     : [];
@@ -1967,7 +2002,7 @@ const MainNavigation = memo(function MainNavigation({
           <button
             type="button"
             onClick={onToggleSearch}
-            disabled={showAuthPrompt || keepSearchExpanded}
+            disabled={showAuthPrompt}
             aria-label="Search files"
             aria-pressed={isSearchOpen}
             className={mergeClasses(segmentBaseClass, "w-11 justify-center", searchSegmentState)}
