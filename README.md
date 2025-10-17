@@ -50,7 +50,7 @@ If you want to proxy private links, follow the instructions below. This is optio
    pnpm build
    pnpm start
    # The proxy will start listening at http://localhost:8787 by default. 
-   # Change this to the domain you will be using to server proxy links. 
+   # Change this to the domain you will be using to serve proxy links. 
    # We recommend using a subdomain such as https://private.mydomain.com
    ```
 
