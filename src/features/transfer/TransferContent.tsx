@@ -1,9 +1,9 @@
 import React from "react";
-import { prettyBytes } from "../../utils/format";
-import { getBlobMetadataName } from "../../utils/blobMetadataStore";
-import type { ManagedServer } from "../../hooks/useServers";
-import type { BlossomBlob } from "../../lib/blossomClient";
-import type { TransferState } from "../../components/UploadPanel";
+import { prettyBytes } from "../../shared/utils/format";
+import { getBlobMetadataName } from "../../shared/utils/blobMetadataStore";
+import type { ManagedServer } from "../../shared/types/servers";
+import type { BlossomBlob } from "../../shared/api/blossomClient";
+import type { TransferState } from "../workspace/ui/UploadPanel";
 
 type SelectedBlobItem = {
   blob: BlossomBlob;

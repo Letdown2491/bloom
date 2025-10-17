@@ -1,14 +1,14 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { CancelIcon, CopyIcon, RefreshIcon, SaveIcon } from "../../components/icons";
-import { useNdk } from "../../context/NdkContext";
+import { CancelIcon, CopyIcon, RefreshIcon, SaveIcon } from "../../shared/ui/icons";
+import { useNdk } from "../../app/context/NdkContext";
 import { useWorkspace } from "../workspace/WorkspaceContext";
-import { isImageBlob } from "../../utils/blobClassification";
-import { getBlobMetadataName } from "../../utils/blobMetadataStore";
-import type { BlossomBlob } from "../../lib/blossomClient";
-import { PRIVATE_SERVER_NAME } from "../../constants/private";
-import type { StatusMessageTone } from "../../types/status";
-import { loadNdkModule } from "../../lib/ndkModule";
+import { isImageBlob } from "../../shared/utils/blobClassification";
+import { getBlobMetadataName } from "../../shared/utils/blobMetadataStore";
+import type { BlossomBlob } from "../../shared/api/blossomClient";
+import { PRIVATE_SERVER_NAME } from "../../shared/constants/private";
+import type { StatusMessageTone } from "../../shared/types/status";
+import { loadNdkModule } from "../../shared/api/ndkModule";
 
 export type ProfileMetadataPayload = {
   name?: string;

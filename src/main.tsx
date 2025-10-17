@@ -3,8 +3,8 @@ import { createRoot } from "react-dom/client";
 
 import "./index.css";
 
-import { AppProviders } from "./providers/AppProviders";
-import App from "./App";
+import { AppProviders } from "./app/providers/AppProviders";
+import App from "./app/App";
 import { PublicFolderPage } from "./features/folderShare/PublicFolderPage";
 
 type InitialView =

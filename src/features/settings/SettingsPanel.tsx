@@ -1,10 +1,10 @@
 import React from "react";
-import type { FilterMode } from "../../types/filter";
-import type { ManagedServer } from "../../hooks/useServers";
-import type { DefaultSortOption, SortDirection } from "../../context/UserPreferencesContext";
-import type { StatusMessageTone } from "../../types/status";
-import type { ShareFolderRequest } from "../../types/shareFolder";
-import type { FolderListRecord } from "../../lib/folderList";
+import type { FilterMode } from "../../shared/types/filter";
+import type { ManagedServer } from "../../shared/types/servers";
+import type { DefaultSortOption, SortDirection } from "../../app/context/UserPreferencesContext";
+import type { StatusMessageTone } from "../../shared/types/status";
+import type { ShareFolderRequest } from "../../shared/types/shareFolder";
+import type { FolderListRecord } from "../../shared/domain/folderList";
 import { WorkspaceProvider } from "../workspace/WorkspaceContext";
 import {
   GridIcon,
@@ -28,17 +28,17 @@ import {
   ShareIcon,
   FolderIcon,
   LockIcon,
-} from "../../components/icons";
-import { ServerList } from "../../components/ServerList";
-const RelayListLazy = React.lazy(() => import("../../components/RelayList"));
-import { useIsCompactScreen } from "../../hooks/useIsCompactScreen";
-import { useStorageQuota } from "../../hooks/useStorageQuota";
-import { formatBytes } from "../../utils/storageQuota";
-import { useFolderLists } from "../../context/FolderListContext";
-import { encodeFolderNaddr, isPrivateFolderName } from "../../lib/folderList";
-import { usePreferredRelays } from "../../hooks/usePreferredRelays";
-import { useCurrentPubkey } from "../../context/NdkContext";
-import { DEFAULT_PUBLIC_RELAYS, sanitizeRelayUrl } from "../../utils/relays";
+} from "../../shared/ui/icons";
+import { ServerList } from "../workspace/ui/ServerList";
+const RelayListLazy = React.lazy(() => import("../../shared/ui/RelayList"));
+import { useIsCompactScreen } from "../../shared/hooks/useIsCompactScreen";
+import { useStorageQuota } from "../../shared/hooks/useStorageQuota";
+import { formatBytes } from "../../shared/utils/storageQuota";
+import { useFolderLists } from "../../app/context/FolderListContext";
+import { encodeFolderNaddr, isPrivateFolderName } from "../../shared/domain/folderList";
+import { usePreferredRelays } from "../../app/hooks/usePreferredRelays";
+import { useCurrentPubkey } from "../../app/context/NdkContext";
+import { DEFAULT_PUBLIC_RELAYS, sanitizeRelayUrl } from "../../shared/utils/relays";
 
 type FilterOption = {
   id: FilterMode;

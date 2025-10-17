@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import type { ShareCompletion, SharePayload } from "../../components/ShareComposer";
-import { usePrivateLinks } from "../../hooks/usePrivateLinks";
-import { describeExpiration } from "../../utils/format";
+import type { ShareCompletion, SharePayload } from "./ui/ShareComposer";
+import { usePrivateLinks } from "../privateLinks/hooks/usePrivateLinks";
+import { describeExpiration } from "../../shared/utils/format";
 
 type ExpirationOption = "never" | "24h" | "7d" | "30d" | "custom";
 

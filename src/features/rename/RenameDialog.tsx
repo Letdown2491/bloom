@@ -1,27 +1,25 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 
-import type { BlossomBlob } from "../../lib/blossomClient";
-import { buildNip94EventTemplate } from "../../lib/nip94";
+import type { BlossomBlob } from "../../shared/api/blossomClient";
+import { buildNip94EventTemplate } from "../../shared/api/nip94";
 import {
   applyAliasUpdate,
   getStoredAudioMetadata,
-  getStoredFolderPath,
   normalizeFolderPathInput,
   rememberAudioMetadata,
   sanitizeCoverUrl,
-  applyFolderUpdate,
   containsReservedFolderSegment,
   type BlobAudioMetadata,
   getBlobMetadataName,
-} from "../../utils/blobMetadataStore";
-import { isMusicBlob } from "../../utils/blobClassification";
-import { EditDialog, type EditDialogAudioFields } from "../../components/RenameDialog";
-import type { NdkContextValue } from "../../context/NdkContext";
-import type { StatusMessageTone } from "../../types/status";
-import { usePrivateLibrary } from "../../context/PrivateLibraryContext";
-import type { PrivateListEntry } from "../../lib/privateList";
-import { useFolderLists } from "../../context/FolderListContext";
-import { loadNdkModule } from "../../lib/ndkModule";
+} from "../../shared/utils/blobMetadataStore";
+import { isMusicBlob } from "../../shared/utils/blobClassification";
+import { EditDialog, type EditDialogAudioFields } from "./ui/EditDialog";
+import type { NdkContextValue } from "../../app/context/NdkContext";
+import type { StatusMessageTone } from "../../shared/types/status";
+import { usePrivateLibrary } from "../../app/context/PrivateLibraryContext";
+import type { PrivateListEntry } from "../../shared/domain/privateList";
+import { useFolderLists } from "../../app/context/FolderListContext";
+import { loadNdkModule } from "../../shared/api/ndkModule";
 
 type NdkInstance = NdkContextValue["ndk"];
 type NdkSigner = NdkContextValue["signer"];
@@ -83,7 +81,11 @@ export const RenameDialog: React.FC<RenameDialogProps> = ({ blob, ndk, signer, r
   const { entriesBySha, upsertEntries } = usePrivateLibrary();
   const privateEntry = entriesBySha.get(blob.sha256) ?? null;
   const isPrivate = Boolean(privateEntry);
-  const { addBlobToFolder, removeBlobFromFolder, resolveFolderPath } = useFolderLists();
+  const {
+    resolveFolderPath,
+    getFoldersForBlob,
+    setBlobFolderMembership,
+  } = useFolderLists();
   const storedAudio = useMemo(
     () => {
       const stored =
@@ -101,6 +103,7 @@ export const RenameDialog: React.FC<RenameDialogProps> = ({ blob, ndk, signer, r
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [folder, setFolder] = useState("");
+  const [currentFolderPath, setCurrentFolderPath] = useState<string | null>(null);
 
   useEffect(() => {
     const music = isMusicBlob(blob) || Boolean(storedAudio);
@@ -127,12 +130,15 @@ export const RenameDialog: React.FC<RenameDialogProps> = ({ blob, ndk, signer, r
       setAlias(getBlobMetadataName(blob) ?? "");
     }
 
-    const storedFolderPath =
-      getStoredFolderPath(blob.serverUrl, blob.sha256) ??
+    const membershipPaths = getFoldersForBlob(blob.sha256);
+    const membershipFolder = membershipPaths[0] ?? null;
+    const fallbackFolderPath =
+      membershipFolder ??
       normalizeFolderPathInput(blob.folderPath ?? privateEntry?.metadata?.folderPath ?? undefined) ??
       null;
-    setFolder(storedFolderPath ?? "");
-  }, [blob, privateEntry, storedAudio]);
+    setCurrentFolderPath(membershipFolder);
+    setFolder(fallbackFolderPath ?? "");
+  }, [blob, getFoldersForBlob, privateEntry, storedAudio]);
 
   const handleAliasChange = useCallback(
     (next: string) => {
@@ -181,15 +187,9 @@ export const RenameDialog: React.FC<RenameDialogProps> = ({ blob, ndk, signer, r
 
     const relayList = normalizeRelays(relays);
 
-    const storedFolderPath = getStoredFolderPath(blob.serverUrl, blob.sha256);
     const desiredFolderRaw = normalizeFolderPathInput(folder) ?? null;
     const desiredFolder = desiredFolderRaw ? resolveFolderPath(desiredFolderRaw) : null;
-    const baseFolderSource =
-      storedFolderPath !== undefined
-        ? storedFolderPath
-        : blob.folderPath ?? privateEntry?.metadata?.folderPath ?? undefined;
-    const currentFolderRaw = normalizeFolderPathInput(baseFolderSource) ?? null;
-    const currentFolder = currentFolderRaw ? resolveFolderPath(currentFolderRaw) : null;
+    const currentFolder = currentFolderPath ? resolveFolderPath(currentFolderPath) : null;
     const folderChanged = desiredFolder !== currentFolder;
 
     const existingStoredAudio =
@@ -304,7 +304,6 @@ export const RenameDialog: React.FC<RenameDialogProps> = ({ blob, ndk, signer, r
 
     const applyLocalUpdates = (timestampSeconds: number) => {
       applyAliasUpdate(undefined, blob.sha256, aliasForStore, timestampSeconds);
-      applyFolderUpdate(blob.serverUrl, blob.sha256, desiredFolder, timestampSeconds);
       if (treatAsMusic) {
         rememberAudioMetadata(blob.serverUrl, blob.sha256, audioMetadata ?? null, {
           updatedAt: timestampSeconds * 1000,
@@ -368,7 +367,6 @@ export const RenameDialog: React.FC<RenameDialogProps> = ({ blob, ndk, signer, r
         };
         await upsertEntries([updatedEntry]);
         applyAliasUpdate(undefined, blob.sha256, aliasForStore, nowSeconds);
-        applyFolderUpdate(serverForMetadata, blob.sha256, desiredFolder, nowSeconds);
         if (treatAsMusic) {
           rememberAudioMetadata(serverForMetadata, blob.sha256, audioMetadata ?? null, {
             updatedAt: nowSeconds * 1000,
@@ -379,6 +377,7 @@ export const RenameDialog: React.FC<RenameDialogProps> = ({ blob, ndk, signer, r
             updatedAt: nowSeconds * 1000,
           });
         }
+        setCurrentFolderPath(desiredFolder);
         onStatus("Details updated.", "success", 2500);
         onClose();
         return;
@@ -422,7 +421,6 @@ export const RenameDialog: React.FC<RenameDialogProps> = ({ blob, ndk, signer, r
 
         aliasEventTimestamp = event.created_at ?? nowSeconds;
         applyAliasUpdate(undefined, blob.sha256, aliasForStore, aliasEventTimestamp);
-        applyFolderUpdate(blob.serverUrl, blob.sha256, desiredFolder, aliasEventTimestamp);
         if (treatAsMusic) {
           const updatedAt = typeof aliasEventTimestamp === "number" ? aliasEventTimestamp * 1000 : undefined;
           rememberAudioMetadata(blob.serverUrl, blob.sha256, audioMetadata ?? null, {
@@ -430,12 +428,8 @@ export const RenameDialog: React.FC<RenameDialogProps> = ({ blob, ndk, signer, r
           });
         }
         if (!isPrivate && folderChanged) {
-          if (currentFolder) {
-            await removeBlobFromFolder(currentFolder, blob.sha256);
-          }
-          if (desiredFolder) {
-            await addBlobToFolder(desiredFolder, blob.sha256);
-          }
+          await setBlobFolderMembership(blob.sha256, desiredFolder);
+          setCurrentFolderPath(desiredFolder);
         }
       }
 
@@ -463,8 +457,8 @@ export const RenameDialog: React.FC<RenameDialogProps> = ({ blob, ndk, signer, r
     upsertEntries,
     isPrivate,
     privateEntry,
-    addBlobToFolder,
-    removeBlobFromFolder,
+    currentFolderPath,
+    setBlobFolderMembership,
   ]);
 
   const folderHasReservedKeyword = containsReservedFolderSegment(folder);

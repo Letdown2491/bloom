@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { nip19 } from "nostr-tools";
-import { useNdk } from "../../context/NdkContext";
+import { useNdk } from "../../app/context/NdkContext";
 import {
   decodeFolderNaddr,
   encodeFolderNaddr,
@@ -8,12 +8,12 @@ import {
   type FolderListAddress,
   type FolderListRecord,
   type FolderFileHint,
-} from "../../lib/folderList";
-import { fetchNip94ByHashes } from "../../lib/nip94Fetch";
-import type { Nip94ParsedEvent } from "../../lib/nip94";
-import { prettyBytes, prettyDate } from "../../utils/format";
-import { DEFAULT_PUBLIC_RELAYS } from "../../utils/relays";
-import { DocumentIcon, RefreshIcon, LinkIcon, DownloadIcon } from "../../components/icons";
+} from "../../shared/domain/folderList";
+import { fetchNip94ByHashes } from "../../shared/api/nip94Fetch";
+import type { Nip94ParsedEvent } from "../../shared/api/nip94";
+import { prettyBytes, prettyDate } from "../../shared/utils/format";
+import { DEFAULT_PUBLIC_RELAYS } from "../../shared/utils/relays";
+import { DocumentIcon, RefreshIcon, LinkIcon, DownloadIcon } from "../../shared/ui/icons";
 
 type PublicFolderPageProps = {
   naddr: string;

@@ -1,42 +1,45 @@
 import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import type { FilterMode } from "../../types/filter";
+import type { FilterMode } from "../../shared/types/filter";
 import { useWorkspace } from "./WorkspaceContext";
 import { useSelection } from "../selection/SelectionContext";
-import { usePrivateLibrary } from "../../context/PrivateLibraryContext";
-import { useFolderLists } from "../../context/FolderListContext";
-import { useAudio } from "../../context/AudioContext";
+import { usePrivateLibrary } from "../../app/context/PrivateLibraryContext";
+import { useFolderLists } from "../../app/context/FolderListContext";
+import { MoveDialog } from "./ui/MoveDialog";
+import type { MoveDialogDestination } from "./ui/MoveDialog";
+import { useAudio } from "../../app/context/AudioContext";
 import { matchesFilter, createAudioTrack } from "../browse/browseUtils";
 import { useAudioMetadataMap } from "../browse/useAudioMetadata";
-import type { StatusMessageTone } from "../../types/status";
-import type { SharePayload } from "../../components/ShareComposer";
-import type { BlossomBlob, SignTemplate } from "../../lib/blossomClient";
-import { extractSha256FromUrl } from "../../lib/blossomClient";
-import type { ManagedServer } from "../../hooks/useServers";
-import type { TabId } from "../../types/tabs";
-import { deleteUserBlob, buildAuthorizationHeader } from "../../lib/blossomClient";
-import { deleteNip96File } from "../../lib/nip96Client";
-import { deleteSatelliteFile } from "../../lib/satelliteClient";
-import { useNdk, useCurrentPubkey } from "../../context/NdkContext";
-import { isMusicBlob } from "../../utils/blobClassification";
-import { PRIVATE_PLACEHOLDER_SHA, PRIVATE_SERVER_NAME } from "../../constants/private";
-import { applyFolderUpdate, getBlobMetadataName, normalizeFolderPathInput } from "../../utils/blobMetadataStore";
-import type { BlobAudioMetadata } from "../../utils/blobMetadataStore";
-import type { FolderListVisibility } from "../../lib/folderList";
-import { isListLikeBlob, type BlobReplicaSummary } from "../../components/BlobList";
-import type { DefaultSortOption, SortDirection } from "../../context/UserPreferencesContext";
-import { buildNip98AuthHeader } from "../../lib/nip98";
-import { decryptPrivateBlob } from "../../lib/privateEncryption";
-import type { Track } from "../../context/AudioContext";
-import type { PrivateListEntry } from "../../lib/privateList";
-import { useDialog } from "../../context/DialogContext";
-import type { FolderShareHint, ShareFolderRequest } from "../../types/shareFolder";
+import type { StatusMessageTone } from "../../shared/types/status";
+import type { SharePayload } from "../share/ui/ShareComposer";
+import type { BlossomBlob, SignTemplate } from "../../shared/api/blossomClient";
+import { extractSha256FromUrl } from "../../shared/api/blossomClient";
+import type { ManagedServer } from "../../shared/types/servers";
+import type { TabId } from "../../shared/types/tabs";
+import { deleteUserBlob, buildAuthorizationHeader } from "../../shared/api/blossomClient";
+import { deleteNip96File } from "../../shared/api/nip96Client";
+import { deleteSatelliteFile } from "../../shared/api/satelliteClient";
+import { useNdk, useCurrentPubkey } from "../../app/context/NdkContext";
+import { isMusicBlob } from "../../shared/utils/blobClassification";
+import { PRIVATE_PLACEHOLDER_SHA, PRIVATE_SERVER_NAME } from "../../shared/constants/private";
+import { applyFolderUpdate, getBlobMetadataName, normalizeFolderPathInput } from "../../shared/utils/blobMetadataStore";
+import type { BlobAudioMetadata } from "../../shared/utils/blobMetadataStore";
+import { deriveNameFromPath, isPrivateFolderName, type FolderListVisibility } from "../../shared/domain/folderList";
+import { isListLikeBlob, type BlobReplicaSummary } from "../browse/ui/BlobList";
+import type { DefaultSortOption, SortDirection } from "../../app/context/UserPreferencesContext";
+import { buildNip98AuthHeader } from "../../shared/api/nip98";
+import { decryptPrivateBlob } from "../../shared/domain/privateEncryption";
+import type { Track } from "../../app/context/AudioContext";
+import type { PrivateListEntry } from "../../shared/domain/privateList";
+import { useDialog } from "../../app/context/DialogContext";
+import type { FolderShareHint, ShareFolderRequest } from "../../shared/types/shareFolder";
 
 const BrowsePanelLazy = React.lazy(() =>
   import("../browse/BrowseTab").then(module => ({ default: module.BrowsePanel }))
 );
 
 const normalizeServerUrl = (value: string) => value.replace(/\/+$/, "");
+const NEW_FOLDER_OPTION_VALUE = "__bloom_move_create_new_folder__";
 
 type SearchField = "artist" | "album" | "title" | "genre" | "year" | "type" | "mime" | "size";
 
@@ -190,6 +193,10 @@ type FolderNode = {
 };
 
 type FolderScope = "aggregated" | "server" | "private";
+
+type MoveDialogState =
+  | { kind: "blob"; blob: BlossomBlob; currentPath: string | null; isPrivate: boolean }
+  | { kind: "folder"; path: string; name: string; currentParent: string | null; scope: FolderScope; isPrivate: boolean };
 
 const folderPlaceholderSha = (scope: FolderScope, path: string, variant: "node" | "up") => {
   const encodedPath = encodeURIComponent(path || "__root__");
@@ -422,13 +429,26 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
   const queryClient = useQueryClient();
   const { signer, signEventTemplate } = useNdk();
   const pubkey = useCurrentPubkey();
-  const { entriesBySha, removeEntries } = usePrivateLibrary();
-  const { deleteFolder, foldersByPath, getFolderDisplayName, removeBlobFromFolder, resolveFolderPath } = useFolderLists();
+  const { entriesBySha, removeEntries, upsertEntries } = usePrivateLibrary();
+  const {
+    folders,
+    deleteFolder,
+    foldersByPath,
+    getFolderDisplayName,
+    removeBlobFromFolder,
+    resolveFolderPath,
+    renameFolder,
+    getFoldersForBlob,
+    setBlobFolderMembership,
+  } = useFolderLists();
   const { confirm } = useDialog();
   const [activeList, setActiveList] = useState<ActiveListState | null>(null);
   const playbackUrlCacheRef = useRef(new Map<string, string>());
   const lastPlayRequestRef = useRef<string | undefined>();
   const autoPrivateNavigationRef = useRef<{ previous: ActiveListState | null } | null>(null);
+  const [moveState, setMoveState] = useState<MoveDialogState | null>(null);
+  const [moveBusy, setMoveBusy] = useState(false);
+  const [moveError, setMoveError] = useState<string | null>(null);
 
   useEffect(() => {
     onActiveListChange?.(activeList);
@@ -1099,6 +1119,104 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
       serverUrl: blob.serverUrl ?? null,
     } as { scope: FolderScope; path: string; serverUrl?: string | null };
   };
+
+  const formatFolderLabel = useCallback((value: string | null) => {
+    if (!value) return "Home";
+    const segments = value.split("/").filter(Boolean);
+    if (segments.length === 0) return "Home";
+    return segments.join(" / ");
+  }, []);
+
+  const formatPrivateFolderLabel = useCallback((value: string | null) => {
+    if (!value) return "Private";
+    const segments = value.split("/").filter(Boolean);
+    if (segments.length === 0) return "Private";
+    return `Private / ${segments.join(" / ")}`;
+  }, []);
+
+  const formatMoveDestinationLabel = useCallback(
+    (value: string | null, isPrivate: boolean) =>
+      isPrivate ? formatPrivateFolderLabel(value) : formatFolderLabel(value),
+    [formatFolderLabel, formatPrivateFolderLabel]
+  );
+
+  const moveDestinations = useMemo(() => {
+    const paths = new Set<string>();
+    folders.forEach(record => {
+      const normalized = normalizeFolderPathInput(record.path) ?? null;
+      if (!normalized) return;
+      const name = deriveNameFromPath(normalized);
+      if (isPrivateFolderName(name)) return;
+      const canonical = resolveFolderPath(normalized);
+      paths.add(canonical);
+    });
+    return Array.from(paths).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+  }, [folders, resolveFolderPath]);
+
+  const privateMoveDestinations = useMemo(() => {
+    const paths = new Set<string>();
+    privateBlobs.forEach(blob => {
+      const normalized = normalizeFolderPathInput(blob.folderPath ?? undefined);
+      if (!normalized) return;
+      let current: string | null = normalized;
+      while (current && !paths.has(current)) {
+        paths.add(current);
+        current = getParentFolderPath(current);
+        if (current === "") {
+          current = null;
+        }
+      }
+    });
+    return Array.from(paths).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+  }, [privateBlobs]);
+
+  const moveDialogOptions = useMemo(() => {
+    if (moveState?.isPrivate) {
+      const options: Array<{ value: string | null; label: string; disabled?: boolean }> = [
+        { value: null, label: "Private" },
+        ...privateMoveDestinations.map(path => ({
+          value: path,
+          label: formatPrivateFolderLabel(path),
+        })),
+        { value: NEW_FOLDER_OPTION_VALUE, label: "New folder…" },
+      ];
+      if (moveState.kind === "folder") {
+        const currentPath = moveState.path;
+        return options.map(option => {
+          if (!option.value) return option;
+          if (option.value === NEW_FOLDER_OPTION_VALUE) return option;
+          if (option.value === currentPath || option.value.startsWith(`${currentPath}/`)) {
+            return { ...option, disabled: true };
+          }
+          return option;
+        });
+      }
+      return options;
+    }
+
+    const options: Array<{ value: string | null; label: string; disabled?: boolean }> = [
+      { value: null, label: "Home" },
+      ...moveDestinations.map(path => ({
+        value: path,
+        label: formatFolderLabel(path),
+      })),
+      { value: NEW_FOLDER_OPTION_VALUE, label: "New folder…" },
+    ];
+
+    if (moveState?.kind === "folder") {
+      const currentPath = moveState.path;
+      return options.map(option => {
+        if (!option.value) return option;
+        if (option.value === NEW_FOLDER_OPTION_VALUE) return option;
+        if (option.value === currentPath || option.value.startsWith(`${currentPath}/`)) {
+          return { ...option, disabled: true };
+        }
+        return option;
+      });
+    }
+
+    return options;
+  }, [formatFolderLabel, formatPrivateFolderLabel, moveDestinations, moveState, privateMoveDestinations]);
 
   const blobVariantsBySha = useMemo(() => {
     const map = new Map<string, BlossomBlob[]>();
@@ -1965,6 +2083,310 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
     ]
   );
 
+  const handleMoveRequest = useCallback(
+    (blob: BlossomBlob) => {
+      if (blob.__bloomFolderPlaceholder) {
+        if (blob.__bloomFolderIsParentLink) {
+          return;
+        }
+        const scope = blob.__bloomFolderScope ?? "aggregated";
+        const normalizedPath = normalizeFolderPathInput(blob.__bloomFolderTargetPath ?? undefined);
+        if (scope === "private") {
+          if (!normalizedPath) {
+            showStatusMessage("Unable to determine the folder location.", "error", 4000);
+            return;
+          }
+          const folderName =
+            blob.name?.trim().length ? blob.name.trim() : normalizedPath.split("/").pop() ?? normalizedPath;
+          const parentPathRaw = getParentFolderPath(normalizedPath);
+          const parentPath = parentPathRaw && parentPathRaw.length > 0 ? parentPathRaw : null;
+          setMoveError(null);
+          setMoveBusy(false);
+          setMoveState({
+            kind: "folder",
+            path: normalizedPath,
+            name: folderName,
+            currentParent: parentPath,
+            scope,
+            isPrivate: true,
+          });
+          return;
+        }
+        if (!normalizedPath) {
+          showStatusMessage("Unable to determine the folder location.", "error", 4000);
+          return;
+        }
+        const canonicalPath = resolveFolderPath(normalizedPath);
+        const folderName = getFolderDisplayName(canonicalPath) || canonicalPath.split("/").pop() || canonicalPath;
+        const parentPathRaw = getParentFolderPath(canonicalPath);
+        const parentPath = parentPathRaw && parentPathRaw.length > 0 ? resolveFolderPath(parentPathRaw) : null;
+        setMoveError(null);
+        setMoveBusy(false);
+        setMoveState({
+          kind: "folder",
+          path: canonicalPath,
+          name: folderName,
+          currentParent: parentPath,
+          scope: blob.__bloomFolderScope ?? "aggregated",
+          isPrivate: false,
+        });
+        return;
+      }
+
+      if (isListLikeBlob(blob)) {
+        const folderInfo = extractFolderInfo(blob);
+        const scope = folderInfo?.scope ?? "aggregated";
+        const normalizedPath = normalizeFolderPathInput(folderInfo?.path ?? blob.folderPath ?? undefined);
+        if (scope === "private") {
+          if (!normalizedPath) {
+            showStatusMessage("This folder cannot be moved.", "error", 4000);
+            return;
+          }
+          const folderName =
+            blob.name?.trim().length ? blob.name.trim() : normalizedPath.split("/").pop() ?? normalizedPath;
+          const parentPathRaw = getParentFolderPath(normalizedPath);
+          const parentPath = parentPathRaw && parentPathRaw.length > 0 ? parentPathRaw : null;
+          setMoveError(null);
+          setMoveBusy(false);
+          setMoveState({
+            kind: "folder",
+            path: normalizedPath,
+            name: folderName,
+            currentParent: parentPath,
+            scope,
+            isPrivate: true,
+          });
+          return;
+        }
+        if (!normalizedPath) {
+          showStatusMessage("This folder cannot be moved.", "error", 4000);
+          return;
+        }
+        const canonicalPath = resolveFolderPath(normalizedPath);
+        const folderName = getFolderDisplayName(canonicalPath) || canonicalPath.split("/").pop() || canonicalPath;
+        const parentPathRaw = getParentFolderPath(canonicalPath);
+        const parentPath = parentPathRaw && parentPathRaw.length > 0 ? resolveFolderPath(parentPathRaw) : null;
+        setMoveError(null);
+        setMoveBusy(false);
+        setMoveState({
+          kind: "folder",
+          path: canonicalPath,
+          name: folderName,
+          currentParent: parentPath,
+          scope,
+          isPrivate: false,
+        });
+        return;
+      }
+
+      if (blob.privateData) {
+        const entry = entriesBySha.get(blob.sha256);
+        const normalizedPath =
+          normalizeFolderPathInput(entry?.metadata?.folderPath ?? blob.folderPath ?? undefined) ?? null;
+        if (!entry) {
+          showStatusMessage("Unable to locate private file details.", "error", 4000);
+          return;
+        }
+        setMoveError(null);
+        setMoveBusy(false);
+        setMoveState({ kind: "blob", blob, currentPath: normalizedPath, isPrivate: true });
+        return;
+      }
+
+      const memberships = getFoldersForBlob(blob.sha256);
+      const currentPath = memberships[0] ?? null;
+      setMoveError(null);
+      setMoveBusy(false);
+      setMoveState({ kind: "blob", blob, currentPath, isPrivate: false });
+    },
+    [entriesBySha, extractFolderInfo, getFolderDisplayName, getFoldersForBlob, isListLikeBlob, resolveFolderPath, showStatusMessage]
+  );
+
+  const handleMoveSubmit = useCallback(
+    async (destination: MoveDialogDestination) => {
+      if (!moveState) return;
+      setMoveBusy(true);
+      setMoveError(null);
+
+      const canonicalize = (value: string | null) => {
+        if (!value) return null;
+        if (moveState.isPrivate) {
+          return value;
+        }
+        const resolved = resolveFolderPath(value);
+        return resolved ? resolved : null;
+      };
+
+      try {
+        const resolveDestinationValue = (): string | null => {
+          if (destination.kind === "new") {
+            const normalized = normalizeFolderPathInput(destination.path);
+            if (!normalized) {
+              throw new Error("Enter a valid folder path.");
+            }
+            return normalized;
+          }
+          return destination.target ?? null;
+        };
+
+        const rawDestination = resolveDestinationValue();
+
+        if (moveState.kind === "blob") {
+          if (moveState.isPrivate) {
+            const targetCanonical = canonicalize(rawDestination);
+            const currentCanonical = canonicalize(moveState.currentPath);
+            if ((currentCanonical ?? null) === (targetCanonical ?? null)) {
+              setMoveState(null);
+              return;
+            }
+            const entry = entriesBySha.get(moveState.blob.sha256);
+            if (!entry) {
+              throw new Error("Unable to locate private file details.");
+            }
+            const updatedEntry: PrivateListEntry = {
+              sha256: entry.sha256,
+              encryption: entry.encryption,
+              metadata: {
+                ...(entry.metadata ?? {}),
+                folderPath: targetCanonical,
+              },
+              servers: entry.servers,
+              updatedAt: Math.floor(Date.now() / 1000),
+            };
+            await upsertEntries([updatedEntry]);
+            const destinationLabel = formatPrivateFolderLabel(targetCanonical);
+            showStatusMessage(`Moved to ${destinationLabel}.`, "success", 2500);
+            setMoveState(null);
+            setMoveError(null);
+          } else {
+            const targetCanonical = canonicalize(rawDestination);
+            const currentCanonical = canonicalize(moveState.currentPath);
+            if ((currentCanonical ?? null) === (targetCanonical ?? null)) {
+              setMoveState(null);
+              return;
+            }
+            await setBlobFolderMembership(moveState.blob.sha256, targetCanonical);
+            const destinationLabel = formatFolderLabel(targetCanonical);
+            showStatusMessage(`Moved to ${destinationLabel}.`, "success", 2500);
+            setMoveState(null);
+            setMoveError(null);
+          }
+        } else {
+          const targetCanonical = canonicalize(rawDestination);
+          const currentCanonical = moveState.path;
+          const currentParentCanonical = canonicalize(moveState.currentParent);
+
+          if ((currentParentCanonical ?? null) === (targetCanonical ?? null)) {
+            setMoveState(null);
+            return;
+          }
+
+          if (targetCanonical && (targetCanonical === currentCanonical || targetCanonical.startsWith(`${currentCanonical}/`))) {
+            throw new Error("Choose a destination outside this folder.");
+          }
+
+          const folderName = currentCanonical.split("/").pop() ?? currentCanonical;
+          const nextPath = targetCanonical ? `${targetCanonical}/${folderName}` : folderName;
+
+          if (moveState.isPrivate) {
+            const nowSeconds = Math.floor(Date.now() / 1000);
+            const updates: PrivateListEntry[] = [];
+            privateEntries.forEach(entry => {
+              const entryPath = normalizeFolderPathInput(entry.metadata?.folderPath ?? undefined);
+              if (!entryPath) return;
+              if (entryPath === currentCanonical || entryPath.startsWith(`${currentCanonical}/`)) {
+                const suffix = entryPath.slice(currentCanonical.length).replace(/^\/+/, "");
+                const updatedPath = suffix ? `${nextPath}/${suffix}` : nextPath;
+                updates.push({
+                  sha256: entry.sha256,
+                  encryption: entry.encryption,
+                  metadata: {
+                    ...(entry.metadata ?? {}),
+                    folderPath: updatedPath,
+                  },
+                  servers: entry.servers,
+                  updatedAt: nowSeconds,
+                });
+              }
+            });
+
+            if (!updates.length) {
+              throw new Error("Unable to locate private folder contents.");
+            }
+
+            await upsertEntries(updates);
+
+            const destinationLabel = formatPrivateFolderLabel(targetCanonical);
+            showStatusMessage(`Folder moved to ${destinationLabel}.`, "success", 2500);
+
+            if (activeList?.type === "folder" && activeList.scope === "private") {
+              if (activeList.path === currentCanonical) {
+                setActiveList({
+                  ...activeList,
+                  path: nextPath,
+                });
+              } else if (activeList.path.startsWith(`${currentCanonical}/`)) {
+                const suffix = activeList.path.slice(currentCanonical.length).replace(/^\/+/, "");
+                const updatedActivePath = suffix ? `${nextPath}/${suffix}` : nextPath;
+                setActiveList({
+                  ...activeList,
+                  path: updatedActivePath,
+                });
+              }
+            }
+
+            setMoveState(null);
+            setMoveError(null);
+          } else {
+            await renameFolder(currentCanonical, nextPath);
+
+            const destinationLabel = formatFolderLabel(targetCanonical);
+            showStatusMessage(`Folder moved to ${destinationLabel}.`, "success", 2500);
+
+            if (activeList?.type === "folder") {
+              const activeCanonical = resolveFolderPath(activeList.path);
+              if (activeCanonical === currentCanonical) {
+                const resolvedNext = resolveFolderPath(nextPath);
+                setActiveList({
+                  ...activeList,
+                  path: resolvedNext,
+                });
+              }
+            }
+
+            setMoveState(null);
+            setMoveError(null);
+          }
+        }
+      } catch (error) {
+        setMoveError(error instanceof Error ? error.message : "Unable to move item.");
+        return;
+      } finally {
+        setMoveBusy(false);
+      }
+    },
+    [
+      activeList,
+      entriesBySha,
+      formatFolderLabel,
+      formatPrivateFolderLabel,
+      moveState,
+      privateEntries,
+      renameFolder,
+      resolveFolderPath,
+      setActiveList,
+      setBlobFolderMembership,
+      showStatusMessage,
+      upsertEntries,
+    ]
+  );
+
+  const closeMoveDialog = useCallback(() => {
+    if (moveBusy) return;
+    setMoveState(null);
+    setMoveError(null);
+  }, [moveBusy]);
+
   const handleRenameBlob = useCallback(
     (blob: BlossomBlob) => {
       if (isPlaceholderBlob(blob)) {
@@ -2118,6 +2540,35 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
     };
   }, [onNavigationChange]);
 
+  const moveDialogInitialValue = moveState
+    ? moveState.kind === "folder"
+      ? moveState.currentParent ?? null
+      : moveState.currentPath ?? null
+    : null;
+
+  const moveDialogCurrentLocation = moveState
+    ? moveState.kind === "folder"
+      ? formatMoveDestinationLabel(moveState.currentParent, moveState.isPrivate)
+      : formatMoveDestinationLabel(moveState.currentPath, moveState.isPrivate)
+    : "Home";
+
+  const moveDialogItemLabel = moveState
+    ? moveState.kind === "folder"
+      ? moveState.name
+      : getBlobMetadataName(moveState.blob) ?? moveState.blob.name ?? moveState.blob.sha256
+    : "";
+
+  const moveDialogItemPath =
+    moveState?.kind === "folder"
+      ? formatMoveDestinationLabel(moveState.path, moveState.isPrivate)
+      : undefined;
+
+  const moveDialogDestinationHint = moveState?.isPrivate
+    ? "Private items can only be moved within Private."
+    : "Only non-private folders are available as destinations.";
+
+  const moveDialogNewFolderDefault = moveState?.isPrivate ? "Trips" : "Images/Trips";
+
   return (
     <div className="flex flex-1 min-h-0 flex-col overflow-hidden">
       <div className="flex flex-1 min-h-0">
@@ -2143,6 +2594,7 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
           onCopy={handleCopyUrl}
           onShare={handleShareBlob}
           onRename={handleRenameBlob}
+          onMove={handleMoveRequest}
           onPlay={handlePlayBlob}
           currentTrackUrl={audio.current?.url}
           currentTrackStatus={audio.status}
@@ -2159,6 +2611,23 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
         />
         </Suspense>
       </div>
+      {moveState ? (
+        <MoveDialog
+          itemType={moveState.kind === "folder" ? "folder" : "file"}
+          itemLabel={moveDialogItemLabel}
+          currentLocationLabel={moveDialogCurrentLocation}
+          itemPathLabel={moveDialogItemPath}
+          options={moveDialogOptions}
+          initialValue={moveDialogInitialValue}
+          busy={moveBusy}
+          error={moveError}
+          onSubmit={handleMoveSubmit}
+          onCancel={closeMoveDialog}
+          createNewOptionValue={NEW_FOLDER_OPTION_VALUE}
+          newFolderDefaultPath={moveDialogNewFolderDefault}
+          destinationHint={moveDialogDestinationHint}
+        />
+      ) : null}
     </div>
   );
 };

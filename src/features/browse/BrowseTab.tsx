@@ -1,9 +1,9 @@
 import React, { Suspense, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import type { FilterMode } from "../../types/filter";
+import type { FilterMode } from "../../shared/types/filter";
 import { BrowseContent, type BrowseContentProps } from "./BrowseContent";
-import type { AudioContextValue } from "../../context/AudioContext";
-import type { BlobListProps } from "../../components/BlobList";
+import type { AudioContextValue } from "../../app/context/AudioContext";
+import type { BlobListProps } from "./ui/BlobList";
 import {
   GridIcon,
   ListIcon,
@@ -22,8 +22,8 @@ import {
   RepeatIcon,
   RepeatOneIcon,
   StopIcon,
-} from "../../components/icons";
-import type { SortDirection } from "../../context/UserPreferencesContext";
+} from "../../shared/ui/icons";
+import type { SortDirection } from "../../app/context/UserPreferencesContext";
 
 const BlobListPanelLazy = React.lazy(() =>
   import("./BlobListPanel").then(module => ({ default: module.BlobListPanel }))

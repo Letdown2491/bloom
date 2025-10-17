@@ -1,5 +1,5 @@
 import React from "react";
-import { ShareComposer } from "../../components/ShareComposer";
+import { ShareComposer } from "./ui/ShareComposer";
 
 type ShareComposerPanelProps = React.ComponentProps<typeof ShareComposer>;
 

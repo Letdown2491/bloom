@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react";
-import type { ShareCompletion, SharePayload } from "../../components/ShareComposer";
+import type { ShareCompletion, SharePayload } from "./ui/ShareComposer";
 
 export const useShareWorkflow = () => {
   const [shareState, setShareState] = useState<{ payload: SharePayload | null; shareKey: string | null }>(() => ({

@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { BlossomBlob, SignTemplate } from "../../lib/blossomClient";
-import { buildAuthorizationHeader } from "../../lib/blossomClient";
-import { buildNip98AuthHeader } from "../../lib/nip98";
+import type { BlossomBlob, SignTemplate } from "../../shared/api/blossomClient";
+import { buildAuthorizationHeader } from "../../shared/api/blossomClient";
+import { buildNip98AuthHeader } from "../../shared/api/nip98";
 import {
   getStoredBlobMetadata,
   isMetadataFresh,
   markBlobMetadataChecked,
   setStoredBlobMetadata,
-} from "../../utils/blobMetadataStore";
+} from "../../shared/utils/blobMetadataStore";
 
 type ServerType = "blossom" | "nip96" | "satellite";
 

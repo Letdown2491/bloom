@@ -2,22 +2,22 @@ import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState } fr
 import { useQueryClient } from "@tanstack/react-query";
 import { useWorkspace } from "./WorkspaceContext";
 import { useSelection } from "../selection/SelectionContext";
-import type { StatusMessageTone } from "../../types/status";
-import type { ManagedServer } from "../../hooks/useServers";
-import type { BlossomBlob, UploadStreamSource } from "../../lib/blossomClient";
+import type { StatusMessageTone } from "../../shared/types/status";
+import type { ManagedServer } from "../../shared/types/servers";
+import type { BlossomBlob, UploadStreamSource } from "../../shared/api/blossomClient";
 import {
   mirrorBlobToServer,
   uploadBlobToServer,
   buildAuthorizationHeader,
-} from "../../lib/blossomClient";
-import { uploadBlobToNip96 } from "../../lib/nip96Client";
-import { uploadBlobToSatellite } from "../../lib/satelliteClient";
-import { buildNip98AuthHeader } from "../../lib/nip98";
-import { getBlobMetadataName } from "../../utils/blobMetadataStore";
-import type { TransferState } from "../../components/UploadPanel";
-import { BloomHttpError } from "../../lib/httpService";
-import { useNdk, useCurrentPubkey } from "../../context/NdkContext";
-import type { SignTemplate } from "../../lib/blossomClient";
+} from "../../shared/api/blossomClient";
+import { uploadBlobToNip96 } from "../../shared/api/nip96Client";
+import { uploadBlobToSatellite } from "../../shared/api/satelliteClient";
+import { buildNip98AuthHeader } from "../../shared/api/nip98";
+import { getBlobMetadataName } from "../../shared/utils/blobMetadataStore";
+import type { TransferState } from "./ui/UploadPanel";
+import { BloomHttpError } from "../../shared/api/httpService";
+import { useNdk, useCurrentPubkey } from "../../app/context/NdkContext";
+import type { SignTemplate } from "../../shared/api/blossomClient";
 
 const TransferContentLazy = React.lazy(() =>
   import("../transfer/TransferContent").then(module => ({ default: module.TransferContent }))

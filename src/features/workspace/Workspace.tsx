@@ -1,21 +1,21 @@
 import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ManagedServer } from "../../hooks/useServers";
-import type { BlossomBlob } from "../../lib/blossomClient";
-import type { SharePayload } from "../../components/ShareComposer";
-import type { StatusMessageTone } from "../../types/status";
-import type { TabId } from "../../types/tabs";
-import type { TransferState } from "../../components/UploadPanel";
-import type { DefaultSortOption } from "../../context/UserPreferencesContext";
+import type { ManagedServer } from "../../shared/types/servers";
+import type { BlossomBlob } from "../../shared/api/blossomClient";
+import type { SharePayload } from "../share/ui/ShareComposer";
+import type { StatusMessageTone } from "../../shared/types/status";
+import type { TabId } from "../../shared/types/tabs";
+import type { TransferState } from "./ui/UploadPanel";
+import type { DefaultSortOption } from "../../app/context/UserPreferencesContext";
 import { BrowseTabContainer, type BrowseActiveListState, type BrowseNavigationState } from "./BrowseTabContainer";
-import type { FilterMode } from "../../types/filter";
+import type { FilterMode } from "../../shared/types/filter";
 import { useBrowseControls } from "../browse/useBrowseControls";
 import { BrowseControls } from "../browse/BrowseTab";
 import type { SyncStateSnapshot } from "./TransferTabContainer";
-import { useIsCompactScreen } from "../../hooks/useIsCompactScreen";
-import type { ShareFolderRequest } from "../../types/shareFolder";
+import { useIsCompactScreen } from "../../shared/hooks/useIsCompactScreen";
+import type { ShareFolderRequest } from "../../shared/types/shareFolder";
 
 const UploadPanelLazy = React.lazy(() =>
-  import("../../components/UploadPanel").then(module => ({ default: module.UploadPanel }))
+  import("./ui/UploadPanel").then(module => ({ default: module.UploadPanel }))
 );
 
 const TransferTabLazy = React.lazy(() =>

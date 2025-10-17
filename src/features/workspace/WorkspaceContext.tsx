@@ -1,14 +1,14 @@
 import React, { createContext, useContext, useMemo } from "react";
-import type { ManagedServer } from "../../hooks/useServers";
-import { useServerData } from "../../hooks/useServerData";
-import type { ServerSnapshot, BlobDistribution } from "../../hooks/useServerData";
-import type { BlobReplicaSummary } from "../../components/BlobList";
-import { deriveServerNameFromUrl } from "../../utils/serverName";
-import { normalizeFolderPathInput, mergeBlobsWithStoredMetadata } from "../../utils/blobMetadataStore";
-import { usePrivateLibrary } from "../../context/PrivateLibraryContext";
-import type { PrivateListEntry } from "../../lib/privateList";
-import type { BlossomBlob } from "../../lib/blossomClient";
-import { PRIVATE_SERVER_NAME } from "../../constants/private";
+import type { ManagedServer } from "../../shared/types/servers";
+import { useServerData } from "./hooks/useServerData";
+import type { ServerSnapshot, BlobDistribution } from "./hooks/useServerData";
+import type { BlobReplicaSummary } from "../browse/ui/BlobList";
+import { deriveServerNameFromUrl } from "../../shared/utils/serverName";
+import { normalizeFolderPathInput, mergeBlobsWithStoredMetadata } from "../../shared/utils/blobMetadataStore";
+import { usePrivateLibrary } from "../../app/context/PrivateLibraryContext";
+import type { PrivateListEntry } from "../../shared/domain/privateList";
+import type { BlossomBlob } from "../../shared/api/blossomClient";
+import { PRIVATE_SERVER_NAME } from "../../shared/constants/private";
 
 type ServerDataResult = ReturnType<typeof useServerData>;
 

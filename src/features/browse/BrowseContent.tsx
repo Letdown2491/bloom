@@ -1,11 +1,11 @@
 import React from "react";
-import type { BlossomBlob, SignTemplate } from "../../lib/blossomClient";
-import type { ServerSnapshot } from "../../hooks/useServerData";
-import type { BlobListProps, BlobReplicaSummary } from "../../components/BlobList";
-import type { FilterMode } from "../../types/filter";
-import type { DefaultSortOption, SortDirection } from "../../context/UserPreferencesContext";
-import type { FolderShareHint } from "../../types/shareFolder";
-import type { FolderListRecord } from "../../lib/folderList";
+import type { BlossomBlob, SignTemplate } from "../../shared/api/blossomClient";
+import type { ServerSnapshot } from "../workspace/hooks/useServerData";
+import type { BlobListProps, BlobReplicaSummary } from "./ui/BlobList";
+import type { FilterMode } from "../../shared/types/filter";
+import type { DefaultSortOption, SortDirection } from "../../app/context/UserPreferencesContext";
+import type { FolderShareHint } from "../../shared/types/shareFolder";
+import type { FolderListRecord } from "../../shared/domain/folderList";
 
 export type BrowseContentProps = {
   viewMode: "grid" | "list";
@@ -22,6 +22,7 @@ export type BrowseContentProps = {
   onCopy: (blob: BlossomBlob) => void;
   onShare: (blob: BlossomBlob) => void;
   onRename: (blob: BlossomBlob) => void;
+  onMove: (blob: BlossomBlob) => void;
   onPlay: (blob: BlossomBlob) => void;
   onShareFolder?: (hint: FolderShareHint) => void;
   folderRecords?: Map<string, FolderListRecord>;
@@ -53,6 +54,7 @@ export const BrowseContent: React.FC<BrowseContentProps> = ({
   onCopy,
   onShare,
   onRename,
+  onMove,
   onPlay,
   folderRecords,
   onShareFolder,
@@ -77,9 +79,10 @@ export const BrowseContent: React.FC<BrowseContentProps> = ({
     | "onSelectMany"
     | "onDelete"
     | "onCopy"
-    | "onShare"
-    | "onRename"
-    | "onPlay"
+  | "onShare"
+  | "onRename"
+  | "onMove"
+  | "onPlay"
     | "onShareFolder"
     | "currentTrackUrl"
     | "currentTrackStatus"
@@ -101,6 +104,7 @@ export const BrowseContent: React.FC<BrowseContentProps> = ({
     onCopy,
     onShare,
     onRename,
+    onMove,
     onPlay,
     currentTrackUrl,
     currentTrackStatus,

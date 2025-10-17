@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useUserPreferences } from "../../context/UserPreferencesContext";
-import type { FilterMode } from "../../types/filter";
-import type { SortDirection } from "../../context/UserPreferencesContext";
+import { useUserPreferences } from "../../app/context/UserPreferencesContext";
+import type { FilterMode } from "../../shared/types/filter";
+import type { SortDirection } from "../../app/context/UserPreferencesContext";
 
 type FilterOption = {
   id: Exclude<FilterMode, "all">;

@@ -1,10 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { QRCodeToDataURLOptions } from "qrcode";
-import type { RemoteSignerSession } from "../../lib/nip46";
-import { useNip46Pairing } from "../../hooks/useNip46Pairing";
-import { useNip46 } from "../../context/Nip46Context";
-import { useNdk } from "../../context/NdkContext";
-import { DEFAULT_PUBLIC_RELAYS } from "../../utils/relays";
+import type { RemoteSignerSession } from "../../shared/api/nip46";
+import { useNip46Pairing } from "./hooks/useNip46Pairing";
+import { useNip46 } from "../../app/context/Nip46Context";
+import { useNdk } from "../../app/context/NdkContext";
+import { DEFAULT_PUBLIC_RELAYS } from "../../shared/utils/relays";
 
 const BLOOM_METADATA = {
   name: "Bloom",

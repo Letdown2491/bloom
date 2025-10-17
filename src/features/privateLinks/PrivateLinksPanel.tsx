@@ -1,8 +1,8 @@
 import React from "react";
-import { CopyIcon, FileTypeIcon, TrashIcon, type FileKind } from "../../components/icons";
-import { usePrivateLinks } from "../../hooks/usePrivateLinks";
-import type { PrivateLinkRecord } from "../../lib/privateLinks";
-import { describeExpiration } from "../../utils/format";
+import { CopyIcon, FileTypeIcon, TrashIcon, type FileKind } from "../../shared/ui/icons";
+import { usePrivateLinks } from "./hooks/usePrivateLinks";
+import type { PrivateLinkRecord } from "../../shared/domain/privateLinks";
+import { describeExpiration } from "../../shared/utils/format";
 
 const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".heic", ".avif"]);
 const VIDEO_EXTENSIONS = new Set([".mp4", ".mov", ".webm", ".mkv", ".avi", ".hevc"]);

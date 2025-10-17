@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
-import type { BlossomBlob } from "../../lib/blossomClient";
+import type { BlossomBlob } from "../../shared/api/blossomClient";
 import {
   getStoredAudioMetadata,
   sanitizeCoverUrl,
   subscribeToBlobMetadataChanges,
   type BlobAudioMetadata,
-} from "../../utils/blobMetadataStore";
+} from "../../shared/utils/blobMetadataStore";
 
 export const useAudioMetadataMap = (blobs: BlossomBlob[]) => {
   const [version, setVersion] = useState(0);

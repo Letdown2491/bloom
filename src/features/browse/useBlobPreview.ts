@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from "react";
-import type { BlossomBlob, SignTemplate } from "../../lib/blossomClient";
+import type { BlossomBlob, SignTemplate } from "../../shared/api/blossomClient";
 
 type ServerType = "blossom" | "nip96" | "satellite";
 

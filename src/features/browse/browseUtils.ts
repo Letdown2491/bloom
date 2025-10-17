@@ -1,8 +1,8 @@
-import type { BlossomBlob } from "../../lib/blossomClient";
-import type { Track } from "../../context/AudioContext";
-import { getBlobMetadataName, type BlobAudioMetadata } from "../../utils/blobMetadataStore";
-import { isDocumentBlob, isImageBlob, isMusicBlob, isPdfBlob, isVideoBlob } from "../../utils/blobClassification";
-import type { FilterMode } from "../../types/filter";
+import type { BlossomBlob } from "../../shared/api/blossomClient";
+import type { Track } from "../../app/context/AudioContext";
+import { getBlobMetadataName, type BlobAudioMetadata } from "../../shared/utils/blobMetadataStore";
+import { isDocumentBlob, isImageBlob, isMusicBlob, isPdfBlob, isVideoBlob } from "../../shared/utils/blobClassification";
+import type { FilterMode } from "../../shared/types/filter";
 
 const deriveTrackTitle = (blob: BlossomBlob) => {
   const metadataName = getBlobMetadataName(blob);
