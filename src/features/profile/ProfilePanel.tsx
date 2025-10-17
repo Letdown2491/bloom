@@ -578,7 +578,7 @@ export const ProfilePanel: React.FC<ProfilePanelProps> = ({ onProfileUpdated, sh
               type="button"
               onClick={handleRefresh}
               disabled={loading || saving}
-              className={`inline-flex items-center gap-2 rounded-lg border px-4 py-2 text-sm transition ${
+              className={`hidden sm:inline-flex items-center gap-2 rounded-lg border px-4 py-2 text-sm transition ${
                 loading || saving
                   ? "border-slate-700 text-slate-500"
                   : "border-slate-500 text-slate-200 hover:border-emerald-400 hover:text-emerald-200"

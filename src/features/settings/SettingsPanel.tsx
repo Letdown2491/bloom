@@ -1507,7 +1507,55 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
     }
   }, [sections, activeSectionId]);
 
-  const navItemBaseClass = "flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left transition hover:bg-slate-800/60 hover:text-emerald-200";
+  const navItemBaseClass =
+    "flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left transition hover:bg-slate-800/60 hover:text-emerald-200";
+  const isNarrowScreen = useIsCompactScreen(1024);
+  const [navMenuOpen, setNavMenuOpen] = React.useState(false);
+  const navMenuRef = React.useRef<HTMLDivElement | null>(null);
+  const navTriggerRef = React.useRef<HTMLButtonElement | null>(null);
+
+  React.useEffect(() => {
+    if (!navMenuOpen) return;
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target as Node | null;
+      if (!target) return;
+      if (navMenuRef.current?.contains(target) || navTriggerRef.current?.contains(target)) {
+        return;
+      }
+      setNavMenuOpen(false);
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setNavMenuOpen(false);
+      }
+    };
+    window.addEventListener("pointerdown", handlePointerDown, true);
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("pointerdown", handlePointerDown, true);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [navMenuOpen]);
+
+  React.useEffect(() => {
+    if (!isNarrowScreen) {
+      setNavMenuOpen(false);
+    }
+  }, [isNarrowScreen]);
+
+  const handleSectionNavigate = React.useCallback(
+    (sectionId: string) => {
+      setActiveSectionId(sectionId);
+      if (typeof document !== "undefined") {
+        const element = document.getElementById(sectionId);
+        if (element) {
+          element.scrollIntoView({ behavior: "smooth", block: "start" });
+        }
+      }
+      setNavMenuOpen(false);
+    },
+    []
+  );
   const handleOpenSubmitIssue = React.useCallback(() => {
     if (typeof window === "undefined") return;
     window.open("https://github.com/Letdown2491/bloom/issues", "_blank", "noopener,noreferrer");
@@ -1523,8 +1571,88 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
         <h2 className="text-2xl font-semibold text-slate-100">Settings</h2>
       </header>
 
+      {isNarrowScreen && sections.length > 0 ? (
+        <div className="relative w-full">
+          <button
+            ref={navTriggerRef}
+            type="button"
+            onClick={() => setNavMenuOpen(open => !open)}
+            className="flex w-full items-center justify-between gap-2 rounded-xl border border-slate-800 bg-slate-900/70 px-3 py-2 text-sm text-slate-200 shadow-sm transition hover:border-emerald-400 hover:text-emerald-300 focus:outline-none focus:ring-1 focus:ring-emerald-400"
+            aria-haspopup="listbox"
+            aria-expanded={navMenuOpen}
+          >
+            <span className="flex items-center gap-2">
+              {(() => {
+                const activeSection = sections.find(section => section.id === activeSectionId) ?? sections[0];
+                const Icon = activeSection?.icon ?? SettingsIcon;
+                return <Icon size={16} aria-hidden="true" />;
+              })()}
+              <span>{sections.find(section => section.id === activeSectionId)?.label ?? "Select section"}</span>
+            </span>
+            <span className="text-slate-500">
+              <DoubleChevronDownIcon size={14} aria-hidden="true" />
+            </span>
+          </button>
+          {navMenuOpen ? (
+            <div
+              ref={navMenuRef}
+              role="listbox"
+              className="absolute inset-x-0 top-full z-30 mt-2 max-h-80 overflow-auto rounded-xl border border-slate-800 bg-slate-900/95 p-2 shadow-lg backdrop-blur"
+            >
+              <ul className="flex flex-col gap-1 text-sm text-slate-200">
+                {sections.map(section => {
+                  const Icon = section.icon;
+                  const isActive = section.id === activeSectionId;
+                  return (
+                    <li key={section.id}>
+                      <a
+                        href={`#${section.id}`}
+                        onClick={event => {
+                          event.preventDefault();
+                          handleSectionNavigate(section.id);
+                        }}
+                        className={`flex items-center gap-2 rounded-lg px-3 py-2 transition hover:bg-slate-800/70 hover:text-emerald-200 ${
+                          isActive ? "bg-slate-800/70 text-emerald-200" : ""
+                        }`}
+                      >
+                        <Icon size={16} aria-hidden="true" />
+                        <span>{section.label}</span>
+                      </a>
+                    </li>
+                  );
+                })}
+                <li className="mt-1 border-t border-slate-800/70 pt-1">
+                  <a
+                    href="https://github.com/Letdown2491/bloom/issues"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={() => setNavMenuOpen(false)}
+                    className="flex items-center gap-2 rounded-lg px-3 py-2 text-slate-300 transition hover:bg-slate-800/70 hover:text-emerald-200"
+                  >
+                    <GithubIcon size={16} aria-hidden="true" />
+                    <span className="font-medium">Submit Issue</span>
+                  </a>
+                </li>
+                <li>
+                  <a
+                    href="https://getalby.com/p/invincibleperfection384952"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={() => setNavMenuOpen(false)}
+                    className="flex items-center gap-2 rounded-lg px-3 py-2 text-slate-300 transition hover:bg-slate-800/70 hover:text-emerald-200"
+                  >
+                    <LightningIcon size={16} aria-hidden="true" />
+                    <span className="font-medium">Support Bloom</span>
+                  </a>
+                </li>
+              </ul>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
       <div className="grid gap-6 xl:grid-cols-[220px_minmax(0,1fr)]">
-        <nav className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4 shadow-sm">
+        <nav className="hidden rounded-2xl border border-slate-800 bg-slate-900/70 p-4 shadow-sm xl:block">
           <ul className="space-y-2 text-sm text-slate-300">
             {sections.map(section => {
               const Icon = section.icon;

@@ -132,8 +132,8 @@ export const StatusFooter = memo(function StatusFooter({
   const lightFocusRing = "focus-visible:ring-2 focus-visible:ring-blue-400/70 focus-visible:ring-offset-2 focus-visible:ring-offset-white";
   const serverSelectClass =
     theme === "light"
-      ? `rounded-lg border border-slate-200 bg-white/90 px-3 py-1.5 text-xs text-slate-700 transition hover:border-blue-400 focus:outline-none ${lightFocusRing}`
-      : "rounded-lg border border-slate-800/70 bg-slate-900/60 px-3 py-1.5 text-xs text-slate-200 transition hover:border-emerald-400 focus:outline-none focus-visible:focus-emerald-ring";
+      ? `rounded-lg border border-slate-200 bg-white/90 px-2 py-1.5 text-xs text-slate-700 transition hover:border-blue-400 focus:outline-none sm:px-3 ${lightFocusRing}`
+      : "rounded-lg border border-slate-800/70 bg-slate-900/60 px-2 py-1.5 text-xs text-slate-200 transition hover:border-emerald-400 focus:outline-none focus-visible:focus-emerald-ring sm:px-3";
   const settingsButtonClass =
     theme === "light"
       ? `flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white/90 text-slate-600 transition hover:border-blue-400 hover:text-blue-700 focus:outline-none ${lightFocusRing}`
@@ -202,35 +202,6 @@ export const StatusFooter = memo(function StatusFooter({
 
   return (
     <footer className="relative flex min-h-12 flex-wrap items-center gap-4 rounded-2xl border border-slate-800/70 surface-floating px-4 py-3 text-xs text-slate-300 shadow-floating md:flex-nowrap">
-      {showGithubLink && (
-        <a
-          href="https://github.com/Letdown2491/bloom"
-          target="_blank"
-          rel="noopener noreferrer"
-          className={`flex shrink-0 items-center gap-2 rounded-xl px-3 py-1.5 text-slate-200 transition ${
-            theme === "light" ? `${lightFocusRing} hover:text-blue-700` : "hover:text-emerald-300 focus-visible:focus-emerald-ring"
-          }`}
-        >
-          <GithubIcon size={16} aria-hidden="true" />
-          <span className="font-medium">Github</span>
-        </a>
-      )}
-
-      <div className="pointer-events-none absolute inset-0 flex items-center justify-center px-4 text-center">
-        {centerMessage ? (
-          <span
-            className={`inline-flex items-center gap-2 rounded-xl px-3 py-1.5 font-semibold shadow-toolbar ${
-              theme === "light"
-                ? "bg-blue-100 text-blue-700"
-                : "bg-emerald-500/10 text-emerald-200"
-            } ${centerClass}`}
-          >
-            <BellIcon size={14} aria-hidden="true" />
-            <span>{centerMessage}</span>
-          </span>
-        ) : null}
-      </div>
-
       {showServerSelector && (
         <div className="flex shrink-0 items-center gap-2">
           <div className="relative">
@@ -251,7 +222,7 @@ export const StatusFooter = memo(function StatusFooter({
                 }
               }}
               href="#"
-              className={settingsButtonClass}
+              className={`${settingsButtonClass} hidden sm:flex`}
             >
               <SettingsIcon size={16} aria-hidden="true" />
               <span className="sr-only">Workspace menu</span>
@@ -321,14 +292,16 @@ export const StatusFooter = memo(function StatusFooter({
               aria-haspopup="listbox"
               aria-expanded={serverMenuOpen}
               onClick={() => setServerMenuOpen(open => !open)}
-            className={`${serverSelectClass} flex h-8 min-w-[12rem] items-center gap-2 pr-7 shadow-toolbar justify-between`}
-          >
-            <ServersIcon size={14} aria-hidden="true" />
-            <span className="flex-1 truncate text-left pl-1">{currentServerLabel}</span>
-            <span className={`flex items-center ${serverArrowClass}`}>
-              <ChevronDownIcon size={12} aria-hidden="true" />
-            </span>
-          </button>
+              className={`${serverSelectClass} flex h-8 w-10 items-center justify-center shadow-toolbar sm:w-auto sm:justify-between sm:gap-2 sm:pl-3 sm:pr-7`}
+            >
+              <span className="flex flex-1 items-center justify-center sm:justify-start">
+                <ServersIcon size={14} aria-hidden="true" />
+              </span>
+              <span className="hidden flex-1 truncate text-left pl-1 sm:flex">{currentServerLabel}</span>
+              <span className={`hidden items-center ${serverArrowClass} sm:flex`}>
+                <ChevronDownIcon size={12} aria-hidden="true" />
+              </span>
+            </button>
             {serverMenuOpen ? (
               <div
                 ref={serverMenuRef}
@@ -377,18 +350,43 @@ export const StatusFooter = memo(function StatusFooter({
         </div>
       )}
 
+      <div className="pointer-events-none absolute inset-0 hidden items-center justify-center px-4 text-center sm:flex">
+        {centerMessage ? (
+          <span
+            className={`inline-flex items-center gap-2 rounded-xl px-3 py-1.5 font-semibold shadow-toolbar ${
+              theme === "light"
+                ? "bg-blue-100 text-blue-700"
+                : "bg-emerald-500/10 text-emerald-200"
+            } ${centerClass}`}
+          >
+            <BellIcon size={14} aria-hidden="true" />
+            <span>{centerMessage}</span>
+          </span>
+        ) : null}
+      </div>
+
+      {showGithubLink && (
+        <a
+          href="https://github.com/Letdown2491/bloom"
+          target="_blank"
+          rel="noopener noreferrer"
+          className={`hidden shrink-0 items-center gap-2 rounded-xl px-3 py-1.5 text-slate-200 transition sm:flex ${
+            theme === "light" ? `${lightFocusRing} hover:text-blue-700` : "hover:text-emerald-300 focus-visible:focus-emerald-ring"
+          }`}
+        >
+          <GithubIcon size={16} aria-hidden="true" />
+          <span className="font-medium">Github</span>
+        </a>
+      )}
+
       {(showStatusTotals || showSupportLink) && (
-        <div className="ml-auto flex shrink-0 items-center gap-4">
+        <div className="ml-auto hidden shrink-0 items-center gap-4 sm:flex">
           {showStatusTotals && (
             <div className={statusTotalsContainerClass}>
               <span className={statusTotalsItemClass}>
-                <ServersIcon size={12} aria-hidden="true" />
-                <span>{statusCount} item{statusCount === 1 ? "" : "s"}</span>
+                {statusCount} item{statusCount === 1 ? "" : "s"}
               </span>
-              <span className={statusTotalsSizeClass}>
-                <ServersIcon size={12} aria-hidden="true" />
-                <span>{prettyBytes(statusSize)}</span>
-              </span>
+              <span className={statusTotalsSizeClass}>{prettyBytes(statusSize)}</span>
             </div>
           )}
 
@@ -397,7 +395,7 @@ export const StatusFooter = memo(function StatusFooter({
               href="https://getalby.com/p/invincibleperfection384952"
               target="_blank"
               rel="noopener noreferrer"
-              className={donateLinkClass}
+              className={`${donateLinkClass} hidden sm:flex`}
             >
               <LightningIcon size={16} aria-hidden="true" />
               <span className="font-medium">Donate</span>
