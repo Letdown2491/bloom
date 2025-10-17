@@ -2,8 +2,6 @@
 
 **Bloom** is an intuitive, privacy-focused file manager for **Blossom** and **NIP-96** servers. It lets you store, organize, and share files across the distributed Nostr ecosystem with no passwords required.
 
----
-
 ## What Bloom Can Do
 
 - **Simple Sign-In:** Sign in instantly with your Nostr npub using a browser extension (NIP-07) or a remote signer (NIP-46).
@@ -19,8 +17,6 @@
 - **Connection Management:** Easily manage your Blossom and NIP-96 media servers, and Nostr relay (NIP-65) connections.
 - **Profile Editing:** Edit your Nostr profile (kind-0) from within Bloom, and quickly choose avatars or banners from your connected servers.
 - **Customization and Sync:** Personalize your interface and settings. Optionally sync preferences across devices using NIP-77, or keep them local for privacy.
-
----
 
 ## Before You Start
 - You need a browser with a Nostr extension such as Alby installed, or have a remote signer such as Amber available.
