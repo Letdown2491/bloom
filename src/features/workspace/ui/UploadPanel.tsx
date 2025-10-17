@@ -26,6 +26,7 @@ import type { PrivateListEntry } from "../../../shared/domain/privateList";
 import { useFolderLists } from "../../../app/context/FolderListContext";
 import { loadNdkModule } from "../../../shared/api/ndkModule";
 import { FolderIcon, LockIcon, WarningIcon, UploadIcon, EditIcon, TrashIcon } from "../../../shared/ui/icons";
+import { useUserPreferences } from "../../../app/context/UserPreferencesContext";
 
 const RESIZE_OPTIONS = [
   { id: 0, label: "Original" },
@@ -108,11 +109,18 @@ const ENTRY_STATUS_LABEL: Record<UploadEntryStatus, string> = {
   error: "Needs attention",
 };
 
-const ENTRY_STATUS_BADGE: Record<UploadEntryStatus, string> = {
+const ENTRY_STATUS_BADGE_DARK: Record<UploadEntryStatus, string> = {
   idle: "bg-slate-800 text-slate-300",
   uploading: "bg-emerald-500/20 text-emerald-300",
   success: "bg-emerald-500/20 text-emerald-200",
   error: "bg-red-500/20 text-red-300",
+};
+
+const ENTRY_STATUS_BADGE_LIGHT: Record<UploadEntryStatus, string> = {
+  idle: "bg-slate-200 text-slate-600",
+  uploading: "bg-emerald-100 text-emerald-700",
+  success: "bg-emerald-100 text-emerald-700",
+  error: "bg-red-100 text-red-600",
 };
 
 const ENTRY_STATUS_HEADING: Record<UploadEntryStatus, string> = {
@@ -185,6 +193,8 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
   syncTransfers = [],
   defaultFolderPath,
 }) => {
+  const { preferences } = useUserPreferences();
+  const isLightTheme = preferences.theme === "light";
   const [selectedServers, setSelectedServers] = useState<string[]>(() => {
     if (selectedServerUrl) {
       const match = servers.find(server => server.url === selectedServerUrl);
@@ -221,6 +231,8 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
     () => new Map([...syncTransfers, ...transfers].map(item => [item.id, item])),
     [syncTransfers, transfers]
   );
+
+  const entryStatusBadgeMap = isLightTheme ? ENTRY_STATUS_BADGE_LIGHT : ENTRY_STATUS_BADGE_DARK;
 
   const requiresAuthSelected = useMemo(
     () =>
@@ -1226,15 +1238,21 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
           <div className="text-xs text-red-400">Folder names cannot include the word "private".</div>
         )}
         {uploadSummary && entries.length > 1 && (
-          <div className="rounded-xl border border-slate-800 bg-slate-950/60 px-4 py-3 text-sm text-slate-200 space-y-2">
+          <div
+            className={`rounded-xl border px-4 py-3 text-sm space-y-2 ${
+              isLightTheme
+                ? "border-slate-200 bg-white text-slate-700 shadow-sm"
+                : "border-slate-800 bg-slate-950/60 text-slate-200"
+            }`}
+          >
             <div className="flex flex-wrap items-center gap-3">
-              <span className="font-medium">
+              <span className={`font-medium ${isLightTheme ? "text-slate-900" : "text-slate-100"}`}>
                 {uploadSummary.count} {uploadSummary.count === 1 ? "file" : "files"} ·{" "}
                 {prettyBytes(uploadSummary.totalBytes)}
               </span>
               {uploadSummary.privateCount > 0 ? (
-                <span className="inline-flex items-center gap-1 text-xs text-slate-400">
-                  <LockIcon size={14} className="text-emerald-300" />
+                <span className={`inline-flex items-center gap-1 text-xs ${isLightTheme ? "text-slate-500" : "text-slate-400"}`}>
+                  <LockIcon size={14} className={isLightTheme ? "text-emerald-600" : "text-emerald-300"} />
                   <span>
                     {uploadSummary.privateCount}{" "}
                     {uploadSummary.privateCount === 1 ? "private file" : "private files"}
@@ -1243,12 +1261,18 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
               ) : null}
             </div>
             {(uploadSummary.folderGroups.length > 0 || uploadSummary.noFolderCount > 0) && (
-              <div className="flex flex-col gap-1 text-xs text-slate-400">
+              <div className={`flex flex-col gap-1 text-xs ${isLightTheme ? "text-slate-500" : "text-slate-400"}`}>
                 {uploadSummary.folderGroups.map(group => (
                   <span
                     key={group.key}
                     className={`inline-flex items-center gap-2 ${
-                      group.invalid ? "text-amber-300" : "text-emerald-300"
+                      group.invalid
+                        ? isLightTheme
+                          ? "text-amber-600"
+                          : "text-amber-300"
+                        : isLightTheme
+                          ? "text-emerald-600"
+                          : "text-emerald-300"
                     }`}
                   >
                     {group.invalid ? (
@@ -1257,16 +1281,20 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
                       <FolderIcon size={14} />
                     )}
                     <span className="font-medium">{group.label}</span>
-                    <span className="text-slate-400">
+                    <span className={isLightTheme ? "text-slate-500" : "text-slate-400"}>
                       · {group.count} {group.count === 1 ? "file" : "files"}
                     </span>
                   </span>
                 ))}
                 {uploadSummary.noFolderCount > 0 ? (
-                  <span className="inline-flex items-center gap-2 text-slate-400">
-                    <FolderIcon size={14} className="text-slate-400" />
-                    <span className="font-medium text-slate-300">No folder selected</span>
-                    <span>· {uploadSummary.noFolderCount} {uploadSummary.noFolderCount === 1 ? "file" : "files"}</span>
+                  <span className={`inline-flex items-center gap-2 ${isLightTheme ? "text-slate-500" : "text-slate-400"}`}>
+                    <FolderIcon size={14} className={isLightTheme ? "text-slate-500" : "text-slate-400"} />
+                    <span className={`font-medium ${isLightTheme ? "text-slate-700" : "text-slate-300"}`}>
+                      No folder selected
+                    </span>
+                    <span>
+                      · {uploadSummary.noFolderCount} {uploadSummary.noFolderCount === 1 ? "file" : "files"}
+                    </span>
                   </span>
                 ) : null}
               </div>
@@ -1369,7 +1397,13 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
               </div>
             </div>
             {bulkFolderSelector ? (
-              <div className="mt-3 flex flex-wrap items-center gap-3 rounded-lg border border-slate-800 bg-slate-950/60 p-3 text-xs text-slate-300">
+              <div
+                className={`mt-3 flex flex-wrap items-center gap-3 rounded-lg border p-3 text-xs ${
+                  isLightTheme
+                    ? "border-slate-200 bg-white text-slate-600 shadow-sm"
+                    : "border-slate-800 bg-slate-950/60 text-slate-300"
+                }`}
+              >
                 <div className="w-64 min-w-[16rem]">
                   <UploadFolderSelect
                     value={bulkFolderSelector.value}
@@ -1394,7 +1428,11 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
                   </button>
                   <button
                     type="button"
-                    className="rounded-lg border border-slate-700 px-3 py-1 font-medium text-slate-200 transition hover:border-slate-600 hover:text-slate-100"
+                    className={`rounded-lg border px-3 py-1 font-medium transition ${
+                      isLightTheme
+                        ? "border-slate-300 text-slate-600 hover:border-slate-400 hover:text-slate-800"
+                        : "border-slate-700 text-slate-200 hover:border-slate-600 hover:text-slate-100"
+                    }`}
                     onClick={handleCloseBulkFolderSelector}
                     disabled={busy}
                   >
@@ -1402,7 +1440,7 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
                   </button>
                 </div>
                 {bulkFolderSelector.error ? (
-                  <span className="text-red-400">{bulkFolderSelector.error}</span>
+                  <span className={isLightTheme ? "text-red-500" : "text-red-400"}>{bulkFolderSelector.error}</span>
                 ) : (
                   <span className="text-slate-500">
                     {bulkFolderSelector.isPrivate
@@ -1445,7 +1483,7 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
                         : folderInputValue;
                     const showFolderWarning = Boolean(folderInputValue && (!normalizedFolderPreview || folderInvalid));
                     const showStatusIcons = showFolderWarning || entry.isPrivate;
-                    const entryStatusBadge = ENTRY_STATUS_BADGE[entry.status];
+                    const entryStatusBadge = entryStatusBadgeMap[entry.status];
                     const entryStatusLabel = ENTRY_STATUS_LABEL[entry.status];
                     const isEntryUploading = entry.status === "uploading";
                     const serverOrder = [...selectedServers, ...Object.keys(entry.serverStatuses)];
@@ -1474,19 +1512,33 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
                     elements.push(
                       <div
                         key={entry.id}
-                        className="rounded-xl border border-slate-800 bg-slate-950/60 p-4 space-y-3 text-sm text-slate-200 shadow-sm"
+                        className={`rounded-xl border p-4 space-y-3 text-sm shadow-sm ${
+                          isLightTheme
+                            ? "border-slate-200 bg-white text-slate-700"
+                            : "border-slate-800 bg-slate-950/60 text-slate-200"
+                        }`}
                       >
-                        <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div
+                          className={`flex flex-wrap items-start justify-between gap-3 ${
+                            isLightTheme ? "text-slate-700" : "text-slate-200"
+                          }`}
+                        >
                           <div>
-                            <div className="font-medium text-slate-100">{file.name}</div>
-                            <div className="text-xs text-slate-400">
+                            <div className={`font-medium ${isLightTheme ? "text-slate-900" : "text-slate-100"}`}>{file.name}</div>
+                            <div className={`text-xs ${isLightTheme ? "text-slate-500" : "text-slate-400"}`}>
                               {typeLabel} • {prettyBytes(file.size)}
                               {file.type ? ` • ${file.type}` : ""}
                             </div>
                             {folderInputValue ? (
                               <div
                                 className={`mt-1 text-xs ${
-                                  folderInvalid || !normalizedFolderPreview ? "text-amber-300" : "text-emerald-300"
+                                  folderInvalid || !normalizedFolderPreview
+                                    ? isLightTheme
+                                      ? "text-amber-600"
+                                      : "text-amber-300"
+                                    : isLightTheme
+                                    ? "text-emerald-600"
+                                    : "text-emerald-300"
                                 }`}
                               >
                                 {folderInvalid || !normalizedFolderPreview ? "Invalid folder path" : "Uploading to"}{" "}
@@ -1497,20 +1549,32 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
                             ) : null}
                           </div>
                           <div className="flex flex-col items-end gap-2">
-                            <div className="flex flex-wrap items-center justify-end gap-2 text-xs text-slate-400">
+                            <div
+                              className={`flex flex-wrap items-center justify-end gap-2 text-xs ${
+                                isLightTheme ? "text-slate-500" : "text-slate-400"
+                              }`}
+                            >
                               <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-semibold ${entryStatusBadge}`}>
                                 {entryStatusLabel}
                               </span>
                               {showStatusIcons ? (
                                 <>
                                   {showFolderWarning ? (
-                                    <span className="inline-flex items-center gap-1 text-amber-300">
+                                    <span
+                                      className={`inline-flex items-center gap-1 ${
+                                        isLightTheme ? "text-amber-500" : "text-amber-300"
+                                      }`}
+                                    >
                                       <WarningIcon size={16} aria-hidden="true" title="Folder path needs attention" />
                                       <span className="sr-only">Folder path needs attention</span>
                                     </span>
                                   ) : null}
                                   {entry.isPrivate ? (
-                                    <span className="inline-flex items-center gap-1 text-emerald-300">
+                                    <span
+                                      className={`inline-flex items-center gap-1 ${
+                                        isLightTheme ? "text-emerald-600" : "text-emerald-300"
+                                      }`}
+                                    >
                                       <LockIcon size={16} aria-hidden="true" title="Private upload" />
                                       <span className="sr-only">Private upload</span>
                                     </span>
@@ -1522,7 +1586,11 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
                               <button
                                 type="button"
                                 onClick={() => toggleMetadataVisibility(entry.id)}
-                                className="flex items-center justify-center rounded-lg border border-slate-700 p-2 text-xs text-slate-200 transition hover:border-emerald-500 hover:text-emerald-400"
+                                className={`flex items-center justify-center rounded-lg border p-2 text-xs transition ${
+                                  isLightTheme
+                                    ? "border-slate-300 text-slate-600 hover:border-emerald-500 hover:text-emerald-600"
+                                    : "border-slate-700 text-slate-200 hover:border-emerald-500 hover:text-emerald-400"
+                                }`}
                                 title={showMetadata ? "Hide metadata" : "Edit metadata"}
                               >
                                 <EditIcon size={16} aria-hidden="true" />
@@ -1532,7 +1600,11 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
                                 <button
                                   type="button"
                                   onClick={() => retryEntry(entry.id)}
-                                  className="rounded-lg border border-amber-500 px-3 py-1 text-xs font-medium uppercase tracking-wide text-amber-200 hover:border-amber-400 hover:text-amber-100 disabled:cursor-not-allowed disabled:opacity-40"
+                                  className={`rounded-lg border px-3 py-1 text-xs font-medium uppercase tracking-wide transition disabled:cursor-not-allowed disabled:opacity-40 ${
+                                    isLightTheme
+                                      ? "border-amber-500 text-amber-600 hover:border-amber-400 hover:text-amber-500"
+                                      : "border-amber-500 text-amber-200 hover:border-amber-400 hover:text-amber-100"
+                                  }`}
                                   disabled={isEntryUploading}
                                   title="Retry this upload"
                                 >
@@ -1542,7 +1614,11 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
                               <button
                                 type="button"
                                 onClick={() => removeEntry(entry.id)}
-                                className="flex items-center justify-center rounded-lg border border-slate-700 p-2 text-xs text-slate-200 transition hover:border-red-500 hover:text-red-300 disabled:cursor-not-allowed disabled:opacity-40"
+                                className={`flex items-center justify-center rounded-lg border p-2 text-xs transition disabled:cursor-not-allowed disabled:opacity-40 ${
+                                  isLightTheme
+                                    ? "border-slate-300 text-slate-500 hover:border-red-500 hover:text-red-500"
+                                    : "border-slate-700 text-slate-200 hover:border-red-500 hover:text-red-300"
+                                }`}
                                 disabled={isEntryUploading}
                                 title="Remove from upload queue"
                               >
@@ -1553,7 +1629,13 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
                           </div>
                         </div>
                         {serverDetails.length > 0 ? (
-                          <div className="space-y-3 rounded-lg border border-slate-800 bg-slate-900/60 p-3 text-xs text-slate-300">
+                          <div
+                            className={`space-y-3 rounded-lg border p-3 text-xs ${
+                              isLightTheme
+                                ? "border-slate-200 bg-slate-100 text-slate-600"
+                                : "border-slate-800 bg-slate-900/60 text-slate-300"
+                            }`}
+                          >
                             {serverDetails.map(detail => {
                               const indicatorClass =
                                 detail.status === "error"
@@ -1568,17 +1650,27 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
                               return (
                                 <div key={`${entry.id}-${detail.serverUrl}`} className="space-y-1">
                                   <div className="flex items-center justify-between">
-                                    <span className="font-medium text-slate-200">{detail.serverName}</span>
-                                    <span className="inline-flex items-center gap-1 rounded-full bg-slate-800 px-2 py-0.5 text-[10px] font-semibold text-slate-200">
+                                    <span className={`font-medium ${isLightTheme ? "text-slate-700" : "text-slate-200"}`}>
+                                      {detail.serverName}
+                                    </span>
+                                    <span
+                                      className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                                        isLightTheme ? "bg-slate-200 text-slate-700" : "bg-slate-800 text-slate-200"
+                                      }`}
+                                    >
                                       {ENTRY_STATUS_LABEL[detail.status]}
                                       {detail.status === "uploading" ? ` · ${detail.percent}%` : null}
                                     </span>
                                   </div>
-                                  <div className="h-1.5 w-full overflow-hidden rounded bg-slate-800">
+                                  <div
+                                    className={`h-1.5 w-full overflow-hidden rounded ${
+                                      isLightTheme ? "bg-slate-200" : "bg-slate-800"
+                                    }`}
+                                  >
                                     <div className={`h-full ${indicatorClass}`} style={{ width: `${progressWidth}%` }} />
                                   </div>
                                   {detail.transfer && detail.transfer.status === "error" ? (
-                                    <div className="text-[11px] text-red-300">
+                                    <div className={`text-[11px] ${isLightTheme ? "text-red-500" : "text-red-300"}`}>
                                       {detail.transfer.message || "Upload failed"}
                                     </div>
                                   ) : null}
@@ -1587,18 +1679,32 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
                             })}
                           </div>
                         ) : null}
-                        <div className="rounded-xl border border-slate-700 bg-slate-900/80 px-4 py-3">
-                          <label className="flex items-start gap-3 text-sm text-slate-200">
+                        <div
+                          className={`rounded-xl border px-4 py-3 ${
+                            isLightTheme ? "border-slate-200 bg-slate-50" : "border-slate-700 bg-slate-900/80"
+                          }`}
+                        >
+                          <label
+                            className={`flex items-start gap-3 text-sm ${
+                              isLightTheme ? "text-slate-700" : "text-slate-200"
+                            }`}
+                          >
                             <input
                               type="checkbox"
-                              className="mt-1 h-4 w-4 rounded border-slate-600 bg-slate-950 text-emerald-400 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                              className={`mt-1 h-4 w-4 rounded focus:outline-none focus:ring-1 focus:ring-emerald-500 ${
+                                isLightTheme
+                                  ? "border-slate-300 bg-white text-emerald-600"
+                                  : "border-slate-600 bg-slate-950 text-emerald-400"
+                              }`}
                               checked={entry.isPrivate}
                               onChange={event => setEntryPrivacy(entry.id, event.target.checked)}
                               disabled={isEntryUploading}
                             />
                             <span className="flex flex-col gap-1 text-left">
-                              <span className="font-medium text-slate-100">Private upload</span>
-                              <span className="text-xs leading-relaxed text-slate-400">
+                              <span className={`font-medium ${isLightTheme ? "text-slate-900" : "text-slate-100"}`}>
+                                Private upload
+                              </span>
+                              <span className={`text-xs leading-relaxed ${isLightTheme ? "text-slate-500" : "text-slate-400"}`}>
                                 Encrypts the file on your device. Private files cannot be shared publicly as they require your
                                 private key to decrypt.
                               </span>
@@ -1626,11 +1732,11 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
                             )}
                           </div>
                         ) : metadata.kind === "audio" ? (
-                          <div className="text-xs text-slate-400">
+                          <div className={`text-xs ${isLightTheme ? "text-slate-500" : "text-slate-400"}`}>
                             Metadata detected{entry.extractedAudioMetadata ? " from the file." : "."} Click "Edit metadata" to review.
                           </div>
                         ) : (
-                          <div className="text-xs text-slate-400">
+                          <div className={`text-xs ${isLightTheme ? "text-slate-500" : "text-slate-400"}`}>
                             Click "Edit metadata" to override the display name, upload location, and other file specific metadata.
                           </div>
                         )}

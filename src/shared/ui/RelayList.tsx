@@ -7,6 +7,7 @@ import { SaveIcon, TrashIcon, CancelIcon, EditIcon, RelayIcon, RefreshIcon, Plus
 import { loadNdkModule } from "../api/ndkModule";
 import type { StatusMessageTone } from "../types/status";
 import { useDialog } from "../../app/context/DialogContext";
+import { useUserPreferences } from "../../app/context/UserPreferencesContext";
 
 const statusStyles: Record<RelayHealth["status"], { label: string; dot: string; text: string }> = {
   error: {
@@ -151,6 +152,8 @@ type RelayListProps = {
 };
 
 const RelayList: React.FC<RelayListProps> = ({ showStatusMessage, compact = false, onProvideActions }) => {
+  const { preferences } = useUserPreferences();
+  const isLightTheme = preferences.theme === "light";
   const { relayPolicies, loading, refresh } = usePreferredRelays();
   const { relayHealth, ndk, signer } = useNdk();
   const { confirm } = useDialog();
@@ -477,6 +480,10 @@ const RelayList: React.FC<RelayListProps> = ({ showStatusMessage, compact = fals
     };
   }, [controls, onProvideActions]);
 
+  const loadingMessageClass = isLightTheme
+    ? "rounded-xl border border-slate-200 bg-white px-4 py-6 text-sm text-slate-600 shadow-sm"
+    : "rounded-xl border border-slate-800 bg-slate-950/60 px-4 py-6 text-sm text-slate-300";
+
   return (
     <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4 flex-1 min-h-0">
       {!compact ? (
@@ -493,7 +500,7 @@ const RelayList: React.FC<RelayListProps> = ({ showStatusMessage, compact = fals
       )}
 
       {loading && drafts.length === 0 ? (
-        <div className="rounded-xl border border-slate-800 bg-slate-950/60 px-4 py-6 text-sm text-slate-300">
+        <div className={loadingMessageClass}>
           Loading relay preferences…
         </div>
       ) : (

@@ -4,10 +4,54 @@
 
 :root {
   color-scheme: dark;
+  --accent-50: #ecfdf5;
+  --accent-100: #d1fae5;
+  --accent-200: #a7f3d0;
+  --accent-300: #6ee7b7;
+  --accent-400: #34d399;
+  --accent-500: #10b981;
+  --accent-600: #059669;
+  --accent-700: #047857;
+  --accent-800: #065f46;
+  --accent-900: #064e3b;
+  --accent-950: #022c22;
+  --accent-200-60: color-mix(in srgb, transparent 40%, var(--accent-200));
+  --accent-200-80: color-mix(in srgb, transparent 20%, var(--accent-200));
+  --accent-400-60: color-mix(in srgb, transparent 40%, var(--accent-400));
+  --accent-400-70: color-mix(in srgb, transparent 30%, var(--accent-400));
+  --accent-400-90: color-mix(in srgb, transparent 10%, var(--accent-400));
+  --accent-500-05: color-mix(in srgb, transparent 95%, var(--accent-500));
+  --accent-500-10: color-mix(in srgb, transparent 90%, var(--accent-500));
+  --accent-500-15: color-mix(in srgb, transparent 85%, var(--accent-500));
+  --accent-500-20: color-mix(in srgb, transparent 80%, var(--accent-500));
+  --accent-500-25: color-mix(in srgb, transparent 75%, var(--accent-500));
+  --accent-500-30: color-mix(in srgb, transparent 70%, var(--accent-500));
+  --accent-500-40: color-mix(in srgb, transparent 60%, var(--accent-500));
+  --accent-500-50: color-mix(in srgb, transparent 50%, var(--accent-500));
+  --accent-500-60: color-mix(in srgb, transparent 40%, var(--accent-500));
+  --accent-500-70: color-mix(in srgb, transparent 30%, var(--accent-500));
+  --accent-500-80: color-mix(in srgb, transparent 20%, var(--accent-500));
+  --accent-600-30: color-mix(in srgb, transparent 70%, var(--accent-600));
+  --accent-600-60: color-mix(in srgb, transparent 40%, var(--accent-600));
+  --accent-700-70: color-mix(in srgb, transparent 30%, var(--accent-700));
+  --accent-900-70: color-mix(in srgb, transparent 30%, var(--accent-900));
+  --accent-950-30: color-mix(in srgb, transparent 70%, var(--accent-950));
+  --accent-950-40: color-mix(in srgb, transparent 60%, var(--accent-950));
 }
 
 :root[data-theme="light"] {
   color-scheme: light;
+  --accent-50: #eff6ff;
+  --accent-100: #dbeafe;
+  --accent-200: #bfdbfe;
+  --accent-300: #93c5fd;
+  --accent-400: #60a5fa;
+  --accent-500: #1d4ed8;
+  --accent-600: #1e40af;
+  --accent-700: #1e3a8a;
+  --accent-800: #172554;
+  --accent-900: #0f172a;
+  --accent-950: #0b1120;
 }
 
 :root[data-theme="light"] body {
@@ -106,4 +150,227 @@ input, select, textarea {
   background-color: #ffffff;
   border-color: #e2e8f0;
   color: #0f172a;
+}
+
+@layer utilities {
+  .shadow-toolbar {
+    box-shadow:
+      0 1px 2px -1px rgba(15, 23, 42, 0.7),
+      0 1px 1px rgba(15, 23, 42, 0.45);
+  }
+
+  .shadow-panel {
+    box-shadow: 0 12px 24px rgba(15, 23, 42, 0.35);
+  }
+
+  .shadow-floating {
+    box-shadow:
+      0 24px 48px rgba(15, 23, 42, 0.4),
+      0 2px 8px rgba(15, 23, 42, 0.65);
+  }
+
+  .surface-window {
+    background:
+      radial-gradient(circle at 20% -10%, rgba(56, 189, 248, 0.11), transparent 55%),
+      radial-gradient(circle at 80% 0%, rgba(16, 185, 129, 0.12), transparent 62%),
+      #020617;
+  }
+
+  .surface-sheet {
+    background:
+      linear-gradient(180deg, rgba(15, 23, 42, 0.92), rgba(2, 6, 23, 0.92));
+  }
+
+  .surface-rail {
+    background:
+      linear-gradient(180deg, rgba(15, 23, 42, 0.96), rgba(15, 23, 42, 0.78));
+    box-shadow: inset -1px 0 0 rgba(148, 163, 184, 0.08);
+  }
+
+  .surface-floating {
+    background: rgba(15, 23, 42, 0.82);
+    backdrop-filter: blur(20px);
+  }
+
+  .focus-emerald-ring {
+    box-shadow:
+      0 0 0 1px color-mix(in srgb, transparent 40%, var(--accent-500)),
+      0 0 0 4px color-mix(in srgb, transparent 82%, var(--accent-500));
+  }
+
+  .noise-layer {
+    position: relative;
+    isolation: isolate;
+  }
+
+  .noise-layer::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160' viewBox='0 0 160 160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='1.2' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)' opacity='.05'/%3E%3C/svg%3E");
+    background-size: 160px 160px;
+    mix-blend-mode: soft-light;
+    opacity: 0.45;
+    border-radius: inherit;
+    z-index: -1;
+  }
+
+  /* Accent overrides for Tailwind emerald classes */
+  .text-emerald-100 { color: var(--accent-100) !important; }
+  .text-emerald-200 { color: var(--accent-200) !important; }
+  .text-emerald-300 { color: var(--accent-300) !important; }
+  .text-emerald-400 { color: var(--accent-400) !important; }
+  .text-emerald-500 { color: var(--accent-500) !important; }
+  .text-emerald-600 { color: var(--accent-600) !important; }
+  .text-emerald-700 { color: var(--accent-700) !important; }
+  .hover\:text-emerald-100:hover { color: var(--accent-100) !important; }
+  .hover\:text-emerald-200:hover { color: var(--accent-200) !important; }
+  .hover\:text-emerald-300:hover { color: var(--accent-300) !important; }
+  .hover\:text-emerald-400:hover { color: var(--accent-400) !important; }
+  .hover\:text-emerald-500:hover { color: var(--accent-500) !important; }
+  .hover\:text-emerald-600:hover { color: var(--accent-600) !important; }
+  .hover\:text-emerald-700:hover { color: var(--accent-700) !important; }
+
+  .decoration-emerald-500\/60 { text-decoration-color: color-mix(in srgb, transparent 40%, var(--accent-500)) !important; }
+
+  .bg-emerald-50 { background-color: var(--accent-50) !important; }
+  .bg-emerald-100 { background-color: var(--accent-100) !important; }
+  .bg-emerald-200 { background-color: var(--accent-200) !important; }
+  .bg-emerald-300 { background-color: var(--accent-300) !important; }
+  .bg-emerald-400 { background-color: var(--accent-400) !important; color: #ffffff !important; }
+  .bg-emerald-500 { background-color: var(--accent-500) !important; color: #ffffff !important; }
+  .bg-emerald-600 { background-color: var(--accent-600) !important; color: #ffffff !important; }
+  .bg-emerald-700 { background-color: var(--accent-700) !important; color: #ffffff !important; }
+  .bg-emerald-950 { background-color: var(--accent-950) !important; color: #ffffff !important; }
+  .bg-emerald-200\/60 { background-color: var(--accent-200-60) !important; }
+  .bg-emerald-200\/80 { background-color: var(--accent-200-80) !important; }
+  .bg-emerald-400\/70 { background-color: var(--accent-400-70) !important; }
+  .bg-emerald-400\/90 { background-color: var(--accent-400-90) !important; }
+  .bg-emerald-500\/05 { background-color: var(--accent-500-05) !important; }
+  .bg-emerald-500\/10 { background-color: var(--accent-500-10) !important; }
+  .bg-emerald-500\/15 { background-color: var(--accent-500-15) !important; }
+  .bg-emerald-500\/20 { background-color: var(--accent-500-20) !important; }
+  .bg-emerald-500\/25 { background-color: var(--accent-500-25) !important; }
+  .bg-emerald-500\/80 { background-color: var(--accent-500-80) !important; }
+  .bg-emerald-600\/60 { background-color: var(--accent-600-60) !important; }
+  .bg-emerald-700\/70 { background-color: var(--accent-700-70) !important; }
+  .bg-emerald-950\/30 { background-color: var(--accent-950-30) !important; }
+  .bg-emerald-950\/40 { background-color: var(--accent-950-40) !important; }
+  .hover\:bg-emerald-200\/80:hover { background-color: var(--accent-200-80) !important; }
+  .hover\:bg-emerald-400:hover { background-color: var(--accent-400) !important; color: #ffffff !important; }
+  .hover\:bg-emerald-500:hover { background-color: var(--accent-500) !important; color: #ffffff !important; }
+  .hover\:bg-emerald-500\/20:hover { background-color: var(--accent-500-20) !important; }
+  .hover\:bg-emerald-500\/25:hover { background-color: var(--accent-500-25) !important; }
+  .hover\:bg-emerald-500\/10:hover { background-color: var(--accent-500-10) !important; }
+  .hover\:bg-emerald-600:hover { background-color: var(--accent-600) !important; color: #ffffff !important; }
+  .hover\:bg-emerald-200:hover { background-color: var(--accent-200) !important; }
+
+  .border-emerald-300 { border-color: var(--accent-300) !important; }
+  .border-emerald-400 { border-color: var(--accent-400) !important; }
+  .border-emerald-500 { border-color: var(--accent-500) !important; }
+  .border-emerald-600 { border-color: var(--accent-600) !important; }
+  .border-emerald-400\/60 { border-color: var(--accent-400-60) !important; }
+  .border-emerald-400\/70 { border-color: var(--accent-400-70) !important; }
+  .border-emerald-500\/30 { border-color: var(--accent-500-30) !important; }
+  .border-emerald-500\/40 { border-color: var(--accent-500-40) !important; }
+  .border-emerald-500\/50 { border-color: var(--accent-500-50) !important; }
+  .border-emerald-500\/60 { border-color: var(--accent-500-60) !important; }
+  .border-emerald-500\/70 { border-color: var(--accent-500-70) !important; }
+  .border-emerald-500\/80 { border-color: var(--accent-500-80) !important; }
+  .border-emerald-600\/30 { border-color: var(--accent-600-30) !important; }
+  .hover\:border-emerald-400:hover { border-color: var(--accent-400) !important; }
+  .hover\:border-emerald-400\/60:hover { border-color: var(--accent-400-60) !important; }
+  .hover\:border-emerald-500:hover { border-color: var(--accent-500) !important; }
+
+  .focus\:border-emerald-500:focus { border-color: var(--accent-500) !important; }
+
+  .focus\:ring-emerald-400:focus { --tw-ring-color: var(--accent-400) !important; }
+  .focus\:ring-emerald-500:focus { --tw-ring-color: var(--accent-500) !important; }
+  .focus\:ring-emerald-500\/60:focus { --tw-ring-color: var(--accent-500-60) !important; }
+  .focus\:ring-emerald-500\/70:focus { --tw-ring-color: var(--accent-500-70) !important; }
+  .focus-visible\:ring-emerald-400:focus-visible { --tw-ring-color: var(--accent-400) !important; }
+  .focus-visible\:ring-emerald-500:focus-visible { --tw-ring-color: var(--accent-500) !important; }
+
+  .ring-emerald-400 { --tw-ring-color: var(--accent-400) !important; }
+  .ring-emerald-400\/40 { --tw-ring-color: color-mix(in srgb, transparent 60%, var(--accent-400)) !important; }
+  .ring-emerald-400\/60 { --tw-ring-color: color-mix(in srgb, transparent 40%, var(--accent-400)) !important; }
+  .ring-emerald-500 { --tw-ring-color: var(--accent-500) !important; }
+  .ring-emerald-500\/60 { --tw-ring-color: var(--accent-500-60) !important; }
+  .ring-emerald-500\/70 { --tw-ring-color: var(--accent-500-70) !important; }
+
+  .from-emerald-100 {
+    --tw-gradient-from: var(--accent-100) !important;
+    --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to, rgb(255 255 255 / 0));
+  }
+  .from-emerald-900\/70 {
+    --tw-gradient-from: var(--accent-900-70) !important;
+    --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to, rgb(255 255 255 / 0));
+  }
+
+  .bg-emerald-400 svg,
+  .bg-emerald-500 svg,
+  .bg-emerald-600 svg,
+  .bg-emerald-700 svg,
+  .hover\:bg-emerald-400:hover svg,
+  .hover\:bg-emerald-500:hover svg,
+  .hover\:bg-emerald-600:hover svg {
+    color: currentColor !important;
+    fill: currentColor !important;
+    stroke: currentColor !important;
+  }
+
+  .bg-emerald-400 *,
+  .bg-emerald-500 *,
+  .bg-emerald-600 *,
+  .bg-emerald-700 *,
+  .hover\:bg-emerald-400:hover *,
+  .hover\:bg-emerald-500:hover *,
+  .hover\:bg-emerald-600:hover * {
+    color: inherit !important;
+  }
+
+  .text-emerald-500,
+  .text-emerald-600,
+  .text-emerald-700 {
+    font-weight: 600 !important;
+  }
+}
+
+:root[data-theme="light"] .shadow-toolbar {
+  box-shadow:
+    0 1px 1px rgba(148, 163, 184, 0.3),
+    0 0 0 1px rgba(148, 163, 184, 0.25);
+}
+
+:root[data-theme="light"] .shadow-panel {
+  box-shadow:
+    0 12px 24px rgba(203, 213, 225, 0.45),
+    0 2px 4px rgba(148, 163, 184, 0.28);
+}
+
+:root[data-theme="light"] .shadow-floating {
+  box-shadow:
+    0 24px 48px rgba(148, 163, 184, 0.35),
+    0 4px 12px rgba(100, 116, 139, 0.3);
+}
+
+:root[data-theme="light"] .surface-window {
+  background:
+    radial-gradient(circle at 20% -10%, rgba(59, 130, 246, 0.09), transparent 55%),
+    radial-gradient(circle at 80% 0%, rgba(37, 99, 235, 0.1), transparent 62%),
+    #f8fafc;
+}
+
+:root[data-theme="light"] .surface-sheet {
+  background: linear-gradient(180deg, rgba(248, 250, 252, 0.98), rgba(241, 245, 249, 0.94));
+}
+
+:root[data-theme="light"] .surface-rail {
+  background: linear-gradient(180deg, rgba(241, 245, 249, 0.98), rgba(226, 232, 240, 0.9));
+  box-shadow: inset -1px 0 0 rgba(148, 163, 184, 0.22);
+}
+
+:root[data-theme="light"] .surface-floating {
+  background: rgba(255, 255, 255, 0.88);
 }

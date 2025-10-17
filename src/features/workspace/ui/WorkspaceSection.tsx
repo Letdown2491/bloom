@@ -177,10 +177,12 @@ export const WorkspaceSection = memo(function WorkspaceSection({
   serverValidationError,
   onProfileUpdated,
 }: WorkspaceSectionProps) {
+  const workspaceBackgroundClass = theme === "light" ? "bg-white" : "bg-slate-900";
+
   return (
     <div
-      className={`flex flex-1 min-h-0 flex-col box-border p-4 ${
-        tab === "browse" || tab === "share" ? "overflow-hidden" : "overflow-y-auto"
+      className={`flex flex-1 min-h-0 flex-col box-border p-4 overflow-hidden ${workspaceBackgroundClass}${
+        tab === "browse" || tab === "share" ? "" : " overflow-y-auto"
       }`}
     >
       <WorkspaceProvider servers={localServers} selectedServer={selectedServer} onSelectServer={onSelectServer}>

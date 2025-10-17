@@ -173,35 +173,39 @@ export const Workspace: React.FC<WorkspaceProps> = ({
   return (
     <>
       {tab === "browse" && (
-        <BrowseTabContainer
-          active
-          onStatusMetricsChange={onStatusMetricsChange}
-          onRequestRename={onRequestRename}
-          onRequestFolderRename={onRequestFolderRename}
-          onRequestShare={onRequestShare}
-          onShareFolder={onShareFolder}
-          onUnshareFolder={onUnshareFolder}
-          folderShareBusyPath={folderShareBusyPath}
-          onSetTab={onSetTab}
-          showStatusMessage={showStatusMessage}
-          viewMode={viewMode}
-          filterMode={filterMode}
-          filterMenuRef={filterMenuRef}
-          isFilterMenuOpen={isFilterMenuOpen}
-          onCloseFilterMenu={closeFilterMenu}
-          onBrowseTabChange={handleTabChange}
-          showGridPreviews={showGridPreviews}
-          showListPreviews={showListPreviews}
-          homeResetKey={homeNavigationKey}
-          defaultSortOption={defaultSortOption}
-          sortDirection={sortDirection}
-          onNavigationChange={onProvideBrowseNavigation}
-          searchTerm={searchQuery}
-          onActiveListChange={onBrowseActiveListChange}
-          restoreActiveList={browseRestoreState ?? null}
-          restoreActiveListKey={browseRestoreKey ?? null}
-          onRestoreActiveList={onBrowseRestoreHandled}
-        />
+        <div className="flex flex-1 min-h-0 flex-col">
+          <div className="flex flex-1 min-h-0 flex-col overflow-hidden pb-4">
+            <BrowseTabContainer
+              active
+              onStatusMetricsChange={onStatusMetricsChange}
+              onRequestRename={onRequestRename}
+              onRequestFolderRename={onRequestFolderRename}
+              onRequestShare={onRequestShare}
+              onShareFolder={onShareFolder}
+              onUnshareFolder={onUnshareFolder}
+              folderShareBusyPath={folderShareBusyPath}
+              onSetTab={onSetTab}
+              showStatusMessage={showStatusMessage}
+              viewMode={viewMode}
+              filterMode={filterMode}
+              filterMenuRef={filterMenuRef}
+              isFilterMenuOpen={isFilterMenuOpen}
+              onCloseFilterMenu={closeFilterMenu}
+              onBrowseTabChange={handleTabChange}
+              showGridPreviews={showGridPreviews}
+              showListPreviews={showListPreviews}
+              homeResetKey={homeNavigationKey}
+              defaultSortOption={defaultSortOption}
+              sortDirection={sortDirection}
+              onNavigationChange={onProvideBrowseNavigation}
+              searchTerm={searchQuery}
+              onActiveListChange={onBrowseActiveListChange}
+              restoreActiveList={browseRestoreState ?? null}
+              restoreActiveListKey={browseRestoreKey ?? null}
+              onRestoreActiveList={onBrowseRestoreHandled}
+            />
+          </div>
+        </div>
       )}
       {tab === "transfer" && (
         <Suspense

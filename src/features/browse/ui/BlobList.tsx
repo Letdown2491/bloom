@@ -692,6 +692,20 @@ export const BlobList: React.FC<BlobListProps> = ({
     return prioritizeListBlobs(directed);
   }, [audioMetadata, baseSortedBlobs, replicaInfo, sortConfig, sortedBlobs, viewMode]);
 
+  if (previewTarget) {
+    return (
+      <div className="flex h-full flex-1 min-h-0 w-full flex-col overflow-hidden">
+        <PreviewDialog
+          target={previewTarget}
+          onClose={handleClosePreview}
+          onDetect={handleDetect}
+          onCopy={onCopy}
+          onBlobVisible={requestMetadata}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="flex h-full flex-1 min-h-0 w-full flex-col overflow-hidden">
       {viewMode === "list" ? (
@@ -760,15 +774,6 @@ export const BlobList: React.FC<BlobListProps> = ({
           audioMetadata={audioMetadata}
           showPreviews={showGridPreviews}
           resolveCoverEntry={resolveCoverEntry}
-        />
-      )}
-      {previewTarget && (
-        <PreviewDialog
-          target={previewTarget}
-          onClose={handleClosePreview}
-          onDetect={handleDetect}
-          onCopy={onCopy}
-          onBlobVisible={requestMetadata}
         />
       )}
     </div>
@@ -1328,24 +1333,25 @@ const GridLayout: React.FC<{
   resolveCoverEntry,
 }) => {
   const CARD_WIDTH = 220;
-  const GAP = 16;
+  const HORIZONTAL_GAP = 8;
+  const VERTICAL_GAP = 12;
   const OVERSCAN_ROWS = 2;
   const FALLBACK_MAX_WIDTH = 1280;
-  const FALLBACK_HORIZONTAL_PADDING = 48;
+  const FALLBACK_HORIZONTAL_PADDING = HORIZONTAL_GAP * 2;
   const FALLBACK_MIN_ROWS = 3;
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const fallbackViewport = useMemo(() => {
     if (typeof window === "undefined") {
       return {
-        width: CARD_WIDTH * 3 + GAP * 4,
-        height: (CARD_HEIGHT + GAP) * FALLBACK_MIN_ROWS,
+        width: CARD_WIDTH * 3 + HORIZONTAL_GAP * 4,
+        height: (CARD_HEIGHT + VERTICAL_GAP) * FALLBACK_MIN_ROWS,
       };
     }
     const width = Math.max(
       CARD_WIDTH,
       Math.min(window.innerWidth, FALLBACK_MAX_WIDTH) - FALLBACK_HORIZONTAL_PADDING
     );
-    const height = Math.max(CARD_HEIGHT + GAP, Math.floor((window.innerHeight || 800) * 0.6));
+    const height = Math.max(CARD_HEIGHT + VERTICAL_GAP, Math.floor((window.innerHeight || 800) * 0.6));
     return { width, height };
   }, []);
   const [viewport, setViewport] = useState(() => ({
@@ -1433,9 +1439,12 @@ const GridLayout: React.FC<{
   const viewportHeight = hasMeasuredViewport ? viewport.height : fallbackViewport.height;
   const viewportWidth = hasMeasuredViewport ? viewport.width : fallbackViewport.width;
   const scrollTop = hasMeasuredViewport ? viewport.scrollTop : 0;
-  const columnCount = Math.max(1, Math.floor((viewportWidth + GAP) / (CARD_WIDTH + GAP)));
-  const effectiveColumnWidth = Math.max(160, Math.floor((viewportWidth - GAP * (columnCount + 1)) / columnCount) || CARD_WIDTH);
-  const rowHeight = CARD_HEIGHT + GAP;
+  const columnCount = Math.max(1, Math.floor((viewportWidth + HORIZONTAL_GAP) / (CARD_WIDTH + HORIZONTAL_GAP)));
+  const effectiveColumnWidth = Math.max(
+    160,
+    Math.floor((viewportWidth - HORIZONTAL_GAP * (columnCount + 1)) / columnCount) || CARD_WIDTH
+  );
+  const rowHeight = CARD_HEIGHT + VERTICAL_GAP;
   const rowCount = Math.ceil(blobs.length / columnCount);
   const visibleRowCount = viewportHeight > 0 ? Math.ceil(viewportHeight / rowHeight) + OVERSCAN_ROWS * 2 : rowCount;
   const startRow = Math.max(0, Math.floor(scrollTop / rowHeight) - OVERSCAN_ROWS);
@@ -1461,21 +1470,21 @@ const GridLayout: React.FC<{
   const handleCloseMenu = useCallback(() => {
     setOpenMenuBlob(null);
   }, []);
-  const containerHeight = rowCount * rowHeight + GAP;
+  const containerHeight = rowCount * rowHeight + VERTICAL_GAP;
 
   return (
     <div className="flex flex-1 min-h-0 w-full flex-col overflow-hidden">
       <div
         ref={viewportRef}
-        className="relative flex-1 min-h-0 w-full overflow-y-auto overflow-x-hidden pl-2 pr-2 -mr-2"
+        className="relative flex-1 min-h-0 w-full overflow-y-auto overflow-x-hidden"
       >
         <div style={{ position: "relative", height: containerHeight }}>
           {visibleItems.map(({ blob, row, col }) => (
             <GridCard
               key={blob.sha256}
               blob={blob}
-              top={GAP + row * rowHeight}
-              left={GAP + col * (effectiveColumnWidth + GAP)}
+              top={VERTICAL_GAP + row * rowHeight}
+              left={HORIZONTAL_GAP + col * (effectiveColumnWidth + HORIZONTAL_GAP)}
               width={effectiveColumnWidth}
               height={CARD_HEIGHT}
               isSelected={selected.has(blob.sha256)}
@@ -1980,12 +1989,18 @@ const GridCard = React.memo<GridCardProps>(
     ]);
 
     const primaryAction = useMemo(() => {
+      const focusClass = isLightTheme
+        ? "focus:outline-none focus:ring-1 focus:ring-blue-400/70 focus:ring-offset-2 focus:ring-offset-white"
+        : "focus:outline-none focus:ring-1 focus:ring-emerald-400";
       const primaryActionBaseClass =
-        "p-2 shrink-0 rounded-lg flex items-center justify-center transition focus:outline-none focus:ring-1 focus:ring-emerald-400 disabled:cursor-not-allowed disabled:opacity-40";
+        `p-2 shrink-0 rounded-lg flex items-center justify-center transition disabled:cursor-not-allowed disabled:opacity-40 ${focusClass}`;
       if (isListBlob && onOpenList) {
         return (
           <button
-            className={`${primaryActionBaseClass} bg-emerald-700/70 text-slate-100 hover:bg-emerald-600 h-10 w-10`}
+            className={`${primaryActionBaseClass} ${
+              isLightTheme ? "bg-blue-700 text-white hover:bg-blue-600"
+              : "bg-emerald-700/70 text-slate-100 hover:bg-emerald-600"
+            } h-10 w-10`}
             onClick={event => {
               event.stopPropagation();
               onOpenList(blob);
@@ -2003,8 +2018,12 @@ const GridCard = React.memo<GridCardProps>(
           <button
             className={`${primaryActionBaseClass} ${
               isActivePlaying
-                ? "bg-emerald-500/80 text-slate-900 hover:bg-emerald-400"
-                : "bg-emerald-700/70 text-slate-100 hover:bg-emerald-600"
+                ? isLightTheme
+                  ? "bg-blue-500 text-white hover:bg-blue-400"
+                  : "bg-emerald-500/80 text-slate-900 hover:bg-emerald-400"
+                : isLightTheme
+                  ? "bg-blue-700 text-white hover:bg-blue-600"
+                  : "bg-emerald-700/70 text-slate-100 hover:bg-emerald-600"
             } aspect-square h-10 w-10`}
             onClick={event => {
               event.stopPropagation();
@@ -2022,7 +2041,9 @@ const GridCard = React.memo<GridCardProps>(
       const buttonDisabled = !canPreview && !allowDialogPreview;
       return (
         <button
-          className={`${primaryActionBaseClass} bg-emerald-700/70 text-slate-100 hover:bg-emerald-600 h-10 w-10`}
+          className={`${primaryActionBaseClass} ${
+            isLightTheme ? "bg-blue-700 text-white hover:bg-blue-600" : "bg-emerald-700/70 text-slate-100 hover:bg-emerald-600"
+          } h-10 w-10`}
           onClick={event => {
             event.stopPropagation();
             onPreview(blob);
@@ -2067,7 +2088,7 @@ const GridCard = React.memo<GridCardProps>(
             onToggle(blob.sha256);
           }
         }}
-        className={`absolute flex flex-col overflow-visible rounded-xl border focus:outline-none focus:ring-2 focus:ring-emerald-500/70 focus:ring-offset-2 focus:ring-offset-slate-900 cursor-pointer transition ${
+        className={`absolute flex flex-col overflow-visible rounded-xl border box-border focus:outline-none focus:ring-2 focus:ring-emerald-500/70 focus:ring-offset-2 focus:ring-offset-slate-900 cursor-pointer transition ${
           isSelected ? "border-emerald-500 bg-emerald-500/10" : "border-slate-800 bg-slate-900/60"
         }`}
         style={cardStyle}
@@ -2177,41 +2198,23 @@ const PreviewDialog: React.FC<{
     };
   }, [onClose]);
 
-  useEffect(() => {
-    if (typeof document === "undefined") return;
-    const { body } = document;
-    if (!body) return;
-    const previous = body.style.overflow;
-    body.style.overflow = "hidden";
-    return () => {
-      body.style.overflow = previous;
-    };
-  }, []);
-
-  const handleBackdropClick: React.MouseEventHandler<HTMLDivElement> = event => {
-    if (event.target === event.currentTarget) {
-      onClose();
-    }
-  };
-
   const {
     preferences: { theme },
   } = useUserPreferences();
   const isLightTheme = theme === "light";
-  const backdropClass = isLightTheme ? "bg-slate-900/40" : "bg-slate-950/80";
-  const containerBaseClass =
-    "relative flex w-full max-w-4xl flex-col gap-4 rounded-2xl border p-6 shadow-2xl max-h-[calc(100vh-2rem)] overflow-hidden";
+  const containerBaseClass = "relative flex h-full w-full flex-1 flex-col";
   const containerClass = isLightTheme
-    ? `${containerBaseClass} border-slate-200 bg-white text-slate-700`
-    : `${containerBaseClass} border-slate-800 bg-slate-900/95 text-slate-100`;
+    ? `${containerBaseClass} bg-white text-slate-700`
+    : `${containerBaseClass} bg-slate-900 text-slate-100`;
   const headingClass = isLightTheme ? "text-lg font-semibold text-slate-900" : "text-lg font-semibold text-slate-100";
   const metaContainerClass = isLightTheme
     ? "mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-600"
     : "mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-400";
+  const contentAreaClass = "flex min-h-0 flex-1 flex-col gap-4 pt-4";
   const metaLabelClass = isLightTheme ? "text-slate-500" : "text-slate-300";
   const previewContainerClass = isLightTheme
-    ? "relative flex min-h-[18rem] flex-1 items-center justify-center overflow-hidden rounded-xl border border-slate-200 bg-slate-50 max-h-[calc(100vh-18rem)]"
-    : "relative flex min-h-[18rem] flex-1 items-center justify-center overflow-hidden rounded-xl border border-slate-800 bg-slate-950/60 max-h-[calc(100vh-18rem)]";
+    ? "relative flex h-full min-h-0 flex-1 items-center justify-center overflow-hidden rounded-xl border border-slate-200 bg-white"
+    : "relative flex h-full min-h-0 flex-1 items-center justify-center overflow-hidden rounded-xl border border-slate-800 bg-slate-900/90";
   const fallbackMessageClass = isLightTheme
     ? "flex h-full w-full flex-col items-center justify-center gap-4 p-6 text-sm text-slate-500"
     : "flex h-full w-full flex-col items-center justify-center gap-4 p-6 text-sm text-slate-400";
@@ -2219,8 +2222,8 @@ const PreviewDialog: React.FC<{
     ? "absolute right-4 top-4 rounded-full p-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-400 focus:ring-offset-2 focus:ring-offset-white"
     : "absolute right-4 top-4 rounded-full p-2 text-slate-300 transition hover:bg-slate-800 hover:text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-400 focus:ring-offset-2 focus:ring-offset-slate-900";
   const footerContainerClass = isLightTheme
-    ? "flex flex-wrap gap-4 text-[11px] text-slate-500"
-    : "flex flex-wrap gap-4 text-[11px] text-slate-500";
+    ? "flex flex-wrap gap-4 border-t border-slate-200 px-6 pt-4 text-[11px] text-slate-500"
+    : "flex flex-wrap gap-4 border-t border-slate-800/80 px-6 pt-4 text-[11px] text-slate-400";
   const hashLabelClass = isLightTheme ? "font-mono break-all text-slate-600" : "font-mono break-all text-slate-400";
   const directUrlLabelClass = isLightTheme ? "text-slate-600" : "text-slate-300";
   const copyButtonClass = isLightTheme
@@ -2228,101 +2231,99 @@ const PreviewDialog: React.FC<{
     : "flex max-w-full items-center gap-1 rounded px-1 text-left text-[11px] text-emerald-300 underline decoration-dotted underline-offset-2 hover:text-emerald-200 focus:outline-none focus:ring-2 focus:ring-emerald-400 focus:ring-offset-2 focus:ring-offset-slate-900";
 
   return (
-    <div
-      className={`fixed inset-0 z-50 flex items-center justify-center p-4 ${backdropClass}`}
-      onClick={handleBackdropClick}
-      role="presentation"
-    >
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-label={`Preview ${displayName}`}
-        className={containerClass}
-        onClick={event => event.stopPropagation()}
-      >
-        <button
-          type="button"
-          className={closeButtonClass}
-          onClick={onClose}
-          aria-label="Close preview"
+    <section className="flex h-full w-full flex-1 min-h-0 flex-col overflow-hidden">
+      <div className="flex flex-1 min-h-0 flex-col overflow-hidden">
+        <div
+          role="region"
+          aria-label={`Preview ${displayName}`}
+          className={containerClass}
         >
-          <CancelIcon size={18} />
-        </button>
-        <div>
-          <h2 className={headingClass}>{displayName}</h2>
-          <div className={metaContainerClass}>
-            {sizeLabel && (
+          <button
+            type="button"
+            className={closeButtonClass}
+            onClick={onClose}
+            aria-label="Close preview"
+          >
+            <CancelIcon size={18} />
+          </button>
+          <div className="px-6 pt-6">
+            <h2 className={headingClass}>{displayName}</h2>
+            <div className={metaContainerClass}>
+              {sizeLabel && (
+                <span>
+                  <span className={metaLabelClass}>Size:</span> {sizeLabel}
+                </span>
+              )}
+              {updatedLabel && (
+                <span>
+                  <span className={metaLabelClass}>Updated:</span> {updatedLabel}
+                </span>
+              )}
               <span>
-                <span className={metaLabelClass}>Size:</span> {sizeLabel}
+                <span className={metaLabelClass}>Type:</span> {typeLabel}
               </span>
-            )}
-            {updatedLabel && (
-              <span>
-                <span className={metaLabelClass}>Updated:</span> {updatedLabel}
-              </span>
-            )}
-            <span>
-              <span className={metaLabelClass}>Type:</span> {typeLabel}
-            </span>
-            {originLabel && (
-              <span className="truncate">
-                <span className={metaLabelClass}>Server:</span> {originLabel}
-              </span>
-            )}
+              {originLabel && (
+                <span className="truncate">
+                  <span className={metaLabelClass}>Server:</span> {originLabel}
+                </span>
+              )}
+            </div>
+          </div>
+          <div className={contentAreaClass}>
+            <div className={previewContainerClass}>
+              {previewUnavailable ? (
+                <div className={fallbackMessageClass}>
+                  <FileTypeIcon
+                    kind={derivedKind}
+                    size={112}
+                    className={isLightTheme ? "text-slate-400" : "text-slate-500"}
+                  />
+                  <p className="max-w-sm text-center">Preview not available for this file type.</p>
+                </div>
+              ) : (
+                <BlobPreview
+                  sha={blob.sha256}
+                  url={previewUrl}
+                  name={(blob.__bloomFolderPlaceholder || isListLikeBlob(blob) ? blob.name : getBlobMetadataName(blob)) ?? blob.sha256}
+                  type={blob.type}
+                  serverUrl={target.baseUrl ?? blob.serverUrl}
+                  requiresAuth={requiresAuth}
+                  signTemplate={requiresAuth ? signTemplate : undefined}
+                  serverType={serverType}
+                  onDetect={onDetect}
+                  fallbackIconSize={160}
+                  className="h-full w-full"
+                  variant="dialog"
+                  onVisible={onBlobVisible}
+                  blurhash={blurhash}
+                  blob={blob}
+                />
+              )}
+            </div>
+            <div className={footerContainerClass}>
+              <span className={hashLabelClass}>Hash: {blob.sha256}</span>
+              {blob.url && (
+                <button
+                  type="button"
+                  onClick={event => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    handleDirectUrlCopy();
+                  }}
+                  className={copyButtonClass}
+                  title="Copy direct URL"
+                  aria-label="Copy direct URL"
+                >
+                  <span className={directUrlLabelClass}>Direct URL:</span>
+                  <span className="truncate font-mono">{blob.url}</span>
+                  <span className="mt-[1px] text-current"><CopyIcon size={12} /></span>
+                </button>
+              )}
+            </div>
           </div>
         </div>
-        <div className={previewContainerClass}>
-          {previewUnavailable ? (
-            <div className={fallbackMessageClass}>
-              <FileTypeIcon
-                kind={derivedKind}
-                size={112}
-                className={isLightTheme ? "text-slate-400" : "text-slate-500"}
-              />
-              <p className="max-w-sm text-center">Preview not available for this file type.</p>
-            </div>
-          ) : (
-            <BlobPreview
-              sha={blob.sha256}
-              url={previewUrl}
-              name={(blob.__bloomFolderPlaceholder || isListLikeBlob(blob) ? blob.name : getBlobMetadataName(blob)) ?? blob.sha256}
-              type={blob.type}
-              serverUrl={target.baseUrl ?? blob.serverUrl}
-              requiresAuth={requiresAuth}
-              signTemplate={requiresAuth ? signTemplate : undefined}
-              serverType={serverType}
-              onDetect={onDetect}
-              fallbackIconSize={160}
-              className="h-full w-full max-h-[65vh] max-w-full"
-              variant="dialog"
-              onVisible={onBlobVisible}
-              blurhash={blurhash}
-              blob={blob}
-            />
-          )}
-        </div>
-        <div className={footerContainerClass}>
-          <span className={hashLabelClass}>Hash: {blob.sha256}</span>
-          {blob.url && (
-            <button
-              type="button"
-              onClick={event => {
-                event.preventDefault();
-                event.stopPropagation();
-                handleDirectUrlCopy();
-              }}
-              className={copyButtonClass}
-              title="Copy direct URL"
-              aria-label="Copy direct URL"
-            >
-              <span className={directUrlLabelClass}>Direct URL:</span>
-              <span className="truncate font-mono">{blob.url}</span>
-              <span className="mt-[1px] text-current"><CopyIcon size={12} /></span>
-            </button>
-          )}
-        </div>
       </div>
-    </div>
+    </section>
   );
 };
 
@@ -2605,7 +2606,6 @@ const ListRowComponent: React.FC<ListRowProps> = ({
   const playButtonClass = `${primaryActionBaseClass} ${
     isActivePlaying ? "bg-emerald-500/80 text-slate-900 hover:bg-emerald-400" : "bg-emerald-700/70 text-slate-100 hover:bg-emerald-600"
   }`;
-  const showButtonClass = `${primaryActionBaseClass} bg-emerald-700/70 text-slate-100 hover:bg-emerald-600`;
   const playPauseIcon = isActivePlaying ? <PauseIcon size={16} /> : <PlayIcon size={16} />;
   const displayName = buildDisplayName(blob);
   const folderInfo = blob.__bloomFolderPlaceholder
@@ -2785,52 +2785,6 @@ const ListRowComponent: React.FC<ListRowProps> = ({
       document.removeEventListener("keydown", handleKey);
     };
   }, [menuOpen]);
-
-  const primaryAction = isListBlob && onOpenList ? (
-    <button
-      className={showButtonClass}
-      onClick={event => {
-        event.stopPropagation();
-        handleOpenList();
-      }}
-      aria-label="Open list"
-      title="Open"
-      type="button"
-    >
-      <PreviewIcon size={16} />
-    </button>
-  ) : isAudio && onPlay && blob.url ? (
-      <button
-        className={playButtonClass}
-        onClick={event => {
-          event.stopPropagation();
-          onPlay?.(blob);
-        }}
-        aria-label={playButtonAria}
-        aria-pressed={isActivePlaying}
-        title={playButtonLabel}
-        type="button"
-      >
-        {playPauseIcon}
-      </button>
-    ) : !isAudio ? (
-      <button
-        className={showButtonClass}
-        onClick={event => {
-          event.stopPropagation();
-          if (isListBlob && onOpenList) {
-            handleOpenList();
-            return;
-          }
-          onPreview(blob);
-        }}
-        aria-label={isListBlob ? "Open list" : disablePreview ? "Preview unavailable" : "Show blob"}
-        title={isListBlob ? "Open" : disablePreview ? "Preview unavailable" : "Show"}
-        type="button"
-      >
-        <PreviewIcon size={16} />
-      </button>
-    ) : null;
 
     const shareButton = (() => {
     if (folderShareHint && onShareFolder) {
@@ -3052,6 +3006,56 @@ const ListRowComponent: React.FC<ListRowProps> = ({
           ) : null}
         </div>
       );
+
+  const showButtonClass = `${primaryActionBaseClass} ${
+    isLightTheme ? "bg-blue-700 text-white hover:bg-blue-600" : "bg-emerald-700/70 text-slate-100 hover:bg-emerald-600"
+  }`;
+
+  const primaryAction = isListBlob && onOpenList ? (
+    <button
+      className={showButtonClass}
+      onClick={event => {
+        event.stopPropagation();
+        handleOpenList();
+      }}
+      aria-label="Open list"
+      title="Open"
+      type="button"
+    >
+      <PreviewIcon size={16} />
+    </button>
+  ) : isAudio && onPlay && blob.url ? (
+      <button
+        className={playButtonClass}
+        onClick={event => {
+          event.stopPropagation();
+          onPlay?.(blob);
+        }}
+        aria-label={playButtonAria}
+        aria-pressed={isActivePlaying}
+        title={playButtonLabel}
+        type="button"
+      >
+        {playPauseIcon}
+      </button>
+    ) : !isAudio ? (
+      <button
+        className={showButtonClass}
+        onClick={event => {
+          event.stopPropagation();
+          if (isListBlob && onOpenList) {
+            handleOpenList();
+            return;
+          }
+          onPreview(blob);
+        }}
+        aria-label={isListBlob ? "Open list" : disablePreview ? "Preview unavailable" : "Show blob"}
+        title={isListBlob ? "Open" : disablePreview ? "Preview unavailable" : "Show"}
+        type="button"
+      >
+        <PreviewIcon size={16} />
+      </button>
+    ) : null;
 
   const handleRowClick: React.MouseEventHandler<HTMLDivElement> = event => {
     if (!isListBlob || !onOpenList) return;

@@ -1498,36 +1498,54 @@ export default function App() {
     disconnect();
   }, [disconnect]);
 
+  const isLightTheme = preferences.theme === "light";
+  const shellBaseClass =
+    "relative flex flex-1 min-h-0 flex-col overflow-hidden rounded-3xl border border-slate-800/70";
+  const shellClass = showAuthPrompt
+    ? `${shellBaseClass} ${isLightTheme ? "bg-slate-900/70" : "bg-slate-900/70"}`
+    : `${shellBaseClass} ${
+        isLightTheme ? "bg-white surface-sheet shadow-panel noise-layer" : "bg-slate-900 surface-sheet shadow-panel noise-layer"
+      }`;
+  const userMenuButtonClass = isLightTheme
+    ? "relative flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 bg-white/90 p-0 text-xs text-slate-700 transition hover:border-blue-400 hover:text-blue-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/70 focus-visible:ring-offset-2 focus-visible:ring-offset-white"
+    : "relative flex h-10 w-10 items-center justify-center rounded-full border border-slate-800/80 bg-slate-900/80 p-0 text-xs text-slate-200 transition hover:border-emerald-400 hover:text-emerald-300 focus:outline-none focus-visible:focus-emerald-ring";
+  const userMenuContainerClass = isLightTheme
+    ? "absolute right-0 z-50 mt-3 min-w-[12rem] rounded-xl border border-slate-200 bg-white/95 px-3 py-2 text-sm text-slate-700 shadow-lg backdrop-blur-sm"
+    : "absolute right-0 z-50 mt-3 min-w-[12rem] rounded-xl border border-slate-800/80 bg-slate-900/90 px-3 py-2 text-sm text-slate-200 shadow-floating backdrop-blur";
+  const userMenuItemClass = isLightTheme
+    ? "flex w-full items-center gap-2 rounded-lg px-2 py-1 transition hover:bg-slate-100 hover:text-blue-700 focus-visible:ring-2 focus-visible:ring-blue-400/70 focus-visible:ring-offset-2 focus-visible:ring-offset-white"
+    : "flex w-full items-center gap-2 rounded-lg px-2 py-1 transition hover:bg-slate-800/70 hover:text-emerald-300 focus-visible:focus-emerald-ring";
+
   const shouldShowFloatingPlayer = Boolean(audio.current);
 
   return (
-    <div className="flex min-h-screen max-h-screen flex-col overflow-hidden bg-slate-950 text-slate-100">
-      <div className="mx-auto flex w-full flex-1 min-h-0 flex-col gap-6 overflow-hidden px-6 py-8 max-w-7xl box-border">
-        <header className="flex flex-wrap items-center gap-4">
-          <div className="flex items-center gap-3 min-h-[32px] md:min-h-12">
-            <img
-              src="/bloom.webp"
-              alt="Bloom logo"
-              className="h-6 w-6 rounded-md object-cover md:h-10 md:w-10 md:rounded-xl"
-            />
-            <div>
-              <h1 className="text-2xl font-semibold">Bloom</h1>
-              <p className="hidden md:block text-xs text-slate-400">
-                Manage your content, upload media, and mirror files across servers.
-              </p>
+    <div className="surface-window flex min-h-screen max-h-screen flex-col overflow-hidden text-slate-100">
+    <div className="mx-auto flex w-full max-w-7xl flex-1 min-h-0 flex-col gap-2 px-4 py-6 sm:px-6 sm:py-8">
+        <header className="relative z-30 flex flex-col gap-4 rounded-3xl border border-slate-800/70 bg-slate-900/80 p-4 shadow-toolbar backdrop-blur">
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-3">
+              <img
+                src="/bloom.webp"
+                alt="Bloom logo"
+                className="h-8 w-8 rounded-lg object-cover md:h-9 md:w-9"
+              />
+              <div className="leading-tight">
+                <h1 className="text-sm font-semibold tracking-tight">Bloom</h1>
+                <p className="hidden text-[11px] text-slate-400 sm:block">
+                  Manage your content, upload media, and mirror files across servers.
+                </p>
+              </div>
             </div>
-          </div>
-          <div className="ml-auto flex flex-wrap items-center gap-2 text-sm">
             {user && (
-              <div className="relative" ref={userMenuRef}>
+              <div className="relative ml-auto" ref={userMenuRef}>
                 <button
                   type="button"
                   onClick={toggleUserMenu}
-                  className="relative flex h-8 w-8 items-center justify-center rounded-full border border-slate-800 bg-slate-900/70 p-0 text-xs text-slate-200 transition hover:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 md:h-12 md:w-12"
+                  className={userMenuButtonClass}
                   aria-haspopup="menu"
                   aria-expanded={isUserMenuOpen}
                   aria-label={isUserMenuOpen ? "Close account menu" : "Open account menu"}
-                  title="Click for more options"
+                  title="Account options"
                 >
                   {avatarUrl ? (
                     <img
@@ -1540,7 +1558,7 @@ export default function App() {
                     <span className="flex h-full w-full items-center justify-center font-semibold">{userInitials}</span>
                   )}
                   <span
-                    className={`pointer-events-none absolute -bottom-1.5 -right-1.5 z-10 flex h-5 w-5 items-center justify-center rounded-full border shadow-sm ${
+                    className={`pointer-events-none absolute -bottom-1.5 -right-1.5 z-10 flex h-5 w-5 items-center justify-center rounded-full border shadow-toolbar ${
                       preferences.theme === "light"
                         ? "border-slate-200 bg-white text-slate-900"
                         : "border-slate-900 bg-slate-950 text-emerald-300"
@@ -1551,8 +1569,8 @@ export default function App() {
                   </span>
                 </button>
                 {isUserMenuOpen && (
-                  <div className="absolute right-0 z-50 mt-2 min-w-[10rem] rounded-md bg-slate-900 px-2 py-2 text-sm shadow-lg">
-                    <ul className="flex flex-col gap-1 text-slate-200">
+                  <div className={userMenuContainerClass}>
+                    <ul className="flex flex-col gap-1">
                       {userMenuLinks.map(item => (
                         <li key={item.label}>
                           <a
@@ -1561,7 +1579,7 @@ export default function App() {
                               event.preventDefault();
                               item.handler();
                             }}
-                            className="flex items-center gap-2 rounded-lg px-2 py-1 transition hover:bg-slate-800/70 hover:text-emerald-300"
+                            className={userMenuItemClass}
                           >
                             <item.icon size={16} />
                             <span>{item.label}</span>
@@ -1575,7 +1593,7 @@ export default function App() {
                             event.preventDefault();
                             handleDisconnectClick();
                           }}
-                          className="flex items-center gap-2 rounded-lg px-2 py-1 transition hover:bg-slate-800/70 hover:text-emerald-300"
+                          className={userMenuItemClass}
                         >
                           <LogoutIcon size={16} />
                           <span>Disconnect</span>
@@ -1587,9 +1605,30 @@ export default function App() {
               </div>
             )}
           </div>
+          {!showAuthPrompt && (
+            <MainNavigation
+              showAuthPrompt={false}
+              keepSearchExpanded={keepSearchExpanded}
+              browseNavigationState={browseNavigationState}
+              isSearchOpen={isSearchOpen}
+              searchQuery={searchQuery}
+              searchInputRef={searchInputRef}
+              onSearchChange={handleSearchChange}
+              onSearchKeyDown={handleSearchKeyDown}
+              onSearchClear={handleClearSearch}
+              onToggleSearch={handleToggleSearch}
+              browseHeaderControls={browseHeaderControls}
+              selectedCount={selectedBlobs.size}
+              tab={tab}
+              onSelectTab={selectTab}
+              navTabs={NAV_TABS}
+              onBreadcrumbHome={handleBreadcrumbHome}
+              theme={preferences.theme}
+            />
+          )}
         </header>
 
-        <div className="relative flex flex-1 min-h-0 flex-col overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/70">
+        <div className={shellClass}>
           <div ref={mainWidgetRef} className="flex flex-1 min-h-0 flex-col">
             {showAuthPrompt ? (
               <LoggedOutPrompt
@@ -1598,40 +1637,21 @@ export default function App() {
                 hasNip07Extension={hasNip07Extension}
               />
             ) : (
-              <>
-                <MainNavigation
-                  showAuthPrompt={false}
-                  keepSearchExpanded={keepSearchExpanded}
-                  browseNavigationState={browseNavigationState}
-                  isSearchOpen={isSearchOpen}
-                  searchQuery={searchQuery}
-                  searchInputRef={searchInputRef}
-                  onSearchChange={handleSearchChange}
-                  onSearchKeyDown={handleSearchKeyDown}
-                  onSearchClear={handleClearSearch}
-                  onToggleSearch={handleToggleSearch}
-                  browseHeaderControls={browseHeaderControls}
-                  selectedCount={selectedBlobs.size}
-                  tab={tab}
-                  onSelectTab={selectTab}
-                  navTabs={NAV_TABS}
-                  onBreadcrumbHome={handleBreadcrumbHome}
-                />
-                <WorkspaceSection
-                  tab={tab}
-                  localServers={localServers}
-                  selectedServer={selectedServer}
-                  onSelectServer={setSelectedServer}
-                  homeNavigationKey={homeNavigationKey}
-                  defaultViewMode={preferences.defaultViewMode}
-                  defaultFilterMode={preferences.defaultFilterMode}
-                  showGridPreviews={preferences.showGridPreviews}
-                  showListPreviews={preferences.showListPreviews}
-                  defaultSortOption={preferences.defaultSortOption}
-                  sortDirection={preferences.sortDirection}
-                  onStatusMetricsChange={handleStatusMetricsChange}
-                  onSyncStateChange={handleSyncStateChange}
-                  onProvideSyncStarter={handleProvideSyncStarter}
+              <WorkspaceSection
+                tab={tab}
+                localServers={localServers}
+                selectedServer={selectedServer}
+                onSelectServer={setSelectedServer}
+                homeNavigationKey={homeNavigationKey}
+                defaultViewMode={preferences.defaultViewMode}
+                defaultFilterMode={preferences.defaultFilterMode}
+                showGridPreviews={preferences.showGridPreviews}
+                showListPreviews={preferences.showListPreviews}
+                defaultSortOption={preferences.defaultSortOption}
+                sortDirection={preferences.sortDirection}
+                onStatusMetricsChange={handleStatusMetricsChange}
+                onSyncStateChange={handleSyncStateChange}
+                onProvideSyncStarter={handleProvideSyncStarter}
                 onRequestRename={handleRequestRename}
                 onRequestFolderRename={handleRequestFolderRename}
                 onRequestShare={handleShareBlob}
@@ -1639,122 +1659,121 @@ export default function App() {
                 onUnshareFolder={handleUnshareFolder}
                 folderShareBusyPath={folderShareBusyPath}
                 onSetTab={selectTab}
-                  onUploadCompleted={handleUploadCompleted}
-                  showStatusMessage={showStatusMessage}
-                  onProvideBrowseControls={setBrowseHeaderControls}
-                  onProvideBrowseNavigation={setBrowseNavigationState}
-                  onFilterModeChange={handleFilterModeChange}
-                  searchQuery={searchQuery}
-                  onBrowseActiveListChange={handleBrowseActiveListChange}
-                  browseRestoreState={pendingBrowseRestore?.state ?? null}
-                  browseRestoreKey={pendingBrowseRestore?.key ?? null}
-                  onBrowseRestoreHandled={handleBrowseRestoreHandled}
-                  uploadFolderSuggestion={uploadFolderSuggestion}
-                  shareState={shareState}
-                  onClearShareState={clearShareState}
-                  onShareComplete={handleShareComplete}
-                  defaultServerUrl={preferences.defaultServerUrl}
-                  keepSearchExpanded={keepSearchExpanded}
-                  theme={preferences.theme}
-                  syncEnabled={syncEnabled}
-                  syncLoading={syncLoading}
-                  syncError={syncError}
-                  syncPending={syncPending}
-                  syncLastSyncedAt={syncLastSyncedAt}
-                  onToggleSyncEnabled={setSyncEnabled}
-                  onSetDefaultViewMode={handleSetDefaultViewMode}
-                  onSetDefaultFilterMode={handleSetDefaultFilterMode}
-                  onSetDefaultSortOption={handleSetDefaultSortOption}
-                  onSetSortDirection={handleSetSortDirection}
-                  onSetDefaultServer={handleSetDefaultServer}
-                  onSetShowGridPreviews={handleSetShowPreviewsInGrid}
-                  onSetShowListPreviews={handleSetShowPreviewsInList}
-                  onSetKeepSearchExpanded={handleSetKeepSearchExpanded}
-                  onSetTheme={handleSetTheme}
-                  saving={saving}
-                  signer={signer}
-                  onAddServer={handleAddServer}
-                  onUpdateServer={handleUpdateServer}
-                  onRemoveServer={handleRemoveServer}
-                  onSyncSelectedServers={handleSyncSelectedServers}
-                  syncButtonDisabled={syncButtonDisabled}
-                  syncBusy={syncBusy}
-                  serverValidationError={serverValidationError}
-                  onProfileUpdated={handleProfileUpdated}
-                />
-              </>
+                onUploadCompleted={handleUploadCompleted}
+                showStatusMessage={showStatusMessage}
+                onProvideBrowseControls={setBrowseHeaderControls}
+                onProvideBrowseNavigation={setBrowseNavigationState}
+                onFilterModeChange={handleFilterModeChange}
+                searchQuery={searchQuery}
+                onBrowseActiveListChange={handleBrowseActiveListChange}
+                browseRestoreState={pendingBrowseRestore?.state ?? null}
+                browseRestoreKey={pendingBrowseRestore?.key ?? null}
+                onBrowseRestoreHandled={handleBrowseRestoreHandled}
+                uploadFolderSuggestion={uploadFolderSuggestion}
+                shareState={shareState}
+                onClearShareState={clearShareState}
+                onShareComplete={handleShareComplete}
+                defaultServerUrl={preferences.defaultServerUrl}
+                keepSearchExpanded={keepSearchExpanded}
+                theme={preferences.theme}
+                syncEnabled={syncEnabled}
+                syncLoading={syncLoading}
+                syncError={syncError}
+                syncPending={syncPending}
+                syncLastSyncedAt={syncLastSyncedAt}
+                onToggleSyncEnabled={setSyncEnabled}
+                onSetDefaultViewMode={handleSetDefaultViewMode}
+                onSetDefaultFilterMode={handleSetDefaultFilterMode}
+                onSetDefaultSortOption={handleSetDefaultSortOption}
+                onSetSortDirection={handleSetSortDirection}
+                onSetDefaultServer={handleSetDefaultServer}
+                onSetShowGridPreviews={handleSetShowPreviewsInGrid}
+                onSetShowListPreviews={handleSetShowPreviewsInList}
+                onSetKeepSearchExpanded={handleSetKeepSearchExpanded}
+                onSetTheme={handleSetTheme}
+                saving={saving}
+                signer={signer}
+                onAddServer={handleAddServer}
+                onUpdateServer={handleUpdateServer}
+                onRemoveServer={handleRemoveServer}
+                onSyncSelectedServers={handleSyncSelectedServers}
+                syncButtonDisabled={syncButtonDisabled}
+                syncBusy={syncBusy}
+                serverValidationError={serverValidationError}
+                onProfileUpdated={handleProfileUpdated}
+              />
             )}
           </div>
+        </div>
 
-          {shouldShowFloatingPlayer && (
-            <Suspense fallback={null}>
-              <AudioPlayerCardLazy audio={audio} variant="docked" />
-            </Suspense>
-          )}
-
-          <StatusFooter
-            isSignedIn={isSignedIn}
-            localServers={localServers}
-            statusSelectValue={statusSelectValue}
-            onStatusServerChange={handleStatusServerChange}
-            centerClass={centerClass}
-            centerMessage={centerMessage}
-            showStatusTotals={showStatusTotals}
-            showServerSelector={showServerSelector}
-            statusCount={statusCount}
-            statusSize={statusSize}
-            allServersValue={ALL_SERVERS_VALUE}
-            showGithubLink={showGithubLink}
-            showSupportLink={showSupportLink}
-            theme={preferences.theme}
-            userMenuItems={userMenuLinks}
-            onDisconnect={handleDisconnectClick}
-          />
-
-          {!showAuthPrompt && renameTarget && (
-            <Suspense
-              fallback={
-                <div className="fixed inset-0 z-20 flex items-center justify-center bg-slate-950/80 text-sm text-slate-300">
-                  Loading editor…
-                </div>
-              }
-            >
-              <RenameDialogLazy
-                blob={renameTarget}
-                ndk={ndk}
-                signer={signer}
-                relays={effectiveRelays}
-                onClose={handleRenameDialogClose}
-                onStatus={showStatusMessage}
-              />
-            </Suspense>
-          )}
-
-          {!showAuthPrompt && folderRenamePath && (
-            <FolderRenameDialog
-              path={folderRenamePath}
-              onClose={handleFolderRenameClose}
-              onStatus={showStatusMessage}
-            />
-          )}
-
-          {folderShareDialog ? (
-            <FolderShareDialog
-              record={folderShareDialog.record}
-              shareUrl={folderShareDialog.shareUrl}
-              naddr={folderShareDialog.naddr}
-              onClose={handleCloseFolderShareDialog}
-              onStatus={showStatusMessage}
-            />
-          ) : null}
-
+        {shouldShowFloatingPlayer && (
           <Suspense fallback={null}>
-            <ConnectSignerDialogLazy
-              open={shouldShowConnectSignerDialog}
-              onClose={() => setConnectSignerOpen(false)}
+            <AudioPlayerCardLazy audio={audio} variant="docked" />
+          </Suspense>
+        )}
+
+        <StatusFooter
+          isSignedIn={isSignedIn}
+          localServers={localServers}
+          statusSelectValue={statusSelectValue}
+          onStatusServerChange={handleStatusServerChange}
+          centerClass={centerClass}
+          centerMessage={centerMessage}
+          showStatusTotals={showStatusTotals}
+          showServerSelector={showServerSelector}
+          statusCount={statusCount}
+          statusSize={statusSize}
+          allServersValue={ALL_SERVERS_VALUE}
+          showGithubLink={showGithubLink}
+          showSupportLink={showSupportLink}
+          theme={preferences.theme}
+          userMenuItems={userMenuLinks}
+          onDisconnect={handleDisconnectClick}
+        />
+
+        {!showAuthPrompt && renameTarget && (
+          <Suspense
+            fallback={
+              <div className="fixed inset-0 z-20 flex items-center justify-center bg-slate-950/80 text-sm text-slate-300">
+                Loading editor…
+              </div>
+            }
+          >
+            <RenameDialogLazy
+              blob={renameTarget}
+              ndk={ndk}
+              signer={signer}
+              relays={effectiveRelays}
+              onClose={handleRenameDialogClose}
+              onStatus={showStatusMessage}
             />
           </Suspense>
-        </div>
+        )}
+
+        {!showAuthPrompt && folderRenamePath && (
+          <FolderRenameDialog
+            path={folderRenamePath}
+            onClose={handleFolderRenameClose}
+            onStatus={showStatusMessage}
+          />
+        )}
+
+        {folderShareDialog ? (
+          <FolderShareDialog
+            record={folderShareDialog.record}
+            shareUrl={folderShareDialog.shareUrl}
+            naddr={folderShareDialog.naddr}
+            onClose={handleCloseFolderShareDialog}
+            onStatus={showStatusMessage}
+          />
+        ) : null}
+
+        <Suspense fallback={null}>
+          <ConnectSignerDialogLazy
+            open={shouldShowConnectSignerDialog}
+            onClose={() => setConnectSignerOpen(false)}
+          />
+        </Suspense>
       </div>
     </div>
   );
@@ -1777,6 +1796,7 @@ type MainNavigationProps = {
   onSelectTab: (tab: TabId) => void;
   navTabs: typeof NAV_TABS;
   onBreadcrumbHome: () => void;
+  theme: "dark" | "light";
 };
 
 type LoggedOutPromptProps = {
@@ -1793,7 +1813,13 @@ const LoggedOutPrompt: React.FC<LoggedOutPromptProps> = ({
   return (
     <div className="flex flex-1 items-center justify-center p-6">
       <div className="flex w-full max-w-md flex-col items-center gap-4 rounded-2xl border border-slate-800 bg-slate-900/70 p-8 text-center shadow-xl">
-        <img src="/bloom.webp" alt="Bloom logo" className="w-24 md:w-32 rounded-xl" />
+        <img
+          src="/bloom.webp"
+          alt="Bloom logo"
+          width={128}
+          height={128}
+          className="w-24 md:w-32 rounded-xl"
+        />
         <div className="space-y-2">
           <h2 className="text-lg font-semibold text-slate-100">Welcome to Bloom</h2>
           <p className="text-sm text-slate-300 text-left">
@@ -1871,6 +1897,7 @@ const MainNavigation = memo(function MainNavigation({
   onSelectTab,
   navTabs,
   onBreadcrumbHome,
+  theme,
 }: MainNavigationProps) {
   const assignSearchInputRef = (node: HTMLInputElement | null) => {
     searchInputRef.current = node;
@@ -1878,12 +1905,20 @@ const MainNavigation = memo(function MainNavigation({
   const isCompactScreen = useIsCompactScreen();
   const hasBreadcrumbs = Boolean(browseNavigationState?.segments.length);
   const showBreadcrumbs = !isCompactScreen && hasBreadcrumbs;
+  const isLightTheme = theme === "light";
+  const navContainerClass = isLightTheme
+    ? "flex flex-wrap items-center gap-3 rounded-2xl border border-slate-200 bg-white px-3 py-2 shadow-toolbar"
+    : "flex flex-wrap items-center gap-3 rounded-2xl border border-slate-800/60 bg-slate-950/30 px-3 py-2 shadow-toolbar backdrop-blur-sm";
   const mergeClasses = (...classes: Array<string | false | null | undefined>) => classes.filter(Boolean).join(" ");
   const segmentBaseClass =
-    "flex h-10 shrink-0 items-center gap-2 px-0 text-sm transition focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-emerald-500 disabled:cursor-not-allowed disabled:opacity-60 border-none bg-transparent";
-  const segmentDefaultClass = "text-slate-300 hover:bg-slate-900/80";
-  const segmentActiveClass = "bg-emerald-500/10 text-emerald-200 hover:bg-emerald-500/20";
-  const segmentDisabledClass = "text-slate-500";
+    "flex h-9 shrink-0 items-center gap-2 rounded-xl px-3 text-sm transition focus-visible:outline-none focus-visible:focus-emerald-ring disabled:cursor-not-allowed disabled:opacity-55";
+  const segmentDefaultClass = isLightTheme
+    ? "bg-slate-200 text-slate-600 hover:bg-slate-100"
+    : "bg-slate-900/40 text-slate-300 hover:bg-slate-800/60";
+  const segmentActiveClass = isLightTheme
+    ? "bg-emerald-200/60 text-emerald-700 shadow-toolbar"
+    : "bg-emerald-500/15 text-emerald-200 shadow-toolbar";
+  const segmentDisabledClass = isLightTheme ? "bg-slate-100 text-slate-400" : "bg-transparent text-slate-500";
   const searchSegmentState = showAuthPrompt
     ? segmentDisabledClass
     : isSearchOpen
@@ -1892,7 +1927,7 @@ const MainNavigation = memo(function MainNavigation({
   const browseControlSegments = browseHeaderControls
     ? React.Children.toArray(browseHeaderControls).filter(Boolean)
     : [];
-  const navButtonSegments = navTabs.map((item, index) => {
+  const navButtonSegments = navTabs.map(item => {
     const isUploadTab = item.id === "upload";
     const isTransferView = tab === "transfer";
     const showTransfer = isUploadTab && selectedCount > 0;
@@ -1901,7 +1936,6 @@ const MainNavigation = memo(function MainNavigation({
     const label = showTransfer ? "Transfer" : item.label;
     const hideLabelOnMobile = isUploadTab;
     const nextTab: TabId = showTransfer ? "transfer" : item.id;
-    const firstNavSegment = index === 0;
     return (
       <button
         key={item.id}
@@ -1909,13 +1943,7 @@ const MainNavigation = memo(function MainNavigation({
         disabled={showAuthPrompt}
         aria-label={label}
         title={label}
-        className={mergeClasses(
-          segmentBaseClass,
-          "px-4 justify-center",
-          isActive ? segmentActiveClass : segmentDefaultClass,
-          firstNavSegment &&
-            "relative before:pointer-events-none before:content-[''] before:absolute before:inset-y-1 before:left-0 before:w-px before:bg-slate-700/80"
-        )}
+        className={mergeClasses(segmentBaseClass, "justify-center", isActive ? segmentActiveClass : segmentDefaultClass)}
         data-segment-type="label"
       >
         <IconComponent size={16} />
@@ -1926,15 +1954,38 @@ const MainNavigation = memo(function MainNavigation({
     );
   });
 
+  const homeButtonClass = isLightTheme
+    ? "flex items-center gap-2 rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-medium text-slate-600 transition hover:border-emerald-400 hover:text-emerald-600 focus-visible:focus-emerald-ring disabled:cursor-not-allowed disabled:opacity-60"
+    : "flex items-center gap-2 rounded-xl border border-slate-800 bg-slate-900/50 px-3 py-2 text-xs font-medium text-slate-200 transition hover:border-emerald-500 hover:text-emerald-200 focus-visible:focus-emerald-ring disabled:cursor-not-allowed disabled:opacity-60";
+  const backButtonClass = isLightTheme
+    ? "flex items-center gap-2 rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-medium text-slate-600 transition hover:border-emerald-400 hover:text-emerald-600 focus-visible:focus-emerald-ring disabled:cursor-not-allowed disabled:opacity-40"
+    : "flex items-center gap-2 rounded-xl border border-slate-800 bg-slate-900/40 px-3 py-2 text-xs font-medium text-slate-200 transition hover:border-emerald-500 hover:text-emerald-200 focus-visible:focus-emerald-ring disabled:cursor-not-allowed disabled:opacity-40";
+  const searchInputClass = isLightTheme
+    ? "h-10 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm text-slate-700 placeholder:text-slate-400 shadow-inner focus:border-emerald-500 focus:outline-none focus-visible:focus-emerald-ring"
+    : "h-10 w-full rounded-xl border border-slate-800/70 bg-slate-950/40 px-3 text-sm text-slate-100 placeholder:text-slate-500 shadow-inner focus:border-emerald-500 focus:outline-none focus-visible:focus-emerald-ring";
+  const searchClearButtonClass = isLightTheme
+    ? "absolute right-2 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-full bg-slate-200 text-emerald-600 transition hover:bg-emerald-200/80 hover:text-emerald-700 focus:outline-none focus-visible:focus-emerald-ring"
+    : "absolute right-2 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-full bg-slate-900/60 text-emerald-300 transition hover:bg-emerald-500/25 hover:text-emerald-200 focus:outline-none focus-visible:focus-emerald-ring";
+  const breadcrumbButtonClass = isLightTheme
+    ? "max-w-[12rem] truncate rounded-xl border border-transparent bg-white px-3 py-1.5 text-left text-slate-600 transition hover:bg-slate-100 focus-visible:focus-emerald-ring disabled:cursor-not-allowed disabled:opacity-60"
+    : "max-w-[12rem] truncate rounded-xl border border-transparent bg-slate-900/40 px-3 py-1.5 text-left transition hover:bg-slate-800/60 focus-visible:focus-emerald-ring disabled:cursor-not-allowed disabled:opacity-60";
+  const breadcrumbChevronClass = isLightTheme ? "text-slate-400 flex-shrink-0" : "text-slate-600 flex-shrink-0";
+  const breadcrumbWrapperClass = isLightTheme
+    ? "flex min-w-0 items-center gap-1 overflow-x-auto whitespace-nowrap text-sm text-slate-500"
+    : "flex min-w-0 items-center gap-1 overflow-x-auto whitespace-nowrap text-sm text-slate-200";
+  const controlsContainerClass = isLightTheme
+    ? "flex items-center gap-2 rounded-2xl border border-slate-300 bg-white px-1.5 py-1 shadow-toolbar"
+    : "flex items-center gap-2 rounded-2xl border border-slate-800/70 bg-slate-900/50 px-1.5 py-1 shadow-toolbar";
+
   return (
-    <nav className="flex flex-wrap items-center gap-3 px-4 py-3 border-b border-slate-800 bg-slate-900/60">
+    <nav className={navContainerClass}>
       <div className="flex items-center gap-2">
         <button
           type="button"
           onClick={onBreadcrumbHome}
           disabled={showAuthPrompt}
           aria-label="Home"
-          className="px-3 py-2 text-sm rounded-xl border flex items-center gap-2 transition disabled:cursor-not-allowed disabled:opacity-60 border-slate-800 bg-slate-900/70 text-slate-300 hover:border-slate-700"
+          className={homeButtonClass}
         >
           <HomeIcon size={16} />
           <span className="hidden sm:inline">Home</span>
@@ -1944,7 +1995,7 @@ const MainNavigation = memo(function MainNavigation({
             type="button"
             onClick={() => browseNavigationState?.onNavigateUp?.()}
             disabled={showAuthPrompt || !browseNavigationState?.canNavigateUp}
-            className="px-3 py-2 text-sm rounded-xl border flex items-center gap-2 transition disabled:cursor-not-allowed disabled:opacity-40 border-slate-800 bg-slate-900/70 text-slate-300 hover:border-slate-700"
+            className={backButtonClass}
             aria-label="Go back"
           >
             <ChevronLeftIcon size={16} />
@@ -1961,13 +2012,13 @@ const MainNavigation = memo(function MainNavigation({
               onChange={onSearchChange}
               onKeyDown={onSearchKeyDown}
               placeholder="Search files"
-              className="w-full rounded-xl border border-slate-800 bg-slate-900/70 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+              className={searchInputClass}
             />
             {searchQuery ? (
               <button
                 type="button"
                 onClick={onSearchClear}
-                className="absolute right-2 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-full bg-slate-800/70 text-emerald-300 transition hover:bg-emerald-500/20 hover:text-emerald-200 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                className={searchClearButtonClass}
                 aria-label="Clear search"
               >
                 <CloseIcon size={14} />
@@ -1976,17 +2027,17 @@ const MainNavigation = memo(function MainNavigation({
           </div>
         ) : showBreadcrumbs && browseNavigationState ? (
           <div
-            className="flex min-w-0 items-center gap-1 overflow-x-auto whitespace-nowrap text-sm text-slate-200"
+            className={breadcrumbWrapperClass}
             title={`/${browseNavigationState.segments.map(segment => segment.label).join("/")}`}
           >
             {browseNavigationState.segments.map((segment, index) => (
               <React.Fragment key={segment.id}>
-                {index > 0 && <ChevronRightIcon size={14} className="text-slate-600 flex-shrink-0" />}
+                {index > 0 && <ChevronRightIcon size={14} className={breadcrumbChevronClass} />}
                 <button
                   type="button"
                   onClick={segment.onNavigate}
                   disabled={showAuthPrompt}
-                  className="max-w-[10rem] truncate rounded-lg border border-slate-800 bg-slate-900/70 px-2 py-1 text-left transition hover:border-slate-700 disabled:cursor-not-allowed disabled:opacity-60"
+                  className={breadcrumbButtonClass}
                 >
                   {segment.label}
                 </button>
@@ -1998,14 +2049,14 @@ const MainNavigation = memo(function MainNavigation({
         ) : null}
       </div>
       <div className="flex items-center" role="group" aria-label="Main navigation controls">
-        <div className="flex items-stretch rounded-xl border border-slate-800 bg-slate-900/70 divide-x divide-slate-800">
+        <div className={controlsContainerClass}>
           <button
             type="button"
             onClick={onToggleSearch}
             disabled={showAuthPrompt}
             aria-label="Search files"
             aria-pressed={isSearchOpen}
-            className={mergeClasses(segmentBaseClass, "w-11 justify-center", searchSegmentState)}
+            className={mergeClasses(segmentBaseClass, "w-10 justify-center px-0", searchSegmentState)}
             data-segment-type="icon"
           >
             <SearchIcon size={16} />
@@ -2014,12 +2065,11 @@ const MainNavigation = memo(function MainNavigation({
             if (!React.isValidElement(segment)) return null;
             const segmentType = segment.props["data-segment-type"] || (segment.type === "button" ? "icon" : undefined);
             const baseClass = mergeClasses(
-              segmentType === "label" ? segmentBaseClass + " px-4" : segmentBaseClass + " w-11 justify-center",
-              segmentType === "menu-container" &&
-                "relative before:pointer-events-none before:content-[''] before:absolute before:inset-y-1 before:right-0 before:w-px before:bg-slate-700/80"
+              segmentBaseClass,
+              segmentType === "label" ? "" : "w-10 justify-center px-0"
             );
             return React.cloneElement(segment, {
-              className: mergeClasses(baseClass, segment.props.className || ""),
+              className: mergeClasses(baseClass, segmentDefaultClass, segment.props.className || ""),
               "data-segment-type": segmentType,
             });
           })}

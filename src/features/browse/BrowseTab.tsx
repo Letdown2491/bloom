@@ -144,9 +144,6 @@ const ScrollingText: React.FC<ScrollingTextProps> = ({ children, className = "" 
 
 const CONTROL_BUTTON_BASE =
   "flex h-10 items-center gap-2 rounded-xl border px-2.5 py-2 text-sm transition focus:outline-none focus:ring-1 focus:ring-emerald-500 disabled:cursor-not-allowed disabled:opacity-60";
-const CONTROL_BUTTON_DEFAULT = "border-slate-800 bg-slate-900/70 text-slate-300 hover:border-slate-700";
-const CONTROL_BUTTON_ACTIVE = "border-emerald-500 bg-emerald-500/10 text-emerald-200";
-const CONTROL_BUTTON_DISABLED = "border-slate-800 bg-slate-900/70 text-slate-500";
 type BrowseControlsProps = {
   viewMode: "grid" | "list";
   disabled: boolean;
@@ -207,16 +204,31 @@ export const BrowseControls: React.FC<BrowseControlsProps> = ({
         ? "w-full px-2 py-2 text-left text-sm transition focus:outline-none cursor-default text-slate-400"
         : "w-full px-2 py-2 text-left text-sm transition focus:outline-none cursor-default text-slate-500"
       : isLightTheme
-      ? "w-full px-2 py-2 text-left text-sm transition focus:outline-none text-slate-700 hover:text-emerald-600"
-      : "w-full px-2 py-2 text-left text-sm transition focus:outline-none text-slate-100 hover:text-emerald-300";
+        ? "w-full px-2 py-2 text-left text-sm transition focus:outline-none text-slate-700 hover:text-emerald-600"
+        : "w-full px-2 py-2 text-left text-sm transition focus:outline-none text-slate-100 hover:text-emerald-300";
+  const buttonDefaultClass = isLightTheme
+    ? "border-slate-300 bg-white text-slate-600 hover:bg-slate-100"
+    : "border-slate-800 bg-slate-900/70 text-slate-300 hover:border-slate-700";
+  const buttonActiveClass = isLightTheme
+    ? "border-emerald-300 bg-emerald-100 text-emerald-700"
+    : "border-emerald-500 bg-emerald-500/10 text-emerald-200";
+  const buttonDisabledClass = isLightTheme
+    ? "border-slate-200 bg-slate-100 text-slate-400"
+    : "border-slate-800 bg-slate-900/70 text-slate-500";
   const isGrouped = variant === "grouped";
 
   if (isGrouped) {
     const groupedButtonBase =
       "flex h-10 shrink-0 items-center gap-2 px-0 text-sm transition focus:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-emerald-500 disabled:cursor-not-allowed disabled:opacity-60";
-    const groupedDefault = "bg-slate-900/70 text-slate-300 hover:bg-slate-900/80";
-    const groupedActive = "bg-emerald-500/10 text-emerald-200 hover:bg-emerald-500/20";
-    const groupedDisabled = "bg-slate-900/70 text-slate-500";
+    const groupedDefault = isLightTheme
+      ? "bg-slate-200 text-slate-600 hover:bg-slate-100"
+      : "bg-slate-900/70 text-slate-300 hover:bg-slate-900/80";
+    const groupedActive = isLightTheme
+      ? "bg-emerald-200/60 text-emerald-700 hover:bg-emerald-200/80"
+      : "bg-emerald-500/10 text-emerald-200 hover:bg-emerald-500/20";
+    const groupedDisabled = isLightTheme
+      ? "bg-slate-100 text-slate-400"
+      : "bg-slate-900/70 text-slate-500";
 
     const buttonClass = (
       state: "default" | "active" | "disabled",
@@ -337,7 +349,7 @@ export const BrowseControls: React.FC<BrowseControlsProps> = ({
         onClick={() => onSelectViewMode(viewMode === "grid" ? "list" : "grid")}
         disabled={disabled}
         aria-label={`Switch to ${viewMode === "grid" ? "list" : "grid"} view`}
-        className={`${buttonBaseClass} ${disabled ? CONTROL_BUTTON_DISABLED : CONTROL_BUTTON_DEFAULT}`}
+        className={`${buttonBaseClass} ${disabled ? buttonDisabledClass : buttonDefaultClass}`}
       >
         {viewMode === "grid" ? <GridIcon size={18} /> : <ListIcon size={18} />}
       </button>
@@ -352,7 +364,7 @@ export const BrowseControls: React.FC<BrowseControlsProps> = ({
         onClick={onToggleSortDirection}
         disabled={disabled}
         aria-label={`Toggle sort direction (${sortDirection === "ascending" ? "ascending" : "descending"})`}
-        className={`${buttonBaseClass} ${disabled ? CONTROL_BUTTON_DISABLED : CONTROL_BUTTON_DEFAULT}`}
+        className={`${buttonBaseClass} ${disabled ? buttonDisabledClass : buttonDefaultClass}`}
       >
         {sortDirection === "ascending" ? <DoubleChevronUpIcon size={18} /> : <DoubleChevronDownIcon size={18} />}
       </button>
@@ -372,7 +384,7 @@ export const BrowseControls: React.FC<BrowseControlsProps> = ({
           aria-expanded={isFilterMenuOpen}
           title={filterButtonLabel}
           className={`${buttonBaseClass} ${
-            disabled ? CONTROL_BUTTON_DISABLED : filterButtonActive ? CONTROL_BUTTON_ACTIVE : CONTROL_BUTTON_DEFAULT
+            disabled ? buttonDisabledClass : filterButtonActive ? buttonActiveClass : buttonDefaultClass
           }`}
         >
           <FilterIcon size={18} />
@@ -440,11 +452,7 @@ export const BrowsePanel: React.FC<BrowsePanelProps> = props => {
     </Suspense>
   );
 
-  return (
-    <div className="flex flex-1 min-h-0 flex-col">
-      <BrowseContent {...props} renderBlobList={renderBlobList} />
-    </div>
-  );
+  return <BrowseContent {...props} renderBlobList={renderBlobList} />;
 };
 
 type AudioPlayerCardProps = {
@@ -578,7 +586,7 @@ export const AudioPlayerCard: React.FC<AudioPlayerCardProps> = ({ audio, variant
         ? ` (${year.trim()})`
         : "";
   const renderFloatingCard = () => (
-    <div className="relative w-full max-w-sm rounded-xl border border-slate-800 bg-slate-900/85 px-4 py-2 text-xs text-slate-200 shadow-lg pointer-events-auto">
+    <div className="surface-floating pointer-events-auto relative w-full max-w-sm rounded-2xl border border-slate-800/70 px-4 py-3 text-xs text-slate-200 shadow-floating">
       <div className="flex flex-col gap-2.5">
         <div className="flex items-start gap-3">
           {currentTrack.coverUrl && (
@@ -646,7 +654,7 @@ export const AudioPlayerCard: React.FC<AudioPlayerCardProps> = ({ audio, variant
 
   if (isDocked) {
     return (
-      <div className="border-t border-slate-800 bg-slate-900/70 px-4 py-2 text-sm text-slate-200">
+      <div className="surface-floating border-t border-slate-800/60 px-4 py-3 text-sm text-slate-200 shadow-floating">
         <div className="flex flex-col gap-3.5 md:gap-4">
           <div className="flex items-center justify-between gap-2.5 md:hidden">
             <div className="flex min-w-0 items-center gap-3">

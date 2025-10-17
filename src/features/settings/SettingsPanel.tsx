@@ -172,17 +172,26 @@ type SwitchControlProps = {
   disabled?: boolean;
   labelledBy?: string;
   label?: string;
+  theme?: "dark" | "light";
 };
 
-const SwitchControl: React.FC<SwitchControlProps> = ({ id, checked, onToggle, disabled, labelledBy, label }) => {
+const SwitchControl: React.FC<SwitchControlProps> = ({ id, checked, onToggle, disabled, labelledBy, label, theme = "dark" }) => {
+  const isLightTheme = theme === "light";
+  const activeTrackClass = isLightTheme ? "border-blue-700 bg-blue-700" : "border-emerald-500/80 bg-emerald-400/90";
+  const inactiveTrackClass = "border-slate-500/80 bg-slate-600/70";
+
   const trackClass = disabled
     ? "cursor-not-allowed border-slate-600 bg-slate-700/70 opacity-60"
     : checked
-    ? "border-emerald-500/80 bg-emerald-400/90"
-    : "border-slate-500/80 bg-slate-600/70";
+    ? activeTrackClass
+    : inactiveTrackClass;
 
   const knobPosition = checked ? "right-1" : "left-1";
-  const knobColor = checked ? "border-emerald-500 text-emerald-500" : "border-slate-500 text-slate-500";
+  const knobColor = checked
+    ? isLightTheme
+      ? "border-blue-700 text-blue-700"
+      : "border-emerald-500 text-emerald-500"
+    : "border-slate-500 text-slate-500";
 
   return (
     <button
@@ -270,6 +279,7 @@ type SegmentedControlProps = {
   className?: string;
   variant?: "default" | "compact";
   disabled?: boolean;
+  theme?: "dark" | "light";
 };
 
 const SegmentedControl: React.FC<SegmentedControlProps> = ({
@@ -281,22 +291,36 @@ const SegmentedControl: React.FC<SegmentedControlProps> = ({
   className,
   variant = "default",
   disabled = false,
+  theme = "dark",
 }) => {
+  const isLightTheme = theme === "light";
   const containerClass =
     className ??
     (variant === "compact" ? "flex flex-wrap gap-2" : "grid gap-2 sm:grid-cols-2");
 
   const baseButtonClass =
     variant === "compact"
-      ? "flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs transition focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-slate-900"
-      : "flex items-center gap-2 rounded-lg border px-3 py-2 text-sm transition focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-slate-900";
+      ? `flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs transition ${
+          isLightTheme
+            ? "focus:outline-none focus:ring-2 focus:ring-blue-400/70 focus:ring-offset-2 focus:ring-offset-white"
+            : "focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-slate-900"
+        }`
+      : `flex items-center gap-2 rounded-lg border px-3 py-2 text-sm transition ${
+          isLightTheme
+            ? "focus:outline-none focus:ring-2 focus:ring-blue-400/70 focus:ring-offset-2 focus:ring-offset-white"
+            : "focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-slate-900"
+        }`;
 
   const activeClass = variant === "compact"
-      ? "border-emerald-500 bg-emerald-500/10 text-emerald-200"
-      : "border-emerald-500 bg-emerald-500/10 text-emerald-200";
+      ? (isLightTheme ? "border-blue-700 bg-blue-700 text-white" : "border-emerald-500 bg-emerald-500/10 text-emerald-200")
+      : (isLightTheme ? "border-blue-700 bg-blue-700 text-white" : "border-emerald-500 bg-emerald-500/10 text-emerald-200");
   const inactiveClass = variant === "compact"
-    ? "border-slate-600/70 text-slate-200 hover:border-slate-400"
-    : "border-slate-500/60 text-slate-200 hover:border-slate-400";
+    ? isLightTheme
+      ? "border-slate-300 text-slate-600 hover:border-blue-300 hover:text-blue-700"
+      : "border-slate-600/70 text-slate-200 hover:border-slate-400"
+    : isLightTheme
+      ? "border-slate-300 text-slate-600 hover:border-blue-300 hover:text-blue-700"
+      : "border-slate-500/60 text-slate-200 hover:border-slate-400";
   const disabledClass =
     variant === "compact"
       ? "cursor-not-allowed border-slate-700/60 text-slate-500 opacity-60"
@@ -424,6 +448,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   onUnshareFolder,
   folderShareBusyPath,
 }) => {
+  const isLightTheme = theme === "light";
   const isSmallScreen = useIsCompactScreen();
   const syncHeadingId = React.useId();
   const syncDescriptionId = React.useId();
@@ -698,9 +723,10 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 const sanitizedIdSource = record.path || record.name || "folder";
                 const folderLabelId = `folder-sharing-${sanitizedIdSource.replace(/[^a-zA-Z0-9_-]/g, "-").toLowerCase()}`;
                 const guideDepth = Math.max(depth - 1, 0);
+                const indentGuideClass = isLightTheme ? "flex shrink-0 text-slate-300" : "flex shrink-0 text-slate-100";
                 const indentGuides =
                   guideDepth > 0 ? (
-                    <div className="flex shrink-0 text-slate-100" aria-hidden="true">
+                    <div className={indentGuideClass} aria-hidden="true">
                       {Array.from({ length: guideDepth }).map((_, levelIndex) => {
                         const isLast = levelIndex === guideDepth - 1;
                         return (
@@ -742,14 +768,35 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                   showStatusMessage?.("Copy unavailable. Opening share dialog to manage the link.", "warning", 4000);
                   onShareFolder(shareRequest);
                 };
+                const containerClass = `${
+                  isLightTheme
+                    ? "flex flex-1 flex-col gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
+                    : "flex flex-1 flex-col gap-3 rounded-xl border border-slate-800 bg-slate-950/70 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
+                } ${isBusy ? "opacity-80" : ""}`;
+                const shareButtonBaseClass = isLightTheme
+                  ? "group inline-flex items-center gap-2 rounded-md px-1.5 py-1 text-sm font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/70 focus-visible:ring-offset-2 focus-visible:ring-offset-white"
+                  : "group inline-flex items-center gap-2 rounded-md px-1.5 py-1 text-sm font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-900";
+                const shareButtonClass = `${shareButtonBaseClass} ${
+                  isBusy
+                    ? isLightTheme ? "cursor-not-allowed text-slate-400" : "cursor-not-allowed text-slate-500"
+                    : isLightTheme ? "text-slate-700 hover:text-blue-700" : "text-slate-100 hover:text-emerald-100"
+                }`;
+                const folderLabelClass = isLightTheme ? "flex items-center gap-2 text-sm font-medium text-slate-700" : "flex items-center gap-2 text-sm font-medium text-slate-100";
+                const folderIconBaseClass = isLightTheme ? "text-slate-600" : "text-slate-100";
+                const folderIconHoverClass = isLightTheme ? "group-hover:text-blue-600" : "group-hover:text-emerald-200";
+                const folderIconClass = `${folderIconBaseClass}${isPublic ? ` transition ${folderIconHoverClass}` : ""}`;
+                const shareIconClass = isPublic
+                  ? `${isLightTheme ? "text-slate-500" : "text-slate-100"} transition ${isLightTheme ? "group-hover:text-blue-600" : "group-hover:text-emerald-200"}`
+                  : isLightTheme
+                    ? "text-slate-500"
+                    : "text-slate-100";
+                const pathLabelClass = `break-all text-xs ${isLightTheme ? "text-slate-500" : "text-slate-400"}`;
                 const labelContent = (
                   <>
                     <FolderIcon
                       size={16}
                       aria-hidden="true"
-                      className={`${
-                        isPublic ? "text-slate-100 transition group-hover:text-emerald-200" : "text-slate-100"
-                      }`}
+                      className={folderIconClass}
                     />
                     <span className="flex min-w-0 items-center gap-1">
                       <span id={folderLabelId} className="truncate">
@@ -758,7 +805,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                       {isPublic ? (
                         <ShareIcon
                           size={14}
-                          className="text-slate-100 transition group-hover:text-emerald-200"
+                          className={shareIconClass}
                           aria-hidden="true"
                         />
                       ) : null}
@@ -769,9 +816,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                   <div key={record.path} className="flex items-stretch">
                     {indentGuides}
                     <div
-                      className={`flex flex-1 flex-col gap-3 rounded-xl border border-slate-800 bg-slate-950/70 px-4 py-3 sm:flex-row sm:items-center sm:justify-between ${
-                        isBusy ? "opacity-80" : ""
-                      }`}
+                      className={containerClass}
                     >
                       <div className="min-w-0 flex-1 space-y-2">
                         {isPublic ? (
@@ -780,20 +825,21 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                             onClick={handleCopyLink}
                             disabled={isBusy}
                             title="Copy share link"
-                            className={`group inline-flex items-center gap-2 rounded-md px-1.5 py-1 text-sm font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-900 ${
-                              isBusy
-                                ? "cursor-not-allowed text-slate-500"
-                                : "text-slate-100 hover:text-emerald-100"
-                            }`}
+                            className={shareButtonClass}
                           >
                             {labelContent}
                           </button>
                         ) : (
-                          <div className="flex items-center gap-2 text-sm font-medium text-slate-100">
+                          <div
+                            className={
+                              folderLabelClass +
+                              (isLightTheme ? " hover:text-blue-700" : " hover:text-emerald-100")
+                            }
+                          >
                             {labelContent}
                           </div>
                         )}
-                        <p className="break-all text-xs text-slate-500">{pathLabel}</p>
+                        <p className={pathLabelClass}>{pathLabel}</p>
                       </div>
                       <div className="flex w-full flex-wrap items-center justify-end gap-2 sm:w-auto sm:flex-none">
                         <SegmentedControl
@@ -811,6 +857,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                           variant="compact"
                           className="flex flex-wrap justify-end gap-2"
                           disabled={isBusy}
+                          theme={theme}
                         />
                       </div>
                     </div>
@@ -837,13 +884,23 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
             descriptionId={syncDescriptionId}
             title="Sync to Nostr"
             description="Bloom can publish preference updates to your relays so other devices stay aligned."
-            className={syncEnabled ? "border-emerald-500/40 bg-emerald-500/10" : undefined}
+            className={
+              syncEnabled
+                ? theme === "light"
+                  ? "border-blue-400/60 bg-blue-100"
+                  : "border-emerald-500/40 bg-emerald-500/10"
+                : undefined
+            }
           >
             <div className="flex flex-wrap items-center justify-between gap-4">
               <div className="flex items-center gap-3">
                 <div
                   className={`flex h-10 w-10 items-center justify-center rounded-xl ${
-                    syncEnabled ? "bg-emerald-500/20 text-emerald-300" : "bg-slate-800 text-slate-300"
+                    syncEnabled
+                      ? theme === "light"
+                        ? "bg-blue-700 text-white"
+                        : "bg-emerald-500/20 text-emerald-300"
+                      : "bg-slate-800 text-slate-300"
                   }`}
                 >
                   <SyncIndicatorIcon size={18} />
@@ -860,6 +917,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                   void onToggleSyncEnabled(value);
                 }}
                 disabled={syncLoading}
+                theme={theme}
               />
             </div>
             <div className="mt-3 flex items-center gap-2 text-xs text-slate-400">
@@ -943,6 +1001,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 checked={theme === "dark"}
                 onToggle={value => onSetTheme(value ? "dark" : "light")}
                 label="Toggle dark mode"
+                theme={theme}
               />
             </div>
           </SettingCard>
@@ -970,6 +1029,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
               labelledBy={viewHeadingId}
               describedBy={viewDescriptionId}
               variant="compact"
+              theme={theme}
             />
           </SettingCard>
         ),
@@ -988,6 +1048,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
               labelledBy={filterHeadingId}
               describedBy={filterDescriptionId}
               variant="compact"
+              theme={theme}
             />
           </SettingCard>
         ),
@@ -1006,6 +1067,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
               labelledBy={sortHeadingId}
               describedBy={sortDescriptionId}
               variant="compact"
+              theme={theme}
             />
           </SettingCard>
         ),
@@ -1024,6 +1086,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
               labelledBy={sortDirectionHeadingId}
               describedBy={sortDirectionDescriptionId}
               variant="compact"
+              theme={theme}
             />
           </SettingCard>
         ),
@@ -1045,7 +1108,15 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
           >
             <div className="flex items-center justify-between gap-3">
               <div className="flex items-center gap-3">
-                <div className={`flex h-10 w-10 items-center justify-center rounded-xl ${showIconsPreviews ? "bg-emerald-500/20 text-emerald-300" : "bg-slate-800 text-slate-300"}`}>
+                <div
+                  className={`flex h-10 w-10 items-center justify-center rounded-xl ${
+                    showIconsPreviews
+                      ? theme === "light"
+                        ? "bg-blue-700 text-white"
+                        : "bg-emerald-500/20 text-emerald-300"
+                      : "bg-slate-800 text-slate-300"
+                  }`}
+                >
                   <GridIcon size={18} />
                 </div>
                 <p className="text-xs text-slate-400">
@@ -1056,6 +1127,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 checked={showIconsPreviews}
                 onToggle={value => onSetShowIconsPreviews(value)}
                 label="Toggle icons view previews"
+                theme={theme}
               />
             </div>
           </SettingCard>
@@ -1070,7 +1142,15 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
           >
             <div className="flex items-center justify-between gap-3">
               <div className="flex items-center gap-3">
-                <div className={`flex h-10 w-10 items-center justify-center rounded-xl ${showListPreviews ? "bg-emerald-500/20 text-emerald-300" : "bg-slate-800 text-slate-300"}`}>
+                <div
+                  className={`flex h-10 w-10 items-center justify-center rounded-xl ${
+                    showListPreviews
+                      ? theme === "light"
+                        ? "bg-blue-700 text-white"
+                        : "bg-emerald-500/20 text-emerald-300"
+                      : "bg-slate-800 text-slate-300"
+                  }`}
+                >
                   <ListIcon size={18} />
                 </div>
                 <p className="text-xs text-slate-400">
@@ -1081,6 +1161,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 checked={showListPreviews}
                 onToggle={value => onSetShowListPreviews(value)}
                 label="Toggle list view previews"
+                theme={theme}
               />
             </div>
           </SettingCard>
@@ -1095,7 +1176,15 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
           >
             <div className="flex items-center justify-between gap-3">
               <div className="flex items-center gap-3">
-                <div className={`flex h-10 w-10 items-center justify-center rounded-xl ${keepSearchExpanded ? "bg-emerald-500/20 text-emerald-300" : "bg-slate-800 text-slate-300"}`}>
+                <div
+                  className={`flex h-10 w-10 items-center justify-center rounded-xl ${
+                    keepSearchExpanded
+                      ? theme === "light"
+                        ? "bg-blue-700 text-white"
+                        : "bg-emerald-500/20 text-emerald-300"
+                      : "bg-slate-800 text-slate-300"
+                  }`}
+                >
                   <SearchIcon size={18} />
                 </div>
                 <p className="text-xs text-slate-400">
@@ -1106,6 +1195,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 checked={keepSearchExpanded}
                 onToggle={value => onSetKeepSearchExpanded(value)}
                 label="Toggle persistent search"
+                theme={theme}
               />
             </div>
           </SettingCard>

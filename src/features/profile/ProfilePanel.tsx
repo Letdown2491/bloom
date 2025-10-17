@@ -417,11 +417,11 @@ export const ProfilePanel: React.FC<ProfilePanelProps> = ({ onProfileUpdated, sh
   );
 
   return (
-    <div className="w-full space-y-6 rounded-2xl border border-slate-800 bg-slate-900/70 p-6 shadow">
+    <div className="flex h-full w-full min-h-0 flex-col overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/70 p-6 shadow">
       {loading ? (
-        <p className="text-sm text-slate-400">Loading profile…</p>
+        <div className="flex flex-1 items-center justify-center text-sm text-slate-400">Loading profile…</div>
       ) : !ndk || !user?.pubkey ? (
-        <div className="space-y-3 text-sm text-slate-300">
+        <div className="flex flex-1 flex-col justify-center gap-3 text-sm text-slate-300">
           <p>Bloom could not detect an active Nostr session.</p>
           <button
             type="button"
@@ -432,8 +432,8 @@ export const ProfilePanel: React.FC<ProfilePanelProps> = ({ onProfileUpdated, sh
           </button>
         </div>
       ) : (
-        <form onSubmit={handleSubmit} className="space-y-6">
-          <div className="space-y-4">
+        <form onSubmit={handleSubmit} className="flex flex-1 min-h-0 flex-col gap-6">
+          <div className="flex-1 min-h-0 space-y-4 overflow-y-auto pr-1">
             <div className="flex items-center justify-between">
               <h3 className="text-lg font-semibold text-slate-100">Edit Nostr Profile</h3>
             </div>
@@ -544,7 +544,7 @@ export const ProfilePanel: React.FC<ProfilePanelProps> = ({ onProfileUpdated, sh
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-3">
+          <div className="flex flex-shrink-0 flex-wrap items-center gap-3">
             <button
               type="submit"
               disabled={saving || !hasChanges || !activeSigner}
@@ -598,6 +598,18 @@ export const ProfilePanel: React.FC<ProfilePanelProps> = ({ onProfileUpdated, sh
               </button>
             )}
           </div>
+          <p className="text-xs text-slate-400">
+            If you'd like to back up your Nostr profile, head on over to{" "}
+            <a
+              href="https://metadata.nostr.com/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-emerald-300 transition hover:text-emerald-200"
+            >
+              Nostr Profile Manager
+            </a>{" "}
+            to create a back up.
+          </p>
         </form>
       )}
     </div>
