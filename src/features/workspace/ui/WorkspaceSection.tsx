@@ -8,7 +8,7 @@ import type { FilterMode } from "../../../shared/types/filter";
 import type { DefaultSortOption, SortDirection } from "../../../app/context/UserPreferencesContext";
 import type { SyncStateSnapshot } from "../TransferTabContainer";
 import type { BrowseActiveListState, BrowseNavigationState } from "../BrowseTabContainer";
-import type { SharePayload, ShareCompletion } from "../../share/ui/ShareComposer";
+import type { SharePayload, ShareCompletion, ShareMode } from "../../share/ui/ShareComposer";
 import type { ProfileMetadataPayload } from "../../profile/ProfilePanel";
 import type { NdkContextValue } from "../../../app/context/NdkContext";
 import type { useShareWorkflow } from "../../share/useShareWorkflow";
@@ -63,7 +63,7 @@ export type WorkspaceSectionProps = {
   onProvideSyncStarter: (runner: () => void) => void;
   onRequestRename: (blob: BlossomBlob) => void;
   onRequestFolderRename: (path: string) => void;
-  onRequestShare: (payload: SharePayload) => void;
+  onRequestShare: (payload: SharePayload, options?: { mode?: ShareMode }) => void;
   onShareFolder: (request: ShareFolderRequest) => void;
   onUnshareFolder: (request: ShareFolderRequest) => void;
   folderShareBusyPath: string | null;
@@ -182,7 +182,7 @@ export const WorkspaceSection = memo(function WorkspaceSection({
   return (
     <div
       className={`flex flex-1 min-h-0 flex-col box-border p-4 overflow-hidden ${workspaceBackgroundClass}${
-        tab === "browse" || tab === "share" ? "" : " overflow-y-auto"
+        tab === "browse" || tab === "share" || tab === "share-private" ? "" : " overflow-y-auto"
       }`}
     >
       <WorkspaceProvider servers={localServers} selectedServer={selectedServer} onSelectServer={onSelectServer}>
@@ -280,6 +280,31 @@ export const WorkspaceSection = memo(function WorkspaceSection({
               embedded
               payload={shareState.payload}
               shareKey={shareState.shareKey}
+              initialMode={shareState.mode && shareState.mode !== "private-link" ? shareState.mode : null}
+              onClose={() => {
+                onClearShareState();
+                onSetTab("browse");
+              }}
+              onShareComplete={onShareComplete}
+            />
+          </Suspense>
+        </div>
+      )}
+
+      {tab === "share-private" && (
+        <div className="flex flex-1 min-h-0">
+          <Suspense
+            fallback={
+              <div className="flex flex-1 items-center justify-center text-sm text-slate-400">
+                Preparing private link composer…
+              </div>
+            }
+          >
+            <ShareComposerLazy
+              embedded
+              payload={shareState.payload}
+              shareKey={shareState.shareKey}
+              initialMode="private-link"
               onClose={() => {
                 onClearShareState();
                 onSetTab("browse");

@@ -4,11 +4,11 @@ import { useCurrentPubkey, useNdk } from "../../../app/context/NdkContext";
 import { DEFAULT_PUBLIC_RELAYS, extractPreferredRelays, sanitizeRelayUrl } from "../../../shared/utils/relays";
 import { nip19 } from "nostr-tools";
 import { PrivateLinkPanel } from "../PrivateLinkPanel";
-import { PRIVATE_LINK_SERVICE_HOST } from "../../../shared/constants/privateLinks";
 import { prettyBytes } from "../../../shared/utils/format";
 import { checkLocalStorageQuota } from "../../../shared/utils/storageQuota";
 import { loadNdkModule, type NdkModule } from "../../../shared/api/ndkModule";
 import { useUserPreferences } from "../../../app/context/UserPreferencesContext";
+import { usePrivateLinks } from "../../privateLinks/hooks/usePrivateLinks";
 
 export type SharePayload = {
   url: string;
@@ -43,6 +43,7 @@ type ShareComposerProps = {
   embedded?: boolean;
   onClose?: () => void;
   onShareComplete?: (result: ShareCompletion) => void;
+  initialMode?: ShareMode | null;
 };
 
 type RelayStatus = "idle" | "pending" | "success" | "error";
@@ -439,6 +440,27 @@ const BookmarkIcon: React.FC<{ className?: string }> = ({ className }) => (
   </svg>
 );
 
+const CloseIcon: React.FC<{ className?: string }> = ({ className }) => (
+  <svg viewBox="0 0 24 24" className={className} aria-hidden="true">
+    <path {...strokeProps} d="M6 6 18 18" />
+    <path {...strokeProps} d="M6 18 18 6" />
+  </svg>
+);
+
+const NoteIcon: React.FC<{ className?: string }> = ({ className }) => (
+  <svg viewBox="0 0 24 24" className={className} aria-hidden="true">
+    <path {...strokeProps} d="M8 4h7l3 3v13a1 1 0 0 1-1 1H8a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1Z" />
+    <path {...strokeProps} d="M15 4v4h4" />
+  </svg>
+);
+
+const SendIcon: React.FC<{ className?: string }> = ({ className }) => (
+  <svg viewBox="0 0 24 24" className={className} aria-hidden="true">
+    <path {...strokeProps} d="M3.5 5.5 20.5 12 3.5 18.5l3-6.5-3-6.5Z" />
+    <path {...strokeProps} d="m6.5 12 4 1-1 4" />
+  </svg>
+);
+
 const PREVIEW_ACTIONS: PreviewAction[] = [
   { key: "reply", label: "Reply", icon: ReplyIcon },
   { key: "zap", label: "Zap", icon: ZapIcon },
@@ -453,6 +475,7 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
   embedded = false,
   onClose,
   onShareComplete,
+  initialMode = null,
 }) => {
   const { connect, signer, ndk } = useNdk();
   const pubkey = useCurrentPubkey();
@@ -465,7 +488,8 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
     });
     return stored;
   });
-  const [shareMode, setShareMode] = useState<ShareMode>("note");
+  const [shareMode, setShareMode] = useState<ShareMode>(initialMode ?? "note");
+  const initialModeRef = useRef<ShareMode | null | undefined>(initialMode);
   const [recipientQuery, setRecipientQuery] = useState("");
   const [recipientResults, setRecipientResults] = useState<RecipientSuggestion[]>([]);
   const [selectedRecipient, setSelectedRecipient] = useState<RecipientProfile | null>(null);
@@ -487,10 +511,17 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
     preferences: { theme },
   } = useUserPreferences();
   const isLightTheme = theme === "light";
+  const privateLinkState = usePrivateLinks({ enabled: shareMode === "private-link" });
 
   const runtimeRef = useRef<NdkModule | null>(null);
   const normalizeRelayUrlRef = useRef<NdkModule["normalizeRelayUrl"] | null>(null);
   const [relayStatusEnum, setRelayStatusEnum] = useState<NdkModule["NDKRelayStatus"] | null>(null);
+
+  useEffect(() => {
+    if (initialModeRef.current === initialMode) return;
+    initialModeRef.current = initialMode;
+    setShareMode(initialMode ?? "note");
+  }, [initialMode]);
 
   const ensureRuntime = useCallback(async () => {
     if (!runtimeRef.current) {
@@ -709,7 +740,7 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
     setGlobalError(null);
     setPublishing(false);
     setNoteContent("");
-    setShareMode("note");
+    setShareMode(initialMode ?? "note");
     setRecipientQuery("");
     setRecipientResults([]);
     setSelectedRecipient(null);
@@ -919,11 +950,15 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
     if (embedded || !payload?.name) return;
     if (typeof document === "undefined") return;
     const originalTitle = document.title;
-    document.title = `Share ${payload.name} – Bloom`;
+    const nextTitle =
+      shareMode === "private-link"
+        ? `Create private link – ${payload.name}`
+        : `Share ${payload.name} – Bloom`;
+    document.title = nextTitle;
     return () => {
       document.title = originalTitle;
     };
-  }, [embedded, payload?.name]);
+  }, [embedded, payload?.name, shareMode]);
 
   const successes = useMemo(
     () =>
@@ -1217,9 +1252,10 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
         <p className="text-sm text-slate-400">{message}</p>
         <button
           onClick={handleClose}
-          className="rounded-lg bg-slate-800 px-4 py-2 text-sm font-medium text-slate-200 hover:bg-slate-700"
+          className="inline-flex items-center gap-2 rounded-lg bg-slate-800 px-4 py-2 text-sm font-medium text-slate-200 hover:bg-slate-700"
         >
-          Close
+          <CloseIcon className="h-4 w-4" />
+          <span>Close</span>
         </button>
       </div>
     </div>
@@ -1236,12 +1272,155 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
 
   const contentUnavailable = payloadError ? renderUnavailable(payloadError) : !payload ? renderLoading() : null;
 
+  const renderPrivateLinkComposer = () => {
+    const containerClasses = embedded
+      ? "flex flex-1 min-h-0 w-full overflow-hidden text-slate-100"
+      : "min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-6";
+
+    if (contentUnavailable) {
+      return <div className={containerClasses}>{contentUnavailable}</div>;
+    }
+
+    if (!payload) {
+      return <div className={containerClasses}>{renderLoading()}</div>;
+    }
+
+    const data = payload;
+
+    const infoCardClass = isLightTheme
+      ? "rounded-2xl border border-slate-200 bg-white/95 p-6 text-slate-700 shadow"
+      : "rounded-2xl border border-slate-800 bg-slate-900/80 p-6 text-slate-200 shadow-lg";
+    const infoLabelClass = "text-xs uppercase tracking-wide text-slate-500";
+    const infoNameClass = isLightTheme ? "text-lg font-semibold text-slate-900" : "text-lg font-semibold text-slate-100";
+    const infoMetaClass = isLightTheme ? "text-xs text-slate-500" : "text-xs text-slate-400";
+    const infoHashClass = isLightTheme ? "font-mono text-[11px] text-slate-600" : "font-mono text-[11px] text-slate-300";
+    const urlPanelClass = isLightTheme
+      ? "mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4 text-xs text-slate-600"
+      : "mt-4 rounded-xl border border-slate-800 bg-slate-950/80 p-4 text-xs text-slate-300";
+    const urlAnchorClass = isLightTheme
+      ? "mt-1 block truncate font-mono text-[11px] text-emerald-600 hover:text-emerald-500"
+      : "mt-1 block truncate font-mono text-[11px] text-emerald-300 hover:text-emerald-200";
+    const previewContainerClass = isLightTheme
+      ? "mt-5 overflow-hidden rounded-xl border border-slate-200 bg-slate-50"
+      : "mt-5 overflow-hidden rounded-xl border border-slate-800 bg-slate-950/70";
+    const previewFallbackClass = isLightTheme ? "p-6 text-sm text-slate-600" : "p-6 text-sm text-slate-300";
+
+    let privateMediaType: "image" | "video" | null = null;
+    if (!mediaError && data.url) {
+      const source = (() => {
+        try {
+          return new URL(data.url).pathname.toLowerCase();
+        } catch {
+          return data.url.toLowerCase();
+        }
+      })();
+      if (/\.(png|jpe?g|gif|webp|avif|bmp|svg)$/.test(source)) {
+        privateMediaType = "image";
+      } else if (/\.(mp4|webm|ogg|mov|m4v)$/.test(source)) {
+        privateMediaType = "video";
+      }
+    }
+
+    const mediaPreview =
+      privateMediaType === "image" ? (
+        <img
+          src={data.url}
+          alt={data.name ? `Preview of ${data.name}` : "Shared media preview"}
+          className="w-full max-h-[300px] object-contain"
+          onError={() => setMediaError(true)}
+        />
+      ) : privateMediaType === "video" ? (
+        <video
+          src={data.url}
+          controls
+          className="h-full w-full bg-black"
+          onError={() => setMediaError(true)}
+        />
+      ) : (
+        <div className={previewFallbackClass}>
+          <p>Preview is not available for this file type.</p>
+          {data.url ? (
+            <a href={data.url} target="_blank" rel="noreferrer" className={urlAnchorClass}>
+              Open Blossom URL
+            </a>
+          ) : null}
+        </div>
+      );
+
+    const previewContainerDynamicClass =
+      privateMediaType === "image" ? `${previewContainerClass} max-h-[300px]` : previewContainerClass;
+
+    return (
+      <div className={containerClasses}>
+        <div className="flex flex-1 min-h-0 w-full flex-col gap-6 py-2">
+          <div className="grid min-h-0 flex-1 gap-6 lg:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)]">
+            <PrivateLinkPanel
+              payload={data}
+              onShareComplete={onShareComplete}
+              links={privateLinkState}
+              tone={isLightTheme ? "light" : "dark"}
+              className={
+                isLightTheme
+                  ? "rounded-2xl border border-slate-200 bg-white p-6"
+                  : "rounded-2xl border border-slate-800 bg-slate-900/80 p-6"
+              }
+            />
+            <section className={infoCardClass}>
+              <div className="space-y-3">
+                <div className="space-y-1">
+                  <div className={infoLabelClass}>File summary</div>
+                  <div className={infoNameClass}>{data.name ?? "Unnamed file"}</div>
+                  {typeof data.size === "number" && Number.isFinite(data.size) ? (
+                    <div className={infoMetaClass}>Size: {prettyBytes(Math.max(0, Math.round(data.size)))}</div>
+                  ) : null}
+                  {data.sha256 ? (
+                    <div className={infoMetaClass}>
+                      SHA-256: <span className={infoHashClass}>{data.sha256}</span>
+                    </div>
+                  ) : null}
+                </div>
+                {data.url ? (
+                  <div className={urlPanelClass}>
+                    <div className="text-[11px] uppercase tracking-wide text-slate-500">Blossom URL</div>
+                    <a href={data.url} target="_blank" rel="noreferrer" className={urlAnchorClass}>
+                      {data.url}
+                    </a>
+                  </div>
+                ) : null}
+              </div>
+              <div className={previewContainerDynamicClass}>{mediaPreview}</div>
+              {!privateLinkState.serviceConfigured && (
+                <div className="mt-4 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-200">
+                  Configure <code className="font-mono text-xs text-amber-100">VITE_PRIVATE_LINK_SERVICE_PUBKEY</code> to enable private links.
+                </div>
+              )}
+              <div className="mt-6 flex justify-end">
+                <button
+                  type="button"
+                  onClick={handleClose}
+                  className="inline-flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-900 px-4 py-2 text-sm font-medium text-slate-300 hover:border-slate-600"
+                >
+                  <CloseIcon className="h-4 w-4" />
+                  <span>Close</span>
+                </button>
+              </div>
+            </section>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  if (shareMode === "private-link") {
+    return renderPrivateLinkComposer();
+  }
+
   const containerClasses = embedded
     ? "flex flex-1 min-h-0 w-full overflow-hidden text-slate-100"
     : "min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-6";
 
   const wrapperClasses = embedded
-    ? "flex flex-1 min-h-0 w-full flex-col lg:flex-row gap-6 p-4"
+    ? "flex flex-1 min-h-0 w-full flex-col lg:flex-row gap-6 p-2"
     : "flex flex-1 min-h-0 w-full max-w-5xl flex-col lg:flex-row gap-6 mx-auto";
 
   const shareCardClasses = "flex h-full w-full flex-col overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/80 shadow-lg";
@@ -1249,23 +1428,6 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
     isLightTheme ? "border-slate-200 bg-white text-slate-700" : "border-slate-800 bg-slate-900/70 text-slate-100"
   }`;
   const previewTitleClass = isLightTheme ? "text-xl font-semibold text-slate-900" : "text-xl font-semibold text-slate-100";
-  const privateLinkCardClass = isLightTheme
-    ? "rounded-xl border border-slate-200 bg-slate-50 p-5 text-sm text-slate-700"
-    : "rounded-xl border border-slate-800 bg-slate-950/70 p-5 text-sm text-slate-200";
-  const privateLinkNameClass = isLightTheme ? "font-medium text-slate-900" : "font-medium text-slate-100";
-  const privateLinkMetaTextClass = isLightTheme ? "text-xs text-slate-500" : "text-xs text-slate-400";
-  const privateLinkHashClass = isLightTheme ? "font-mono text-[11px] text-slate-600" : "font-mono text-[11px] text-slate-300";
-  const privateLinkInfoTextClass = isLightTheme ? "space-y-2 text-xs text-slate-600" : "space-y-2 text-xs text-slate-400";
-  const privateLinkHostClass = isLightTheme ? "font-mono text-slate-700" : "font-mono text-slate-200";
-  const privateLinkMediaContainerClass = isLightTheme
-    ? "mt-4 overflow-hidden rounded-xl border border-slate-200 bg-slate-100"
-    : "mt-4 overflow-hidden rounded-xl border border-slate-800 bg-slate-950/80";
-  const privateLinkLinkPreviewClass = isLightTheme
-    ? "mt-4 rounded-xl border border-slate-200 bg-slate-100 p-4 text-xs text-slate-600"
-    : "mt-4 rounded-xl border border-slate-800 bg-slate-950/80 p-4 text-xs text-slate-300";
-  const privateLinkAnchorClass = isLightTheme
-    ? "mt-1 block truncate font-mono text-[11px] text-emerald-600 hover:text-emerald-500"
-    : "mt-1 block truncate font-mono text-[11px] text-emerald-300 hover:text-emerald-200";
   const previewMessageCardClass = isLightTheme
     ? "rounded-xl border border-slate-200 bg-slate-50 p-5"
     : "rounded-xl border border-slate-800 bg-slate-950/70 p-5";
@@ -1319,6 +1481,15 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
 
   const data = payload!;
 
+  const shareButtonLabel = publishing
+    ? isDmMode
+      ? "Sending…"
+      : "Publishing…"
+    : isDmMode
+    ? "Send DM"
+    : "Publish note";
+  const ShareActionIcon = isDmMode ? SendIcon : NoteIcon;
+
   const relayLabel = isDmMode
     ? "Using connected relays"
     : usingFallbackRelays
@@ -1347,7 +1518,7 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
                     onClick={() => setShareMode("note")}
                     disabled={publishing}
                   >
-                    Via public note
+                    Public note
                   </button>
                   <button
                     type="button"
@@ -1359,7 +1530,7 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
                     onClick={() => setShareMode("dm")}
                     disabled={publishing}
                   >
-                    Via DM
+                    DM (NIP-04)
                   </button>
                   <button
                     type="button"
@@ -1371,19 +1542,7 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
                     onClick={() => setShareMode("dm-private")}
                     disabled={publishing}
                   >
-                    Via private DM
-                  </button>
-                  <button
-                    type="button"
-                    className={`rounded-xl px-3 py-1 font-medium transition-colors ${
-                      shareMode === "private-link"
-                        ? "bg-emerald-600 text-white shadow"
-                        : "text-slate-300 hover:text-white"
-                    }`}
-                    onClick={() => setShareMode("private-link")}
-                    disabled={publishing}
-                  >
-                    Private link
+                    Private DM (NIP-17)
                   </button>
                 </div>
                 <span className="w-full text-xs text-slate-400">
@@ -1395,10 +1554,6 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
             </header>
 
             <div className="flex-1 overflow-auto pr-1">
-              {shareMode === "private-link" ? (
-                <PrivateLinkPanel payload={data} onShareComplete={onShareComplete} />
-              ) : (
-                <>
               {isDmMode && (
                 <section className="space-y-3 mb-[7px]">
                   <div className="flex items-center justify-between text-xs font-semibold uppercase tracking-wide text-slate-400">
@@ -1539,58 +1694,38 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
                       }.`}
                 </div>
               )}
-                </>
-              )}
             </div>
-            {shareMode === "private-link" ? (
-              <footer className="flex flex-wrap items-center justify-end gap-3 pt-4">
-                {!signer ? (
+            <footer className="flex flex-wrap items-center justify-between gap-3 pt-4">
+              <button
+                type="button"
+                onClick={handleClose}
+                className="inline-flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-900 px-4 py-2 text-sm font-medium text-slate-300 hover:border-slate-600"
+              >
+                <CloseIcon className="h-4 w-4" />
+                <span>Close</span>
+              </button>
+              <div className="flex flex-wrap items-center gap-2">
+                {!signer && (
                   <button
                     type="button"
                     onClick={handleConnectClick}
                     className="rounded-xl border border-emerald-500/70 bg-emerald-500/10 px-4 py-2 text-sm font-medium text-emerald-200 hover:border-emerald-400"
+                    disabled={publishing}
                   >
                     Connect signer
                   </button>
-                ) : null}
-              </footer>
-            ) : (
-              <footer className="flex flex-wrap items-center justify-between gap-3 pt-4">
+                )}
                 <button
                   type="button"
-                  onClick={handleClose}
-                  className="rounded-xl border border-slate-700 bg-slate-900 px-4 py-2 text-sm font-medium text-slate-300 hover:border-slate-600"
+                  onClick={handleShare}
+                  className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-60"
+                  disabled={publishing || !data.url || (isDmMode && !selectedRecipient)}
                 >
-                  Close
+                  <ShareActionIcon className="h-4 w-4" />
+                  <span>{shareButtonLabel}</span>
                 </button>
-                <div className="flex flex-wrap items-center gap-2">
-                  {!signer && (
-                    <button
-                      type="button"
-                      onClick={handleConnectClick}
-                      className="rounded-xl border border-emerald-500/70 bg-emerald-500/10 px-4 py-2 text-sm font-medium text-emerald-200 hover:border-emerald-400"
-                      disabled={publishing}
-                    >
-                      Connect signer
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    onClick={handleShare}
-                    className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-60"
-                    disabled={publishing || !data.url || (isDmMode && !selectedRecipient)}
-                  >
-                    {publishing
-                      ? isDmMode
-                        ? "Sending…"
-                        : "Publishing…"
-                      : isDmMode
-                      ? "Send DM"
-                      : "Publish note"}
-                  </button>
-                </div>
-              </footer>
-            )}
+              </div>
+            </footer>
           </div>
         </div>
 
@@ -1600,68 +1735,20 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
               <h1 className={previewTitleClass}>
                 {shareMode === "note"
                   ? "Note Preview"
-                  : shareMode === "private-link"
-                  ? "Private Link Overview"
                   : isPrivateDmMode
-                  ? "Private DM Preview"
-                  : "DM Preview"}
+                    ? "Private DM Preview"
+                    : "DM Preview"}
               </h1>
             </div>
 
             <div className="flex-1 overflow-auto">
-              {shareMode === "private-link" ? (
-                <div className={privateLinkCardClass}>
-                  <div className="mb-4 space-y-1">
-                    <div className="text-xs uppercase tracking-wide text-slate-500">File summary</div>
-                    <div className={privateLinkNameClass}>{data.name ?? "Unnamed file"}</div>
-                    {typeof data.size === "number" && Number.isFinite(data.size) && (
-                      <div className={privateLinkMetaTextClass}>
-                        Size: {prettyBytes(Math.max(0, Math.round(data.size)))}
-                      </div>
-                    )}
-                    {data.sha256 && (
-                      <div className={privateLinkMetaTextClass}>
-                        SHA-256: <span className={privateLinkHashClass}>{data.sha256}</span>
-                      </div>
-                    )}
-                  </div>
-                  <div className={privateLinkInfoTextClass}>
-                    <p>
-                      Private links proxy downloads through <span className={privateLinkHostClass}>{PRIVATE_LINK_SERVICE_HOST}</span>. Recipients only see the proxy URL, never the Blossom endpoint.
-                    </p>
-                    <p>Use the controls on the left to generate shareable links for this file.</p>
-                  </div>
-                  {mediaType === "image" ? (
-                    <div className={privateLinkMediaContainerClass}>
-                      <img
-                        src={data.url}
-                        alt={data.name ? `Preview of ${data.name}` : "Shared media preview"}
-                        className="max-h-72 w-full object-contain"
-                        onError={() => setMediaError(true)}
-                      />
-                    </div>
-                  ) : data.url ? (
-                    <div className={privateLinkLinkPreviewClass}>
-                      <div className="uppercase tracking-wide text-slate-500">Link preview</div>
-                      <a
-                        href={data.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className={privateLinkAnchorClass}
-                      >
-                        {data.url}
-                      </a>
-                    </div>
-                  ) : null}
-                </div>
-              ) : (
-                <div className={previewMessageCardClass}>
-                  <div className="flex flex-col gap-5">
-                    <div className="flex items-start gap-4">
-                      <div className={previewAvatarClass}>
-                        {previewAvatar ? (
-                          <img
-                            src={previewAvatar}
+              <div className={previewMessageCardClass}>
+                <div className="flex flex-col gap-5">
+                  <div className="flex items-start gap-4">
+                    <div className={previewAvatarClass}>
+                      {previewAvatar ? (
+                        <img
+                          src={previewAvatar}
                           alt={`${previewDisplayName}'s avatar`}
                           className="h-full w-full object-cover"
                           onError={() => setProfileInfo(prev => ({ ...prev, picture: null }))}
@@ -1672,51 +1759,51 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
                     </div>
                     <div className="flex min-w-0 flex-col">
                       <span className={previewDisplayNameClass}>{previewDisplayName}</span>
-                      <span className={previewHandleClass}>{previewHandle} | just now</span>
+                      <span className={previewHandleClass}>{previewHandle}</span>
                     </div>
                   </div>
-
                   <div className={previewNoteTextClass}>
-                    {previewNote ? previewNote : <span className={previewPlaceholderClass}>Start typing to add a message.</span>}
+                    {previewNote ? previewNote : <span className={previewPlaceholderClass}>Start typing to add a note…</span>}
                   </div>
-
-                  {mediaType && (
-                    <div className={previewMediaContainerClass}>
-                      {mediaType === "image" ? (
-                        <img
-                          src={data.url}
-                          alt={data.name ? `Preview of ${data.name}` : "Shared media preview"}
-                          className="max-h-72 w-full object-contain"
-                          onError={() => setMediaError(true)}
-                        />
-                      ) : (
-                        <video
-                          src={data.url}
-                          className="max-h-72 w-full bg-black"
-                          style={{ objectFit: "contain" }}
-                          controls
-                          playsInline
-                          muted
-                          onError={() => setMediaError(true)}
-                        />
-                      )}
-                    </div>
-                  )}
-
+                  <div className={previewMediaContainerClass}>
+                    {mediaType === "image" ? (
+                      <img
+                        src={payload?.url}
+                        alt={payload?.name ? `Preview of ${payload.name}` : "Shared media preview"}
+                        className="h-full w-full object-contain"
+                        onError={() => setMediaError(true)}
+                      />
+                    ) : mediaType === "video" ? (
+                      <video
+                        className="h-full w-full"
+                        src={payload?.url}
+                        controls
+                        onError={() => setMediaError(true)}
+                      />
+                    ) : payload?.url ? (
+                      <a
+                        href={payload.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-sm text-emerald-400 hover:text-emerald-300"
+                      >
+                        View shared file
+                      </a>
+                    ) : (
+                      <span className="text-sm text-slate-500">File preview will appear here once available.</span>
+                    )}
+                  </div>
                   {shareMode === "note" && (
-                    <div className="pt-1">
-                      <div className="flex items-center justify-between text-slate-500">
-                        {PREVIEW_ACTIONS.map(action => (
-                          <span key={action.key} className={previewActionCircleClass} title={action.label}>
-                            <action.icon className="h-4 w-4" />
-                          </span>
-                        ))}
-                      </div>
+                    <div className="flex items-center justify-between pt-1 text-slate-500">
+                      {PREVIEW_ACTIONS.map(action => (
+                        <span key={action.key} className={previewActionCircleClass} title={action.label}>
+                          <action.icon className="h-4 w-4" />
+                        </span>
+                      ))}
                     </div>
                   )}
-                  </div>
                 </div>
-              )}
+              </div>
             </div>
           </div>
         </aside>

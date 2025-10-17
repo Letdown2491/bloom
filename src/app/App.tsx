@@ -18,7 +18,7 @@ import { DEFAULT_PUBLIC_RELAYS, sanitizeRelayUrl } from "../shared/utils/relays"
 import { buildNip94EventTemplate } from "../shared/api/nip94";
 import { ShareFolderRequest } from "../shared/types/shareFolder";
 
-import type { ShareCompletion, SharePayload } from "../features/share/ui/ShareComposer";
+import type { ShareCompletion, SharePayload, ShareMode } from "../features/share/ui/ShareComposer";
 import type { BlossomBlob } from "../shared/api/blossomClient";
 import type { StatusMessageTone } from "../shared/types/status";
 import type { TabId } from "../shared/types/tabs";
@@ -1324,9 +1324,10 @@ export default function App() {
   );
 
   const handleShareBlob = useCallback(
-    (payload: SharePayload) => {
-      openShareForPayload(payload);
-      selectTab("share");
+    (payload: SharePayload, options?: { mode?: ShareMode }) => {
+      openShareForPayload(payload, options?.mode);
+      const targetTab: TabId = options?.mode === "private-link" ? "share-private" : "share";
+      selectTab(targetTab);
     },
     [openShareForPayload, selectTab]
   );

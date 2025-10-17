@@ -1,7 +1,7 @@
 import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ManagedServer } from "../../shared/types/servers";
 import type { BlossomBlob } from "../../shared/api/blossomClient";
-import type { SharePayload } from "../share/ui/ShareComposer";
+import type { SharePayload, ShareMode } from "../share/ui/ShareComposer";
 import type { StatusMessageTone } from "../../shared/types/status";
 import type { TabId } from "../../shared/types/tabs";
 import type { TransferState } from "./ui/UploadPanel";
@@ -33,7 +33,7 @@ type WorkspaceProps = {
   onProvideSyncStarter: (runner: () => void) => void;
   onRequestRename: (blob: BlossomBlob) => void;
   onRequestFolderRename: (path: string) => void;
-  onRequestShare: (payload: SharePayload) => void;
+  onRequestShare: (payload: SharePayload, options?: { mode?: ShareMode }) => void;
   onShareFolder: (request: ShareFolderRequest) => void;
   onUnshareFolder: (request: ShareFolderRequest) => void;
   folderShareBusyPath: string | null;

@@ -6,5 +6,6 @@ export type TabId =
   | "settings"
   | "transfer"
   | "share"
+  | "share-private"
   | "private-links"
   | "profile";

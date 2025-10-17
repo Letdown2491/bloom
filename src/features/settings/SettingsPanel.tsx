@@ -28,6 +28,7 @@ import {
   ShareIcon,
   FolderIcon,
   LockIcon,
+  TrashIcon,
 } from "../../shared/ui/icons";
 import { ServerList } from "../workspace/ui/ServerList";
 const RelayListLazy = React.lazy(() => import("../../shared/ui/RelayList"));
@@ -128,10 +129,10 @@ const buildShareLink = (
 };
 
 
-const getProgressBarClass = (percent: number): string => {
+const getProgressBarClass = (percent: number, theme: "dark" | "light"): string => {
   if (percent >= 80) return "bg-red-400";
   if (percent >= 66.6666667) return "bg-amber-400";
-  return "bg-emerald-400";
+  return theme === "light" ? "bg-blue-500" : "bg-emerald-400";
 };
 const formatRelativeTime = (timestampMs: number): string => {
   const now = Date.now();
@@ -177,7 +178,7 @@ type SwitchControlProps = {
 
 const SwitchControl: React.FC<SwitchControlProps> = ({ id, checked, onToggle, disabled, labelledBy, label, theme = "dark" }) => {
   const isLightTheme = theme === "light";
-  const activeTrackClass = isLightTheme ? "border-blue-700 bg-blue-700" : "border-emerald-500/80 bg-emerald-400/90";
+  const activeTrackClass = isLightTheme ? "border-blue-600 bg-blue-600" : "border-emerald-500/80 bg-emerald-400/90";
   const inactiveTrackClass = "border-slate-500/80 bg-slate-600/70";
 
   const trackClass = disabled
@@ -189,7 +190,7 @@ const SwitchControl: React.FC<SwitchControlProps> = ({ id, checked, onToggle, di
   const knobPosition = checked ? "right-1" : "left-1";
   const knobColor = checked
     ? isLightTheme
-      ? "border-blue-700 text-blue-700"
+      ? "border-blue-600 text-blue-600"
       : "border-emerald-500 text-emerald-500"
     : "border-slate-500 text-slate-500";
 
@@ -280,6 +281,7 @@ type SegmentedControlProps = {
   variant?: "default" | "compact";
   disabled?: boolean;
   theme?: "dark" | "light";
+  highlightTone?: "default" | "blue";
 };
 
 const SegmentedControl: React.FC<SegmentedControlProps> = ({
@@ -292,6 +294,7 @@ const SegmentedControl: React.FC<SegmentedControlProps> = ({
   variant = "default",
   disabled = false,
   theme = "dark",
+  highlightTone = "default",
 }) => {
   const isLightTheme = theme === "light";
   const containerClass =
@@ -311,15 +314,26 @@ const SegmentedControl: React.FC<SegmentedControlProps> = ({
             : "focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-slate-900"
         }`;
 
-  const activeClass = variant === "compact"
-      ? (isLightTheme ? "border-blue-700 bg-blue-700 text-white" : "border-emerald-500 bg-emerald-500/10 text-emerald-200")
-      : (isLightTheme ? "border-blue-700 bg-blue-700 text-white" : "border-emerald-500 bg-emerald-500/10 text-emerald-200");
+  const isBlueHighlight = highlightTone === "blue";
+
+  const activeClass =
+    variant === "compact"
+      ? isBlueHighlight
+        ? "border-transparent bg-blue-600 text-white shadow-sm hover:bg-blue-500"
+        : isLightTheme
+          ? "border-blue-700 bg-blue-700 text-white hover:border-blue-600 hover:bg-blue-600"
+          : "border-emerald-500 bg-emerald-500/10 text-emerald-200 hover:border-emerald-400/80 hover:bg-emerald-500/20"
+      : isBlueHighlight
+        ? "border-transparent bg-blue-600 text-white shadow-sm hover:bg-blue-500"
+        : isLightTheme
+          ? "border-blue-700 bg-blue-700 text-white hover:border-blue-600 hover:bg-blue-600"
+          : "border-emerald-500 bg-emerald-500/10 text-emerald-200 hover:border-emerald-400/80 hover:bg-emerald-500/20";
   const inactiveClass = variant === "compact"
     ? isLightTheme
-      ? "border-slate-300 text-slate-600 hover:border-blue-300 hover:text-blue-700"
+      ? "border-slate-300 text-slate-600 hover:border-blue-400 hover:text-blue-600"
       : "border-slate-600/70 text-slate-200 hover:border-slate-400"
     : isLightTheme
-      ? "border-slate-300 text-slate-600 hover:border-blue-300 hover:text-blue-700"
+      ? "border-slate-300 text-slate-600 hover:border-blue-400 hover:text-blue-600"
       : "border-slate-500/60 text-slate-200 hover:border-slate-400";
   const disabledClass =
     variant === "compact"
@@ -337,6 +351,35 @@ const SegmentedControl: React.FC<SegmentedControlProps> = ({
     >
       {options.map(option => {
         const isActive = value === option.id;
+        const activeIconColor = isBlueHighlight
+          ? "text-white"
+          : isLightTheme
+            ? "text-white"
+            : "text-emerald-200";
+        const inactiveIconColor = isBlueHighlight
+          ? isLightTheme
+            ? "text-slate-500"
+            : "text-slate-400"
+          : isLightTheme
+            ? "text-slate-500"
+            : "text-slate-400";
+        const iconClassName = `transition-colors ${isActive ? activeIconColor : inactiveIconColor}`;
+        const activeLabelColor = isBlueHighlight
+          ? "text-white"
+          : isLightTheme
+            ? "text-white"
+            : "text-emerald-200";
+        const inactiveLabelColor = isBlueHighlight
+          ? isLightTheme
+            ? "text-slate-600"
+            : "text-slate-300"
+          : isLightTheme
+            ? "text-slate-600"
+            : "text-slate-200";
+        const labelClassName = `transition-colors ${isActive ? activeLabelColor : inactiveLabelColor}`;
+        const activeStyle = isBlueHighlight && isActive
+          ? { backgroundColor: "#2563EB", borderColor: "transparent", color: "#FFFFFF" }
+          : undefined;
         return (
           <button
             key={option.id}
@@ -353,9 +396,10 @@ const SegmentedControl: React.FC<SegmentedControlProps> = ({
             className={`${baseButtonClass} ${
               disabled ? disabledClass : isActive ? activeClass : inactiveClass
             }`}
+            style={activeStyle}
           >
-            {option.Icon ? <option.Icon size={iconSize} /> : null}
-            <span>{option.label}</span>
+            {option.Icon ? <option.Icon size={iconSize} className={iconClassName} /> : null}
+            <span className={labelClassName}>{option.label}</span>
           </button>
         );
       })}
@@ -516,7 +560,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
     return Math.max(0, Math.min(1, storageWarnThreshold / storageCriticalThreshold));
   }, [storageWarnThreshold, storageCriticalThreshold]);
   const storageProgressWidth = React.useMemo(() => Math.max(0, Math.min(100, storageUsagePercent * 100)), [storageUsagePercent]);
-  const storageBarClass = React.useMemo(() => getProgressBarClass(storageProgressWidth), [storageProgressWidth]);
+  const storageBarClass = React.useMemo(() => getProgressBarClass(storageProgressWidth, theme), [storageProgressWidth, theme]);
   const cacheUsageDisplay = React.useMemo(() => {
     if (cacheEstimate && cacheEstimate.totalBytes != null) {
       return formatBytes(cacheEstimate.totalBytes);
@@ -546,7 +590,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
     }
     return Math.max(0, Math.min(100, (cacheUsageBytes / cacheCapacityBytes) * 100));
   }, [cacheUsageBytes, cacheCapacityBytes]);
-  const cacheBarClass = getProgressBarClass(cacheProgressWidth);
+  const cacheBarClass = getProgressBarClass(cacheProgressWidth, theme);
 
   const handleStorageRefresh = React.useCallback(() => {
     setStorageFeedback(null);
@@ -779,7 +823,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 const shareButtonClass = `${shareButtonBaseClass} ${
                   isBusy
                     ? isLightTheme ? "cursor-not-allowed text-slate-400" : "cursor-not-allowed text-slate-500"
-                    : isLightTheme ? "text-slate-700 hover:text-blue-700" : "text-slate-100 hover:text-emerald-100"
+                    : isLightTheme ? "text-slate-700 hover:text-blue-600" : "text-slate-100 hover:text-emerald-100"
                 }`;
                 const folderLabelClass = isLightTheme ? "flex items-center gap-2 text-sm font-medium text-slate-700" : "flex items-center gap-2 text-sm font-medium text-slate-100";
                 const folderIconBaseClass = isLightTheme ? "text-slate-600" : "text-slate-100";
@@ -831,9 +875,9 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                           </button>
                         ) : (
                           <div
-                            className={
+                          className={
                               folderLabelClass +
-                              (isLightTheme ? " hover:text-blue-700" : " hover:text-emerald-100")
+                              (isLightTheme ? " hover:text-blue-600" : " hover:text-emerald-100")
                             }
                           >
                             {labelContent}
@@ -858,6 +902,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                           className="flex flex-wrap justify-end gap-2"
                           disabled={isBusy}
                           theme={theme}
+                          highlightTone="blue"
                         />
                       </div>
                     </div>
@@ -1030,6 +1075,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
               describedBy={viewDescriptionId}
               variant="compact"
               theme={theme}
+              highlightTone="blue"
             />
           </SettingCard>
         ),
@@ -1049,6 +1095,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
               describedBy={filterDescriptionId}
               variant="compact"
               theme={theme}
+              highlightTone="blue"
             />
           </SettingCard>
         ),
@@ -1068,6 +1115,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
               describedBy={sortDescriptionId}
               variant="compact"
               theme={theme}
+              highlightTone="blue"
             />
           </SettingCard>
         ),
@@ -1087,6 +1135,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
               describedBy={sortDirectionDescriptionId}
               variant="compact"
               theme={theme}
+              highlightTone="blue"
             />
           </SettingCard>
         ),
@@ -1216,7 +1265,12 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
               ) : (
                 <>
                   <div className="space-y-2">
-                    <div className="relative h-2 w-full overflow-hidden rounded-full bg-slate-800" role="presentation">
+                    <div
+                      className={`relative h-2 w-full overflow-hidden rounded-full ${
+                        theme === "light" ? "bg-slate-200" : "bg-slate-800"
+                      }`}
+                      role="presentation"
+                    >
                       <div
                         className={`h-full ${storageBarClass}`}
                         style={{ width: `${Math.max(2, storageProgressWidth).toFixed(1)}%` }}
@@ -1251,18 +1305,40 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                       type="button"
                       onClick={handleClearLocalStorage}
                       disabled={clearingLocalStorage}
-                      className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-slate-900 ${
-                        clearingLocalStorage ? "cursor-not-allowed border-slate-600 text-slate-500" : "border-emerald-500/70 text-emerald-200 hover:border-emerald-400 hover:text-emerald-100"
+                      className={`group inline-flex items-center gap-2 rounded-lg border px-3 py-1.5 text-xs font-medium transition focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-slate-900 ${
+                        clearingLocalStorage
+                          ? "cursor-not-allowed border-slate-600 text-slate-500"
+                          : theme === "light"
+                            ? "border-blue-600/70 text-blue-800 hover:border-blue-500 hover:text-blue-600"
+                            : "border-emerald-500/70 text-emerald-200 hover:border-emerald-400 hover:text-emerald-100"
                       }`}
                     >
-                      {clearingLocalStorage ? "Clearing…" : "Clear local storage"}
+                      <TrashIcon
+                        size={14}
+                        className={`shrink-0 transition-colors ${
+                          theme === "light"
+                            ? "text-blue-800 group-hover:text-blue-600"
+                            : "text-emerald-200 group-hover:text-emerald-100"
+                        }`}
+                      />
+                      <span
+                        className={`transition-colors ${
+                          theme === "light"
+                            ? "text-blue-800 group-hover:text-blue-600"
+                            : "text-emerald-200 group-hover:text-emerald-100"
+                        }`}
+                        style={theme === "light" ? { color: "#1d4ed8" } : undefined}
+                      >
+                        {clearingLocalStorage ? "Clearing…" : "Clear local storage"}
+                      </span>
                     </button>
                     <button
                       type="button"
                       onClick={handleStorageRefresh}
-                      className="rounded-lg border border-slate-600 px-3 py-1.5 text-xs font-medium text-slate-200 transition hover:border-emerald-500 hover:text-emerald-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-slate-900"
+                      className="inline-flex items-center gap-2 rounded-lg border border-slate-600 px-3 py-1.5 text-xs font-medium text-slate-200 transition hover:border-emerald-500 hover:text-emerald-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-slate-900"
                     >
-                      Refresh
+                      <RefreshIcon size={14} className="shrink-0" />
+                      <span>Refresh</span>
                     </button>
                   </div>
                 </>
@@ -1272,7 +1348,12 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
               {cacheSupported ? (
                 <>
                   <div className="space-y-2">
-                    <div className="relative h-2 w-full overflow-hidden rounded-full bg-slate-800" role="presentation">
+                    <div
+                      className={`relative h-2 w-full overflow-hidden rounded-full ${
+                        theme === "light" ? "bg-slate-200" : "bg-slate-800"
+                      }`}
+                      role="presentation"
+                    >
                       <div className={`h-full ${cacheBarClass}`} style={{ width: `${Math.max(2, cacheProgressWidth).toFixed(1)}%` }} />
                     </div>
                     <div className="flex justify-between text-[11px] text-slate-500">
@@ -1295,18 +1376,40 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                       type="button"
                       onClick={handleClearCacheStorage}
                       disabled={clearingCacheStorage}
-                      className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-slate-900 ${
-                        clearingCacheStorage ? "cursor-not-allowed border-slate-600 text-slate-500" : "border-emerald-500/70 text-emerald-200 hover-border-emerald-400 hover:text-emerald-100"
+                      className={`group inline-flex items-center gap-2 rounded-lg border px-3 py-1.5 text-xs font-medium transition focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-slate-900 ${
+                        clearingCacheStorage
+                          ? "cursor-not-allowed border-slate-600 text-slate-500"
+                          : theme === "light"
+                            ? "border-blue-600/70 text-blue-800 hover:border-blue-500 hover:text-blue-600"
+                            : "border-emerald-500/70 text-emerald-200 hover:border-emerald-400 hover:text-emerald-100"
                       }`}
                     >
-                      {clearingCacheStorage ? "Clearing…" : "Clear preview cache"}
+                      <TrashIcon
+                        size={14}
+                        className={`shrink-0 transition-colors ${
+                          theme === "light"
+                            ? "text-blue-800 group-hover:text-blue-600"
+                            : "text-emerald-200 group-hover:text-emerald-100"
+                        }`}
+                      />
+                      <span
+                        className={`transition-colors ${
+                          theme === "light"
+                            ? "text-blue-800 group-hover:text-blue-600"
+                            : "text-emerald-200 group-hover:text-emerald-100"
+                        }`}
+                        style={theme === "light" ? { color: "#1d4ed8" } : undefined}
+                      >
+                        {clearingCacheStorage ? "Clearing…" : "Clear preview cache"}
+                      </span>
                     </button>
                     <button
                       type="button"
                       onClick={handleStorageRefresh}
-                      className="rounded-lg border border-slate-600 px-3 py-1.5 text-xs font-medium text-slate-200 transition hover:border-emerald-500 hover:text-emerald-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-slate-900"
+                      className="inline-flex items-center gap-2 rounded-lg border border-slate-600 px-3 py-1.5 text-xs font-medium text-slate-200 transition hover:border-emerald-500 hover:text-emerald-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-slate-900"
                     >
-                      Refresh
+                      <RefreshIcon size={14} className="shrink-0" />
+                      <span>Refresh</span>
                     </button>
                   </div>
                 </>
@@ -1508,7 +1611,29 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   }, [sections, activeSectionId]);
 
   const navItemBaseClass =
-    "flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left transition hover:bg-slate-800/60 hover:text-emerald-200";
+    "group flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2";
+  const inactiveNavClass = isLightTheme
+    ? "text-slate-600 hover:bg-blue-50 hover:text-blue-700 focus-visible:ring-blue-200 focus-visible:ring-offset-white"
+    : "text-slate-300 hover:bg-slate-800/60 hover:text-emerald-200 focus-visible:ring-emerald-400/40 focus-visible:ring-offset-slate-900";
+  const activeNavClass = isLightTheme
+    ? "bg-blue-600 text-white shadow-sm hover:bg-blue-500 focus-visible:ring-blue-200 focus-visible:ring-offset-white"
+    : "bg-emerald-600/20 text-emerald-200 focus-visible:ring-emerald-400/40 focus-visible:ring-offset-slate-900";
+  const inactiveNavIconClass = isLightTheme
+    ? "text-slate-500 transition-colors group-hover:text-blue-700"
+    : "text-slate-400 transition-colors group-hover:text-emerald-200";
+  const activeNavIconClass = isLightTheme ? "text-white transition-colors" : "text-emerald-300 transition-colors";
+  const dropdownItemBaseClass =
+    "group flex items-center gap-2 rounded-lg px-3 py-2 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2";
+  const dropdownInactiveClass = isLightTheme
+    ? "text-slate-600 hover:bg-blue-50 hover:text-blue-700"
+    : "text-slate-200 hover:bg-slate-800/70 hover:text-emerald-200";
+  const dropdownActiveClass = isLightTheme
+    ? "bg-blue-600 text-white hover:bg-blue-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-200 focus-visible:ring-offset-2 focus-visible:ring-offset-white"
+    : "bg-emerald-600/20 text-emerald-200";
+  const dropdownInactiveIconClass = isLightTheme
+    ? "text-slate-500 transition-colors group-hover:text-blue-700"
+    : "text-slate-400 transition-colors group-hover:text-emerald-200";
+  const dropdownActiveIconClass = isLightTheme ? "text-white transition-colors" : "text-emerald-300 transition-colors";
   const isNarrowScreen = useIsCompactScreen(1024);
   const [navMenuOpen, setNavMenuOpen] = React.useState(false);
   const navMenuRef = React.useRef<HTMLDivElement | null>(null);
@@ -1599,25 +1724,40 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
               role="listbox"
               className="absolute inset-x-0 top-full z-30 mt-2 max-h-80 overflow-auto rounded-xl border border-slate-800 bg-slate-900/95 p-2 shadow-lg backdrop-blur"
             >
-              <ul className="flex flex-col gap-1 text-sm text-slate-200">
+          <ul className="flex flex-col gap-1 text-sm">
                 {sections.map(section => {
                   const Icon = section.icon;
                   const isActive = section.id === activeSectionId;
                   return (
                     <li key={section.id}>
-                      <a
-                        href={`#${section.id}`}
-                        onClick={event => {
-                          event.preventDefault();
-                          handleSectionNavigate(section.id);
-                        }}
-                        className={`flex items-center gap-2 rounded-lg px-3 py-2 transition hover:bg-slate-800/70 hover:text-emerald-200 ${
-                          isActive ? "bg-slate-800/70 text-emerald-200" : ""
-                        }`}
+                    <a
+                      href={`#${section.id}`}
+                      onClick={event => {
+                        event.preventDefault();
+                        handleSectionNavigate(section.id);
+                      }}
+                      className={`${dropdownItemBaseClass} ${
+                        isActive ? dropdownActiveClass : dropdownInactiveClass
+                      }`}
+                      style={
+                        isActive && isLightTheme
+                          ? { backgroundColor: "#2563eb", color: "#ffffff" }
+                          : undefined
+                      }
+                    >
+                      <Icon
+                        size={16}
+                        aria-hidden="true"
+                        className={isActive ? dropdownActiveIconClass : dropdownInactiveIconClass}
+                        style={isActive && isLightTheme ? { color: "#ffffff" } : undefined}
+                      />
+                      <span
+                        className={isActive ? (isLightTheme ? "font-medium text-white" : "font-medium text-emerald-200") : "font-medium"}
+                        style={isActive && isLightTheme ? { color: "#ffffff" } : undefined}
                       >
-                        <Icon size={16} aria-hidden="true" />
-                        <span>{section.label}</span>
-                      </a>
+                        {section.label}
+                      </span>
+                    </a>
                     </li>
                   );
                 })}
@@ -1653,7 +1793,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
 
       <div className="grid gap-6 xl:grid-cols-[220px_minmax(0,1fr)]">
         <nav className="hidden rounded-2xl border border-slate-800 bg-slate-900/70 p-4 shadow-sm xl:block">
-          <ul className="space-y-2 text-sm text-slate-300">
+          <ul className="space-y-2 text-sm">
             {sections.map(section => {
               const Icon = section.icon;
               const isActive = section.id === activeSectionId;
@@ -1662,26 +1802,52 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                   <button
                     type="button"
                     onClick={() => setActiveSectionId(section.id)}
-                    className={`${navItemBaseClass} ${
-                      isActive ? "bg-slate-800/70 text-emerald-200" : ""
-                    }`}
+                    className={`${navItemBaseClass} ${isActive ? activeNavClass : inactiveNavClass}`}
+                    style={
+                      isActive && isLightTheme
+                        ? { backgroundColor: "#2563eb", color: "#ffffff" }
+                        : undefined
+                    }
                     aria-current={isActive ? "true" : undefined}
                   >
-                    <Icon size={16} />
-                    <span>{section.label}</span>
+                    <Icon
+                      size={16}
+                      className={isActive ? activeNavIconClass : inactiveNavIconClass}
+                      style={isActive && isLightTheme ? { color: "#ffffff" } : undefined}
+                    />
+                    <span
+                      className={isActive ? (isLightTheme ? "font-medium text-white" : "font-medium text-emerald-200") : "font-medium"}
+                      style={isActive && isLightTheme ? { color: "#ffffff" } : undefined}
+                    >
+                      {section.label}
+                    </span>
                   </button>
                 </li>
               );
             })}
             <li>
-              <button type="button" onClick={handleOpenSubmitIssue} className={`${navItemBaseClass} text-slate-300`}>
-                <GithubIcon size={16} />
+              <button
+                type="button"
+                onClick={handleOpenSubmitIssue}
+                className={`${navItemBaseClass} ${inactiveNavClass}`}
+              >
+                <GithubIcon
+                  size={16}
+                  className={isLightTheme ? "text-slate-500 transition-colors group-hover:text-blue-700" : "text-slate-400 transition-colors group-hover:text-emerald-200"}
+                />
                 <span className="font-medium">Submit Issue</span>
               </button>
             </li>
             <li>
-              <button type="button" onClick={handleOpenSupport} className={`${navItemBaseClass} text-slate-300`}>
-                <LightningIcon size={16} />
+              <button
+                type="button"
+                onClick={handleOpenSupport}
+                className={`${navItemBaseClass} ${inactiveNavClass}`}
+              >
+                <LightningIcon
+                  size={16}
+                  className={isLightTheme ? "text-slate-500 transition-colors group-hover:text-blue-700" : "text-slate-400 transition-colors group-hover:text-emerald-200"}
+                />
                 <span className="font-medium">Support Bloom</span>
               </button>
             </li>

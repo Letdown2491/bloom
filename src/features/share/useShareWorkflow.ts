@@ -1,22 +1,27 @@
 import { useCallback, useState } from "react";
-import type { ShareCompletion, SharePayload } from "./ui/ShareComposer";
+import type { ShareCompletion, SharePayload, ShareMode } from "./ui/ShareComposer";
 
 export const useShareWorkflow = () => {
-  const [shareState, setShareState] = useState<{ payload: SharePayload | null; shareKey: string | null }>(() => ({
+  const [shareState, setShareState] = useState<{
+    payload: SharePayload | null;
+    shareKey: string | null;
+    mode: ShareMode | null;
+  }>(() => ({
     payload: null,
     shareKey: null,
+    mode: null,
   }));
 
-  const openShareForPayload = useCallback((payload: SharePayload) => {
-    setShareState({ payload, shareKey: null });
+  const openShareForPayload = useCallback((payload: SharePayload, mode?: ShareMode) => {
+    setShareState({ payload, shareKey: null, mode: mode ?? null });
   }, []);
 
   const openShareByKey = useCallback((shareKey: string) => {
-    setShareState({ payload: null, shareKey });
+    setShareState({ payload: null, shareKey, mode: null });
   }, []);
 
   const clearShareState = useCallback(() => {
-    setShareState({ payload: null, shareKey: null });
+    setShareState({ payload: null, shareKey: null, mode: null });
   }, []);
 
   const handleShareComplete = useCallback(

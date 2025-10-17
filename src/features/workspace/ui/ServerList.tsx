@@ -9,6 +9,7 @@ import type { FilterMode } from "../../../shared/types/filter";
 import { prettyBytes } from "../../../shared/utils/format";
 import { matchesFilter } from "../../browse/browseUtils";
 import type { StatusMessageTone } from "../../../shared/types/status";
+import { useUserPreferences } from "../../../app/context/UserPreferencesContext";
 
 export type ServerListProps = {
   servers: ManagedServer[];
@@ -131,6 +132,10 @@ export const ServerList: React.FC<ServerListProps> = ({
   compact = false,
   onProvideActions,
 }) => {
+  const {
+    preferences: { theme },
+  } = useUserPreferences();
+  const isLightTheme = theme === "light";
   const [isAdding, setIsAdding] = useState(false);
   const [editingUrl, setEditingUrl] = useState<string | null>(null);
   const [draft, setDraft] = useState<ServerDraft>(createEmptyDraft);
@@ -1167,7 +1172,10 @@ export const ServerList: React.FC<ServerListProps> = ({
                             toggleUsage(server.url);
                           }}
                           onKeyDown={event => event.stopPropagation()}
-                          className="self-start text-[11px] font-medium text-emerald-300 transition hover:text-emerald-200"
+                          className={`self-start text-[11px] font-medium transition ${
+                            isLightTheme ? "text-blue-800 hover:text-blue-600" : "text-emerald-300 hover:text-emerald-200"
+                          }`}
+                          style={isLightTheme ? { color: "#1e3a8a" } : undefined}
                           aria-expanded={isUsageExpanded}
                           aria-controls={usageRowId}
                         >

@@ -38,6 +38,7 @@ import { useUserPreferences, type DefaultSortOption, type SortDirection } from "
 import { useDialog } from "../../../app/context/DialogContext";
 import type { FolderListRecord } from "../../../shared/domain/folderList";
 import type { FolderShareHint, ShareFolderScope } from "../../../shared/types/shareFolder";
+import type { ShareMode } from "../../share/ui/ShareComposer";
 
 export type BlobReplicaSummary = {
   count: number;
@@ -59,7 +60,7 @@ export type BlobListProps = {
   onDelete: (blob: BlossomBlob) => void;
   onCopy: (blob: BlossomBlob) => void;
   onPlay?: (blob: BlossomBlob) => void;
-  onShare?: (blob: BlossomBlob) => void;
+  onShare?: (blob: BlossomBlob, options?: { mode?: ShareMode }) => void;
   onRename?: (blob: BlossomBlob) => void;
   onMove?: (blob: BlossomBlob) => void;
   onOpenList?: (blob: BlossomBlob) => void;
@@ -797,7 +798,7 @@ const ListLayout: React.FC<{
   onDownload: (blob: BlossomBlob) => void;
   onPreview: (blob: BlossomBlob) => void;
   onPlay?: (blob: BlossomBlob) => void;
-  onShare?: (blob: BlossomBlob) => void;
+  onShare?: (blob: BlossomBlob, options?: { mode?: ShareMode }) => void;
   onRename?: (blob: BlossomBlob) => void;
   onMove?: (blob: BlossomBlob) => void;
   onOpenList?: (blob: BlossomBlob) => void;
@@ -1285,7 +1286,7 @@ const GridLayout: React.FC<{
   onDownload: (blob: BlossomBlob) => void;
   onPreview: (blob: BlossomBlob) => void;
   onPlay?: (blob: BlossomBlob) => void;
-  onShare?: (blob: BlossomBlob) => void;
+  onShare?: (blob: BlossomBlob, options?: { mode?: ShareMode }) => void;
   onRename?: (blob: BlossomBlob) => void;
   onMove?: (blob: BlossomBlob) => void;
   onOpenList?: (blob: BlossomBlob) => void;
@@ -1552,7 +1553,7 @@ type GridCardProps = {
   onDownload: (blob: BlossomBlob) => void;
   onPreview: (blob: BlossomBlob) => void;
   onPlay?: (blob: BlossomBlob) => void;
-  onShare?: (blob: BlossomBlob) => void;
+  onShare?: (blob: BlossomBlob, options?: { mode?: ShareMode }) => void;
   onRename?: (blob: BlossomBlob) => void;
   onMove?: (blob: BlossomBlob) => void;
   onOpenList?: (blob: BlossomBlob) => void;
@@ -1839,6 +1840,7 @@ const GridCard = React.memo<GridCardProps>(
       onDownload,
       onRename,
       onMove,
+      onShare,
       isPrivateItem,
       isFolderParentLink,
     ]);
@@ -1937,7 +1939,51 @@ const GridCard = React.memo<GridCardProps>(
       displayName,
     ]);
 
-    const shareButton = useMemo(() => {
+    const shareTriggerRef = useRef<HTMLButtonElement | null>(null);
+    const shareMenuRef = useRef<HTMLDivElement | null>(null);
+    const [shareMenuOpen, setShareMenuOpen] = useState(false);
+    const shareMenuDisabled = useMemo(
+      () => Boolean(folderShareHint && onShareFolder) || !onShare || isPrivateItem || !blob.url,
+      [folderShareHint, onShare, onShareFolder, isPrivateItem, blob.url]
+    );
+
+    useEffect(() => {
+      setShareMenuOpen(false);
+    }, [blob.sha256, folderShareHint, onShareFolder]);
+
+    useEffect(() => {
+      if (!shareMenuOpen) return;
+      if (typeof document === "undefined") return;
+      const handlePointer = (event: Event) => {
+        const target = event.target as Node | null;
+        if (!target) return;
+        const trigger = shareTriggerRef.current;
+        const menu = shareMenuRef.current;
+        if (trigger?.contains(target) || menu?.contains(target)) {
+          return;
+        }
+        setShareMenuOpen(false);
+      };
+      const handleKey = (event: KeyboardEvent) => {
+        if (event.key === "Escape") {
+          setShareMenuOpen(false);
+        }
+      };
+      document.addEventListener("pointerdown", handlePointer);
+      document.addEventListener("keydown", handleKey);
+      return () => {
+        document.removeEventListener("pointerdown", handlePointer);
+        document.removeEventListener("keydown", handleKey);
+      };
+    }, [shareMenuOpen]);
+
+    useEffect(() => {
+      if (shareMenuDisabled) {
+        setShareMenuOpen(false);
+      }
+    }, [shareMenuDisabled]);
+
+    const shareButton = (() => {
       if (folderShareHint && onShareFolder) {
         const disabled = shareBusy;
         const title = disabled
@@ -1971,32 +2017,64 @@ const GridCard = React.memo<GridCardProps>(
         : "Share";
       const ariaLabel = isAudio ? "Share track" : "Share blob";
       return (
-        <button
-          className={`${toolbarNeutralButtonClass} rounded-none border-l border-r-0 disabled:border-inherit disabled:bg-inherit disabled:text-inherit disabled:hover:bg-inherit`}
-          onClick={event => {
-            if (disabled) return;
-            event.stopPropagation();
-            onShare(blob);
-          }}
-          aria-label={ariaLabel}
-          title={title}
-          type="button"
-          disabled={disabled}
-        >
-          <ShareIcon size={18} />
-        </button>
+        <div className="relative">
+          <button
+            ref={shareTriggerRef}
+            className={`${toolbarNeutralButtonClass} rounded-none border-l border-r-0 disabled:border-inherit disabled:bg-inherit disabled:text-inherit disabled:hover:bg-inherit`}
+            onClick={event => {
+              event.stopPropagation();
+              if (disabled) return;
+              setShareMenuOpen(value => !value);
+            }}
+            aria-label={ariaLabel}
+            title={title}
+            type="button"
+            disabled={disabled}
+            aria-haspopup="true"
+            aria-expanded={shareMenuOpen}
+          >
+            <ShareIcon size={18} />
+          </button>
+          {shareMenuOpen ? (
+            <div
+              ref={shareMenuRef}
+              className={`${menuBaseClass} absolute right-0 top-full mt-2 origin-top visible opacity-100`}
+              role="menu"
+              aria-label="Share options"
+            >
+              <a
+                href="#"
+                role="menuitem"
+                className={makeItemClass()}
+                onClick={event => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  setShareMenuOpen(false);
+                  onShare?.(blob);
+                }}
+              >
+                <ShareIcon size={14} />
+                <span>Share publicly</span>
+              </a>
+              <a
+                href="#"
+                role="menuitem"
+                className={makeItemClass()}
+                onClick={event => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  setShareMenuOpen(false);
+                  onShare?.(blob, { mode: "private-link" });
+                }}
+              >
+                <LockIcon size={14} />
+                <span>Share privately</span>
+              </a>
+            </div>
+          ) : null}
+        </div>
       );
-    }, [
-      blob,
-      folderShareHint,
-      onShareFolder,
-      shareBusy,
-      folderVisibility,
-      isAudio,
-      isPrivateItem,
-      onShare,
-      toolbarNeutralButtonClass,
-    ]);
+    })();
 
     const primaryAction = useMemo(() => {
       if (isListBlob && onOpenList) {
@@ -2531,7 +2609,7 @@ type ListRowProps = {
   onDownload: (blob: BlossomBlob) => void;
   onPreview: (blob: BlossomBlob) => void;
   onPlay?: (blob: BlossomBlob) => void;
-  onShare?: (blob: BlossomBlob) => void;
+  onShare?: (blob: BlossomBlob, options?: { mode?: ShareMode }) => void;
   onRename?: (blob: BlossomBlob) => void;
   onMove?: (blob: BlossomBlob) => void;
   onOpenList?: (blob: BlossomBlob) => void;
@@ -2792,7 +2870,77 @@ const ListRowComponent: React.FC<ListRowProps> = ({
     };
   }, [menuOpen]);
 
-    const shareButton = (() => {
+  const shareTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const shareMenuRef = useRef<HTMLDivElement | null>(null);
+  const [shareMenuOpen, setShareMenuOpen] = useState(false);
+
+  const {
+    preferences: { theme },
+  } = useUserPreferences();
+  const isLightTheme = theme === "light";
+  const dropdownTriggerClass = isLightTheme
+    ? "p-2 shrink-0 flex h-10 w-10 items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-600 transition hover:bg-slate-100"
+    : "p-2 shrink-0 flex h-10 w-10 items-center justify-center rounded-lg bg-slate-800 text-slate-200 transition hover:bg-slate-700";
+  const menuBaseClass = isLightTheme
+    ? "absolute right-0 z-30 w-44 rounded-md border border-slate-300 bg-white p-1 text-slate-700 shadow-xl"
+    : "absolute right-0 z-30 w-44 rounded-md border border-slate-700 bg-slate-900/95 p-1 text-slate-200 shadow-xl backdrop-blur";
+  const focusRingClass = isLightTheme
+    ? "focus:outline-none focus:ring-1 focus:ring-emerald-400 focus:ring-offset-1 focus:ring-offset-white"
+    : "focus:outline-none focus:ring-1 focus:ring-emerald-400 focus:ring-offset-1 focus:ring-offset-slate-900";
+  const makeItemClass = (variant?: "destructive", disabled?: boolean) => {
+    const base = `flex items-center gap-2 rounded-md px-3 py-1.5 text-sm transition ${focusRingClass}`;
+    const variantClass =
+      variant === "destructive"
+        ? isLightTheme
+          ? "text-red-600 hover:bg-red-50"
+          : "text-red-300 hover:bg-red-900/40"
+        : isLightTheme
+          ? "text-slate-700 hover:bg-slate-100"
+          : "text-slate-200 hover:bg-slate-700";
+    const disabledClass = disabled ? "cursor-not-allowed opacity-50 hover:bg-transparent" : "";
+    return `${base} ${variantClass} ${disabledClass}`.trim();
+  };
+
+  useEffect(() => {
+    if (!shareMenuOpen) return;
+    if (typeof document === "undefined") return;
+    const handlePointer = (event: Event) => {
+      const target = event.target as Node | null;
+      if (!target) return;
+      if (shareTriggerRef.current?.contains(target) || shareMenuRef.current?.contains(target)) {
+        return;
+      }
+      setShareMenuOpen(false);
+    };
+    const handleKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setShareMenuOpen(false);
+      }
+    };
+    document.addEventListener("pointerdown", handlePointer);
+    document.addEventListener("keydown", handleKey);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointer);
+      document.removeEventListener("keydown", handleKey);
+    };
+  }, [shareMenuOpen]);
+
+  useEffect(() => {
+    setShareMenuOpen(false);
+  }, [blob.sha256, folderShareHint, onShareFolder]);
+
+  const shareMenuDisabled = useMemo(
+    () => Boolean(folderShareHint && onShareFolder) || !onShare || isPrivateItem || !blob.url,
+    [folderShareHint, onShare, onShareFolder, isPrivateItem, blob.url]
+  );
+
+  useEffect(() => {
+    if (shareMenuDisabled) {
+      setShareMenuOpen(false);
+    }
+  }, [shareMenuDisabled]);
+
+  const shareButton = (() => {
     if (folderShareHint && onShareFolder) {
       const disabled = shareBusy;
       const title = disabled
@@ -2826,20 +2974,62 @@ const ListRowComponent: React.FC<ListRowProps> = ({
         : "Share available once file link is ready"
       : "Share";
     return (
-      <button
-        className="p-2 shrink-0 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-slate-800"
-        onClick={event => {
-          if (disabled) return;
-          event.stopPropagation();
-          onShare?.(blob);
-        }}
-        aria-label={ariaLabel}
-        title={title}
-        type="button"
-        disabled={disabled}
-      >
-        <ShareIcon size={16} />
-      </button>
+      <div className="relative">
+        <button
+          ref={shareTriggerRef}
+          className="p-2 shrink-0 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-slate-800"
+          onClick={event => {
+            event.stopPropagation();
+            if (disabled) return;
+            setShareMenuOpen(value => !value);
+          }}
+          aria-label={ariaLabel}
+          title={title}
+          type="button"
+          disabled={disabled}
+          aria-haspopup="true"
+          aria-expanded={shareMenuOpen}
+        >
+          <ShareIcon size={16} />
+        </button>
+        {shareMenuOpen ? (
+          <div
+            ref={shareMenuRef}
+            className={`${menuBaseClass} absolute right-0 top-full mt-2 origin-top visible opacity-100`}
+            role="menu"
+            aria-label="Share options"
+          >
+            <a
+              href="#"
+              role="menuitem"
+              className={makeItemClass()}
+              onClick={event => {
+                event.preventDefault();
+                event.stopPropagation();
+                setShareMenuOpen(false);
+                onShare?.(blob);
+              }}
+            >
+              <ShareIcon size={14} />
+              <span>Share publicly</span>
+            </a>
+            <a
+              href="#"
+              role="menuitem"
+              className={makeItemClass()}
+              onClick={event => {
+                event.preventDefault();
+                event.stopPropagation();
+                setShareMenuOpen(false);
+                onShare?.(blob, { mode: "private-link" });
+              }}
+            >
+              <LockIcon size={14} />
+              <span>Share privately</span>
+            </a>
+          </div>
+        ) : null}
+      </div>
     );
   })();
 
@@ -2939,33 +3129,6 @@ const ListRowComponent: React.FC<ListRowProps> = ({
       ? "bottom-full mb-2 origin-bottom"
       : "top-full mt-2 origin-top";
   const menuVisibilityClass = menuPlacement ? "visible opacity-100" : "invisible opacity-0 pointer-events-none";
-
-  const {
-    preferences: { theme },
-  } = useUserPreferences();
-  const isLightTheme = theme === "light";
-  const dropdownTriggerClass = isLightTheme
-    ? "p-2 shrink-0 flex h-10 w-10 items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-600 transition hover:bg-slate-100"
-    : "p-2 shrink-0 flex h-10 w-10 items-center justify-center rounded-lg bg-slate-800 text-slate-200 transition hover:bg-slate-700";
-  const menuBaseClass = isLightTheme
-    ? "absolute right-0 z-30 w-44 rounded-md border border-slate-300 bg-white p-1 text-slate-700 shadow-xl"
-    : "absolute right-0 z-30 w-44 rounded-md border border-slate-700 bg-slate-900/95 p-1 text-slate-200 shadow-xl backdrop-blur";
-  const focusRingClass = isLightTheme
-    ? "focus:outline-none focus:ring-1 focus:ring-emerald-400 focus:ring-offset-1 focus:ring-offset-white"
-    : "focus:outline-none focus:ring-1 focus:ring-emerald-400 focus:ring-offset-1 focus:ring-offset-slate-900";
-  const makeItemClass = (variant?: "destructive", disabled?: boolean) => {
-    const base = `flex items-center gap-2 rounded-md px-3 py-1.5 text-sm transition ${focusRingClass}`;
-    const variantClass =
-      variant === "destructive"
-        ? isLightTheme
-          ? "text-red-600 hover:bg-red-50"
-          : "text-red-300 hover:bg-red-900/40"
-        : isLightTheme
-          ? "text-slate-700 hover:bg-slate-100"
-          : "text-slate-200 hover:bg-slate-700";
-    const disabledClass = disabled ? "cursor-not-allowed opacity-50 hover:bg-transparent" : "";
-    return `${base} ${variantClass} ${disabledClass}`.trim();
-  };
 
   const dropdownMenu = !showDropdown
     ? null

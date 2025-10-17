@@ -77,7 +77,7 @@ vi.mock("../features/selection/SelectionContext", () => ({
 
 vi.mock("../features/share/useShareWorkflow", () => ({
   useShareWorkflow: () => ({
-    shareState: null,
+    shareState: { payload: null, shareKey: null, mode: null },
     openShareForPayload: vi.fn(),
     openShareByKey: vi.fn(),
     handleShareComplete: vi.fn(),

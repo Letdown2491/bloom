@@ -11,7 +11,7 @@ import { useAudio } from "../../app/context/AudioContext";
 import { matchesFilter, createAudioTrack } from "../browse/browseUtils";
 import { useAudioMetadataMap } from "../browse/useAudioMetadata";
 import type { StatusMessageTone } from "../../shared/types/status";
-import type { SharePayload } from "../share/ui/ShareComposer";
+import type { SharePayload, ShareMode } from "../share/ui/ShareComposer";
 import type { BlossomBlob, SignTemplate } from "../../shared/api/blossomClient";
 import { extractSha256FromUrl } from "../../shared/api/blossomClient";
 import type { ManagedServer } from "../../shared/types/servers";
@@ -339,7 +339,7 @@ export type BrowseTabContainerProps = {
   onStatusMetricsChange: (metrics: { count: number; size: number }) => void;
   onRequestRename: (blob: BlossomBlob) => void;
   onRequestFolderRename: (path: string) => void;
-  onRequestShare: (payload: SharePayload) => void;
+  onRequestShare: (payload: SharePayload, options?: { mode?: ShareMode }) => void;
   onShareFolder: (request: ShareFolderRequest) => void;
   onUnshareFolder: (request: ShareFolderRequest) => void;
   folderShareBusyPath?: string | null;
@@ -1977,7 +1977,7 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
   );
 
   const handleShareBlob = useCallback(
-    (blob: BlossomBlob) => {
+    (blob: BlossomBlob, options?: { mode?: ShareMode }) => {
       if (isPlaceholderBlob(blob)) {
         openPrivateList();
         return;
@@ -2012,8 +2012,8 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
         serverUrl: blob.serverUrl ?? null,
         size: typeof blob.size === "number" ? blob.size : null,
       };
-      onRequestShare(payload);
-      onSetTab("share");
+      onRequestShare(payload, options);
+      onSetTab(options?.mode === "private-link" ? "share-private" : "share");
     },
     [
       extractFolderInfo,
