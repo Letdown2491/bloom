@@ -1620,9 +1620,19 @@ const GridCard = React.memo<GridCardProps>(
       preferences: { theme },
     } = useUserPreferences();
     const isLightTheme = theme === "light";
-    const dropdownTriggerClass = isLightTheme
-      ? "p-2 shrink-0 flex h-10 w-10 items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-600 transition hover:bg-slate-100"
-      : "p-2 shrink-0 flex h-10 w-10 items-center justify-center rounded-lg bg-slate-800 text-slate-200 transition hover:bg-slate-700";
+    const toolbarFocusClass = isLightTheme
+      ? "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/80 focus-visible:ring-offset-1 focus-visible:ring-offset-white"
+      : "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/80 focus-visible:ring-offset-1 focus-visible:ring-offset-slate-900";
+    const toolbarBaseClass = `${toolbarFocusClass} flex h-11 w-full items-center justify-center transition disabled:cursor-not-allowed disabled:opacity-45`;
+    const neutralToolbarClass = isLightTheme
+      ? "border border-slate-300 bg-white/95 text-slate-700 shadow-sm hover:bg-white"
+      : "border border-slate-700 bg-slate-900/80 text-slate-100 shadow-sm hover:bg-slate-900/60";
+    const primaryToolbarClass = isLightTheme
+      ? "border border-slate-300 bg-slate-100 text-slate-900 shadow-sm hover:bg-slate-200"
+      : "border border-slate-700 bg-slate-800 text-slate-100 shadow-sm hover:bg-slate-700";
+    const toolbarNeutralButtonClass = `${toolbarBaseClass} ${neutralToolbarClass}`;
+    const toolbarPrimaryButtonClass = `${toolbarBaseClass} ${primaryToolbarClass}`;
+    const dropdownTriggerClass = `${toolbarNeutralButtonClass} justify-center`;
     const menuBaseClass = isLightTheme
       ? "absolute right-0 z-50 w-44 rounded-md border border-slate-300 bg-white p-1 text-slate-700 shadow-xl"
       : "absolute right-0 z-50 w-44 rounded-md border border-slate-700 bg-slate-900/95 p-1 text-slate-200 shadow-xl backdrop-blur";
@@ -1654,7 +1664,6 @@ const GridCard = React.memo<GridCardProps>(
       [height, isMenuOpen, isSelected, left, top, width]
     );
     const contentHeight = height * 0.75;
-    const footerHeight = height * 0.25;
 
     const isAudio = blob.type?.startsWith("audio/");
     const isActiveTrack = Boolean(currentTrackUrl && blob.url && currentTrackUrl === blob.url);
@@ -1938,7 +1947,7 @@ const GridCard = React.memo<GridCardProps>(
             : "Share folder";
         return (
           <button
-            className="p-2 shrink-0 flex h-10 w-10 items-center justify-center rounded-lg bg-slate-800 text-slate-200 transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-slate-800"
+            className={`${toolbarNeutralButtonClass} rounded-none border-l border-r-0 disabled:border-inherit disabled:bg-inherit disabled:text-inherit disabled:hover:bg-inherit`}
             onClick={event => {
               event.stopPropagation();
               if (disabled) return;
@@ -1949,7 +1958,7 @@ const GridCard = React.memo<GridCardProps>(
             type="button"
             disabled={disabled}
           >
-            <ShareIcon size={16} />
+            <ShareIcon size={18} />
           </button>
         );
       }
@@ -1963,7 +1972,7 @@ const GridCard = React.memo<GridCardProps>(
       const ariaLabel = isAudio ? "Share track" : "Share blob";
       return (
         <button
-          className="p-2 shrink-0 flex h-10 w-10 items-center justify-center rounded-lg bg-slate-800 text-slate-200 transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-slate-800"
+          className={`${toolbarNeutralButtonClass} rounded-none border-l border-r-0 disabled:border-inherit disabled:bg-inherit disabled:text-inherit disabled:hover:bg-inherit`}
           onClick={event => {
             if (disabled) return;
             event.stopPropagation();
@@ -1974,7 +1983,7 @@ const GridCard = React.memo<GridCardProps>(
           type="button"
           disabled={disabled}
         >
-          <ShareIcon size={16} />
+          <ShareIcon size={18} />
         </button>
       );
     }, [
@@ -1986,21 +1995,14 @@ const GridCard = React.memo<GridCardProps>(
       isAudio,
       isPrivateItem,
       onShare,
+      toolbarNeutralButtonClass,
     ]);
 
     const primaryAction = useMemo(() => {
-      const focusClass = isLightTheme
-        ? "focus:outline-none focus:ring-1 focus:ring-blue-400/70 focus:ring-offset-2 focus:ring-offset-white"
-        : "focus:outline-none focus:ring-1 focus:ring-emerald-400";
-      const primaryActionBaseClass =
-        `p-2 shrink-0 rounded-lg flex items-center justify-center transition disabled:cursor-not-allowed disabled:opacity-40 ${focusClass}`;
       if (isListBlob && onOpenList) {
         return (
           <button
-            className={`${primaryActionBaseClass} ${
-              isLightTheme ? "bg-blue-700 text-white hover:bg-blue-600"
-              : "bg-emerald-700/70 text-slate-100 hover:bg-emerald-600"
-            } h-10 w-10`}
+            className={`${toolbarPrimaryButtonClass} justify-center rounded-none rounded-bl-xl border-r-0`}
             onClick={event => {
               event.stopPropagation();
               onOpenList(blob);
@@ -2009,22 +2011,20 @@ const GridCard = React.memo<GridCardProps>(
             title="Open"
             type="button"
           >
-            <PreviewIcon size={16} />
+            <PreviewIcon size={18} />
           </button>
         );
       }
       if (isAudio && onPlay && blob.url) {
+        const playingToolbarClass = `${toolbarBaseClass} ${
+          isLightTheme
+            ? "border border-slate-400 bg-slate-200 text-slate-900 shadow-sm hover:bg-slate-300"
+            : "border border-slate-600 bg-slate-700 text-slate-100 shadow-sm hover:bg-slate-600"
+        }`;
+        const idleToolbarClass = toolbarPrimaryButtonClass;
         return (
           <button
-            className={`${primaryActionBaseClass} ${
-              isActivePlaying
-                ? isLightTheme
-                  ? "bg-blue-500 text-white hover:bg-blue-400"
-                  : "bg-emerald-500/80 text-slate-900 hover:bg-emerald-400"
-                : isLightTheme
-                  ? "bg-blue-700 text-white hover:bg-blue-600"
-                  : "bg-emerald-700/70 text-slate-100 hover:bg-emerald-600"
-            } aspect-square h-10 w-10`}
+            className={`${isActivePlaying ? `${playingToolbarClass} border-r-0` : `${idleToolbarClass} border-r-0`} justify-center rounded-none rounded-bl-xl`}
             onClick={event => {
               event.stopPropagation();
               onPlay(blob);
@@ -2034,26 +2034,24 @@ const GridCard = React.memo<GridCardProps>(
             title={playButtonLabel}
             type="button"
           >
-            {isActivePlaying ? <PauseIcon size={16} /> : <PlayIcon size={16} />}
+            {isActivePlaying ? <PauseIcon size={18} /> : <PlayIcon size={18} />}
           </button>
         );
       }
       const buttonDisabled = !canPreview && !allowDialogPreview;
       return (
         <button
-          className={`${primaryActionBaseClass} ${
-            isLightTheme ? "bg-blue-700 text-white hover:bg-blue-600" : "bg-emerald-700/70 text-slate-100 hover:bg-emerald-600"
-          } h-10 w-10`}
+          className={`${toolbarPrimaryButtonClass} justify-center rounded-none rounded-bl-xl border-r-0`}
           onClick={event => {
             event.stopPropagation();
             onPreview(blob);
           }}
-          aria-label={buttonDisabled ? "Preview unavailable" : "Show blob"}
-          title={buttonDisabled ? "Preview unavailable" : "Show"}
+          aria-label={buttonDisabled ? "Preview unavailable" : "Preview blob"}
+          title={buttonDisabled ? "Preview unavailable" : "Preview"}
           type="button"
           disabled={buttonDisabled}
         >
-          <PreviewIcon size={16} />
+          <PreviewIcon size={18} />
         </button>
       );
     }, [
@@ -2068,7 +2066,14 @@ const GridCard = React.memo<GridCardProps>(
       onPreview,
       playButtonAria,
       playButtonLabel,
+      toolbarBaseClass,
+      toolbarPrimaryButtonClass,
+      isLightTheme,
     ]);
+
+    const toolbarContainerClass = isLightTheme
+      ? "grid grid-cols-3 border-t border-slate-200 bg-slate-50/90 backdrop-blur px-0 py-0"
+      : "grid grid-cols-3 border-t border-slate-800/70 bg-slate-950/85 backdrop-blur px-0 py-0";
 
     const menuPlacementClass =
       menuPlacement === "up"
@@ -2110,20 +2115,21 @@ const GridCard = React.memo<GridCardProps>(
             </div>
           </div>
         </div>
-        <div className="flex items-center justify-center gap-2 border-t border-slate-800/80 bg-slate-950/90 px-2 py-3" style={{ height: footerHeight }}>
+        <div className={toolbarContainerClass}>
           {primaryAction}
-          {shareButton}
+          {shareButton ?? <div className="h-11 w-full" />}
           {dropdownItems.length > 0 ? (
-            <div className="relative" ref={registerDropdownRef}>
+            <div className="relative h-full w-full" ref={registerDropdownRef}>
               <button
-                className={dropdownTriggerClass}
+                className={`${dropdownTriggerClass} h-full w-full rounded-none rounded-br-xl border-l`}
                 onClick={handleMenuToggle}
                 aria-haspopup="true"
                 aria-expanded={isMenuOpen}
                 title="More actions"
                 type="button"
+                aria-label="More actions"
               >
-                <ChevronDownIcon size={16} />
+                <ChevronDownIcon size={18} />
               </button>
               {isMenuOpen ? (
                 <div
