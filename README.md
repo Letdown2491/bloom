@@ -1,19 +1,26 @@
-# Bloom
-Bloom is a simple to use and intuitive file manager interface for Blossom and NIP-96 servers, alowing users to store files in a distributed way easily.
+## What is Bloom?
 
-## What can Bloom do?
-- **No accounts, no passwords:** Sign in with your Nostr npub via browser extension (NIP-07), or remote signer (NIP-46).
-- **Stay organized:** See everything stored on each server at a glance. Want to store stuff in folders? No problem! While Blossom servers do not support this by default, Bloom leverages lists (NIP-51) to store links to blobs in a way that resembles a traditional file system.
-- **File searches:** Easily search for files on any connected server by name, file type, mime type, extension, or file size, or combined any search type to find exactly what you need. Bloom also has some easy to access filters for popular file types right from the toolbar.
-- **Keep files safe:** Make backup copies on other servers with just a couple of clicks.
-- **Keep files private:** At upload, users have the option of marking files as private which encrypts the payload with AES-GCM (NIP-44) locally before sending it to the defined servers. Note that since files are encrypted on the user's machine, Bloom cannot currently encrypt files that already exist on a remote server.
-- **Share easily:** Grab ready-to-use links without digging through menus or share directly to Nostr by creating a note with embedded media or sending it to other users directly via DM (NIP-04) or private DM (NIP-17 encrypted via NIP-44 and sealed via NIP-59) without ever having to leave Bloom.
-- **Share privately:** Since files are uploaded to publicly accessible servers, anyone with access to the link can access it. Bloom provides a proxy microservice so that you can create private links that obfuscate the originating URL for sharing. You can delete private links at any time and that file will no longer be accessible to anyone that has the link. Additionally, you can set optional expiration dates on links for additional control.
-- **Metadata support:** Bloom fully supports editing blob metadata both at time of upload and at any point after. This is done through Nostr NIP-94 support. This allows users to "rename" blob hashes to human-readable names and add additional data for certain filetypes. Users can also set a "folder" tag on the fly. Bloom also has an option to remove EXIF metadata from images at the time of upload.
-- **Media support:** Play your music right from Bloom, and with rich metadata support, actually know what you're playing. Audio files with ID3 tags will be automatically parsed and converted into metadata tags at the time of upload.
-- **Connection management:** Manage your Blossom and NIP-96 servers as well as Nostr relay list (NIP-65) right from Bloom. We also support Satellite.earth's API if you use their servers for uploads.
-- **Easily edit your Nostr profile:** You can edit your Nostr profile (kind-0) right from Bloom, and quickly search for avatar and banner images right from your connected servers without having to copy URLs from somewhere else.
-- **Fully customizable:** Control various UI elements and more right from the Settings page. You can optionally save your settings to your preferred relay list (NIP-77) to have your settings synced across all your devices. You can leave this option disabled, but your sessions will only be saved on local storage.
+**Bloom** is an intuitive, privacy-focused file manager for **Blossom** and **NIP-96** servers. It lets you store, organize, and share files across the distributed Nostr ecosystem with no passwords required.
+
+---
+
+## What Bloom Can Do
+
+- **Simple Sign-In:** Sign in instantly with your Nostr npub using a browser extension (NIP-07) or a remote signer (NIP-46).
+- **Organized Storage:** View all your files across connected servers at a glance. Create folder-like structures using lists (NIP-51) so you can organize blobs as if you were in a traditional file system.
+- **Smart Search:** Find anything by name, file type, MIME type, extension, or size. Bloom includes quick filters for common file types right in the toolbar.
+- **Backup and Safety:** Replicate your files to other servers with just a few clicks to ensure they’re never lost.
+- **Private by Design:** Encrypt files locally using AES-GCM (NIP-44) before upload. Please note that Bloom cannot retroactively encrypt files that already exist on a remote server.
+- **Easy Sharing:** Generate shareable links or post directly to Nostr as public notes, DMs (NIP-04), or private DMs (NIP-17 + NIP-59) without leaving Bloom.
+- **Private Links:** Use Bloom’s optional proxy microservice to hide server URLs and create expiring or revocable private links.
+- **Folder Sharing:** Make folders public so anyone can view and download contents without logging in, using NIP-19 events.
+- **Metadata and File Info:** Edit file metadata anytime via NIP-94. Rename blobs, tag folders, or strip EXIF data from images on upload.
+- **Built-in Media Support:** Play audio directly in Bloom. Files with ID3 tags are automatically parsed into readable metadata.
+- **Connection Management:** Easily manage your Blossom and NIP-96 media servers, and Nostr relay (NIP-65) connections.
+- **Profile Editing:** Edit your Nostr profile (kind-0) from within Bloom, and quickly choose avatars or banners from your connected servers.
+- **Customization and Sync:** Personalize your interface and settings. Optionally sync preferences across devices using NIP-77, or keep them local for privacy.
+
+---
 
 ## Before You Start
 - You need a browser with a Nostr extension such as Alby installed, or have a remote signer such as Amber available.
@@ -21,7 +28,7 @@ Bloom is a simple to use and intuitive file manager interface for Blossom and NI
 ## Quick Start
 If you wish to set up the event proxy to serve private links (links to files without exposing the Blossom endpoints) follow the steps below. If you do not wish to serve private links, skip to the **Development Build** or **Production Build** sections further down.
 
-## Setting up the private link proxy (Optional)
+### Setting up the private link proxy (Optional)
 
 If you want to proxy private links, follow the instructions below. This is optional, but recommended.
 
@@ -46,29 +53,31 @@ If you want to proxy private links, follow the instructions below. This is optio
    pnpm install
    pnpm build
    pnpm start
-   # The proxy will start listening at http://localhost:8787 by default
+   # The proxy will start listening at http://localhost:8787 by default. 
+   # Change this to the domain you will be using to server proxy links. 
+   # We recommend using a subdomain such as https://private.mydomain.com
    ```
 
-## Development Build
+### Development Build
 ```bash
 pnpm install
 pnpm dev
 # open http://localhost:5173
 ```
 
-## Production Build
+### Production Build
 ```bash
 pnpm build
 pnpm preview
 # open http://localhost:4173
 ```
 
-## Docker
+### Docker
 You can build and run the production bundle inside a container without installing pnpm locally. Provide the proxy values as build arguments (replace them inline or export them in your shell) before running the container.
 
 ```bash
 docker build \
-  --build-arg VITE_PRIVATE_LINK_SERVICE_HOST=${VITE_PRIVATE_LINK_SERVICE_HOST:-http://localhost:8787} \
+  --build-arg VITE_PRIVATE_LINK_SERVICE_HOST=${VITE_PRIVATE_LINK_SERVICE_HOST:-CHANGE_THIS_BEFORE_BUILDING \
   --build-arg VITE_PRIVATE_LINK_SERVICE_PUBKEY=${VITE_PRIVATE_LINK_SERVICE_PUBKEY:-CHANGE_THIS_BEFORE_BUILDING} \
   -t bloom-web .
 docker run --rm -p 3000:80 bloom-web
