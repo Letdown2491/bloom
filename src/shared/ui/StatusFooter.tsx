@@ -297,7 +297,7 @@ export const StatusFooter = memo(function StatusFooter({
               <span className="flex flex-1 items-center justify-center sm:justify-start">
                 <ServersIcon size={14} aria-hidden="true" />
               </span>
-              <span className="hidden flex-1 truncate text-left pl-1 sm:flex">{currentServerLabel}</span>
+              <span className="hidden sm:inline-flex sm:pl-2 sm:text-left sm:whitespace-nowrap">{currentServerLabel}</span>
               <span className={`hidden items-center ${serverArrowClass} sm:flex`}>
                 <ChevronDownIcon size={12} aria-hidden="true" />
               </span>
