@@ -494,6 +494,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
 }) => {
   const isLightTheme = theme === "light";
   const isSmallScreen = useIsCompactScreen();
+  const segmentedHighlightTone = isLightTheme ? "blue" : "default";
   const syncHeadingId = React.useId();
   const syncDescriptionId = React.useId();
   const defaultServerHeadingId = React.useId();
@@ -902,7 +903,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                           className="flex flex-wrap justify-end gap-2"
                           disabled={isBusy}
                           theme={theme}
-                          highlightTone="blue"
+                          highlightTone={segmentedHighlightTone}
                         />
                       </div>
                     </div>
@@ -1075,7 +1076,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
               describedBy={viewDescriptionId}
               variant="compact"
               theme={theme}
-              highlightTone="blue"
+              highlightTone={segmentedHighlightTone}
             />
           </SettingCard>
         ),
@@ -1095,7 +1096,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
               describedBy={filterDescriptionId}
               variant="compact"
               theme={theme}
-              highlightTone="blue"
+              highlightTone={segmentedHighlightTone}
             />
           </SettingCard>
         ),
@@ -1115,7 +1116,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
               describedBy={sortDescriptionId}
               variant="compact"
               theme={theme}
-              highlightTone="blue"
+              highlightTone={segmentedHighlightTone}
             />
           </SettingCard>
         ),
@@ -1135,7 +1136,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
               describedBy={sortDirectionDescriptionId}
               variant="compact"
               theme={theme}
-              highlightTone="blue"
+              highlightTone={segmentedHighlightTone}
             />
           </SettingCard>
         ),
