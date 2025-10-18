@@ -1688,7 +1688,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   }, []);
   const handleOpenSupport = React.useCallback(() => {
     if (typeof window === "undefined") return;
-    window.open("https://getalby.com/p/invincibleperfection384952", "_blank", "noopener,noreferrer");
+    window.open("https://getalby.com/p/geek", "_blank", "noopener,noreferrer");
   }, []);
 
   return (
@@ -1776,7 +1776,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 </li>
                 <li>
                   <a
-                    href="https://getalby.com/p/invincibleperfection384952"
+                    href="https://getalby.com/p/geek"
                     target="_blank"
                     rel="noopener noreferrer"
                     onClick={() => setNavMenuOpen(false)}

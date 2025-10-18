@@ -185,7 +185,7 @@ export const StatusFooter = memo(function StatusFooter({
             <span className="font-medium">GitHub</span>
           </a>
           <a
-            href="https://getalby.com/p/invincibleperfection384952"
+            href="https://getalby.com/p/geek"
             target="_blank"
             rel="noopener noreferrer"
             className={`ml-auto flex items-center gap-2 rounded-xl px-3 py-1.5 text-slate-200 transition ${
@@ -392,7 +392,7 @@ export const StatusFooter = memo(function StatusFooter({
 
           {showSupportLink && (
             <a
-              href="https://getalby.com/p/invincibleperfection384952"
+            href="https://getalby.com/p/geek"
               target="_blank"
               rel="noopener noreferrer"
               className={`${donateLinkClass} hidden sm:flex`}
