@@ -1365,9 +1365,6 @@ export default function App() {
       queryClient.invalidateQueries({ queryKey: ["server-blobs", server.url] });
     });
 
-    const previousTab = uploadReturnTarget?.tab;
-    const targetTab: TabId = previousTab && previousTab !== "upload" ? previousTab : "browse";
-
     if (uploadReturnTarget && uploadReturnTarget.selectedServer !== selectedServer) {
       setSelectedServer(uploadReturnTarget.selectedServer);
     }
@@ -1380,8 +1377,6 @@ export default function App() {
       });
     }
 
-    setUploadReturnTarget(null);
-    selectTab(targetTab);
     showStatusMessage("All files uploaded successfully", "success", 5000);
   };
 

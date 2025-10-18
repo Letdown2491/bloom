@@ -234,7 +234,7 @@ describe("App upload return flow", () => {
     await user.click(screen.getByRole("button", { name: "Mark Upload Complete" }));
 
     await waitFor(() => {
-      expect(screen.getByTestId("active-tab")).toHaveTextContent("browse");
+      expect(screen.getByTestId("active-tab")).toHaveTextContent("upload");
       expect(__mockState.lastRestoreState).toEqual(__mockActiveList);
       expect(__mockState.restoreHandledCount).toBeGreaterThan(0);
       expect(__mockState.lastFolderSuggestion).toEqual(__mockActiveList.path);

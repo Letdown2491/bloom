@@ -130,6 +130,8 @@ const ENTRY_STATUS_HEADING: Record<UploadEntryStatus, string> = {
   error: "Needs attention",
 };
 
+type UploadPhase = "idle" | "uploading" | "completed" | "attention";
+
 const resetEntryProgress = (entry: UploadEntry): UploadEntry => {
   const serverStatuses = Object.keys(entry.serverStatuses).reduce<Record<string, UploadEntryStatus>>((acc, key) => {
     acc[key] = "idle";
@@ -275,6 +277,36 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
     }
     return { total: entries.length, pending, completed, errors };
   }, [entries]);
+
+  const uploadPhase = useMemo<UploadPhase>(() => {
+    if (entries.some(entry => entry.status === "uploading")) return "uploading";
+    if (busy) return "uploading";
+    if (entries.length > 0 && entries.every(entry => entry.status === "success")) return "completed";
+    if (entries.some(entry => entry.status === "error")) return "attention";
+    return "idle";
+  }, [busy, entries]);
+
+  const showSetupContent = uploadPhase === "idle" || uploadPhase === "attention";
+  const readOnlyMode = uploadPhase === "uploading" || uploadPhase === "completed";
+
+  const uploadCompletionPercent = useMemo(() => {
+    if (entryCounts.total === 0) return 0;
+    return Math.min(100, Math.round((entryCounts.completed / entryCounts.total) * 100));
+  }, [entryCounts.completed, entryCounts.total]);
+
+  const targetServerNames = useMemo(() => {
+    if (!selectedServers.length) return "";
+    const seen = new Set<string>();
+    const labels = selectedServers
+      .map(url => serverMap.get(url)?.name || url)
+      .filter(label => {
+        if (seen.has(label)) return false;
+        seen.add(label);
+        return true;
+      });
+    return labels.join(", ");
+  }, [selectedServers, serverMap]);
+
   const filteredEntries = useMemo(() => {
     switch (entryFilter) {
       case "pending":
@@ -345,6 +377,12 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
       noFolderCount,
     };
   }, [entries]);
+
+  const completedEntries = useMemo(() => entries.filter(entry => entry.status === "success"), [entries]);
+  const completedTotalBytes = useMemo(
+    () => completedEntries.reduce((acc, entry) => acc + entry.file.size, 0),
+    [completedEntries]
+  );
 
   const [bulkFolderSelector, setBulkFolderSelector] = useState<{ value: string; isPrivate: boolean; error: string | null } | null>(null);
 
@@ -447,6 +485,11 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
       setBulkFolderSelector(null);
     }
   }, [entries.length]);
+  React.useEffect(() => {
+    if (!showSetupContent) {
+      setBulkFolderSelector(null);
+    }
+  }, [showSetupContent]);
 
   React.useEffect(() => {
     if (!feedback) return;
@@ -1172,7 +1215,106 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
         <p className="text-xs text-slate-400">After adding a file for upload, you will be able to edit metadata before publishing to your selected server. Bloom will automatically post metadata for music files with embedded ID3 tags.</p>
       </header>
       <div className="space-y-3">
-        <div className="space-y-2">
+        {uploadPhase === "uploading" ? (
+          <div
+            className={`rounded-xl border px-4 py-3 text-sm ${
+              isLightTheme
+                ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                : "border-emerald-500/40 bg-emerald-500/10 text-emerald-200"
+            }`}
+          >
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex flex-col gap-1">
+                <span className="text-sm font-semibold">Uploading files</span>
+                <span className="text-xs opacity-80">
+                  {targetServerNames ? `Sending to ${targetServerNames}.` : "Sending to your selected servers."}
+                </span>
+              </div>
+              <span
+                className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                  isLightTheme ? "bg-emerald-200 text-emerald-700" : "bg-emerald-500/30 text-emerald-100"
+                }`}
+              >
+                {uploadCompletionPercent}% complete
+              </span>
+            </div>
+            <p className={`mt-2 text-xs ${isLightTheme ? "text-emerald-700/80" : "text-emerald-100/80"}`}>
+              Setup controls are hidden while uploads finish. Track progress below.
+            </p>
+          </div>
+        ) : null}
+        {uploadPhase === "completed" && completedEntries.length > 0 ? (
+          <div
+            className={`rounded-xl border px-4 py-4 ${
+              isLightTheme
+                ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                : "border-emerald-500/40 bg-emerald-500/10 text-emerald-100"
+            }`}
+          >
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex flex-col gap-1">
+                <span className="text-sm font-semibold">Uploads complete</span>
+                <span className="text-xs opacity-80">
+                  {`Uploaded ${completedEntries.length} ${completedEntries.length === 1 ? "file" : "files"} (${prettyBytes(
+                    completedTotalBytes
+                  )})${targetServerNames ? ` to ${targetServerNames}` : ""}.`}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={reset}
+                className="inline-flex items-center gap-2 rounded-xl bg-emerald-500 px-3 py-2 text-xs font-semibold text-emerald-950 transition hover:bg-emerald-400"
+              >
+                Start new upload
+              </button>
+            </div>
+            <p className={`mt-2 text-xs ${isLightTheme ? "text-emerald-700/80" : "text-emerald-100/80"}`}>
+              You can keep this summary for reference or reset to prepare a new batch.
+            </p>
+            <div className="mt-4 space-y-2">
+              <span className={`text-[11px] font-semibold uppercase tracking-wide ${isLightTheme ? "text-emerald-700/80" : "text-emerald-100/80"}`}>
+                Uploaded files
+              </span>
+              <ul className="space-y-2 text-xs">
+                {completedEntries.map(entry => (
+                  <li
+                    key={entry.id}
+                    className={`flex items-center justify-between rounded-lg border px-3 py-2 ${
+                      isLightTheme ? "border-emerald-200/70 bg-white/70 text-emerald-700" : "border-emerald-500/30 bg-emerald-500/10 text-emerald-100"
+                    }`}
+                  >
+                    <span className="font-medium">{entry.file.name}</span>
+                    <span className={isLightTheme ? "text-emerald-700/70" : "text-emerald-100/70"}>
+                      {prettyBytes(entry.file.size)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              <div className={isLightTheme ? "text-xs text-emerald-700/70" : "text-xs text-emerald-100/70"}>
+                Uploaded {completedEntries.length} {completedEntries.length === 1 ? "file" : "files"} (
+                {prettyBytes(completedTotalBytes)}
+                ){targetServerNames ? ` to ${targetServerNames}.` : "."}
+              </div>
+            </div>
+          </div>
+        ) : null}
+        {uploadPhase === "attention" ? (
+          <div
+            className={`rounded-xl border px-4 py-3 text-sm ${
+              isLightTheme
+                ? "border-amber-300 bg-amber-50 text-amber-700"
+                : "border-amber-400/70 bg-amber-500/10 text-amber-200"
+            }`}
+          >
+            <span className="text-sm font-semibold">Uploads need attention</span>
+            <p className={`mt-1 text-xs ${isLightTheme ? "text-amber-700/80" : "text-amber-100/80"}`}>
+              Review the items below to retry the failed uploads.
+            </p>
+          </div>
+        ) : null}
+        {showSetupContent ? (
+          <>
+            <div className="space-y-2">
           <span className="text-sm text-slate-300">Upload to</span>
           <div className="flex flex-wrap gap-3">
             {servers.map(server => (
@@ -1233,14 +1375,16 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
               tabIndex={-1}
             />
           </div>
-        </div>
-        {signerMissing && (
-          <div className="text-xs text-red-400">Connect your NIP-07 signer to upload.</div>
-        )}
-        {folderNamesInvalid && (
-          <div className="text-xs text-red-400">Folder names cannot include the word "private".</div>
-        )}
-        {uploadSummary && entries.length > 1 && (
+            </div>
+            {signerMissing && (
+              <div className="text-xs text-red-400">Connect your NIP-07 signer to upload.</div>
+            )}
+            {folderNamesInvalid && (
+              <div className="text-xs text-red-400">Folder names cannot include the word "private".</div>
+            )}
+          </>
+        ) : null}
+        {uploadSummary && entries.length > 1 && showSetupContent && (
           <div
             className={`rounded-xl border px-4 py-3 text-sm space-y-2 ${
               isLightTheme
@@ -1304,7 +1448,7 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
             )}
           </div>
         )}
-        {entries.length > 0 ? (
+        {entries.length > 0 && uploadPhase !== "completed" ? (
           <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 px-4 py-3">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="flex flex-wrap items-center gap-2 text-xs text-slate-300">
@@ -1343,63 +1487,65 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
                 })}
               </div>
             </div>
-            <div className="mt-3 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-300">
-              <div className="flex flex-wrap items-center gap-2">
-                {entries.length > 1 && (
-                  <>
-                    <span className="font-medium text-slate-400">Bulk actions:</span>
+            {showSetupContent ? (
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-300">
+                <div className="flex flex-wrap items-center gap-2">
+                  {entries.length > 1 && (
+                    <>
+                      <span className="font-medium text-slate-400">Bulk actions:</span>
+                      <button
+                        type="button"
+                        className="rounded-lg border border-slate-700 px-2 py-1 text-xs font-medium text-slate-200 hover:border-emerald-400 hover:text-emerald-200"
+                        onClick={handleOpenBulkFolderSelector}
+                        disabled={busy}
+                      >
+                        Apply folder…
+                      </button>
+                      <button
+                        type="button"
+                        className="rounded-lg border border-slate-700 px-2 py-1 text-xs font-medium text-slate-200 hover:border-emerald-400 hover:text-emerald-200"
+                        onClick={() => {
+                          const shouldSetPrivate = entries.some(entry => !entry.isPrivate);
+                          setEntries(prev =>
+                            prev.map(entry =>
+                              entry.isPrivate === shouldSetPrivate
+                                ? entry
+                                : resetEntryProgress({ ...entry, isPrivate: shouldSetPrivate })
+                            )
+                          );
+                        }}
+                        disabled={busy}
+                      >
+                        Set {entries.some(entry => !entry.isPrivate) ? "all private" : "all public"}
+                      </button>
+                    </>
+                  )}
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  {entries.length > 1 && (
                     <button
                       type="button"
                       className="rounded-lg border border-slate-700 px-2 py-1 text-xs font-medium text-slate-200 hover:border-emerald-400 hover:text-emerald-200"
-                      onClick={handleOpenBulkFolderSelector}
+                      onClick={() => setAllMetadataVisibility(!allMetadataExpanded)}
                       disabled={busy}
                     >
-                      Apply folder…
+                      {allMetadataExpanded ? "Collapse metadata" : "Expand metadata"}
                     </button>
+                  )}
+                  {hasCompletedEntries ? (
                     <button
                       type="button"
-                      className="rounded-lg border border-slate-700 px-2 py-1 text-xs font-medium text-slate-200 hover:border-emerald-400 hover:text-emerald-200"
-                      onClick={() => {
-                        const shouldSetPrivate = entries.some(entry => !entry.isPrivate);
-                        setEntries(prev =>
-                          prev.map(entry =>
-                            entry.isPrivate === shouldSetPrivate
-                              ? entry
-                              : resetEntryProgress({ ...entry, isPrivate: shouldSetPrivate })
-                          )
-                        );
-                      }}
+                      className="rounded-lg border border-slate-700 px-2 py-1 text-xs font-medium text-slate-200 hover:border-red-500 hover:text-red-300 disabled:cursor-not-allowed disabled:opacity-40"
+                      onClick={clearCompletedEntries}
                       disabled={busy}
                     >
-                      Set {entries.some(entry => !entry.isPrivate) ? "all private" : "all public"}
+                      Clear completed
                     </button>
-                  </>
-                )}
+                  ) : null}
+                </div>
               </div>
-              <div className="flex flex-wrap items-center gap-2">
-                {entries.length > 1 && (
-                  <button
-                    type="button"
-                    className="rounded-lg border border-slate-700 px-2 py-1 text-xs font-medium text-slate-200 hover:border-emerald-400 hover:text-emerald-200"
-                    onClick={() => setAllMetadataVisibility(!allMetadataExpanded)}
-                    disabled={busy}
-                  >
-                    {allMetadataExpanded ? "Collapse metadata" : "Expand metadata"}
-                  </button>
-                )}
-                {hasCompletedEntries ? (
-                  <button
-                    type="button"
-                    className="rounded-lg border border-slate-700 px-2 py-1 text-xs font-medium text-slate-200 hover:border-red-500 hover:text-red-300 disabled:cursor-not-allowed disabled:opacity-40"
-                    onClick={clearCompletedEntries}
-                    disabled={busy}
-                  >
-                    Clear completed
-                  </button>
-                ) : null}
-              </div>
-            </div>
-            {bulkFolderSelector ? (
+            ) : null}
+            {showSetupContent && bulkFolderSelector ? (
               <div
                 className={`mt-3 flex flex-wrap items-center gap-3 rounded-lg border p-3 text-xs ${
                   isLightTheme
@@ -1585,50 +1731,52 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
                                 </>
                               ) : null}
                             </div>
-                            <div className="flex items-center gap-2">
-                              <button
-                                type="button"
-                                onClick={() => toggleMetadataVisibility(entry.id)}
-                                className={`flex items-center justify-center rounded-lg border p-2 text-xs transition ${
-                                  isLightTheme
-                                    ? "border-slate-300 text-slate-600 hover:border-emerald-500 hover:text-emerald-600"
-                                    : "border-slate-700 text-slate-200 hover:border-emerald-500 hover:text-emerald-400"
-                                }`}
-                                title={showMetadata ? "Hide metadata" : "Edit metadata"}
-                              >
-                                <EditIcon size={16} aria-hidden="true" />
-                                <span className="sr-only">{showMetadata ? "Hide metadata" : "Edit metadata"}</span>
-                              </button>
-                              {entry.status === "error" ? (
+                            {!readOnlyMode ? (
+                              <div className="flex items-center gap-2">
                                 <button
                                   type="button"
-                                  onClick={() => retryEntry(entry.id)}
-                                  className={`rounded-lg border px-3 py-1 text-xs font-medium uppercase tracking-wide transition disabled:cursor-not-allowed disabled:opacity-40 ${
+                                  onClick={() => toggleMetadataVisibility(entry.id)}
+                                  className={`flex items-center justify-center rounded-lg border p-2 text-xs transition ${
                                     isLightTheme
-                                      ? "border-amber-500 text-amber-600 hover:border-amber-400 hover:text-amber-500"
-                                      : "border-amber-500 text-amber-200 hover:border-amber-400 hover:text-amber-100"
+                                      ? "border-slate-300 text-slate-600 hover:border-emerald-500 hover:text-emerald-600"
+                                      : "border-slate-700 text-slate-200 hover:border-emerald-500 hover:text-emerald-400"
+                                  }`}
+                                  title={showMetadata ? "Hide metadata" : "Edit metadata"}
+                                >
+                                  <EditIcon size={16} aria-hidden="true" />
+                                  <span className="sr-only">{showMetadata ? "Hide metadata" : "Edit metadata"}</span>
+                                </button>
+                                {entry.status === "error" ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => retryEntry(entry.id)}
+                                    className={`rounded-lg border px-3 py-1 text-xs font-medium uppercase tracking-wide transition disabled:cursor-not-allowed disabled:opacity-40 ${
+                                      isLightTheme
+                                        ? "border-amber-500 text-amber-600 hover:border-amber-400 hover:text-amber-500"
+                                        : "border-amber-500 text-amber-200 hover:border-amber-400 hover:text-amber-100"
+                                    }`}
+                                    disabled={isEntryUploading}
+                                    title="Retry this upload"
+                                  >
+                                    Retry
+                                  </button>
+                                ) : null}
+                                <button
+                                  type="button"
+                                  onClick={() => removeEntry(entry.id)}
+                                  className={`flex items-center justify-center rounded-lg border p-2 text-xs transition disabled:cursor-not-allowed disabled:opacity-40 ${
+                                    isLightTheme
+                                      ? "border-slate-300 text-slate-500 hover:border-red-500 hover:text-red-500"
+                                      : "border-slate-700 text-slate-200 hover:border-red-500 hover:text-red-300"
                                   }`}
                                   disabled={isEntryUploading}
-                                  title="Retry this upload"
+                                  title="Remove from upload queue"
                                 >
-                                  Retry
+                                  <TrashIcon size={16} aria-hidden="true" />
+                                  <span className="sr-only">Remove</span>
                                 </button>
-                              ) : null}
-                              <button
-                                type="button"
-                                onClick={() => removeEntry(entry.id)}
-                                className={`flex items-center justify-center rounded-lg border p-2 text-xs transition disabled:cursor-not-allowed disabled:opacity-40 ${
-                                  isLightTheme
-                                    ? "border-slate-300 text-slate-500 hover:border-red-500 hover:text-red-500"
-                                    : "border-slate-700 text-slate-200 hover:border-red-500 hover:text-red-300"
-                                }`}
-                                disabled={isEntryUploading}
-                                title="Remove from upload queue"
-                              >
-                                <TrashIcon size={16} aria-hidden="true" />
-                                <span className="sr-only">Remove</span>
-                              </button>
-                            </div>
+                              </div>
+                            ) : null}
                           </div>
                         </div>
                         {serverDetails.length > 0 ? (
@@ -1701,7 +1849,7 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
                               }`}
                               checked={entry.isPrivate}
                               onChange={event => setEntryPrivacy(entry.id, event.target.checked)}
-                              disabled={isEntryUploading}
+                              disabled={isEntryUploading || readOnlyMode}
                             />
                             <span className="flex flex-col gap-1 text-left">
                               <span className={`font-medium ${isLightTheme ? "text-slate-900" : "text-slate-100"}`}>
@@ -1722,7 +1870,7 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
                                 onChange={changes => updateAudioMetadata(entry.id, changes)}
                                 folderOptions={entry.isPrivate ? privateFolderOptions : publicFolderOptions}
                                 isPrivate={entry.isPrivate}
-                                disabled={isEntryUploading}
+                                disabled={isEntryUploading || readOnlyMode}
                               />
                             ) : (
                               <GenericMetadataForm
@@ -1730,19 +1878,19 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
                                 onChange={changes => updateGenericMetadata(entry.id, changes)}
                                 folderOptions={entry.isPrivate ? privateFolderOptions : publicFolderOptions}
                                 isPrivate={entry.isPrivate}
-                                disabled={isEntryUploading}
+                                disabled={isEntryUploading || readOnlyMode}
                               />
                             )}
                           </div>
-                        ) : metadata.kind === "audio" ? (
+                        ) : !readOnlyMode && metadata.kind === "audio" ? (
                           <div className={`text-xs ${isLightTheme ? "text-slate-500" : "text-slate-400"}`}>
                             Metadata detected{entry.extractedAudioMetadata ? " from the file." : "."} Click "Edit metadata" to review.
                           </div>
-                        ) : (
+                        ) : !readOnlyMode ? (
                           <div className={`text-xs ${isLightTheme ? "text-slate-500" : "text-slate-400"}`}>
                             Click "Edit metadata" to override the display name, upload location, and other file specific metadata.
                           </div>
-                        )}
+                        ) : null}
                       </div>
                     );
                   }
@@ -1752,7 +1900,7 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
             )}
           </div>
         ) : null}
-        {entries.length > 0 && hasImageEntries && (
+        {showSetupContent && entries.length > 0 && hasImageEntries && (
           <div className="flex flex-wrap gap-4 text-sm text-slate-300">
             <label className="flex items-center gap-2">
               <input type="checkbox" checked={cleanMetadata} onChange={e => setCleanMetadata(e.target.checked)} />
@@ -1770,55 +1918,29 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
             </label>
           </div>
         )}
-        <div className="flex justify-end gap-3">
-          <button
-            onClick={() => handleUpload()}
-            disabled={!entries.length || !selectedServers.length || busy || !canUpload || !hasPendingUploads}
-            title="Upload selected files"
-            className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            <UploadIcon size={18} aria-hidden="true" />
-            <span>{busy ? "Uploading…" : "Upload"}</span>
-          </button>
-          <button
-            onClick={reset}
-            className="inline-flex items-center gap-2 rounded-xl bg-slate-800 px-4 py-2 text-sm font-semibold text-slate-100 transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
-            disabled={busy}
-            title="Reset upload queue"
-          >
-            <TrashIcon size={18} aria-hidden="true" />
-            <span>Reset</span>
-          </button>
-        </div>
+        {showSetupContent ? (
+          <div className="flex justify-end gap-3">
+            <button
+              onClick={() => handleUpload()}
+              disabled={!entries.length || !selectedServers.length || busy || !canUpload || !hasPendingUploads}
+              title="Upload selected files"
+              className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <UploadIcon size={18} aria-hidden="true" />
+              <span>{busy ? "Uploading…" : "Upload"}</span>
+            </button>
+            <button
+              onClick={reset}
+              className="inline-flex items-center gap-2 rounded-xl bg-slate-800 px-4 py-2 text-sm font-semibold text-slate-100 transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
+              disabled={busy}
+              title="Reset upload queue"
+            >
+              <TrashIcon size={18} aria-hidden="true" />
+              <span>Reset</span>
+            </button>
+          </div>
+        ) : null}
       </div>
-      {transfers.length + syncTransfers.length > 0 && (
-        <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3 space-y-2 text-xs text-slate-300">
-          {Array.from(new Map([...syncTransfers, ...transfers].map(item => [item.id, item])).values()).map(item => {
-            const serverName = serverMap.get(item.serverUrl)?.name || item.serverUrl;
-            const percentRaw = item.total ? (item.transferred / item.total) * 100 : item.status === "success" ? 100 : 0;
-            const percent = Math.min(100, Math.max(0, Math.round(percentRaw)));
-            return (
-              <div key={item.id} className="space-y-1">
-                <div className="flex justify-between">
-                  <span>{item.fileName}</span>
-                  <span>
-                  {item.status === "uploading" && `${percent}%`}
-                  {item.status === "success" && "done"}
-                  {item.status === "error" && (item.message || "error")}
-                </span>
-              </div>
-              <div className="h-1.5 rounded bg-slate-800 overflow-hidden">
-                <div
-                  className={`h-full ${item.status === "error" ? "bg-red-500" : "bg-emerald-500"}`}
-                  style={{ width: `${percent}%` }}
-                />
-              </div>
-              <div className="text-slate-300">{serverName}</div>
-            </div>
-            );
-          })}
-        </div>
-      )}
       {feedback ? (
         <div className="pointer-events-none absolute bottom-4 right-4 z-50">
           <div className="pointer-events-auto rounded-lg border border-emerald-400/60 bg-slate-900/90 px-4 py-2 text-sm text-emerald-100 shadow-lg backdrop-blur">
