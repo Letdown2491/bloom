@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 
 import type { BlossomBlob } from "../../shared/api/blossomClient";
-import { buildNip94EventTemplate } from "../../shared/api/nip94";
 import {
   applyAliasUpdate,
   getStoredAudioMetadata,
@@ -19,7 +18,7 @@ import type { StatusMessageTone } from "../../shared/types/status";
 import { usePrivateLibrary } from "../../app/context/PrivateLibraryContext";
 import type { PrivateListEntry } from "../../shared/domain/privateList";
 import { useFolderLists } from "../../app/context/FolderListContext";
-import { loadNdkModule } from "../../shared/api/ndkModule";
+import { publishNip94Metadata } from "../../shared/api/nip94Publisher";
 
 type NdkInstance = NdkContextValue["ndk"];
 type NdkSigner = NdkContextValue["signer"];
@@ -203,6 +202,7 @@ export const RenameDialog: React.FC<RenameDialogProps> = ({ blob, ndk, signer, r
     let extraTags: string[][] | undefined;
     let audioMetadata: BlobAudioMetadata | null = null;
     let needsAliasUpdate = false;
+    let folderForEvent: string | null | undefined = undefined;
 
     if (treatAsMusic) {
       const title = audioFields.title.trim();
@@ -290,16 +290,8 @@ export const RenameDialog: React.FC<RenameDialogProps> = ({ blob, ndk, signer, r
       needsAliasUpdate = true;
     }
 
-    if (desiredFolder !== null) {
-      if (!extraTags) {
-        extraTags = [];
-      }
-      extraTags.push(["folder", desiredFolder]);
-    } else if (folderChanged) {
-      if (!extraTags) {
-        extraTags = [];
-      }
-      extraTags.push(["folder", ""]);
+    if (folderChanged) {
+      folderForEvent = desiredFolder ?? null;
     }
 
     const applyLocalUpdates = (timestampSeconds: number) => {
@@ -385,41 +377,16 @@ export const RenameDialog: React.FC<RenameDialogProps> = ({ blob, ndk, signer, r
 
       let aliasEventTimestamp: number | undefined;
       if (needsAliasUpdate) {
-        const { NDKEvent, NDKRelaySet, NDKPublishError } = await loadNdkModule();
-        const template = buildNip94EventTemplate({
+        const publishResult = await publishNip94Metadata({
+          ndk,
+          signer,
           blob,
-          alias: aliasForEvent ?? "",
+          relays: relayList,
+          alias: aliasForEvent,
+          folderPath: folderForEvent,
           extraTags,
         });
-        const event = new NDKEvent(ndk, template);
-        if (!event.created_at) {
-          event.created_at = nowSeconds;
-        }
-        await event.sign();
-
-        let successes = 0;
-        let lastError: Error | null = null;
-        for (const relayUrl of relayList) {
-          try {
-            const relaySet = NDKRelaySet.fromRelayUrls([relayUrl], ndk);
-            await event.publish(relaySet, 7000, 1);
-            successes += 1;
-          } catch (publishError) {
-            if (publishError instanceof NDKPublishError) {
-              lastError = new Error(publishError.relayErrors || publishError.message || "Update failed");
-            } else if (publishError instanceof Error) {
-              lastError = publishError;
-            } else {
-              lastError = new Error("Update failed");
-            }
-          }
-        }
-
-        if (successes === 0) {
-          throw lastError ?? new Error("No relays accepted the update.");
-        }
-
-        aliasEventTimestamp = event.created_at ?? nowSeconds;
+        aliasEventTimestamp = publishResult.createdAt;
         applyAliasUpdate(undefined, blob.sha256, aliasForStore, aliasEventTimestamp);
         if (treatAsMusic) {
           const updatedAt = typeof aliasEventTimestamp === "number" ? aliasEventTimestamp * 1000 : undefined;

@@ -66,6 +66,7 @@ export const useBlobMetadata = (blobs: BlossomBlob[], options?: MetadataOptions)
   const attemptedLookups = useRef(new Set<string>());
   const visibleRequestsRef = useRef(new Set<string>());
   const passiveDetectors = useRef(new Map<string, () => void>());
+  const blobLookupRef = useRef(new Map<string, BlossomBlob>());
   const isMountedRef = useRef(true);
 
   useEffect(() => () => {
@@ -93,6 +94,13 @@ export const useBlobMetadata = (blobs: BlossomBlob[], options?: MetadataOptions)
       });
       return next;
     });
+    const lookup = new Map<string, BlossomBlob>();
+    blobs.forEach(blob => {
+      if (blob.sha256) {
+        lookup.set(blob.sha256, blob);
+      }
+    });
+    blobLookupRef.current = lookup;
 
     const currentShas = new Set(blobs.map(blob => blob.sha256));
     pendingLookups.current.forEach(sha => {
@@ -317,39 +325,30 @@ export const useBlobMetadata = (blobs: BlossomBlob[], options?: MetadataOptions)
 
     const MAX_LOOKUPS_PER_TICK = 6;
     let processedThisCycle = 0;
+    const requestedShas = Array.from(visibleRequestsRef.current);
 
-    for (const blob of blobs) {
-      const overrides = resolvedMetaSnapshot[blob.sha256];
+    for (const sha of requestedShas) {
+      const blob = blobLookupRef.current.get(sha);
+      if (!blob) {
+        visibleRequestsRef.current.delete(sha);
+        continue;
+      }
+      const overrides = resolvedMetaSnapshot[sha];
       const effectiveType = overrides?.type ?? blob.type;
       const effectiveName = overrides?.name ?? blob.name;
       const hasType = Boolean(effectiveType && effectiveType !== "application/octet-stream");
       const hasName = Boolean(effectiveName && effectiveName !== blob.sha256);
-      const resourceUrl = blob.url || (() => {
-        const fallback = blob.serverUrl ?? baseUrl;
-        if (!fallback) return undefined;
-        return `${fallback.replace(/\/$/, "")}/${blob.sha256}`;
-      })();
-      if (!resourceUrl) continue;
-      const sameOrigin = isSameOrigin(resourceUrl);
-      const alreadyAttempted = attemptedLookups.current.has(blob.sha256);
-      const alreadyLoading = pendingLookups.current.has(blob.sha256);
-      const canFetch = requiresAuth || sameOrigin;
       const storageServer = blob.serverUrl ?? baseUrl;
-      const storedMetadata = getStoredBlobMetadata(storageServer, blob.sha256);
+      const storedMetadata = getStoredBlobMetadata(storageServer, sha);
       const skipDueToFreshAttempt = isMetadataFresh(storedMetadata, ttlMs);
-      const visibilityRequested = visibleRequestsRef.current.has(blob.sha256);
 
       if (hasType && hasName) {
-        visibleRequestsRef.current.delete(blob.sha256);
-        continue;
-      }
-
-      if (!visibilityRequested) {
+        visibleRequestsRef.current.delete(sha);
         continue;
       }
 
       if (skipDueToFreshAttempt) {
-        visibleRequestsRef.current.delete(blob.sha256);
+        visibleRequestsRef.current.delete(sha);
         continue;
       }
 
@@ -357,19 +356,34 @@ export const useBlobMetadata = (blobs: BlossomBlob[], options?: MetadataOptions)
         continue;
       }
 
+      const resourceUrl =
+        blob.url ||
+        (() => {
+          const fallback = blob.serverUrl ?? baseUrl;
+          if (!fallback) return undefined;
+          return `${fallback.replace(/\/$/, "")}/${blob.sha256}`;
+        })();
+      if (!resourceUrl) {
+        continue;
+      }
+
+      const sameOrigin = isSameOrigin(resourceUrl);
+      const canFetch = requiresAuth || sameOrigin;
       if (!canFetch) {
-        visibleRequestsRef.current.delete(blob.sha256);
+        visibleRequestsRef.current.delete(sha);
         ensurePassiveProbe(blob, resourceUrl);
         continue;
       }
 
+      const alreadyAttempted = attemptedLookups.current.has(sha);
+      const alreadyLoading = pendingLookups.current.has(sha);
       if (alreadyAttempted || alreadyLoading) {
-        visibleRequestsRef.current.delete(blob.sha256);
+        visibleRequestsRef.current.delete(sha);
         continue;
       }
 
-      attemptedLookups.current.add(blob.sha256);
-      visibleRequestsRef.current.delete(blob.sha256);
+      attemptedLookups.current.add(sha);
+      visibleRequestsRef.current.delete(sha);
       enqueue(() => resolveMetadata(blob, resourceUrl));
       processedThisCycle += 1;
       if (processedThisCycle >= MAX_LOOKUPS_PER_TICK) {

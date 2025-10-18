@@ -461,10 +461,16 @@ export function setStoredBlobMetadata(
 
 export function mergeBlobWithStoredMetadata(serverUrl: string | undefined, blob: BlossomBlob): BlossomBlob {
   const stored = getStoredBlobMetadata(serverUrl, blob.sha256);
-  const merged: BlossomBlob = { ...blob };
+  let merged: BlossomBlob = blob;
+  const ensureClone = () => {
+    if (merged === blob) {
+      merged = { ...blob };
+    }
+    return merged;
+  };
   const currentMetadataName =
-    typeof merged.__bloomMetadataName === "string" && merged.__bloomMetadataName.trim()
-      ? merged.__bloomMetadataName.trim()
+    typeof blob.__bloomMetadataName === "string" && blob.__bloomMetadataName.trim()
+      ? blob.__bloomMetadataName.trim()
       : null;
   let metadataName = currentMetadataName;
 
@@ -479,30 +485,41 @@ export function mergeBlobWithStoredMetadata(serverUrl: string | undefined, blob:
     }
   }
 
+  const currentName = merged.name;
+
   if (typeof storedNameValue === "string") {
-    merged.name = storedNameValue;
+    if (currentName !== storedNameValue) {
+      ensureClone().name = storedNameValue;
+    }
     metadataName = storedNameValue;
   } else if (hasStoredName && storedNameValue === null) {
-    if (!merged.name) {
-      merged.name = undefined;
+    if (!currentName) {
+      ensureClone().name = undefined;
     }
     metadataName = null;
   }
 
-  if (!metadataName && typeof merged.name === "string") {
-    const trimmedName = merged.name.trim();
+  if (!metadataName && typeof blob.name === "string") {
+    const trimmedName = blob.name.trim();
     if (trimmedName) {
       metadataName = trimmedName;
-      merged.name = trimmedName;
+      if (currentName !== trimmedName) {
+        ensureClone().name = trimmedName;
+      }
     }
   }
 
-  merged.__bloomMetadataName = metadataName ?? null;
+  if (merged.__bloomMetadataName !== (metadataName ?? null)) {
+    ensureClone().__bloomMetadataName = metadataName ?? null;
+  }
   if (stored?.type && !merged.type) {
-    merged.type = stored.type;
+    ensureClone().type = stored.type;
   }
   if (Object.prototype.hasOwnProperty.call(stored ?? {}, "folderPath")) {
-    merged.folderPath = normalizeFolderPathInput(stored?.folderPath) ?? null;
+    const nextFolder = normalizeFolderPathInput(stored?.folderPath) ?? null;
+    if ((merged.folderPath ?? null) !== nextFolder) {
+      ensureClone().folderPath = nextFolder;
+    }
   } else if (typeof merged.folderPath === "string") {
     queueStoredBlobMetadata(serverUrl, blob.sha256, { folderPath: merged.folderPath });
   }
@@ -516,7 +533,16 @@ export function mergeBlobWithStoredMetadata(serverUrl: string | undefined, blob:
 }
 
 export function mergeBlobsWithStoredMetadata(serverUrl: string | undefined, blobs: BlossomBlob[]) {
-  return blobs.map(blob => combineGlobalAlias(blob, mergeBlobWithStoredMetadata(serverUrl, blob)));
+  let changed = false;
+  const mergedBlobs = blobs.map(blob => {
+    const merged = mergeBlobWithStoredMetadata(serverUrl, blob);
+    const combined = combineGlobalAlias(blob, merged);
+    if (combined !== blob) {
+      changed = true;
+    }
+    return combined;
+  });
+  return changed ? mergedBlobs : blobs;
 }
 
 export function rememberBlobMetadata(
@@ -640,12 +666,19 @@ export function isMetadataFresh(stored: StoredMetadata | undefined, ttlMs: numbe
 function combineGlobalAlias(original: BlossomBlob, merged: BlossomBlob): BlossomBlob {
   const global = getStoredBlobMetadata(undefined, merged.sha256);
   if (!global) return merged;
-  const combined: BlossomBlob = { ...merged };
+  let combined: BlossomBlob = merged;
+  const ensureClone = () => {
+    if (combined === merged) {
+      combined = { ...merged };
+    }
+    return combined;
+  };
   const currentMetadataName =
-    typeof combined.__bloomMetadataName === "string" && combined.__bloomMetadataName.trim()
-      ? combined.__bloomMetadataName.trim()
+    typeof merged.__bloomMetadataName === "string" && merged.__bloomMetadataName.trim()
+      ? merged.__bloomMetadataName.trim()
       : null;
   let metadataName = currentMetadataName;
+  const currentName = combined.name;
 
   const hasGlobalName = Object.prototype.hasOwnProperty.call(global, "name");
   let globalNameValue: string | null | undefined;
@@ -659,22 +692,31 @@ function combineGlobalAlias(original: BlossomBlob, merged: BlossomBlob): Blossom
   }
 
   if (typeof globalNameValue === "string") {
-    combined.name = globalNameValue;
+    if (currentName !== globalNameValue) {
+      ensureClone().name = globalNameValue;
+    }
     metadataName = globalNameValue;
   } else if (hasGlobalName && globalNameValue === null) {
-    if (original.name === undefined) {
-      delete combined.name;
+    if (original.name === undefined && combined.name !== undefined) {
+      const target = ensureClone();
+      delete target.name;
     }
     metadataName = null;
   }
 
   if (!combined.type && typeof global.type === "string") {
-    combined.type = global.type;
+    ensureClone().type = global.type;
   }
   if (Object.prototype.hasOwnProperty.call(global, "folderPath")) {
-    combined.folderPath = normalizeFolderPathInput(global.folderPath) ?? null;
+    const nextFolder = normalizeFolderPathInput(global.folderPath) ?? null;
+    if ((combined.folderPath ?? null) !== nextFolder) {
+      ensureClone().folderPath = nextFolder;
+    }
   }
-  combined.__bloomMetadataName = metadataName ?? null;
+  const nextMetadataName = metadataName ?? null;
+  if (combined.__bloomMetadataName !== nextMetadataName) {
+    ensureClone().__bloomMetadataName = nextMetadataName;
+  }
   return combined;
 }
 

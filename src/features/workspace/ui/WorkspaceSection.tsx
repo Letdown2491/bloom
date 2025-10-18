@@ -13,6 +13,7 @@ import type { ProfileMetadataPayload } from "../../profile/ProfilePanel";
 import type { NdkContextValue } from "../../../app/context/NdkContext";
 import type { useShareWorkflow } from "../../share/useShareWorkflow";
 import type { ShareFolderRequest } from "../../../shared/types/shareFolder";
+import { FolderRenameDialog } from "../../rename/ui/FolderRenameDialog";
 
 import { WorkspaceProvider } from "../WorkspaceContext";
 
@@ -63,6 +64,8 @@ export type WorkspaceSectionProps = {
   onProvideSyncStarter: (runner: () => void) => void;
   onRequestRename: (blob: BlossomBlob) => void;
   onRequestFolderRename: (path: string) => void;
+  folderRenamePath: string | null;
+  onCloseFolderRename: () => void;
   onRequestShare: (payload: SharePayload, options?: { mode?: ShareMode }) => void;
   onShareFolder: (request: ShareFolderRequest) => void;
   onUnshareFolder: (request: ShareFolderRequest) => void;
@@ -129,6 +132,8 @@ export const WorkspaceSection = memo(function WorkspaceSection({
   onProvideSyncStarter,
   onRequestRename,
   onRequestFolderRename,
+  folderRenamePath,
+  onCloseFolderRename,
   onRequestShare,
   onShareFolder,
   onUnshareFolder,
@@ -205,13 +210,13 @@ export const WorkspaceSection = memo(function WorkspaceSection({
             onStatusMetricsChange={onStatusMetricsChange}
             onSyncStateChange={onSyncStateChange}
             onProvideSyncStarter={onProvideSyncStarter}
-          onRequestRename={onRequestRename}
-          onRequestFolderRename={onRequestFolderRename}
-          onRequestShare={onRequestShare}
-          onShareFolder={onShareFolder}
-          onUnshareFolder={onUnshareFolder}
-          folderShareBusyPath={folderShareBusyPath}
-          onSetTab={onSetTab}
+            onRequestRename={onRequestRename}
+            onRequestFolderRename={onRequestFolderRename}
+            onRequestShare={onRequestShare}
+            onShareFolder={onShareFolder}
+            onUnshareFolder={onUnshareFolder}
+            folderShareBusyPath={folderShareBusyPath}
+            onSetTab={onSetTab}
             onUploadCompleted={onUploadCompleted}
             showStatusMessage={showStatusMessage}
             onProvideBrowseControls={onProvideBrowseControls}
@@ -264,6 +269,10 @@ export const WorkspaceSection = memo(function WorkspaceSection({
           >
             <ProfilePanelLazy onProfileUpdated={onProfileUpdated} showStatusMessage={showStatusMessage} />
           </Suspense>
+        )}
+
+        {folderRenamePath && (
+          <FolderRenameDialog path={folderRenamePath} onClose={onCloseFolderRename} onStatus={showStatusMessage} />
         )}
       </WorkspaceProvider>
 

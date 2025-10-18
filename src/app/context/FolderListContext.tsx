@@ -1,4 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 
 import { useNdk } from "./NdkContext";
 import {
@@ -10,10 +11,13 @@ import {
   normalizeFolderPath,
   publishFolderList,
   removeShaFromRecord,
+  parseFolderEvent,
+  FOLDER_LIST_CONSTANTS,
   type FolderListRecord,
   type FolderListVisibility,
 } from "../../shared/domain/folderList";
 import { applyFolderUpdate, containsReservedFolderSegment, normalizeFolderPathInput } from "../../shared/utils/blobMetadataStore";
+import { reconcileBlobWithStoredMetadata } from "../../shared/utils/queryBlobCache";
 
 const sortRecords = (records: Iterable<FolderListRecord>) =>
   Array.from(records).sort((a, b) => a.path.localeCompare(b.path, undefined, { sensitivity: "base" }));
@@ -40,6 +44,7 @@ const FolderListContext = createContext<FolderListContextValue | undefined>(unde
 
 export const FolderListProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { ndk, signer, user } = useNdk();
+  const queryClient = useQueryClient();
   const [folders, setFolders] = useState<FolderListRecord[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
@@ -87,6 +92,53 @@ export const FolderListProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     [hydrateMetadataFromRecords]
   );
 
+  const applyRemoteFolderRecord = useCallback(
+    (record: FolderListRecord) => {
+      if (!record?.path) return;
+      const existing = foldersRef.current.get(record.path) ?? null;
+      const incomingSeconds = typeof record.updatedAt === "number" ? record.updatedAt : null;
+      const existingSeconds = existing?.updatedAt ?? null;
+      if (existing && incomingSeconds !== null && existingSeconds !== null && incomingSeconds <= existingSeconds) {
+        return;
+      }
+
+      const normalizedIncomingPath = normalizeFolderPathInput(record.path) ?? null;
+      const normalizedExistingPath = existing ? normalizeFolderPathInput(existing.path) ?? null : null;
+      const existingShas = new Set((existing?.shas ?? []).map(sha => sha.trim()).filter(Boolean));
+      const incomingShas = new Set((record.shas ?? []).map(sha => sha.trim()).filter(Boolean));
+
+      const removed: string[] = [];
+      existingShas.forEach(sha => {
+        if (!incomingShas.has(sha)) removed.push(sha);
+      });
+
+      const added: string[] = [];
+      incomingShas.forEach(sha => {
+        if (!existingShas.has(sha)) added.push(sha);
+      });
+
+      const reassigned = normalizedIncomingPath !== normalizedExistingPath ? Array.from(incomingShas) : added;
+
+      removed.forEach(sha => {
+        applyFolderUpdate(undefined, sha, null, incomingSeconds ?? undefined);
+        reconcileBlobWithStoredMetadata(queryClient, sha);
+      });
+      reassigned.forEach(sha => {
+        applyFolderUpdate(undefined, sha, normalizedIncomingPath, incomingSeconds ?? undefined);
+        reconcileBlobWithStoredMetadata(queryClient, sha);
+      });
+
+      const nextMap = new Map(foldersRef.current);
+      if (record.shas.length === 0) {
+        nextMap.delete(record.path);
+      } else {
+        nextMap.set(record.path, record);
+      }
+      updateState(Array.from(nextMap.values()));
+    },
+    [queryClient, updateState]
+  );
+
   const refresh = useCallback(async () => {
     if (!ndk || !user) {
       updateState([]);
@@ -108,6 +160,27 @@ export const FolderListProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  useEffect(() => {
+    if (!ndk || !user) return;
+    const filter = {
+      kinds: [FOLDER_LIST_CONSTANTS.KIND],
+      authors: [user.pubkey],
+    };
+    const subscription = ndk.subscribe(filter, { closeOnEose: false });
+    let disposed = false;
+    const handleEvent = (event: unknown) => {
+      if (disposed) return;
+      const parsed = parseFolderEvent(event as any);
+      if (!parsed) return;
+      applyRemoteFolderRecord(parsed);
+    };
+    subscription.on("event", handleEvent);
+    return () => {
+      disposed = true;
+      subscription.stop();
+    };
+  }, [ndk, user, applyRemoteFolderRecord]);
 
   const findRecordByName = useCallback((name: string, excludePath?: string) => {
     const target = name.trim().toLowerCase();

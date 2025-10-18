@@ -11,6 +11,8 @@ import {
   type BlobAudioMetadata,
 } from "../../shared/utils/blobMetadataStore";
 import { normalizeRelayOrigin } from "../../shared/utils/relays";
+import { useQueryClient } from "@tanstack/react-query";
+import { reconcileBlobWithStoredMetadata } from "../../shared/utils/queryBlobCache";
 
 const normalizeAliasValue = (value: string | null | undefined) => {
   if (typeof value !== "string") return null;
@@ -23,7 +25,7 @@ const aliasFilterForAuthor = (pubkey: string) => ({
   authors: [pubkey],
 });
 
-const applyAliasFromEvent = (event: NDKEvent) => {
+const applyAliasFromEvent = (event: NDKEvent, queryClient: ReturnType<typeof useQueryClient> | null) => {
   const parsed = parseNip94Event(event);
   if (!parsed) return;
   const alias = normalizeAliasValue(parsed.name);
@@ -38,11 +40,15 @@ const applyAliasFromEvent = (event: NDKEvent) => {
     const updatedAt = typeof event.created_at === "number" ? event.created_at * 1000 : undefined;
     rememberAudioMetadata(undefined, parsed.sha256, audioMetadata, { updatedAt });
   }
+  if (queryClient) {
+    reconcileBlobWithStoredMetadata(queryClient, parsed.sha256);
+  }
 };
 
 export const useAliasSync = (relayUrls: string[], enabled = true) => {
   const { ndk, getModule } = useNdk();
   const pubkey = useCurrentPubkey();
+  const queryClient = useQueryClient();
   const normalizedRelays = useMemo(() => {
     const set = new Set<string>();
     relayUrls.forEach(url => {
@@ -76,7 +82,7 @@ export const useAliasSync = (relayUrls: string[], enabled = true) => {
 
       const handleEvent = (event: NDKEvent) => {
         if (disposed) return;
-        applyAliasFromEvent(event);
+        applyAliasFromEvent(event, queryClient);
       };
 
       if (lastKeyRef.current !== effectKey) {
@@ -120,7 +126,7 @@ export const useAliasSync = (relayUrls: string[], enabled = true) => {
         activeSubscription?.stop();
       }
     };
-  }, [ndk, pubkey, normalizedRelays, enabled, getModule]);
+  }, [ndk, pubkey, normalizedRelays, enabled, getModule, queryClient]);
 };
 
 const extractAudioMetadataFromEvent = (event: NDKEvent): BlobAudioMetadata | null => {

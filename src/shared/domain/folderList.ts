@@ -106,7 +106,7 @@ const parseVisibility = (event: RawNdkEvent): FolderListVisibility => {
   return value === "public" ? "public" : "private";
 };
 
-const parseFolderEvent = (event: RawNdkEvent): FolderListRecord | null => {
+export const parseFolderEvent = (event: RawNdkEvent): FolderListRecord | null => {
   const dTag = event.tags.find(tag => Array.isArray(tag) && tag[0] === "d");
   if (!dTag || typeof dTag[1] !== "string") return null;
   const identifier = dTag[1];

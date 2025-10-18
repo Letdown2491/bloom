@@ -18,15 +18,15 @@ import {
   type BlobAudioMetadata,
 } from "../../../shared/utils/blobMetadataStore";
 import { deriveNameFromPath, isPrivateFolderName } from "../../../shared/domain/folderList";
-import { buildNip94EventTemplate } from "../../../shared/api/nip94";
 import type { ExtractedAudioMetadata } from "../../../shared/utils/audioMetadata";
 import { encryptFileForPrivateUpload } from "../../../shared/domain/privateEncryption";
 import { usePrivateLibrary } from "../../../app/context/PrivateLibraryContext";
 import type { PrivateListEntry } from "../../../shared/domain/privateList";
 import { useFolderLists } from "../../../app/context/FolderListContext";
-import { loadNdkModule } from "../../../shared/api/ndkModule";
 import { FolderIcon, LockIcon, WarningIcon, UploadIcon, EditIcon, TrashIcon } from "../../../shared/ui/icons";
 import { useUserPreferences } from "../../../app/context/UserPreferencesContext";
+import { publishNip94Metadata } from "../../../shared/api/nip94Publisher";
+import { usePreferredRelays } from "../../../app/hooks/usePreferredRelays";
 
 const RESIZE_OPTIONS = [
   { id: 0, label: "Original" },
@@ -710,25 +710,32 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
     );
   };
 
+  const { effectiveRelays } = usePreferredRelays();
+
   const publishMetadata = async (
     blob: BlossomBlob,
     options: {
       blurHash?: { hash: string; width: number; height: number };
       alias?: string | null;
       extraTags?: string[][];
+      folderPath?: string | null | undefined;
     } = {}
   ) => {
     if (!ndk || !activeSigner) return;
-    const template = buildNip94EventTemplate({
-      blob,
-      alias: typeof options.alias === "string" ? options.alias : undefined,
-      blurhash: options.blurHash,
-      extraTags: options.extraTags,
-    });
-    const { NDKEvent } = await loadNdkModule();
-    const event = new NDKEvent(ndk, template);
-    await event.sign();
-    await event.publish().catch(() => undefined);
+    try {
+      await publishNip94Metadata({
+        ndk,
+        signer: activeSigner,
+        blob,
+        relays: effectiveRelays,
+        alias: options.alias,
+        folderPath: options.folderPath,
+        blurhash: options.blurHash,
+        extraTags: options.extraTags,
+      });
+    } catch (error) {
+      console.warn("Failed to publish NIP-94 metadata after upload", error);
+    }
   };
 
   const handleUpload = async (entryIds?: string[]) => {
@@ -946,6 +953,8 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
 
         const normalizedFolder = normalizeFolderPathInput(entry.metadata.folder);
         const folderPathValue = normalizedFolder ? resolveFolderPath(normalizedFolder) : null;
+        const folderForEvent =
+          normalizedFolder === undefined ? undefined : folderPathValue;
         if (normalizedFolder !== undefined) {
           blob.folderPath = folderPathValue;
         }
@@ -1018,13 +1027,6 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
           };
         }
 
-        if (folderPathValue !== null) {
-          if (!extraTags) {
-            extraTags = [];
-          }
-          extraTags.push(["folder", folderPathValue]);
-        }
-
         rememberBlobMetadata(server.url, blob, { folderPath: folderPathValue });
         if (!isPrivate && folderPathValue) {
           pendingFolderUpdates.set(blob.sha256, folderPathValue);
@@ -1048,8 +1050,9 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
         if (!isPrivate) {
           await publishMetadata(blob, {
             blurHash,
-            alias: aliasForEvent ?? null,
+            alias: aliasForEvent,
             extraTags,
+            folderPath: folderForEvent,
           });
         } else if (privateInfo) {
           privateInfo.sha256 = blob.sha256;

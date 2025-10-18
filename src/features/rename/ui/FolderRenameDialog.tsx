@@ -1,8 +1,13 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 
 import { useFolderLists } from "../../../app/context/FolderListContext";
-import { containsReservedFolderSegment } from "../../../shared/utils/blobMetadataStore";
+import { useNdk } from "../../../app/context/NdkContext";
+import { usePreferredRelays } from "../../../app/hooks/usePreferredRelays";
+import { useWorkspace } from "../../workspace/WorkspaceContext";
+import { publishNip94Metadata, extractExtraNip94Tags } from "../../../shared/api/nip94Publisher";
+import { containsReservedFolderSegment, getBlobMetadataName } from "../../../shared/utils/blobMetadataStore";
 import type { StatusMessageTone } from "../../../shared/types/status";
+import type { BlossomBlob } from "../../../shared/api/blossomClient";
 
 export type FolderRenameDialogProps = {
   path: string;
@@ -10,12 +15,88 @@ export type FolderRenameDialogProps = {
   onStatus: (message: string, tone?: StatusMessageTone, duration?: number) => void;
 };
 
+type MetadataSyncTarget = {
+  blob: BlossomBlob;
+  folderPath: string | null;
+};
+
 export const FolderRenameDialog: React.FC<FolderRenameDialogProps> = ({ path, onClose, onStatus }) => {
-  const { renameFolder, getFolderDisplayName } = useFolderLists();
+  const { renameFolder, getFolderDisplayName, foldersByPath, getFoldersForBlob } = useFolderLists();
+  const { ndk, signer } = useNdk();
+  const { effectiveRelays } = usePreferredRelays();
+  const { aggregated, currentSnapshot, privateBlobs } = useWorkspace();
   const [name, setName] = useState(() => getFolderDisplayName(path));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
+
+  const resolveBlobBySha = useCallback(
+    (sha: string): BlossomBlob | null => {
+      if (!sha) return null;
+      const normalized = sha.trim();
+      if (!normalized) return null;
+      const sources: (readonly BlossomBlob[] | undefined | null)[] = [
+        aggregated?.blobs,
+        currentSnapshot?.blobs,
+        privateBlobs,
+      ];
+      for (const source of sources) {
+        if (!source) continue;
+        const match = source.find(candidate => candidate?.sha256 === normalized);
+        if (match) {
+          return match;
+        }
+      }
+      return null;
+    },
+    [aggregated?.blobs, currentSnapshot?.blobs, privateBlobs]
+  );
+
+  const syncMetadata = useCallback(
+    (targets: MetadataSyncTarget[]) => {
+      if (!ndk || !signer) return;
+      if (!targets.length) return;
+      void (async () => {
+        let successCount = 0;
+        let failureCount = 0;
+        for (const target of targets) {
+          try {
+            const alias = getBlobMetadataName(target.blob) ?? target.blob.name ?? null;
+            const extraTags = extractExtraNip94Tags(target.blob.nip94);
+            await publishNip94Metadata({
+              ndk,
+              signer,
+              blob: target.blob,
+              relays: effectiveRelays,
+              alias,
+              folderPath: target.folderPath,
+              extraTags,
+            });
+            successCount += 1;
+          } catch (error) {
+            failureCount += 1;
+            console.warn("Failed to sync NIP-94 metadata for folder rename", target.blob.sha256, error);
+          }
+        }
+        if (failureCount === 0) {
+          onStatus(
+            successCount === 1 ? "Synced metadata for 1 item." : `Synced metadata for ${successCount} items.`,
+            "success",
+            3000
+          );
+        } else {
+          onStatus(
+            failureCount === 1
+              ? "Failed to sync metadata to relays."
+              : `Failed to sync metadata for ${failureCount} items.`,
+            "error",
+            4500
+          );
+        }
+      })();
+    },
+    [effectiveRelays, ndk, onStatus, signer]
+  );
 
   useEffect(() => {
     setName(getFolderDisplayName(path));
@@ -38,10 +119,38 @@ export const FolderRenameDialog: React.FC<FolderRenameDialogProps> = ({ path, on
       setError('Folder names cannot include the word "private".');
       return;
     }
+
+    const impactedRecords = Array.from(foldersByPath.values()).filter(record => {
+      if (!record?.path) return false;
+      return record.path === path || record.path.startsWith(`${path}/`);
+    });
+    const shasToSync = new Set<string>();
+    impactedRecords.forEach(record => {
+      record.shas.forEach(sha => {
+        if (sha) shasToSync.add(sha);
+      });
+    });
+
     setBusy(true);
     try {
       await renameFolder(path, trimmed);
-      onStatus("Folder renamed.", "success", 2500);
+      onStatus("Folder renamed. Syncing metadata…", "success", 2500);
+
+      if (shasToSync.size > 0) {
+        const targets: MetadataSyncTarget[] = [];
+        shasToSync.forEach(sha => {
+          const blob = resolveBlobBySha(sha);
+          if (!blob || blob.privateData) return;
+          const folders = getFoldersForBlob(sha);
+          const destination = folders && folders.length > 0 ? folders[0] : null;
+          const normalizedDestination = destination && destination.length > 0 ? destination : null;
+          targets.push({ blob, folderPath: normalizedDestination });
+        });
+        if (targets.length) {
+          syncMetadata(targets);
+        }
+      }
+
       onClose();
     } catch (err) {
       const message = err instanceof Error ? err.message : "Rename failed.";
@@ -50,7 +159,7 @@ export const FolderRenameDialog: React.FC<FolderRenameDialogProps> = ({ path, on
     } finally {
       setBusy(false);
     }
-  }, [name, onClose, onStatus, path, renameFolder]);
+  }, [foldersByPath, getFoldersForBlob, name, onClose, onStatus, path, renameFolder, resolveBlobBySha, syncMetadata]);
 
   const handleKeyDown: React.KeyboardEventHandler<HTMLDivElement> = event => {
     if (event.key === "Escape") {

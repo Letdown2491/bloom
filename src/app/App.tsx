@@ -40,7 +40,6 @@ import {
   LinkIcon,
   LogoutIcon,
 } from "../shared/ui/icons";
-import { FolderRenameDialog } from "../features/rename/ui/FolderRenameDialog";
 import { FolderShareDialog } from "../features/share/ui/FolderShareDialog";
 import { StatusFooter } from "../shared/ui/StatusFooter";
 import { WorkspaceSection } from "../features/workspace/ui/WorkspaceSection";
@@ -1655,6 +1654,8 @@ export default function App() {
                 onProvideSyncStarter={handleProvideSyncStarter}
                 onRequestRename={handleRequestRename}
                 onRequestFolderRename={handleRequestFolderRename}
+                folderRenamePath={folderRenamePath}
+                onCloseFolderRename={handleFolderRenameClose}
                 onRequestShare={handleShareBlob}
                 onShareFolder={handleShareFolder}
                 onUnshareFolder={handleUnshareFolder}
@@ -1749,14 +1750,6 @@ export default function App() {
               onStatus={showStatusMessage}
             />
           </Suspense>
-        )}
-
-        {!showAuthPrompt && folderRenamePath && (
-          <FolderRenameDialog
-            path={folderRenamePath}
-            onClose={handleFolderRenameClose}
-            onStatus={showStatusMessage}
-          />
         )}
 
         {folderShareDialog ? (

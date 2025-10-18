@@ -35,6 +35,18 @@ import { useDialog } from "../../app/context/DialogContext";
 import type { FolderShareHint, ShareFolderRequest } from "../../shared/types/shareFolder";
 import { usePrivateLinks } from "../privateLinks/hooks/usePrivateLinks";
 import type { PrivateLinkRecord } from "../../shared/domain/privateLinks";
+import { publishNip94Metadata, extractExtraNip94Tags } from "../../shared/api/nip94Publisher";
+import { usePreferredRelays } from "../../app/hooks/usePreferredRelays";
+
+type MetadataSyncTarget = {
+  blob: BlossomBlob;
+  folderPath: string | null;
+};
+
+type MetadataSyncContext = {
+  successMessage?: (count: number) => string;
+  errorMessage?: (count: number) => string;
+};
 
 const BrowsePanelLazy = React.lazy(() =>
   import("../browse/BrowseTab").then(module => ({ default: module.BrowsePanel }))
@@ -442,6 +454,7 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
   const { selected: selectedBlobs, toggle: toggleBlob, selectMany: selectManyBlobs, clear: clearSelection } = useSelection();
   const audio = useAudio();
   const queryClient = useQueryClient();
+  const { effectiveRelays } = usePreferredRelays();
 
   const {
     links: privateLinks,
@@ -470,7 +483,7 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
     },
     [privateLinks, privateLinkServiceConfigured]
   );
-  const { signer, signEventTemplate } = useNdk();
+  const { ndk, signer, signEventTemplate } = useNdk();
   const pubkey = useCurrentPubkey();
   const { entriesBySha, removeEntries, upsertEntries } = usePrivateLibrary();
   const {
@@ -1094,6 +1107,76 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
     currentFolderIndex,
     getFolderDisplayName,
   ]);
+
+  const resolveBlobBySha = useCallback(
+    (sha: string): BlossomBlob | null => {
+      if (!sha) return null;
+      const normalized = sha.trim();
+      if (!normalized) return null;
+      const sources: (readonly BlossomBlob[] | undefined | null)[] = [
+        aggregated.blobs,
+        currentSnapshot?.blobs,
+        currentVisibleBlobs,
+        visibleAggregatedBlobs,
+        privateBlobs,
+        privateVisibleBlobs,
+      ];
+      for (const source of sources) {
+        if (!source) continue;
+        const match = source.find(candidate => candidate?.sha256 === normalized);
+        if (match) {
+          return match;
+        }
+      }
+      return null;
+    },
+    [aggregated.blobs, currentSnapshot, currentVisibleBlobs, visibleAggregatedBlobs, privateBlobs, privateVisibleBlobs]
+  );
+
+  const queueMetadataSync = useCallback(
+    (targets: MetadataSyncTarget[], context?: MetadataSyncContext) => {
+      if (!ndk || !signer) return;
+      if (!Array.isArray(targets) || targets.length === 0) return;
+      const publicTargets = targets.filter(target => target && !target.blob.privateData);
+      if (publicTargets.length === 0) return;
+      void (async () => {
+        let successCount = 0;
+        let failureCount = 0;
+        for (const target of publicTargets) {
+          try {
+            const alias = getBlobMetadataName(target.blob) ?? target.blob.name ?? null;
+            const extraTags = extractExtraNip94Tags(target.blob.nip94);
+            await publishNip94Metadata({
+              ndk,
+              signer,
+              blob: target.blob,
+              relays: effectiveRelays,
+              alias,
+              folderPath: target.folderPath,
+              extraTags,
+            });
+            successCount += 1;
+          } catch (error) {
+            failureCount += 1;
+            console.warn("Failed to sync NIP-94 metadata", target.blob.sha256, error);
+          }
+        }
+        if (failureCount === 0) {
+          if (context?.successMessage) {
+            showStatusMessage(context.successMessage(successCount), "success", 3000);
+          }
+        } else {
+          const message = context?.errorMessage
+            ? context.errorMessage(failureCount)
+            : failureCount === 1
+              ? "Failed to sync metadata to relays."
+              : `Failed to sync metadata for ${failureCount} items.`;
+          showStatusMessage(message, "error", 4500);
+        }
+      })();
+    },
+    [effectiveRelays, ndk, showStatusMessage, signer]
+  );
 
   useEffect(() => {
     if (!hasPrivateFiles) {
@@ -1859,10 +1942,26 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
             register(privateBlobs);
             register(privateVisibleBlobs);
 
+            const metadataTargets: MetadataSyncTarget[] = [];
+
             shasToClear.forEach(sha => {
               const target = blobLookup.get(sha);
               applyFolderUpdate(target?.serverUrl, sha, null, undefined);
+              if (target && !target.privateData) {
+                metadataTargets.push({ blob: target, folderPath: null });
+              }
             });
+
+            if (metadataTargets.length) {
+              queueMetadataSync(metadataTargets, {
+                successMessage: count =>
+                  count === 1 ? "Synced metadata for 1 item." : `Synced metadata for ${count} items.`,
+                errorMessage: failureCount =>
+                  failureCount === 1
+                    ? "Failed to sync metadata to relays."
+                    : `Failed to sync metadata for ${failureCount} items.`,
+              });
+            }
           }
 
           if (activeList?.type === "folder" && normalizeFolderPathInput(activeList.path) === normalizedPath) {
@@ -1880,7 +1979,7 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
           }
 
           clearSelection();
-          showStatusMessage("Folder deleted", "success", 2500);
+          showStatusMessage("Folder deleted. Syncing metadata…", "success", 3000);
         } catch (error: any) {
           const message = error?.message || "Failed to delete folder.";
           showStatusMessage(message, "error", 4000);
@@ -2326,13 +2425,21 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
             if ((currentCanonical ?? null) === (targetCanonical ?? null)) {
               setMoveState(null);
               return;
-            }
-            await setBlobFolderMembership(moveState.blob.sha256, targetCanonical);
-            const destinationLabel = formatFolderLabel(targetCanonical);
-            showStatusMessage(`Moved to ${destinationLabel}.`, "success", 2500);
-            setMoveState(null);
-            setMoveError(null);
           }
+          await setBlobFolderMembership(moveState.blob.sha256, targetCanonical);
+          const destinationLabel = formatFolderLabel(targetCanonical);
+          showStatusMessage(`Moved to ${destinationLabel}. Syncing metadata…`, "success", 3000);
+          queueMetadataSync(
+            [{ blob: moveState.blob, folderPath: targetCanonical ?? null }],
+            {
+              successMessage: () => "Folder metadata synced across relays.",
+              errorMessage: failureCount =>
+                failureCount === 1 ? "Failed to sync metadata to relays." : `Failed to sync metadata for ${failureCount} items.`,
+            }
+          );
+          setMoveState(null);
+          setMoveError(null);
+        }
         } else {
           const targetCanonical = canonicalize(rawDestination);
           const currentCanonical = moveState.path;
@@ -2400,10 +2507,52 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
             setMoveState(null);
             setMoveError(null);
           } else {
+            const impactedRecords = Array.from(foldersByPath.values()).filter(record => {
+              if (!currentCanonical) return false;
+              return record.path === currentCanonical || record.path.startsWith(`${currentCanonical}/`);
+            });
+            const metadataTargetMap = new Map<string, MetadataSyncTarget>();
+            const computeTargetPath = (recordPath: string) => {
+              if (!currentCanonical) return nextPath;
+              if (recordPath === currentCanonical) return nextPath;
+              if (recordPath.startsWith(`${currentCanonical}/`)) {
+                const suffix = recordPath.slice(currentCanonical.length).replace(/^\/+/, "");
+                if (!suffix) return nextPath;
+                return nextPath ? `${nextPath}/${suffix}` : suffix;
+              }
+              return nextPath;
+            };
+            impactedRecords.forEach(record => {
+              const targetPathRaw = computeTargetPath(record.path);
+              const targetPath = targetPathRaw && targetPathRaw.length > 0 ? targetPathRaw : null;
+              record.shas.forEach(sha => {
+                if (!sha) return;
+                const existing = metadataTargetMap.get(sha);
+                if (existing) {
+                  existing.folderPath = targetPath;
+                  return;
+                }
+                const blob = resolveBlobBySha(sha);
+                if (!blob || blob.privateData) return;
+                metadataTargetMap.set(sha, { blob, folderPath: targetPath });
+              });
+            });
+            const metadataTargets = Array.from(metadataTargetMap.values());
+
             await renameFolder(currentCanonical, nextPath);
 
             const destinationLabel = formatFolderLabel(targetCanonical);
-            showStatusMessage(`Folder moved to ${destinationLabel}.`, "success", 2500);
+            showStatusMessage(`Folder moved to ${destinationLabel}. Syncing metadata…`, "success", 3000);
+            if (metadataTargets.length) {
+              queueMetadataSync(metadataTargets, {
+                successMessage: count =>
+                  count === 1 ? "Synced metadata for 1 item." : `Synced metadata for ${count} items.`,
+                errorMessage: failureCount =>
+                  failureCount === 1
+                    ? "Failed to sync metadata to relays."
+                    : `Failed to sync metadata for ${failureCount} items.`,
+              });
+            }
 
             if (activeList?.type === "folder") {
               const activeCanonical = resolveFolderPath(activeList.path);
