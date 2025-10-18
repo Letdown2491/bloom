@@ -18,6 +18,20 @@
 - **Profile Editing:** Edit your Nostr profile (kind-0) from within Bloom, and quickly choose avatars or banners from your connected servers.
 - **Customization and Sync:** Personalize your interface and settings. Optionally sync preferences across devices using NIP-77, or keep them local for privacy.
 
+### Search syntax
+
+Use the global search bar to combine natural text with structured keywords:
+
+- `not:` excludes matches (`blink not:image` skips image MIME types, `not:genre:jazz` removes jazz metadata).
+- `server:` and `folder:` scope results to specific hosts or folder paths (`server:nostr`, `folder:photos/trips`).
+- `is:` accepts flags such as `audio`, `image`, `video`, `document`, `pdf`, `private`, and `shared`.
+- `size:` keeps supporting comparisons and ranges (`size:>50mb`, `size:10mb...200mb`).
+- Relative time tokens work with `before:`, `after:`, and `on:` – try `before:-7d`, `after:-24h`, `on:today`, or `on:yesterday`.
+- `duration:` checks audio length using the same comparison syntax as size (`duration:>3m`, `duration:2m...6m`).
+- `year:` now understands numeric comparisons and ranges (`year:>=1990`, `year:1990...1999`).
+- `before:`, `after:`, and `on:` filter by upload time using `YYYY`, `YYYY-MM`, or `YYYY-MM-DD` (`after:2024-01`, `on:2023-05-10`).
+- Combine everything freely; Bloom normalizes tokens to lowercase so `NOT:` and `server:` behave the same regardless of casing.
+
 ## Before You Start
 - You need a browser with a Nostr extension such as Alby installed, or have a remote signer such as Amber available.
 

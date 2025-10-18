@@ -20,7 +20,7 @@ import { deleteUserBlob, buildAuthorizationHeader } from "../../shared/api/bloss
 import { deleteNip96File } from "../../shared/api/nip96Client";
 import { deleteSatelliteFile } from "../../shared/api/satelliteClient";
 import { useNdk, useCurrentPubkey } from "../../app/context/NdkContext";
-import { isMusicBlob } from "../../shared/utils/blobClassification";
+import { isMusicBlob, isImageBlob, isVideoBlob, isDocumentBlob, isPdfBlob } from "../../shared/utils/blobClassification";
 import { PRIVATE_PLACEHOLDER_SHA, PRIVATE_SERVER_NAME } from "../../shared/constants/private";
 import { applyFolderUpdate, getBlobMetadataName, normalizeFolderPathInput } from "../../shared/utils/blobMetadataStore";
 import type { BlobAudioMetadata } from "../../shared/utils/blobMetadataStore";
@@ -68,18 +68,39 @@ const normalizeMatchUrl = (value?: string | null): string | null => {
   }
 };
 
-type SearchField = "artist" | "album" | "title" | "genre" | "year" | "type" | "mime" | "size";
+type SearchField = "artist" | "album" | "title" | "genre" | "year" | "type" | "mime" | "server" | "folder";
+
+type SearchFlag = "private" | "shared" | "audio" | "image" | "video" | "document" | "pdf";
 
 type SizeComparison = {
   operator: ">" | ">=" | "<" | "<=" | "=";
   value: number;
 };
 
+type NumberComparison = {
+  operator: SizeComparison["operator"];
+  value: number;
+};
+
 type ParsedSearchQuery = {
   textTerms: string[];
+  excludedTextTerms: string[];
   fieldTerms: Partial<Record<SearchField, string[]>>;
+  excludedFieldTerms: Partial<Record<SearchField, string[]>>;
   sizeComparisons: SizeComparison[];
+  durationComparisons: NumberComparison[];
+  yearComparisons: NumberComparison[];
+  beforeTimestamps: number[];
+  afterTimestamps: number[];
+  onRanges: DateRangeFilter[];
+  includeFlags: SearchFlag[];
+  excludeFlags: SearchFlag[];
   isActive: boolean;
+};
+
+type DateRangeFilter = {
+  start: number;
+  end: number;
 };
 
 const SEARCH_FIELD_ALIASES: Record<string, SearchField> = {
@@ -92,7 +113,33 @@ const SEARCH_FIELD_ALIASES: Record<string, SearchField> = {
   type: "type",
   mime: "mime",
   ext: "type",
-  size: "size",
+  server: "server",
+  host: "server",
+  folder: "folder",
+  path: "folder",
+};
+
+const IS_FLAG_ALIASES: Record<string, SearchFlag | undefined> = {
+  private: "private",
+  encrypted: "private",
+  shared: "shared",
+  public: "shared",
+  audio: "audio",
+  audios: "audio",
+  music: "audio",
+  sound: "audio",
+  image: "image",
+  images: "image",
+  photo: "image",
+  picture: "image",
+  video: "video",
+  videos: "video",
+  document: "document",
+  documents: "document",
+  doc: "document",
+  text: "document",
+  pdf: "pdf",
+  pdfs: "pdf",
 };
 
 const extractExtension = (value?: string | null) => {
@@ -137,6 +184,209 @@ const tokenizeSearchInput = (input: string): string[] => {
   return tokens;
 };
 
+const toUtcSeconds = (year: number, monthIndex: number, day: number) =>
+  Math.floor(Date.UTC(year, monthIndex, day) / 1000);
+
+const getUtcStartOfDaySeconds = (date: Date) =>
+  Math.floor(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()) / 1000);
+
+const parseCalendarDateRange = (value: string): DateRangeFilter | null => {
+  const normalized = value.trim();
+  if (!normalized) return null;
+  if (!/^\d{4}(?:-\d{2}(?:-\d{2})?)?$/.test(normalized)) return null;
+
+  const [yearPart, monthPart, dayPart] = normalized.split("-");
+  const year = Number(yearPart);
+  if (!Number.isInteger(year) || year < 1970 || year > 9999) return null;
+
+  if (!monthPart) {
+    const start = toUtcSeconds(year, 0, 1);
+    const end = toUtcSeconds(year + 1, 0, 1);
+    return { start, end };
+  }
+
+  const month = Number(monthPart);
+  if (!Number.isInteger(month) || month < 1 || month > 12) return null;
+
+  if (!dayPart) {
+    const start = toUtcSeconds(year, month - 1, 1);
+    const end = month === 12 ? toUtcSeconds(year + 1, 0, 1) : toUtcSeconds(year, month, 1);
+    return { start, end };
+  }
+
+  const day = Number(dayPart);
+  if (!Number.isInteger(day) || day < 1 || day > 31) return null;
+
+  const startMs = Date.UTC(year, month - 1, day);
+  const check = new Date(startMs);
+  if (
+    check.getUTCFullYear() !== year ||
+    check.getUTCMonth() !== month - 1 ||
+    check.getUTCDate() !== day
+  ) {
+    return null;
+  }
+
+  const start = Math.floor(startMs / 1000);
+  const end = Math.floor(Date.UTC(year, month - 1, day + 1) / 1000);
+  return { start, end };
+};
+
+const parseRelativeOffsetSeconds = (value: string): number | null => {
+  const normalized = value.trim();
+  if (!normalized) return null;
+  const match = /^([+-]?\d+(?:\.\d+)?)(?:\s*(s|sec|secs|second|seconds|m|min|mins|minute|minutes|h|hr|hrs|hour|hours|d|day|days|w|wk|wks|week|weeks))?$/.exec(
+    normalized
+  );
+  if (!match) return null;
+  const magnitude = Number(match[1]);
+  if (!Number.isFinite(magnitude)) return null;
+  const unitRaw = match[2]?.toLowerCase() ?? "s";
+  const multiplier =
+    unitRaw.startsWith("w") ? 60 * 60 * 24 * 7 :
+    unitRaw.startsWith("d") ? 60 * 60 * 24 :
+    unitRaw.startsWith("h") ? 60 * 60 :
+    unitRaw.startsWith("m") && unitRaw !== "ms" ? 60 :
+    1;
+  const seconds = magnitude * multiplier;
+  if (!Number.isFinite(seconds)) return null;
+  return Math.round(seconds);
+};
+
+const createDayRangeFromDate = (date: Date): DateRangeFilter => {
+  const start = getUtcStartOfDaySeconds(date);
+  return { start, end: start + 60 * 60 * 24 };
+};
+
+const parseRelativeDateRange = (value: string): DateRangeFilter | null => {
+  const offsetSeconds = parseRelativeOffsetSeconds(value);
+  if (offsetSeconds == null) return null;
+  const target = new Date(Date.now() + offsetSeconds * 1000);
+  return createDayRangeFromDate(target);
+};
+
+const parseRelativeDatePoint = (value: string): number | null => {
+  const offsetSeconds = parseRelativeOffsetSeconds(value);
+  if (offsetSeconds == null) return null;
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  return nowSeconds + offsetSeconds;
+};
+
+const parseNamedDateRange = (value: string): DateRangeFilter | null => {
+  switch (value) {
+    case "today":
+      return createDayRangeFromDate(new Date());
+    case "yesterday": {
+      const date = new Date();
+      date.setUTCDate(date.getUTCDate() - 1);
+      return createDayRangeFromDate(date);
+    }
+    case "tomorrow": {
+      const date = new Date();
+      date.setUTCDate(date.getUTCDate() + 1);
+      return createDayRangeFromDate(date);
+    }
+    default:
+      return null;
+  }
+};
+
+const resolveDateRangeToken = (token: string): DateRangeFilter | null => {
+  const normalized = token.trim();
+  if (!normalized) return null;
+  const named = parseNamedDateRange(normalized);
+  if (named) return named;
+  const relative = parseRelativeDateRange(normalized);
+  if (relative) return relative;
+  return parseCalendarDateRange(normalized);
+};
+
+const parseDateRange = (value: string): DateRangeFilter | null => {
+  const normalized = value.trim();
+  if (!normalized) return null;
+
+  const rangeSeparator = /\.\.\.?/;
+  if (rangeSeparator.test(normalized)) {
+    const parts = normalized.split(rangeSeparator).map(part => part.trim()).filter(Boolean);
+    if (parts.length !== 2) return null;
+    const [startRaw, endRaw] = parts as [string, string];
+    const startRange = resolveDateRangeToken(startRaw);
+    const endRange = resolveDateRangeToken(endRaw);
+    if (!startRange || !endRange) return null;
+    if (endRange.end <= startRange.start) return null;
+    return { start: startRange.start, end: endRange.end };
+  }
+
+  return resolveDateRangeToken(normalized);
+};
+
+const parseDatePoint = (value: string): number | null => {
+  const normalized = value.trim();
+  if (!normalized) return null;
+  const relative = parseRelativeDatePoint(normalized);
+  if (relative != null) return relative;
+  const range = resolveDateRangeToken(normalized);
+  return range ? range.start : null;
+};
+
+const NUMBER_RANGE_SEPARATOR = /\.\.\.?/;
+
+const parseDurationValue = (value: string): number | null => {
+  const match = /^(\d+(?:\.\d+)?)(?:\s*(ms|s|sec|secs|second|seconds|m|min|mins|minute|minutes|h|hr|hrs|hour|hours))?$/i.exec(
+    value.trim()
+  );
+  if (!match) return null;
+  const magnitude = Number(match[1]);
+  if (!Number.isFinite(magnitude)) return null;
+  const unitRaw = match[2]?.toLowerCase() ?? "s";
+  const multiplier =
+    unitRaw.startsWith("h") ? 60 * 60 :
+    unitRaw.startsWith("m") && unitRaw !== "ms" ? 60 :
+    unitRaw === "ms" ? 0.001 :
+    1;
+  const seconds = magnitude * multiplier;
+  if (!Number.isFinite(seconds)) return null;
+  return seconds >= 0 ? seconds : null;
+};
+
+const parseDurationComparison = (value: string): NumberComparison | null => {
+  const match = /^(?<op>>=|<=|>|<|=)?\s*(?<number>\d+(?:\.\d+)?)(?:\s*(?<unit>ms|s|sec|secs|second|seconds|m|min|mins|minute|minutes|h|hr|hrs|hour|hours))?$/i.exec(
+    value.trim()
+  );
+  if (!match || !match.groups) return null;
+  const rawNumber = Number(match.groups.number);
+  if (!Number.isFinite(rawNumber)) return null;
+  const unitRaw = match.groups.unit?.toLowerCase() ?? "s";
+  const multiplier =
+    unitRaw.startsWith("h") ? 60 * 60 :
+    unitRaw.startsWith("m") && unitRaw !== "ms" ? 60 :
+    unitRaw === "ms" ? 0.001 :
+    1;
+  const seconds = rawNumber * multiplier;
+  if (!Number.isFinite(seconds)) return null;
+  return { operator: (match.groups.op as NumberComparison["operator"]) ?? ">=", value: seconds };
+};
+
+const parseYearComparison = (value: string): NumberComparison | null => {
+  const match = /^(?<op>>=|<=|>|<|=)?\s*(?<number>\d{1,4})$/.exec(value.trim());
+  if (!match || !match.groups) return null;
+  const rawNumber = Number(match.groups.number);
+  if (!Number.isFinite(rawNumber)) return null;
+  return { operator: (match.groups.op as NumberComparison["operator"]) ?? "=", value: rawNumber };
+};
+
+const appendRangeComparisons = (
+  target: NumberComparison[],
+  range: { min?: number | null; max?: number | null }
+) => {
+  if (typeof range.min === "number") {
+    target.push({ operator: ">=", value: range.min });
+  }
+  if (typeof range.max === "number") {
+    target.push({ operator: "<=", value: range.max });
+  }
+};
+
 const parseSizeComparison = (value: string): SizeComparison | null => {
   const SIZE_REGEX = /^(?<op>>=|<=|>|<|=)?\s*(?<number>\d+(?:\.\d+)?)\s*(?<unit>kb|mb|gb|tb|b)?$/i;
   const match = SIZE_REGEX.exec(value.trim());
@@ -163,51 +413,223 @@ const parseSizeComparison = (value: string): SizeComparison | null => {
 const parseSearchQuery = (value: string): ParsedSearchQuery => {
   const trimmed = value.trim().toLowerCase();
   if (!trimmed) {
-    return { textTerms: [], fieldTerms: {}, sizeComparisons: [], isActive: false };
+    return {
+      textTerms: [],
+      excludedTextTerms: [],
+      fieldTerms: {},
+      excludedFieldTerms: {},
+      sizeComparisons: [],
+      durationComparisons: [],
+      yearComparisons: [],
+      beforeTimestamps: [],
+      afterTimestamps: [],
+      onRanges: [],
+      includeFlags: [],
+      excludeFlags: [],
+      isActive: false,
+    };
   }
 
   const tokens = tokenizeSearchInput(trimmed);
   const textTerms: string[] = [];
+  const excludedTextTerms: string[] = [];
   const fieldTerms: Partial<Record<SearchField, string[]>> = {};
+  const excludedFieldTerms: Partial<Record<SearchField, string[]>> = {};
   const sizeComparisons: SizeComparison[] = [];
+  const durationComparisons: NumberComparison[] = [];
+  const yearComparisons: NumberComparison[] = [];
+  const beforeTimestamps: number[] = [];
+  const afterTimestamps: number[] = [];
+  const onRanges: DateRangeFilter[] = [];
+  const includeFlags: SearchFlag[] = [];
+  const excludeFlags: SearchFlag[] = [];
 
   tokens.forEach(token => {
-    const separatorIndex = token.indexOf(":");
+    if (!token) return;
+    let working = token;
+    let isNegated = false;
+    if (working.startsWith("not:")) {
+      working = working.slice(4);
+      isNegated = true;
+      if (!working) return;
+    }
+
+    const separatorIndex = working.indexOf(":");
     if (separatorIndex > 0) {
-      const key = token.slice(0, separatorIndex).trim();
-      const alias = SEARCH_FIELD_ALIASES[key];
-      const rawValue = token.slice(separatorIndex + 1).trim();
-      if (alias && rawValue) {
-        if (alias === "size") {
-          const parts = rawValue.split("...");
-          let parsedAny = false;
-          parts.forEach(part => {
-            const comparison = parseSizeComparison(part);
-            if (comparison) {
-              sizeComparisons.push(comparison);
-              parsedAny = true;
+      const key = working.slice(0, separatorIndex).trim();
+      const rawValue = working.slice(separatorIndex + 1).trim();
+      if (key && rawValue) {
+        if (key === "size") {
+          if (!isNegated) {
+            const parts = rawValue.split("...");
+            let parsedAny = false;
+            parts.forEach(part => {
+              const comparison = parseSizeComparison(part);
+              if (comparison) {
+                sizeComparisons.push(comparison);
+                parsedAny = true;
+              }
+            });
+            if (parsedAny) {
+              return;
             }
-          });
-          if (parsedAny) {
+          }
+        } else if (key === "duration") {
+          if (!isNegated) {
+            if (NUMBER_RANGE_SEPARATOR.test(rawValue)) {
+              const segments = rawValue.split(NUMBER_RANGE_SEPARATOR);
+              if (segments.length === 2) {
+                const [minRaw, maxRaw] = segments as [string, string];
+                const minValue = minRaw ? parseDurationValue(minRaw) : undefined;
+                const maxValue = maxRaw ? parseDurationValue(maxRaw) : undefined;
+                if ((minRaw && minValue == null) || (maxRaw && maxValue == null)) {
+                  // fall through to treat as text term
+                } else {
+                  const normalizedMin = typeof minValue === "number" ? minValue : undefined;
+                  const normalizedMax = typeof maxValue === "number" ? maxValue : undefined;
+                  if (
+                    typeof normalizedMin === "number" &&
+                    typeof normalizedMax === "number" &&
+                    normalizedMax < normalizedMin
+                  ) {
+                    appendRangeComparisons(durationComparisons, { min: normalizedMax, max: normalizedMin });
+                  } else {
+                    appendRangeComparisons(durationComparisons, { min: normalizedMin, max: normalizedMax });
+                  }
+                  return;
+                }
+              }
+            } else {
+              const comparison = parseDurationComparison(rawValue);
+              if (comparison) {
+                durationComparisons.push(comparison);
+                return;
+              }
+            }
+          }
+        } else if (key === "year") {
+          if (!isNegated) {
+            if (NUMBER_RANGE_SEPARATOR.test(rawValue)) {
+              const segments = rawValue.split(NUMBER_RANGE_SEPARATOR);
+              if (segments.length === 2) {
+                const [minRaw, maxRaw] = segments as [string, string];
+                const minValue = minRaw ? Number(minRaw.trim()) : undefined;
+                const maxValue = maxRaw ? Number(maxRaw.trim()) : undefined;
+                const minResolved =
+                  typeof minValue === "number" && Number.isFinite(minValue) ? Math.floor(minValue) : undefined;
+                const maxResolved =
+                  typeof maxValue === "number" && Number.isFinite(maxValue) ? Math.floor(maxValue) : undefined;
+                if ((minRaw && minResolved == null) || (maxRaw && maxResolved == null)) {
+                  // fall through unless both are valid
+                } else if (
+                  typeof minResolved === "number" &&
+                  typeof maxResolved === "number" &&
+                  maxResolved < minResolved
+                ) {
+                  appendRangeComparisons(yearComparisons, { min: maxResolved, max: minResolved });
+                  return;
+                } else {
+                  appendRangeComparisons(yearComparisons, { min: minResolved, max: maxResolved });
+                  return;
+                }
+              }
+            } else {
+              const comparison = parseYearComparison(rawValue);
+              if (comparison) {
+                yearComparisons.push(comparison);
+                return;
+              }
+            }
+          }
+        } else if (key === "before") {
+          if (!isNegated) {
+            const point = parseDatePoint(rawValue);
+            if (point !== null) {
+              beforeTimestamps.push(point);
+              return;
+            }
+          }
+        } else if (key === "after") {
+          if (!isNegated) {
+            const point = parseDatePoint(rawValue);
+            if (point !== null) {
+              afterTimestamps.push(point);
+              return;
+            }
+          }
+        } else if (key === "on") {
+          if (!isNegated) {
+            const range = parseDateRange(rawValue);
+            if (range) {
+              onRanges.push(range);
+              return;
+            }
+          }
+        } else if (key === "is") {
+          const flag = IS_FLAG_ALIASES[rawValue];
+          if (flag) {
+            if (isNegated) {
+              if (!excludeFlags.includes(flag)) {
+                excludeFlags.push(flag);
+              }
+            } else if (!includeFlags.includes(flag)) {
+              includeFlags.push(flag);
+            }
+            return;
+          }
+        } else {
+          const alias = SEARCH_FIELD_ALIASES[key];
+          if (alias) {
+            const target = isNegated ? excludedFieldTerms : fieldTerms;
+            const values = target[alias] ?? [];
+            values.push(rawValue);
+            target[alias] = values;
             return;
           }
         }
-        const values = fieldTerms[alias] ?? [];
-        values.push(rawValue);
-        fieldTerms[alias] = values;
-        return;
       }
     }
-    if (token) {
-      textTerms.push(token);
+
+    if (working) {
+      if (isNegated) {
+        excludedTextTerms.push(working);
+      } else {
+        textTerms.push(working);
+      }
     }
   });
 
+  const hasFieldValues = Object.values(fieldTerms).some(list => (list?.length ?? 0) > 0);
+  const hasExcludedFieldValues = Object.values(excludedFieldTerms).some(list => (list?.length ?? 0) > 0);
   const isActive =
     textTerms.length > 0 ||
+    excludedTextTerms.length > 0 ||
     sizeComparisons.length > 0 ||
-    Object.values(fieldTerms).some(list => (list?.length ?? 0) > 0);
-  return { textTerms, fieldTerms, sizeComparisons, isActive };
+    durationComparisons.length > 0 ||
+    yearComparisons.length > 0 ||
+    beforeTimestamps.length > 0 ||
+    afterTimestamps.length > 0 ||
+    onRanges.length > 0 ||
+    includeFlags.length > 0 ||
+    excludeFlags.length > 0 ||
+    hasFieldValues ||
+    hasExcludedFieldValues;
+
+  return {
+    textTerms,
+    excludedTextTerms,
+    fieldTerms,
+    excludedFieldTerms,
+    sizeComparisons,
+    durationComparisons,
+    yearComparisons,
+    beforeTimestamps,
+    afterTimestamps,
+    onRanges,
+    includeFlags,
+    excludeFlags,
+    isActive,
+  };
 };
 
 type FolderNode = {
@@ -531,7 +953,20 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
         return false;
       }
 
-      const { textTerms, fieldTerms } = searchQuery;
+      const {
+        textTerms,
+        excludedTextTerms,
+        fieldTerms,
+        excludedFieldTerms,
+        sizeComparisons,
+        durationComparisons,
+        yearComparisons,
+        beforeTimestamps,
+        afterTimestamps,
+        onRanges,
+        includeFlags,
+        excludeFlags,
+      } = searchQuery;
       const privateMetadata = blob.privateData?.metadata;
       const privateAudio = privateMetadata?.audio ?? undefined;
       const audioMetadata = metadataMap.get(blob.sha256);
@@ -547,11 +982,31 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
         return undefined;
       };
 
-      const getAudioValue = (field: keyof BlobAudioMetadata) =>
-        coerceValue(audioMetadata?.[field] ?? (privateAudio ? (privateAudio as any)[field] : undefined));
+	      const coerceNumeric = (value: unknown): number | undefined => {
+	        if (typeof value === "number" && Number.isFinite(value)) {
+	          return value;
+	        }
+	        if (typeof value === "string") {
+	          const trimmed = value.trim();
+	          if (!trimmed) return undefined;
+	          const parsed = Number(trimmed);
+	          if (Number.isFinite(parsed)) {
+	            return parsed;
+	          }
+	        }
+	        return undefined;
+	      };
+
+	      const getAudioValue = (field: keyof BlobAudioMetadata) =>
+	        coerceValue(audioMetadata?.[field] ?? (privateAudio ? (privateAudio as any)[field] : undefined));
+
+	      const getAudioNumber = (field: keyof BlobAudioMetadata) =>
+	        coerceNumeric(audioMetadata?.[field] ?? (privateAudio ? (privateAudio as any)[field] : undefined));
 
       const mimeValueSet = new Set<string>();
       const typeValueSet = new Set<string>();
+      const serverValueSet = new Set<string>();
+      const folderValueSet = new Set<string>();
 
       const addMimeCandidate = (value?: string | null) => {
         const coerced = coerceValue(value);
@@ -573,24 +1028,60 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
         }
       };
 
+      const addServerCandidate = (value?: string | null) => {
+        const coerced = coerceValue(value);
+        if (!coerced) return;
+        serverValueSet.add(coerced.toLowerCase());
+        const normalized = normalizeServerUrl(coerced);
+        serverValueSet.add(normalized.toLowerCase());
+        try {
+          const parsed = new URL(coerced);
+          serverValueSet.add(parsed.origin.toLowerCase());
+          serverValueSet.add(parsed.host.toLowerCase());
+          serverValueSet.add(parsed.hostname.toLowerCase());
+        } catch {
+          // Ignore parse errors for non-URL strings.
+        }
+      };
+
+      const addFolderCandidate = (value?: string | null) => {
+        const normalized = normalizeFolderPathInput(value ?? undefined);
+        if (typeof normalized === "string") {
+          const trimmed = normalized.trim();
+          if (trimmed) {
+            folderValueSet.add(trimmed.toLowerCase());
+          } else {
+            folderValueSet.add("/");
+          }
+        }
+        const coerced = coerceValue(value);
+        if (coerced) {
+          folderValueSet.add(coerced.toLowerCase());
+        }
+      };
+
       addMimeCandidate(blob.type);
       addMimeCandidate(privateMetadata?.type);
       addTypeCandidate(blob.name);
       addTypeCandidate(privateMetadata?.name);
       addTypeCandidate(blob.label);
+      addServerCandidate(blob.serverUrl);
+      (blob.privateData?.servers ?? []).forEach(addServerCandidate);
+      addFolderCandidate(blob.folderPath ?? null);
+      addFolderCandidate(privateMetadata?.folderPath ?? null);
 
-      if (searchQuery.sizeComparisons.length > 0) {
-        const resolvedSize = (() => {
-          if (typeof blob.size === "number" && Number.isFinite(blob.size)) return blob.size;
-          const privateSize = privateMetadata?.size;
-          if (typeof privateSize === "number" && Number.isFinite(privateSize)) return privateSize;
-          if (typeof privateMetadata?.audio?.durationSeconds === "number") return undefined;
+	      if (sizeComparisons.length > 0) {
+	        const resolvedSize = (() => {
+	          if (typeof blob.size === "number" && Number.isFinite(blob.size)) return blob.size;
+	          const privateSize = privateMetadata?.size;
+	          if (typeof privateSize === "number" && Number.isFinite(privateSize)) return privateSize;
+	          if (typeof privateMetadata?.audio?.durationSeconds === "number") return undefined;
           return undefined;
         })();
         if (typeof resolvedSize !== "number") {
           return false;
         }
-        const satisfiesSizeFilters = searchQuery.sizeComparisons.every(comparison => {
+        const satisfiesSizeFilters = sizeComparisons.every(comparison => {
           switch (comparison.operator) {
             case ">":
               return resolvedSize > comparison.value;
@@ -605,15 +1096,148 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
               return resolvedSize === comparison.value;
           }
         });
-        if (!satisfiesSizeFilters) {
+	        if (!satisfiesSizeFilters) {
+	          return false;
+	        }
+	      }
+
+	      const resolvedDuration = (() => {
+	        const publicDuration = getAudioNumber("durationSeconds");
+	        if (typeof publicDuration === "number") return publicDuration;
+	        const privateDuration = coerceNumeric(privateAudio?.durationSeconds);
+	        if (typeof privateDuration === "number") return privateDuration;
+	        return undefined;
+	      })();
+
+	      if (durationComparisons.length > 0) {
+	        if (typeof resolvedDuration !== "number") {
+	          return false;
+	        }
+	        const matchesDuration = durationComparisons.every(comparison => {
+	          switch (comparison.operator) {
+	            case ">":
+	              return resolvedDuration > comparison.value;
+	            case ">=":
+	              return resolvedDuration >= comparison.value;
+	            case "<":
+	              return resolvedDuration < comparison.value;
+	            case "<=":
+	              return resolvedDuration <= comparison.value;
+	            case "=":
+	            default:
+	              return resolvedDuration === comparison.value;
+	          }
+	        });
+	        if (!matchesDuration) {
+	          return false;
+	        }
+	      }
+
+	      const resolvedYear = (() => {
+	        const publicYear = getAudioNumber("year");
+	        if (typeof publicYear === "number") return Math.floor(publicYear);
+	        const privateYear = coerceNumeric(privateAudio?.year);
+        if (typeof privateYear === "number") return Math.floor(privateYear);
+        return undefined;
+      })();
+
+      if (yearComparisons.length > 0) {
+        if (typeof resolvedYear !== "number") {
+          return false;
+        }
+        const matchesYear = yearComparisons.every(comparison => {
+          switch (comparison.operator) {
+            case ">":
+              return resolvedYear > comparison.value;
+            case ">=":
+              return resolvedYear >= comparison.value;
+            case "<":
+              return resolvedYear < comparison.value;
+            case "<=":
+              return resolvedYear <= comparison.value;
+            case "=":
+            default:
+              return resolvedYear === comparison.value;
+          }
+        });
+        if (!matchesYear) {
           return false;
         }
       }
 
-      const fieldEntries = Object.entries(fieldTerms) as [SearchField, string[]][];
-      for (const [field, values] of fieldEntries) {
-        if (!values || values.length === 0) continue;
+      const resolvedUploaded =
+        typeof blob.uploaded === "number" && Number.isFinite(blob.uploaded) ? blob.uploaded : undefined;
 
+      if (beforeTimestamps.length > 0) {
+        if (typeof resolvedUploaded !== "number") {
+          return false;
+        }
+        const satisfiesBefore = beforeTimestamps.every(threshold => resolvedUploaded < threshold);
+        if (!satisfiesBefore) {
+          return false;
+        }
+      }
+
+      if (afterTimestamps.length > 0) {
+        if (typeof resolvedUploaded !== "number") {
+          return false;
+        }
+        const satisfiesAfter = afterTimestamps.every(threshold => resolvedUploaded >= threshold);
+        if (!satisfiesAfter) {
+          return false;
+        }
+      }
+
+      if (onRanges.length > 0) {
+        if (typeof resolvedUploaded !== "number") {
+          return false;
+        }
+        const matchesAllRanges = onRanges.every(range => resolvedUploaded >= range.start && resolvedUploaded < range.end);
+        if (!matchesAllRanges) {
+          return false;
+        }
+      }
+
+      const matchesFlag = (flag: SearchFlag) => {
+        switch (flag) {
+          case "private":
+            return Boolean(blob.privateData);
+          case "shared":
+            return !blob.privateData;
+          case "audio":
+            return isMusicBlob(blob);
+          case "image":
+            return isImageBlob(blob);
+          case "video":
+            return isVideoBlob(blob);
+          case "document":
+            return isDocumentBlob(blob);
+          case "pdf":
+            return isPdfBlob(blob);
+          default:
+            return false;
+        }
+      };
+
+      if (includeFlags.length > 0) {
+        const allFlagsMatch = includeFlags.every(flag => matchesFlag(flag));
+        if (!allFlagsMatch) {
+          return false;
+        }
+      }
+
+      if (excludeFlags.length > 0) {
+        const violatesExcludedFlag = excludeFlags.some(flag => matchesFlag(flag));
+        if (violatesExcludedFlag) {
+          return false;
+        }
+      }
+
+      const fieldCandidateCache: Partial<Record<SearchField, string[]>> = {};
+      const getFieldCandidates = (field: SearchField): string[] => {
+        if (fieldCandidateCache[field]) {
+          return fieldCandidateCache[field] as string[];
+        }
         let candidates: string[] = [];
         switch (field) {
           case "artist": {
@@ -662,10 +1286,25 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
             candidates = Array.from(mimeValueSet);
             break;
           }
+          case "server": {
+            candidates = Array.from(serverValueSet);
+            break;
+          }
+          case "folder": {
+            candidates = Array.from(folderValueSet);
+            break;
+          }
           default:
             candidates = [];
         }
+        fieldCandidateCache[field] = candidates;
+        return candidates;
+      };
 
+      const fieldEntries = Object.entries(fieldTerms) as [SearchField, string[]][];
+      for (const [field, values] of fieldEntries) {
+        if (!values || values.length === 0) continue;
+        const candidates = getFieldCandidates(field);
         if (candidates.length === 0) {
           return false;
         }
@@ -678,42 +1317,74 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
         }
       }
 
+      const excludedFieldEntries = Object.entries(excludedFieldTerms) as [SearchField, string[]][];
+      for (const [field, values] of excludedFieldEntries) {
+        if (!values || values.length === 0) continue;
+        const candidates = getFieldCandidates(field);
+        if (!candidates.length) continue;
+        const hasMatch = values.some(value =>
+          candidates.some(candidate => candidate.includes(value))
+        );
+        if (hasMatch) {
+          return false;
+        }
+      }
+
+      const buildTextCandidates = () => {
+        const candidates = new Set<string>();
+        const pushCandidate = (value?: string | null) => {
+          const coerced = coerceValue(value);
+          if (coerced) {
+            candidates.add(coerced.toLowerCase());
+          }
+        };
+
+        pushCandidate(blob.name);
+        pushCandidate(blob.label);
+        pushCandidate(blob.folderPath ?? undefined);
+        pushCandidate(privateMetadata?.name);
+        pushCandidate(privateMetadata?.folderPath ?? undefined);
+        pushCandidate(blob.type);
+        pushCandidate(privateMetadata?.type);
+        pushCandidate(getAudioValue("title"));
+        pushCandidate(getAudioValue("artist"));
+        pushCandidate(getAudioValue("album"));
+        pushCandidate(getAudioValue("genre"));
+        pushCandidate(blob.serverUrl);
+
+        typeValueSet.forEach(value => candidates.add(value));
+        mimeValueSet.forEach(value => candidates.add(value));
+        serverValueSet.forEach(value => candidates.add(value));
+        folderValueSet.forEach(value => candidates.add(value));
+
+        const addExtensionCandidate = (value?: string | null) => {
+          const extension = extractExtension(value);
+          if (extension) {
+            candidates.add(extension);
+          }
+        };
+
+        addExtensionCandidate(blob.name);
+        addExtensionCandidate(privateMetadata?.name);
+
+        return candidates;
+      };
+
       if (textTerms.length === 0) {
+        if (excludedTextTerms.length > 0) {
+          const candidates = buildTextCandidates();
+          for (const term of excludedTextTerms) {
+            for (const candidate of candidates) {
+              if (candidate.includes(term)) {
+                return false;
+              }
+            }
+          }
+        }
         return true;
       }
 
-      const candidates = new Set<string>();
-      const pushCandidate = (value?: string | null) => {
-        const coerced = coerceValue(value);
-        if (coerced) {
-          candidates.add(coerced.toLowerCase());
-        }
-      };
-
-      pushCandidate(blob.name);
-      pushCandidate(blob.label);
-      pushCandidate(blob.folderPath ?? undefined);
-      pushCandidate(privateMetadata?.name);
-      pushCandidate(privateMetadata?.folderPath ?? undefined);
-      pushCandidate(blob.type);
-      pushCandidate(privateMetadata?.type);
-      pushCandidate(getAudioValue("title"));
-      pushCandidate(getAudioValue("artist"));
-      pushCandidate(getAudioValue("album"));
-      pushCandidate(getAudioValue("genre"));
-
-      typeValueSet.forEach(value => candidates.add(value));
-      mimeValueSet.forEach(value => candidates.add(value));
-
-      const addExtensionCandidate = (value?: string | null) => {
-        const extension = extractExtension(value);
-        if (extension) {
-          candidates.add(extension);
-        }
-      };
-
-      addExtensionCandidate(blob.name);
-      addExtensionCandidate(privateMetadata?.name);
+      const candidates = buildTextCandidates();
 
       for (const term of textTerms) {
         let matched = false;
@@ -725,6 +1396,16 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
         }
         if (!matched) {
           return false;
+        }
+      }
+
+      if (excludedTextTerms.length > 0) {
+        for (const term of excludedTextTerms) {
+          for (const candidate of candidates) {
+            if (candidate.includes(term)) {
+              return false;
+            }
+          }
         }
       }
 
