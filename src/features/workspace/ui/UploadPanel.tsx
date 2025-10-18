@@ -27,6 +27,7 @@ import { FolderIcon, LockIcon, WarningIcon, UploadIcon, EditIcon, TrashIcon } fr
 import { useUserPreferences } from "../../../app/context/UserPreferencesContext";
 import { publishNip94Metadata } from "../../../shared/api/nip94Publisher";
 import { usePreferredRelays } from "../../../app/hooks/usePreferredRelays";
+import type { StatusMessageTone } from "../../../shared/types/status";
 
 const RESIZE_OPTIONS = [
   { id: 0, label: "Original" },
@@ -186,6 +187,7 @@ export type UploadPanelProps = {
   onUploaded: (success: boolean) => void;
   syncTransfers?: TransferState[];
   defaultFolderPath?: string | null;
+  showStatusMessage?: (message: string, tone?: StatusMessageTone, duration?: number) => void;
 };
 
 export const UploadPanel: React.FC<UploadPanelProps> = ({
@@ -194,6 +196,7 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
   onUploaded,
   syncTransfers = [],
   defaultFolderPath,
+  showStatusMessage,
 }) => {
   const { preferences } = useUserPreferences();
   const isLightTheme = preferences.theme === "light";
@@ -566,18 +569,23 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
       return prev.filter(entry => entry.status !== "success");
     });
   }, [setFeedback, setTransfers]);
-  const reset = () => {
+  const reset = useCallback(() => {
     setEntries([]);
     setTransfers([]);
     setEntryFilter("all");
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
     }
-    setFeedback({
-      id: Date.now(),
-      message: "Upload queue reset.",
-    });
-  };
+    const message = "Upload queue reset.";
+    if (showStatusMessage) {
+      showStatusMessage(message, "info", 4000);
+    } else {
+      setFeedback({
+        id: Date.now(),
+        message,
+      });
+    }
+  }, [showStatusMessage, setFeedback]);
 
   const handleFilesSelected = async (fileList: FileList | null) => {
     const selectionId = ++pendingSelectionRef.current;
@@ -1244,13 +1252,7 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
           </div>
         ) : null}
         {uploadPhase === "completed" && completedEntries.length > 0 ? (
-          <div
-            className={`rounded-xl border px-4 py-4 ${
-              isLightTheme
-                ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                : "border-emerald-500/40 bg-emerald-500/10 text-emerald-100"
-            }`}
-          >
+          <div className={`rounded-xl border px-4 py-4 ${isLightTheme ? "border-emerald-200 text-emerald-700" : "border-emerald-500/40 text-emerald-100"}`}>
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="flex flex-col gap-1">
                 <span className="text-sm font-semibold">Uploads complete</span>

@@ -239,6 +239,7 @@ export const Workspace: React.FC<WorkspaceProps> = ({
             onUploaded={onUploadCompleted}
             syncTransfers={syncTransfers}
             defaultFolderPath={uploadFolderSuggestion ?? null}
+            showStatusMessage={showStatusMessage}
           />
         </Suspense>
       )}
