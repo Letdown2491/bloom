@@ -1573,6 +1573,24 @@ type GridCardProps = {
   getMenuBoundary: () => HTMLElement | null;
 };
 
+type GridDropdownItem =
+  | {
+      key: string;
+      type: "separator";
+    }
+  | {
+      key: string;
+      label: string;
+      icon: React.ReactNode;
+      onSelect: () => void;
+      ariaLabel?: string;
+      variant?: "destructive";
+      disabled?: boolean;
+    };
+
+const isGridDropdownSeparator = (item: GridDropdownItem): item is { key: string; type: "separator" } =>
+  "type" in item && item.type === "separator";
+
 const GridCard = React.memo<GridCardProps>(
   ({
     blob,
@@ -1634,6 +1652,7 @@ const GridCard = React.memo<GridCardProps>(
     const toolbarNeutralButtonClass = `${toolbarBaseClass} ${neutralToolbarClass}`;
     const toolbarPrimaryButtonClass = `${toolbarBaseClass} ${primaryToolbarClass}`;
     const dropdownTriggerClass = `${toolbarNeutralButtonClass} justify-center`;
+    const dropdownSeparatorClass = isLightTheme ? "my-1 h-px bg-slate-200" : "my-1 h-px bg-slate-700/60";
     const menuBaseClass = isLightTheme
       ? "absolute right-0 z-50 w-44 rounded-md border border-slate-300 bg-white p-1 text-slate-700 shadow-xl"
       : "absolute right-0 z-50 w-44 rounded-md border border-slate-700 bg-slate-900/95 p-1 text-slate-200 shadow-xl backdrop-blur";
@@ -1652,20 +1671,6 @@ const GridCard = React.memo<GridCardProps>(
       const disabledClass = disabled ? "cursor-not-allowed opacity-50 hover:bg-transparent" : "";
       return `${base} ${variantClass} ${disabledClass}`.trim();
     };
-    const cardStyle = useMemo<React.CSSProperties>(
-      () => ({
-        top: 0,
-        left: 0,
-        width,
-        height,
-        transform: `translate3d(${left}px, ${top}px, 0)`,
-        willChange: "transform",
-        zIndex: isMenuOpen ? 40 : isSelected ? 30 : undefined,
-      }),
-      [height, isMenuOpen, isSelected, left, top, width]
-    );
-    const contentHeight = height * 0.75;
-
     const isAudio = blob.type?.startsWith("audio/");
     const isActiveTrack = Boolean(currentTrackUrl && blob.url && currentTrackUrl === blob.url);
     const isActivePlaying = isActiveTrack && currentTrackStatus === "playing";
@@ -1719,12 +1724,109 @@ const GridCard = React.memo<GridCardProps>(
           }
         : null;
 
+    const shareTriggerRef = useRef<HTMLButtonElement | null>(null);
+    const shareMenuRef = useRef<HTMLDivElement | null>(null);
+    const [shareMenuOpen, setShareMenuOpen] = useState(false);
+    const shareMenuDisabled = useMemo(
+      () => Boolean(folderShareHint && onShareFolder) || !onShare || isPrivateItem || !blob.url,
+      [folderShareHint, onShare, onShareFolder, isPrivateItem, blob.url]
+    );
+    const sharePlacement = useDropdownPlacement(shareMenuOpen, shareTriggerRef, shareMenuRef, menuBoundary);
+    const sharePlacementClass =
+      sharePlacement === "up"
+        ? "bottom-full mb-2 origin-bottom"
+        : "top-full mt-2 origin-top";
+    const shareVisibilityClass = sharePlacement ? "visible opacity-100" : "invisible opacity-0 pointer-events-none";
+    const disabledNeutralButtonClass = isLightTheme
+      ? [
+          "disabled:border-slate-300",
+          "disabled:bg-white/95",
+          "disabled:text-slate-700",
+          "disabled:opacity-100",
+          "disabled:hover:bg-white/95",
+          "disabled:hover:text-slate-700",
+          "disabled:focus:bg-white/95",
+          "disabled:focus:text-slate-700",
+          "disabled:focus-visible:bg-white/95",
+          "disabled:focus-visible:text-slate-700",
+          "disabled:active:bg-white/95",
+          "disabled:active:text-slate-700",
+        ].join(" ")
+      : [
+          "disabled:border-slate-700",
+          "disabled:bg-slate-900/80",
+          "disabled:text-slate-100",
+          "disabled:opacity-100",
+          "disabled:hover:bg-slate-900/80",
+          "disabled:hover:text-slate-100",
+          "disabled:focus:bg-slate-900/80",
+          "disabled:focus:text-slate-100",
+          "disabled:focus-visible:bg-slate-900/80",
+          "disabled:focus-visible:text-slate-100",
+          "disabled:active:bg-slate-900/80",
+          "disabled:active:text-slate-100",
+        ].join(" ");
+    const actionsMenuDisabled = isPrivateList && blob.sha256 === PRIVATE_PLACEHOLDER_SHA;
+    const disabledNeutralIconClass = isLightTheme ? "text-slate-400" : "text-slate-500";
+    const disabledActionsClass = actionsMenuDisabled ? disabledNeutralButtonClass : "";
+
+    useEffect(() => {
+      setShareMenuOpen(false);
+    }, [blob.sha256, folderShareHint, onShareFolder]);
+
+    useEffect(() => {
+      if (!shareMenuOpen) return;
+      if (typeof document === "undefined") return;
+      const handlePointer = (event: Event) => {
+        const target = event.target as Node | null;
+        if (!target) return;
+        const trigger = shareTriggerRef.current;
+        const menu = shareMenuRef.current;
+        if (trigger?.contains(target) || menu?.contains(target)) {
+          return;
+        }
+        setShareMenuOpen(false);
+      };
+      const handleKey = (event: KeyboardEvent) => {
+        if (event.key === "Escape") {
+          setShareMenuOpen(false);
+        }
+      };
+      document.addEventListener("pointerdown", handlePointer);
+      document.addEventListener("keydown", handleKey);
+      return () => {
+        document.removeEventListener("pointerdown", handlePointer);
+        document.removeEventListener("keydown", handleKey);
+      };
+    }, [shareMenuOpen]);
+
+    useEffect(() => {
+      if (shareMenuDisabled) {
+        setShareMenuOpen(false);
+      }
+    }, [shareMenuDisabled]);
+
+    const cardStyle = useMemo<React.CSSProperties>(
+      () => ({
+        top: 0,
+        left: 0,
+        width,
+        height,
+        transform: `translate3d(${left}px, ${top}px, 0)`,
+        willChange: "transform",
+        zIndex: isMenuOpen ? 40 : shareMenuOpen ? 4000 : isSelected ? 30 : undefined,
+      }),
+      [shareMenuOpen, height, isMenuOpen, isSelected, left, top, width]
+    );
+    const contentHeight = height * 0.75;
+
     const handleMenuToggle = useCallback<React.MouseEventHandler<HTMLButtonElement>>(
       event => {
+        if (actionsMenuDisabled) return;
         event.stopPropagation();
         onToggleMenu(blob.sha256);
       },
-      [blob.sha256, onToggleMenu]
+      [actionsMenuDisabled, blob.sha256, onToggleMenu]
     );
 
     const registerDropdownRef = useCallback(
@@ -1740,16 +1842,8 @@ const GridCard = React.memo<GridCardProps>(
     );
 
     const dropdownItems = useMemo(() => {
-      type DropdownItem = {
-        key: string;
-        label: string;
-        icon: React.ReactNode;
-        onSelect: () => void;
-        ariaLabel?: string;
-        variant?: "destructive";
-        disabled?: boolean;
-      };
-      const items: DropdownItem[] = [];
+      const items: GridDropdownItem[] = [];
+      let addedRename = false;
       if (folderShareHint && onShareFolder) {
         if (folderVisibility === "public" && onUnshareFolder) {
           items.push({
@@ -1809,6 +1903,14 @@ const GridCard = React.memo<GridCardProps>(
           icon: <EditIcon size={14} />,
           ariaLabel: isAudio ? "Edit track details" : "Edit file details",
           onSelect: () => onRename(blob),
+        });
+        addedRename = true;
+      }
+
+      if (addedRename) {
+        items.push({
+          key: "delete-separator",
+          type: "separator",
         });
       }
 
@@ -1939,53 +2041,10 @@ const GridCard = React.memo<GridCardProps>(
       displayName,
     ]);
 
-    const shareTriggerRef = useRef<HTMLButtonElement | null>(null);
-    const shareMenuRef = useRef<HTMLDivElement | null>(null);
-    const [shareMenuOpen, setShareMenuOpen] = useState(false);
-    const shareMenuDisabled = useMemo(
-      () => Boolean(folderShareHint && onShareFolder) || !onShare || isPrivateItem || !blob.url,
-      [folderShareHint, onShare, onShareFolder, isPrivateItem, blob.url]
-    );
-
-    useEffect(() => {
-      setShareMenuOpen(false);
-    }, [blob.sha256, folderShareHint, onShareFolder]);
-
-    useEffect(() => {
-      if (!shareMenuOpen) return;
-      if (typeof document === "undefined") return;
-      const handlePointer = (event: Event) => {
-        const target = event.target as Node | null;
-        if (!target) return;
-        const trigger = shareTriggerRef.current;
-        const menu = shareMenuRef.current;
-        if (trigger?.contains(target) || menu?.contains(target)) {
-          return;
-        }
-        setShareMenuOpen(false);
-      };
-      const handleKey = (event: KeyboardEvent) => {
-        if (event.key === "Escape") {
-          setShareMenuOpen(false);
-        }
-      };
-      document.addEventListener("pointerdown", handlePointer);
-      document.addEventListener("keydown", handleKey);
-      return () => {
-        document.removeEventListener("pointerdown", handlePointer);
-        document.removeEventListener("keydown", handleKey);
-      };
-    }, [shareMenuOpen]);
-
-    useEffect(() => {
-      if (shareMenuDisabled) {
-        setShareMenuOpen(false);
-      }
-    }, [shareMenuDisabled]);
-
     const shareButton = (() => {
       if (folderShareHint && onShareFolder) {
         const disabled = shareBusy;
+        const folderShareDisabledClass = disabled ? disabledNeutralButtonClass : "";
         const title = disabled
           ? "Sharing folder…"
           : folderVisibility === "public"
@@ -1993,7 +2052,7 @@ const GridCard = React.memo<GridCardProps>(
             : "Share folder";
         return (
           <button
-            className={`${toolbarNeutralButtonClass} rounded-none border-l border-r-0 disabled:border-inherit disabled:bg-inherit disabled:text-inherit disabled:hover:bg-inherit`}
+            className={`${toolbarNeutralButtonClass} rounded-none border-l border-r-0 ${folderShareDisabledClass}`}
             onClick={event => {
               event.stopPropagation();
               if (disabled) return;
@@ -2004,23 +2063,25 @@ const GridCard = React.memo<GridCardProps>(
             type="button"
             disabled={disabled}
           >
-            <ShareIcon size={18} />
+            <ShareIcon size={18} className={disabled ? disabledNeutralIconClass : undefined} />
           </button>
         );
       }
       if (!onShare) return null;
       const disabled = isPrivateItem || !blob.url;
+      const shareDisabledClass = disabled ? disabledNeutralButtonClass : "";
+      const shareDisabledMessage = isListBlob ? "Private folders cannot be shared" : "Private files cannot be shared";
       const title = disabled
         ? isPrivateItem
-          ? "Private files cannot be shared"
+          ? shareDisabledMessage
           : "Share available once file link is ready"
         : "Share";
       const ariaLabel = isAudio ? "Share track" : "Share blob";
       return (
-        <div className="relative">
+        <div className="relative h-full w-full">
           <button
             ref={shareTriggerRef}
-            className={`${toolbarNeutralButtonClass} rounded-none border-l border-r-0 disabled:border-inherit disabled:bg-inherit disabled:text-inherit disabled:hover:bg-inherit`}
+            className={`${dropdownTriggerClass} h-full w-full rounded-none border-l border-r-0 ${shareDisabledClass}`}
             onClick={event => {
               event.stopPropagation();
               if (disabled) return;
@@ -2033,12 +2094,12 @@ const GridCard = React.memo<GridCardProps>(
             aria-haspopup="true"
             aria-expanded={shareMenuOpen}
           >
-            <ShareIcon size={18} />
+            <ShareIcon size={18} className={disabled ? disabledNeutralIconClass : undefined} />
           </button>
           {shareMenuOpen ? (
             <div
               ref={shareMenuRef}
-              className={`${menuBaseClass} absolute right-0 top-full mt-2 origin-top visible opacity-100`}
+              className={`${menuBaseClass} ${sharePlacementClass} ${shareVisibilityClass}`}
               role="menu"
               aria-label="Share options"
             >
@@ -2199,42 +2260,49 @@ const GridCard = React.memo<GridCardProps>(
           {dropdownItems.length > 0 ? (
             <div className="relative h-full w-full" ref={registerDropdownRef}>
               <button
-                className={`${dropdownTriggerClass} h-full w-full rounded-none rounded-br-xl border-l`}
+                className={`${dropdownTriggerClass} h-full w-full rounded-none rounded-br-xl border-l ${disabledActionsClass}`}
                 onClick={handleMenuToggle}
-                aria-haspopup="true"
-                aria-expanded={isMenuOpen}
-                title="More actions"
+                aria-haspopup={actionsMenuDisabled ? undefined : "true"}
+                aria-expanded={actionsMenuDisabled ? undefined : isMenuOpen}
+                title={actionsMenuDisabled ? "Actions unavailable" : "More actions"}
                 type="button"
                 aria-label="More actions"
+                disabled={actionsMenuDisabled}
+                aria-disabled={actionsMenuDisabled || undefined}
               >
-                <ChevronDownIcon size={18} />
+                <ChevronDownIcon size={18} className={actionsMenuDisabled ? disabledNeutralIconClass : undefined} />
               </button>
-              {isMenuOpen ? (
+              {!actionsMenuDisabled && isMenuOpen ? (
                 <div
                   ref={menuRef}
                   className={`${menuBaseClass} ${menuPlacementClass} ${menuVisibilityClass}`}
                   role="menu"
                   aria-label="More actions"
                 >
-                  {dropdownItems.map(item => (
-                    <a
-                      key={item.key}
-                      href="#"
-                      role="menuitem"
-                      aria-label={item.ariaLabel ?? item.label}
-                      className={makeItemClass(item.variant, item.disabled)}
-                      aria-disabled={item.disabled || undefined}
-                      onClick={event => {
-                        event.preventDefault();
-                        event.stopPropagation();
-                        if (item.disabled) return;
-                        handleMenuItemSelect(item.onSelect);
-                      }}
-                    >
-                      {item.icon}
-                      <span>{item.label}</span>
-                    </a>
-                  ))}
+                  {dropdownItems.map(item => {
+                    if (isGridDropdownSeparator(item)) {
+                      return <div key={item.key} className={dropdownSeparatorClass} role="separator" aria-hidden="true" />;
+                    }
+                    return (
+                      <a
+                        key={item.key}
+                        href="#"
+                        role="menuitem"
+                        aria-label={item.ariaLabel ?? item.label}
+                        className={makeItemClass(item.variant, item.disabled)}
+                        aria-disabled={item.disabled || undefined}
+                        onClick={event => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          if (item.disabled) return;
+                          handleMenuItemSelect(item.onSelect);
+                        }}
+                      >
+                        {item.icon}
+                        <span>{item.label}</span>
+                      </a>
+                    );
+                  })}
                 </div>
               ) : null}
             </div>

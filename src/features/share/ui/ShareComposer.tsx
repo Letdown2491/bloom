@@ -1780,7 +1780,7 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
                   <ShareActionIcon className="h-4 w-4" />
                   <span>{shareButtonLabel}</span>
                 </button>
-                {!signer && shareMode !== "private-link" && (
+                {!signer && (
                   <button
                     type="button"
                     onClick={handleConnectClick}
