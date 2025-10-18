@@ -125,6 +125,8 @@ export const PrivateLinkPanel: React.FC<PrivateLinkPanelProps> = ({ payload, onS
     setAlias(nextAlias);
     setDisplayAlias(nextAlias);
     setLinkCreated(false);
+    setLocalMessage(null);
+    onShareComplete?.({ mode: "private-link", success: false });
   };
 
   const handleCreate = async (event: React.FormEvent) => {
@@ -227,6 +229,8 @@ export const PrivateLinkPanel: React.FC<PrivateLinkPanelProps> = ({ payload, onS
                   setAlias(nextAlias);
                   setDisplayAlias(nextAlias);
                   setLinkCreated(false);
+                  setLocalMessage(null);
+                  onShareComplete?.({ mode: "private-link", success: false });
                 }}
                 className={`flex-1 font-mono ${inputClass}`}
                 autoComplete="off"

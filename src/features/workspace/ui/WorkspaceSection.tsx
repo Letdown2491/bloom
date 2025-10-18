@@ -305,6 +305,10 @@ export const WorkspaceSection = memo(function WorkspaceSection({
               payload={shareState.payload}
               shareKey={shareState.shareKey}
               initialMode="private-link"
+              onShareLinkRequest={(payload, options) => {
+                onRequestShare(payload, options);
+                onSetTab("share");
+              }}
               onClose={() => {
                 onClearShareState();
                 onSetTab("browse");

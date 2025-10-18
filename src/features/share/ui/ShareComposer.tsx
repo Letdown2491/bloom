@@ -5,6 +5,7 @@ import { DEFAULT_PUBLIC_RELAYS, extractPreferredRelays, sanitizeRelayUrl } from 
 import { nip19 } from "nostr-tools";
 import { PrivateLinkPanel } from "../PrivateLinkPanel";
 import { prettyBytes } from "../../../shared/utils/format";
+import { ShareIcon } from "../../../shared/ui/icons";
 import { checkLocalStorageQuota } from "../../../shared/utils/storageQuota";
 import { loadNdkModule, type NdkModule } from "../../../shared/api/ndkModule";
 import { useUserPreferences } from "../../../app/context/UserPreferencesContext";
@@ -44,6 +45,7 @@ type ShareComposerProps = {
   onClose?: () => void;
   onShareComplete?: (result: ShareCompletion) => void;
   initialMode?: ShareMode | null;
+  onShareLinkRequest?: (payload: SharePayload, options?: { mode?: ShareMode }) => void;
 };
 
 type RelayStatus = "idle" | "pending" | "success" | "error";
@@ -476,6 +478,7 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
   onClose,
   onShareComplete,
   initialMode = null,
+  onShareLinkRequest,
 }) => {
   const { connect, signer, ndk } = useNdk();
   const pubkey = useCurrentPubkey();
@@ -506,6 +509,8 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
   const [metadataLoaded, setMetadataLoaded] = useState(false);
   const [metadataError, setMetadataError] = useState<string | null>(null);
   const [globalError, setGlobalError] = useState<string | null>(null);
+  const [privateLinkDetails, setPrivateLinkDetails] = useState<{ link: string; alias: string | null } | null>(null);
+  const [showRelayDetails, setShowRelayDetails] = useState(false);
   const [profileInfo, setProfileInfo] = useState<ProfileInfo>(() => emptyProfileInfo());
   const {
     preferences: { theme },
@@ -741,6 +746,7 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
     setPublishing(false);
     setNoteContent("");
     setShareMode(initialMode ?? "note");
+    setPrivateLinkDetails(null);
     setRecipientQuery("");
     setRecipientResults([]);
     setSelectedRecipient(null);
@@ -752,6 +758,34 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
   useEffect(() => {
     setMediaError(false);
   }, [payload?.url]);
+
+  useEffect(() => {
+    if (shareMode !== "private-link") {
+      setPrivateLinkDetails(null);
+    }
+  }, [shareMode]);
+
+  useEffect(() => {
+    setShowRelayDetails(false);
+  }, [shareMode]);
+
+  const handlePrivateLinkCompletion = useCallback(
+    (result: ShareCompletion) => {
+      if (result.mode === "private-link") {
+        if (result.success && result.link) {
+          setPrivateLinkDetails({ link: result.link, alias: result.alias ?? null });
+        } else {
+          setPrivateLinkDetails(null);
+        }
+        if (!result.success) {
+          onShareComplete?.(result);
+        }
+        return;
+      }
+      onShareComplete?.(result);
+    },
+    [onShareComplete]
+  );
 
   useEffect(() => {
     if (payload || !shareKeyDetails) return;
@@ -1349,6 +1383,32 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
 
     const previewContainerDynamicClass =
       privateMediaType === "image" ? `${previewContainerClass} max-h-[300px]` : previewContainerClass;
+    const canSharePrivateLink = Boolean(privateLinkDetails?.link && onShareLinkRequest);
+    const shareButtonBaseClass = "inline-flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-medium transition";
+    const shareButtonClass = shareButtonBaseClass.concat(
+      canSharePrivateLink
+        ? isLightTheme
+          ? " border border-emerald-500 bg-emerald-600 text-white hover:bg-emerald-500"
+          : " border border-emerald-400 bg-emerald-600/90 text-white hover:bg-emerald-500"
+        : isLightTheme
+          ? " border border-slate-300 bg-slate-200 text-slate-500 cursor-not-allowed"
+          : " border border-slate-700 bg-slate-800 text-slate-500 cursor-not-allowed"
+    );
+    const closeButtonClass = isLightTheme
+      ? "inline-flex items-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:border-slate-400 hover:text-slate-900"
+      : "inline-flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-900 px-4 py-2 text-sm font-medium text-slate-300 hover:border-slate-600";
+
+    const handleShareButtonClick = () => {
+      if (!privateLinkDetails?.link || !onShareLinkRequest) return;
+      const sharePayload: SharePayload = {
+        url: privateLinkDetails.link,
+        name: data.name ?? null,
+        sha256: data.sha256 ?? null,
+        serverUrl: data.serverUrl ?? null,
+        size: typeof data.size === "number" ? data.size : null,
+      };
+      onShareLinkRequest(sharePayload, { mode: "note" });
+    };
 
     return (
       <div className={containerClasses}>
@@ -1356,7 +1416,7 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
           <div className="grid min-h-0 flex-1 gap-6 lg:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)]">
             <PrivateLinkPanel
               payload={data}
-              onShareComplete={onShareComplete}
+              onShareComplete={handlePrivateLinkCompletion}
               links={privateLinkState}
               tone={isLightTheme ? "light" : "dark"}
               className={
@@ -1394,11 +1454,25 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
                   Configure <code className="font-mono text-xs text-amber-100">VITE_PRIVATE_LINK_SERVICE_PUBKEY</code> to enable private links.
                 </div>
               )}
-              <div className="mt-6 flex justify-end">
+              {privateLinkState.serviceConfigured && !canSharePrivateLink ? (
+                <div className="mt-4 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-200">
+                  Share controls unlock once a private link is created.
+                </div>
+              ) : null}
+              <div className="mt-6 flex flex-wrap justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={handleShareButtonClick}
+                  className={shareButtonClass}
+                  disabled={!canSharePrivateLink}
+                >
+                  <ShareIcon size={16} className="shrink-0" />
+                  <span>Share</span>
+                </button>
                 <button
                   type="button"
                   onClick={handleClose}
-                  className="inline-flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-900 px-4 py-2 text-sm font-medium text-slate-300 hover:border-slate-600"
+                  className={closeButtonClass}
                 >
                   <CloseIcon className="h-4 w-4" />
                   <span>Close</span>
@@ -1497,6 +1571,13 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
       ? "Using default Bloom relays"
       : "Using connected relays"
     : "Your preferred relays";
+  const RelayIcon: React.FC<{ className?: string }> = ({ className }) => (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="3" />
+      <path d="M5.05 5.05a10 10 0 0 1 0 13.9" />
+      <path d="M18.95 5.05a10 10 0 0 0 0 13.9" />
+    </svg>
+  );
   return (
     <div className={containerClasses}>
       <div className={wrapperClasses}>
@@ -1656,24 +1737,60 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
               </section>
 
               <section className="mt-[7px] space-y-1">
-                <div className="flex items-center justify-between text-xs tracking-wide text-slate-400">
-                  <span>{relayLabel}</span>
-                  {!metadataLoaded && <span className="text-slate-500">Loading…</span>}
-                </div>
-                {metadataError && (
-                  <div className="rounded-lg border border-amber-500/50 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
-                    {metadataError}
-                  </div>
+                <button
+                  type="button"
+                  onClick={() => setShowRelayDetails(value => !value)}
+                  className="flex w-full items-center justify-between text-left text-xs tracking-wide text-slate-400 rounded-md border border-transparent px-2 py-1 hover:border-slate-700 hover:text-slate-200"
+                >
+                  <span className="flex items-center gap-2">
+                    <RelayIcon className="h-3 w-3" />
+                    <span>{relayLabel}</span>
+                    {!metadataLoaded && <span className="text-[10px] text-slate-500">Loading…</span>}
+                  </span>
+                  <svg className={`h-3 w-3 transition-transform ${showRelayDetails ? "rotate-180" : ""}` } viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M4 6l4 4 4-4" />
+                  </svg>
+                </button>
+                {showRelayDetails && (
+                  <>
+                    {metadataError && (
+                      <div className="rounded-lg border border-amber-500/50 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+                        {metadataError}
+                      </div>
+                    )}
+                    <ul className="space-y-1 text-xs text-slate-400">
+                      {effectiveRelays.map(url => (
+                        <li key={url} className="flex items-center justify-between gap-3 text-slate-300">
+                          <span className="font-mono text-[11px] text-slate-200 sm:text-xs">{url}</span>
+                          {renderRelayStatus(url)}
+                        </li>
+                      ))}
+                    </ul>
+                  </>
                 )}
-                <ul className="space-y-1 text-xs text-slate-400">
-                  {effectiveRelays.map(url => (
-                    <li key={url} className="flex items-center justify-between gap-3 text-slate-300">
-                      <span className="font-mono text-[11px] text-slate-200 sm:text-xs">{url}</span>
-                      {renderRelayStatus(url)}
-                    </li>
-                  ))}
-                </ul>
               </section>
+
+              <div className="mt-4 flex flex-wrap items-center justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={handleShare}
+                  className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-60"
+                  disabled={publishing || !data.url || (isDmMode && !selectedRecipient)}
+                >
+                  <ShareActionIcon className="h-4 w-4" />
+                  <span>{shareButtonLabel}</span>
+                </button>
+                {!signer && shareMode !== "private-link" && (
+                  <button
+                    type="button"
+                    onClick={handleConnectClick}
+                    className="rounded-xl border border-emerald-500/70 bg-emerald-500/10 px-4 py-2 text-sm font-medium text-emerald-200 hover:border-emerald-400"
+                    disabled={publishing}
+                  >
+                    Connect signer
+                  </button>
+                )}
+              </div>
 
               {globalError && (
                 <div className="mt-4 rounded-lg border border-red-500/50 bg-red-500/10 px-3 py-2 text-sm text-red-300">
@@ -1695,37 +1812,6 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
                 </div>
               )}
             </div>
-            <footer className="flex flex-wrap items-center justify-between gap-3 pt-4">
-              <button
-                type="button"
-                onClick={handleClose}
-                className="inline-flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-900 px-4 py-2 text-sm font-medium text-slate-300 hover:border-slate-600"
-              >
-                <CloseIcon className="h-4 w-4" />
-                <span>Close</span>
-              </button>
-              <div className="flex flex-wrap items-center gap-2">
-                {!signer && (
-                  <button
-                    type="button"
-                    onClick={handleConnectClick}
-                    className="rounded-xl border border-emerald-500/70 bg-emerald-500/10 px-4 py-2 text-sm font-medium text-emerald-200 hover:border-emerald-400"
-                    disabled={publishing}
-                  >
-                    Connect signer
-                  </button>
-                )}
-                <button
-                  type="button"
-                  onClick={handleShare}
-                  className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-60"
-                  disabled={publishing || !data.url || (isDmMode && !selectedRecipient)}
-                >
-                  <ShareActionIcon className="h-4 w-4" />
-                  <span>{shareButtonLabel}</span>
-                </button>
-              </div>
-            </footer>
           </div>
         </div>
 
@@ -1742,7 +1828,7 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
             </div>
 
             <div className="flex-1 overflow-auto">
-              <div className={previewMessageCardClass}>
+              <div className={`${previewMessageCardClass} min-h-[250px] flex flex-col`}>
                 <div className="flex flex-col gap-5">
                   <div className="flex items-start gap-4">
                     <div className={previewAvatarClass}>
@@ -1789,15 +1875,15 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
                       >
                         View shared file
                       </a>
-                    ) : (
-                      <span className="text-sm text-slate-500">File preview will appear here once available.</span>
-                    )}
-                  </div>
-                  {shareMode === "note" && (
-                    <div className="flex items-center justify-between pt-1 text-slate-500">
-                      {PREVIEW_ACTIONS.map(action => (
-                        <span key={action.key} className={previewActionCircleClass} title={action.label}>
-                          <action.icon className="h-4 w-4" />
+                  ) : (
+                    <span className="text-sm text-slate-500">File preview will appear here once available.</span>
+                  )}
+                </div>
+                {shareMode === "note" && (
+                  <div className="flex items-center justify-between pt-1 text-slate-500">
+                    {PREVIEW_ACTIONS.map(action => (
+                      <span key={action.key} className={previewActionCircleClass} title={action.label}>
+                        <action.icon className="h-4 w-4" />
                         </span>
                       ))}
                     </div>
@@ -1805,6 +1891,16 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
                 </div>
               </div>
             </div>
+          </div>
+          <div className="mt-4 flex justify-end px-5 pb-5">
+            <button
+              type="button"
+              onClick={handleClose}
+              className="inline-flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-900 px-4 py-2 text-sm font-medium text-slate-300 hover:border-slate-600"
+            >
+              <CloseIcon className="h-3 w-3" />
+              <span>Close</span>
+            </button>
           </div>
         </aside>
       </div>

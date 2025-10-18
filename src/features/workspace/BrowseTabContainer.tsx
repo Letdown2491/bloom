@@ -33,6 +33,8 @@ import type { Track } from "../../app/context/AudioContext";
 import type { PrivateListEntry } from "../../shared/domain/privateList";
 import { useDialog } from "../../app/context/DialogContext";
 import type { FolderShareHint, ShareFolderRequest } from "../../shared/types/shareFolder";
+import { usePrivateLinks } from "../privateLinks/hooks/usePrivateLinks";
+import type { PrivateLinkRecord } from "../../shared/domain/privateLinks";
 
 const BrowsePanelLazy = React.lazy(() =>
   import("../browse/BrowseTab").then(module => ({ default: module.BrowsePanel }))
@@ -40,6 +42,19 @@ const BrowsePanelLazy = React.lazy(() =>
 
 const normalizeServerUrl = (value: string) => value.replace(/\/+$/, "");
 const NEW_FOLDER_OPTION_VALUE = "__bloom_move_create_new_folder__";
+
+const normalizeMatchUrl = (value?: string | null): string | null => {
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    url.hash = "";
+    url.search = "";
+    return url.toString();
+  } catch {
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : null;
+  }
+};
 
 type SearchField = "artist" | "album" | "title" | "genre" | "year" | "type" | "mime" | "size";
 
@@ -427,6 +442,34 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
   const { selected: selectedBlobs, toggle: toggleBlob, selectMany: selectManyBlobs, clear: clearSelection } = useSelection();
   const audio = useAudio();
   const queryClient = useQueryClient();
+
+  const {
+    links: privateLinks,
+    serviceConfigured: privateLinkServiceConfigured,
+    serviceHost: privateLinkServiceHost,
+  } = usePrivateLinks({ enabled: true });
+  const privateLinkHost = useMemo(() => privateLinkServiceHost.replace(/\/+$/, ""), [privateLinkServiceHost]);
+  const findExistingPrivateLink = useCallback(
+    (blob: BlossomBlob): PrivateLinkRecord | null => {
+      if (!privateLinkServiceConfigured) return null;
+      const blobSha = blob.sha256 ?? null;
+      const blobUrl = normalizeMatchUrl(blob.url ?? null);
+      for (const record of privateLinks) {
+        if (!record || record.status !== "active" || record.isExpired) continue;
+        const target = record.target;
+        if (!target) continue;
+        const targetSha = target.sha256 ?? null;
+        const targetUrl = normalizeMatchUrl(target.url ?? null);
+        const matchesSha = Boolean(blobSha && targetSha && blobSha === targetSha);
+        const matchesUrl = Boolean(blobUrl && targetUrl && blobUrl === targetUrl);
+        if (matchesSha || matchesUrl) {
+          return record;
+        }
+      }
+      return null;
+    },
+    [privateLinks, privateLinkServiceConfigured]
+  );
   const { signer, signEventTemplate } = useNdk();
   const pubkey = useCurrentPubkey();
   const { entriesBySha, removeEntries, upsertEntries } = usePrivateLibrary();
@@ -2005,6 +2048,22 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
         showStatusMessage("This file does not have a shareable URL.", "error", 3000);
         return;
       }
+      if (options?.mode === "private-link" && privateLinkServiceConfigured) {
+        const existingLink = findExistingPrivateLink(blob);
+        if (existingLink) {
+          const linkUrl = `${privateLinkHost}/${existingLink.alias}`;
+          const sharePayload: SharePayload = {
+            url: linkUrl,
+            name: getBlobMetadataName(blob),
+            sha256: blob.sha256,
+            serverUrl: blob.serverUrl ?? null,
+            size: typeof blob.size === "number" ? blob.size : null,
+          };
+          onRequestShare(sharePayload);
+          onSetTab("share");
+          return;
+        }
+      }
       const payload: SharePayload = {
         url: blob.url,
         name: getBlobMetadataName(blob),
@@ -2024,6 +2083,9 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
       openFolderFromInfo,
       openPrivateList,
       showStatusMessage,
+      findExistingPrivateLink,
+      privateLinkServiceConfigured,
+      privateLinkHost,
     ]
   );
 
