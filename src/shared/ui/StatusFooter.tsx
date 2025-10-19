@@ -33,6 +33,11 @@ type StatusFooterProps = {
     handler: () => void;
   }>;
   onDisconnect?: () => void;
+  showCompactUploadControl?: boolean;
+  compactUploadLabel?: string;
+  compactUploadIcon?: React.ComponentType<{ size?: number; className?: string }>;
+  compactUploadActive?: boolean;
+  onCompactUploadClick?: () => void;
 };
 
 export const StatusFooter = memo(function StatusFooter({
@@ -52,6 +57,11 @@ export const StatusFooter = memo(function StatusFooter({
   theme,
   userMenuItems,
   onDisconnect,
+  showCompactUploadControl = false,
+  compactUploadLabel = "Upload",
+  compactUploadIcon: CompactUploadIcon,
+  compactUploadActive = false,
+  onCompactUploadClick,
 }: StatusFooterProps) {
   const [settingsMenuOpen, setSettingsMenuOpen] = useState(false);
   const settingsButtonRef = useRef<HTMLAnchorElement | null>(null);
@@ -139,6 +149,14 @@ export const StatusFooter = memo(function StatusFooter({
       ? `flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white/90 text-slate-600 transition hover:border-blue-400 hover:text-blue-700 focus:outline-none ${lightFocusRing}`
       : "flex h-8 w-8 items-center justify-center rounded-lg border border-slate-800/70 bg-slate-900/70 text-slate-300 transition hover:border-emerald-400 hover:text-emerald-300 focus:outline-none focus-visible:focus-emerald-ring";
   const serverArrowClass = theme === "light" ? "text-slate-500" : "text-slate-400";
+  const compactUploadButtonClass =
+    theme === "light"
+      ? `flex h-8 items-center gap-2 rounded-lg border border-slate-200 bg-white/90 px-3 text-xs font-medium text-slate-700 shadow-toolbar transition hover:border-blue-400 hover:text-blue-700 focus:outline-none ${lightFocusRing}`
+      : "flex h-8 items-center gap-2 rounded-lg border border-slate-800/70 bg-slate-900/60 px-3 text-xs font-medium text-slate-200 shadow-toolbar transition hover:border-emerald-400 hover:text-emerald-300 focus:outline-none focus-visible:focus-emerald-ring";
+  const compactUploadActiveClass =
+    theme === "light"
+      ? "border-blue-400 text-blue-700 shadow-toolbar"
+      : "border-emerald-400 text-emerald-200 shadow-toolbar";
 
   const donateLinkClass =
     theme === "light"
@@ -378,6 +396,19 @@ export const StatusFooter = memo(function StatusFooter({
           <span className="font-medium">Github</span>
         </a>
       )}
+
+      {showCompactUploadControl && onCompactUploadClick ? (
+        <div className="ml-auto flex shrink-0 items-center sm:hidden">
+          <button
+            type="button"
+            onClick={onCompactUploadClick}
+            className={`${compactUploadButtonClass} ${compactUploadActive ? compactUploadActiveClass : ""}`}
+          >
+            {CompactUploadIcon ? <CompactUploadIcon size={14} aria-hidden="true" /> : null}
+            <span className="font-medium">{compactUploadLabel}</span>
+          </button>
+        </div>
+      ) : null}
 
       {(showStatusTotals || showSupportLink) && (
         <div className="ml-auto hidden shrink-0 items-center gap-4 sm:flex">

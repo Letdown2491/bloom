@@ -42,6 +42,7 @@ import {
   LinkIcon,
   LogoutIcon,
 } from "../shared/ui/icons";
+import type { SearchSyntaxSection } from "../shared/types/search";
 import { FolderShareDialog } from "../features/share/ui/FolderShareDialog";
 import { FolderShareRelayPrompt } from "../features/share/ui/FolderShareRelayPrompt";
 import { FolderSharePolicyPrompt } from "../features/share/ui/FolderSharePolicyPrompt";
@@ -345,6 +346,7 @@ export default function App() {
   const { confirm } = useDialog();
   const { effectiveRelays, relayPolicies } = usePreferredRelays();
   useAliasSync(effectiveRelays, Boolean(pubkey));
+  const isCompactScreen = useIsCompactScreen();
 
   const preferredWriteRelays = useMemo(
     () => relayPolicies.filter(policy => policy.write).map(policy => policy.url),
@@ -387,6 +389,7 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState("");
 
   const { selected: selectedBlobs } = useSelection();
+  const hasSelection = selectedBlobs.size > 0;
   const {
     shareState,
     openShareForPayload,
@@ -590,6 +593,13 @@ export default function App() {
 
   const isSignedIn = Boolean(user);
   const showAuthPrompt = !isSignedIn;
+  const compactUploadLabel = hasSelection ? "Transfer" : "Upload";
+  const compactUploadIcon = hasSelection ? TransferIcon : UploadIcon;
+  const compactUploadActive = hasSelection || tab === "upload" || tab === "transfer";
+  const showCompactUploadControl = isCompactScreen && isSignedIn && !showAuthPrompt;
+  const handleCompactUploadClick = useCallback(() => {
+    selectTab(hasSelection ? "transfer" : "upload");
+  }, [hasSelection, selectTab]);
 
   useEffect(() => {
     const element = mainWidgetRef.current;
@@ -2157,6 +2167,36 @@ export default function App() {
     [keepSearchExpanded]
   );
 
+  const handleInsertSearchToken = useCallback(
+    (token: string) => {
+      const normalized = token.trim();
+      if (!normalized) return;
+      setIsSearchOpen(true);
+      setSearchQuery(prev => {
+        const trimmed = prev.trim();
+        if (!trimmed) {
+          return `${normalized} `;
+        }
+        return `${trimmed} ${normalized} `;
+      });
+      if (typeof window !== "undefined") {
+        window.requestAnimationFrame(() => {
+          const node = searchInputRef.current;
+          if (node) {
+            node.focus();
+            const length = node.value.length;
+            try {
+              node.setSelectionRange(length, length);
+            } catch {
+              // Ignore selection errors in non-editable states.
+            }
+          }
+        });
+      }
+    },
+    [searchInputRef]
+  );
+
   useEffect(() => {
     if (isSearchOpen) {
       const id = window.setTimeout(() => {
@@ -2570,8 +2610,8 @@ export default function App() {
   const shouldShowFloatingPlayer = Boolean(audio.current);
 
   return (
-    <div className="surface-window flex min-h-screen max-h-screen flex-col overflow-hidden text-slate-100">
-    <div className="mx-auto flex w-full max-w-7xl flex-1 min-h-0 flex-col gap-2 px-4 py-6 sm:px-6 sm:py-8">
+    <div className="surface-window flex min-h-screen max-h-screen w-full flex-col overflow-hidden text-slate-100">
+      <div className="flex w-full flex-1 min-h-0 flex-col gap-2 px-0 py-0 sm:px-6 sm:py-8 lg:mx-auto lg:max-w-7xl">
         <header className="relative z-30 flex flex-col gap-4 rounded-3xl border border-slate-800/70 bg-slate-900/80 p-4 shadow-toolbar backdrop-blur">
           <div className="flex items-center gap-3">
             <div className="flex items-center gap-3">
@@ -2667,6 +2707,7 @@ export default function App() {
               onSearchChange={handleSearchChange}
               onSearchKeyDown={handleSearchKeyDown}
               onSearchClear={handleClearSearch}
+              onInsertSearchToken={handleInsertSearchToken}
               onToggleSearch={handleToggleSearch}
               browseHeaderControls={browseHeaderControls}
               selectedCount={selectedBlobs.size}
@@ -2782,6 +2823,11 @@ export default function App() {
           theme={preferences.theme}
           userMenuItems={userMenuLinks}
           onDisconnect={handleDisconnectClick}
+          showCompactUploadControl={showCompactUploadControl}
+          compactUploadLabel={compactUploadLabel}
+          compactUploadIcon={compactUploadIcon}
+          compactUploadActive={compactUploadActive}
+          onCompactUploadClick={handleCompactUploadClick}
         />
 
         {!showAuthPrompt && renameTarget && (
@@ -2856,6 +2902,7 @@ type MainNavigationProps = {
   onSearchChange: React.ChangeEventHandler<HTMLInputElement>;
   onSearchKeyDown: React.KeyboardEventHandler<HTMLInputElement>;
   onSearchClear: () => void;
+  onInsertSearchToken: (token: string) => void;
   onToggleSearch: () => void;
   browseHeaderControls: React.ReactNode | null;
   selectedCount: number;
@@ -2865,6 +2912,64 @@ type MainNavigationProps = {
   onBreadcrumbHome: () => void;
   theme: "dark" | "light";
 };
+
+const SEARCH_SYNTAX_SECTIONS: SearchSyntaxSection[] = [
+  {
+    id: "visibility",
+    title: "Visibility & Type",
+    items: [
+      { token: "is:public", description: "Public or unencrypted items" },
+      { token: "is:private", description: "Encrypted or private items" },
+      { token: "is:shared", description: "Items inside shared folders" },
+      { token: "is:shared-folder", description: "Shared folders only" },
+      { token: "is:shared-file", description: "Shared files only" },
+      { token: "is:shared-link", description: "Items with private links" },
+      { token: "is:audio", description: "Music and other audio files" },
+      { token: "is:image", description: "Photos and images" },
+      { token: "is:video", description: "Video files" },
+      { token: "is:document", description: "Documents and text files" },
+      { token: "is:pdf", description: "PDF documents" },
+    ],
+  },
+  {
+    id: "fields",
+    title: "Metadata Fields",
+    items: [
+      { token: "artist:", description: "Match artist name" },
+      { token: "album:", description: "Match album title" },
+      { token: "title:", description: "Match track or file title" },
+      { token: "genre:", description: "Match genre metadata" },
+      { token: "year:", description: "Match release year" },
+      { token: "folder:", description: "Match folder path" },
+      { token: "path:", description: "Alternative folder filter" },
+      { token: "server:", description: "Match server URL or name" },
+      { token: "host:", description: "Match server host" },
+      { token: "type:", description: "Match file extension" },
+      { token: "mime:", description: "Match MIME type" },
+      { token: "ext:", description: "Match extension shorthand" },
+    ],
+  },
+  {
+    id: "ranges",
+    title: "Ranges & Dates",
+    items: [
+      { token: "size:>10mb", description: "Larger than 10 MB" },
+      { token: "size:200kb...5mb", description: "Between 200 KB and 5 MB" },
+      { token: "duration:<5m", description: "Shorter than 5 minutes" },
+      { token: "duration:2m...10m", description: "Between 2 and 10 minutes" },
+      { token: "year:>=2020", description: "Year 2020 or newer" },
+      { token: "year:1990...1999", description: "Year between 1990 and 1999" },
+      { token: "before:2024-01-01", description: "Uploaded before 1 Jan 2024" },
+      { token: "after:2023-06", description: "Uploaded after June 2023" },
+      { token: "on:2023-09-01...2023-09-30", description: "Uploaded in September 2023" },
+    ],
+  },
+  {
+    id: "advanced",
+    title: "Advanced",
+    items: [{ token: "not:", description: "Negate the next filter (e.g. not:is:shared)" }],
+  },
+];
 
 type LoggedOutPromptProps = {
   onConnect: () => void | Promise<void>;
@@ -2957,6 +3062,7 @@ const MainNavigation = memo(function MainNavigation({
   onSearchChange,
   onSearchKeyDown,
   onSearchClear,
+  onInsertSearchToken,
   onToggleSearch,
   browseHeaderControls,
   selectedCount,
@@ -2969,10 +3075,19 @@ const MainNavigation = memo(function MainNavigation({
   const assignSearchInputRef = (node: HTMLInputElement | null) => {
     searchInputRef.current = node;
   };
+  const [isSyntaxOpen, setSyntaxOpen] = useState(false);
+  const syntaxButtonRef = useRef<HTMLButtonElement | null>(null);
+  const syntaxPopoverRef = useRef<HTMLDivElement | null>(null);
   const isCompactScreen = useIsCompactScreen();
   const hasBreadcrumbs = Boolean(browseNavigationState?.segments.length);
   const showBreadcrumbs = !isCompactScreen && hasBreadcrumbs;
   const isLightTheme = theme === "light";
+  const allowSearch = !showAuthPrompt;
+  useEffect(() => {
+    if (!allowSearch) {
+      setSyntaxOpen(false);
+    }
+  }, [allowSearch]);
   const navContainerClass = isLightTheme
     ? "flex flex-wrap items-center gap-3 rounded-2xl border border-slate-200 bg-white px-3 py-2 shadow-toolbar"
     : "flex flex-wrap items-center gap-3 rounded-2xl border border-slate-800/60 bg-slate-950/30 px-3 py-2 shadow-toolbar backdrop-blur-sm";
@@ -2986,7 +3101,7 @@ const MainNavigation = memo(function MainNavigation({
     ? "bg-emerald-200/60 text-emerald-700 shadow-toolbar"
     : "bg-emerald-500/15 text-emerald-200 shadow-toolbar";
   const segmentDisabledClass = isLightTheme ? "bg-slate-100 text-slate-400" : "bg-transparent text-slate-500";
-  const searchSegmentState = showAuthPrompt
+  const searchSegmentState = !allowSearch
     ? segmentDisabledClass
     : isSearchOpen
       ? segmentActiveClass
@@ -2996,6 +3111,9 @@ const MainNavigation = memo(function MainNavigation({
     : [];
   const navButtonSegments = navTabs.map(item => {
     const isUploadTab = item.id === "upload";
+    if (isUploadTab && isCompactScreen) {
+      return null;
+    }
     const isTransferView = tab === "transfer";
     const showTransfer = isUploadTab && selectedCount > 0;
     const isActive = tab === item.id || (isUploadTab && (isTransferView || showTransfer));
@@ -3027,12 +3145,24 @@ const MainNavigation = memo(function MainNavigation({
   const backButtonClass = isLightTheme
     ? "flex items-center gap-2 rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-medium text-slate-600 transition hover:border-emerald-400 hover:text-emerald-600 focus-visible:focus-emerald-ring disabled:cursor-not-allowed disabled:opacity-40"
     : "flex items-center gap-2 rounded-xl border border-slate-800 bg-slate-900/40 px-3 py-2 text-xs font-medium text-slate-200 transition hover:border-emerald-500 hover:text-emerald-200 focus-visible:focus-emerald-ring disabled:cursor-not-allowed disabled:opacity-40";
+  const searchExpandedContainerClass = isLightTheme
+    ? "relative flex h-10 min-w-[18rem] flex-1 items-center gap-0 overflow-visible rounded-full border border-slate-300 bg-white shadow-toolbar"
+    : "relative flex h-10 min-w-[18rem] flex-1 items-center gap-0 overflow-visible rounded-full border border-slate-800 bg-slate-900/50 shadow-toolbar";
+  const searchExpandedIconButtonClass = isLightTheme
+    ? "flex h-full items-center justify-center px-4 text-slate-600 border-r border-slate-300 rounded-l-full bg-white transition hover:bg-emerald-100 hover:text-emerald-700 focus:outline-none focus-visible:focus-emerald-ring"
+    : "flex h-full items-center justify-center px-4 text-slate-200 border-r border-slate-700 rounded-l-full bg-slate-900/60 transition hover:bg-slate-800 hover:text-emerald-200 focus:outline-none focus-visible:focus-emerald-ring";
+  const searchContentClass = isLightTheme
+    ? "relative flex flex-1 items-center gap-2 px-3"
+    : "relative flex flex-1 items-center gap-2 px-3";
   const searchInputClass = isLightTheme
-    ? "h-10 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm text-slate-700 placeholder:text-slate-400 shadow-inner focus:border-emerald-500 focus:outline-none focus-visible:focus-emerald-ring"
-    : "h-10 w-full rounded-xl border border-slate-800/70 bg-slate-950/40 px-3 text-sm text-slate-100 placeholder:text-slate-500 shadow-inner focus:border-emerald-500 focus:outline-none focus-visible:focus-emerald-ring";
+    ? "h-full w-full bg-transparent text-sm text-slate-700 placeholder:text-slate-400 focus:outline-none border-0 outline-none"
+    : "h-full w-full bg-transparent text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none border-0 outline-none";
+  const searchHelperButtonClass = isLightTheme
+    ? "flex h-[18px] w-[18px] items-center justify-center rounded-full bg-slate-200 text-[10px] font-semibold text-slate-600 leading-none transition hover:bg-emerald-100 hover:text-emerald-700 focus:outline-none focus-visible:focus-emerald-ring"
+    : "flex h-[18px] w-[18px] items-center justify-center rounded-full bg-slate-800 text-[10px] font-semibold text-slate-200 leading-none transition hover:bg-emerald-500/20 hover:text-emerald-200 focus:outline-none focus-visible:focus-emerald-ring";
   const searchClearButtonClass = isLightTheme
-    ? "absolute right-2 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-full bg-slate-200 text-emerald-600 transition hover:bg-emerald-200/80 hover:text-emerald-700 focus:outline-none focus-visible:focus-emerald-ring"
-    : "absolute right-2 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-full bg-slate-900/60 text-emerald-300 transition hover:bg-emerald-500/25 hover:text-emerald-200 focus:outline-none focus-visible:focus-emerald-ring";
+    ? "flex h-7 w-7 items-center justify-center rounded-full bg-slate-200 text-slate-700 text-sm font-semibold transition hover:bg-emerald-100 hover:text-emerald-700 focus:outline-none focus-visible:focus-emerald-ring"
+    : "flex h-7 w-7 items-center justify-center rounded-full bg-slate-800 text-slate-50 text-sm font-semibold transition hover:bg-emerald-500/20 focus:outline-none focus-visible:focus-emerald-ring";
   const breadcrumbButtonClass = isLightTheme
     ? "max-w-[12rem] truncate rounded-xl border border-transparent bg-white px-3 py-1.5 text-left text-slate-600 transition hover:bg-slate-100 focus-visible:focus-emerald-ring disabled:cursor-not-allowed disabled:opacity-60"
     : "max-w-[12rem] truncate rounded-xl border border-transparent bg-slate-900/40 px-3 py-1.5 text-left transition hover:bg-slate-800/60 focus-visible:focus-emerald-ring disabled:cursor-not-allowed disabled:opacity-60";
@@ -3043,6 +3173,69 @@ const MainNavigation = memo(function MainNavigation({
   const controlsContainerClass = isLightTheme
     ? "flex items-center gap-2 rounded-2xl border border-slate-300 bg-white px-1.5 py-1 shadow-toolbar"
     : "flex items-center gap-2 rounded-2xl border border-slate-800/70 bg-slate-900/50 px-1.5 py-1 shadow-toolbar";
+  const popoverAlignmentClass = "left-0";
+  const popoverClass = isLightTheme
+    ? `absolute ${popoverAlignmentClass} top-full z-30 mt-2 w-80 max-h-80 overflow-y-auto rounded-xl border border-slate-200 bg-white p-3 shadow-xl`
+    : `absolute ${popoverAlignmentClass} top-full z-30 mt-2 w-80 max-h-80 overflow-y-auto rounded-xl border border-slate-800 bg-slate-950/95 p-3 shadow-xl backdrop-blur`;
+  const sectionTitleClass = isLightTheme
+    ? "px-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400"
+    : "px-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500";
+  const itemButtonClass = isLightTheme
+    ? "flex w-full items-start gap-2 rounded-lg px-2 py-1 text-left text-sm text-slate-600 transition hover:bg-slate-100 focus:outline-none focus-visible:focus-emerald-ring"
+    : "flex w-full items-start gap-2 rounded-lg px-2 py-1 text-left text-sm text-slate-200 transition hover:bg-slate-800/70 focus:outline-none focus-visible:focus-emerald-ring";
+  const tokenClass = isLightTheme
+    ? "font-mono text-xs font-semibold text-slate-700"
+    : "font-mono text-xs font-semibold text-slate-200";
+  const descriptionClass = isLightTheme ? "text-xs text-slate-500" : "text-xs text-slate-400";
+
+  useEffect(() => {
+    if (!isSearchOpen) {
+      setSyntaxOpen(false);
+    }
+  }, [isSearchOpen]);
+
+  useEffect(() => {
+    if (!isSyntaxOpen) return;
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target as Node | null;
+      if (!target) return;
+      if (syntaxPopoverRef.current?.contains(target) || syntaxButtonRef.current?.contains(target)) {
+        return;
+      }
+      setSyntaxOpen(false);
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setSyntaxOpen(false);
+      }
+    };
+    window.addEventListener("pointerdown", handlePointerDown, true);
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("pointerdown", handlePointerDown, true);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isSyntaxOpen]);
+
+  const handleInsertToken = (token: string) => {
+    onInsertSearchToken(token);
+    setSyntaxOpen(false);
+  };
+
+  const handleSearchKeyDownInternal = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if ((event.key === "Escape" || event.key === "Esc") && isSyntaxOpen) {
+      event.preventDefault();
+      event.stopPropagation();
+      setSyntaxOpen(false);
+      return;
+    }
+    if ((event.key === "/" || event.code === "Slash") && event.ctrlKey && !event.altKey && !event.metaKey) {
+      event.preventDefault();
+      setSyntaxOpen(prev => !prev);
+      return;
+    }
+    onSearchKeyDown(event);
+  };
 
   return (
     <nav className={navContainerClass}>
@@ -3070,26 +3263,75 @@ const MainNavigation = memo(function MainNavigation({
         )}
       </div>
       <div className="min-w-0 flex-1">
-        {isSearchOpen ? (
-          <div className="relative w-full">
-            <input
-              ref={assignSearchInputRef}
-              type="search"
-              value={searchQuery}
-              onChange={onSearchChange}
-              onKeyDown={onSearchKeyDown}
-              placeholder="Search files"
-              className={searchInputClass}
-            />
-            {searchQuery ? (
+        {allowSearch && isSearchOpen ? (
+          <div className={searchExpandedContainerClass}>
+            <button
+              type="button"
+              onClick={onToggleSearch}
+              className={searchExpandedIconButtonClass}
+              aria-label="Close search"
+            >
+              <SearchIcon size={16} />
+            </button>
+            <div className={searchContentClass}>
               <button
                 type="button"
-                onClick={onSearchClear}
-                className={searchClearButtonClass}
-                aria-label="Clear search"
+                ref={syntaxButtonRef}
+                onClick={() => setSyntaxOpen(prev => !prev)}
+                className={searchHelperButtonClass}
+                aria-label="Show search syntax"
+                aria-haspopup="dialog"
+                aria-expanded={isSyntaxOpen}
               >
-                <CloseIcon size={14} />
+                ?
               </button>
+              <input
+                ref={assignSearchInputRef}
+                type="text"
+                value={searchQuery}
+                onChange={onSearchChange}
+                onKeyDown={handleSearchKeyDownInternal}
+                placeholder="Search files"
+                className={searchInputClass}
+                aria-label="Search files"
+              />
+              {searchQuery ? (
+                <button
+                  type="button"
+                  onClick={onSearchClear}
+                  className={searchClearButtonClass}
+                  aria-label="Clear search"
+                >
+                  <CloseIcon size={16} />
+                </button>
+              ) : null}
+            </div>
+            {isSyntaxOpen ? (
+              <div
+                ref={syntaxPopoverRef}
+                className={popoverClass}
+                role="dialog"
+                aria-label="Search syntax help"
+              >
+                {SEARCH_SYNTAX_SECTIONS.map(section => (
+                  <div key={section.id} className="mt-3 first:mt-0">
+                    <div className={sectionTitleClass}>{section.title}</div>
+                    <div className="mt-1 space-y-1">
+                      {section.items.map(item => (
+                        <button
+                          key={item.token}
+                          type="button"
+                          onClick={() => handleInsertToken(item.token)}
+                          className={itemButtonClass}
+                        >
+                          <span className={tokenClass}>{item.token}</span>
+                          <span className={descriptionClass}>{item.description}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
             ) : null}
           </div>
         ) : showBreadcrumbs && browseNavigationState ? (
@@ -3115,33 +3357,76 @@ const MainNavigation = memo(function MainNavigation({
           <span className="text-sm text-slate-500">/</span>
         ) : null}
       </div>
-      <div className="flex items-center" role="group" aria-label="Main navigation controls">
-        <div className={controlsContainerClass}>
-          <button
-            type="button"
-            onClick={onToggleSearch}
-            disabled={showAuthPrompt}
-            aria-label="Search files"
-            aria-pressed={isSearchOpen}
-            className={mergeClasses(segmentBaseClass, "w-10 justify-center px-0", searchSegmentState)}
-            data-segment-type="icon"
-          >
-            <SearchIcon size={16} />
-          </button>
-          {browseControlSegments.map((segment) => {
-            if (!React.isValidElement(segment)) return null;
-            const segmentType = segment.props["data-segment-type"] || (segment.type === "button" ? "icon" : undefined);
-            const baseClass = mergeClasses(
-              segmentBaseClass,
-              segmentType === "label" ? "" : "w-10 justify-center px-0"
-            );
-            return React.cloneElement(segment, {
-              className: mergeClasses(baseClass, segmentDefaultClass, segment.props.className || ""),
-              "data-segment-type": segmentType,
-            });
-          })}
-          {navButtonSegments}
-        </div>
+      <div
+        className={mergeClasses("flex items-center gap-2", allowSearch && isSearchOpen ? "ml-auto" : "")}
+        role="group"
+        aria-label="Main navigation controls"
+      >
+        {allowSearch ? (
+          isSearchOpen ? (
+            <div className={controlsContainerClass}>
+              {browseControlSegments.map(segment => {
+                if (!React.isValidElement(segment)) return null;
+                const segmentType =
+                  segment.props["data-segment-type"] || (segment.type === "button" ? "icon" : undefined);
+                const baseClass = mergeClasses(
+                  segmentBaseClass,
+                  segmentType === "label" ? "" : "w-10 justify-center px-0"
+                );
+                return React.cloneElement(segment, {
+                  className: mergeClasses(baseClass, segmentDefaultClass, segment.props.className || ""),
+                  "data-segment-type": segmentType,
+                });
+              })}
+              {navButtonSegments}
+            </div>
+          ) : (
+            <div className={controlsContainerClass}>
+              <button
+                type="button"
+                onClick={onToggleSearch}
+                disabled={showAuthPrompt}
+                aria-label="Search files"
+                aria-pressed={isSearchOpen}
+                className={mergeClasses(segmentBaseClass, "w-10 justify-center px-0", searchSegmentState)}
+                data-segment-type="icon"
+              >
+                <SearchIcon size={16} />
+              </button>
+              {browseControlSegments.map(segment => {
+                if (!React.isValidElement(segment)) return null;
+                const segmentType =
+                  segment.props["data-segment-type"] || (segment.type === "button" ? "icon" : undefined);
+                const baseClass = mergeClasses(
+                  segmentBaseClass,
+                  segmentType === "label" ? "" : "w-10 justify-center px-0"
+                );
+                return React.cloneElement(segment, {
+                  className: mergeClasses(baseClass, segmentDefaultClass, segment.props.className || ""),
+                  "data-segment-type": segmentType,
+                });
+              })}
+              {navButtonSegments}
+            </div>
+          )
+        ) : (
+          <div className={controlsContainerClass}>
+            {browseControlSegments.map(segment => {
+              if (!React.isValidElement(segment)) return null;
+              const segmentType =
+                segment.props["data-segment-type"] || (segment.type === "button" ? "icon" : undefined);
+              const baseClass = mergeClasses(
+                segmentBaseClass,
+                segmentType === "label" ? "" : "w-10 justify-center px-0"
+              );
+              return React.cloneElement(segment, {
+                className: mergeClasses(baseClass, segmentDefaultClass, segment.props.className || ""),
+                "data-segment-type": segmentType,
+              });
+            })}
+            {navButtonSegments}
+          </div>
+        )}
       </div>
     </nav>
   );

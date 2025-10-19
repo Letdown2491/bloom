@@ -70,7 +70,18 @@ const normalizeMatchUrl = (value?: string | null): string | null => {
 
 type SearchField = "artist" | "album" | "title" | "genre" | "year" | "type" | "mime" | "server" | "folder";
 
-type SearchFlag = "private" | "shared" | "audio" | "image" | "video" | "document" | "pdf";
+type SearchFlag =
+  | "private"
+  | "public"
+  | "shared"
+  | "shared-folder"
+  | "shared-file"
+  | "shared-link"
+  | "audio"
+  | "image"
+  | "video"
+  | "document"
+  | "pdf";
 
 type SizeComparison = {
   operator: ">" | ">=" | "<" | "<=" | "=";
@@ -122,8 +133,20 @@ const SEARCH_FIELD_ALIASES: Record<string, SearchField> = {
 const IS_FLAG_ALIASES: Record<string, SearchFlag | undefined> = {
   private: "private",
   encrypted: "private",
+  public: "public",
   shared: "shared",
-  public: "shared",
+  "shared-folder": "shared-folder",
+  "shared-folders": "shared-folder",
+  "folder-share": "shared-folder",
+  "folder-shares": "shared-folder",
+  "shared-file": "shared-file",
+  "shared-files": "shared-file",
+  "file-share": "shared-file",
+  "file-shares": "shared-file",
+  "shared-link": "shared-link",
+  "shared-links": "shared-link",
+  "private-link": "shared-link",
+  "private-links": "shared-link",
   audio: "audio",
   audios: "audio",
   music: "audio",
@@ -905,6 +928,23 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
     },
     [privateLinks, privateLinkServiceConfigured]
   );
+  const privateLinkPresence = useMemo(() => {
+    if (!privateLinkServiceConfigured) return null;
+    const shaSet = new Set<string>();
+    const urlSet = new Set<string>();
+    privateLinks.forEach(record => {
+      if (!record || record.status !== "active" || record.isExpired) return;
+      const sha = record.target?.sha256?.toLowerCase();
+      if (sha) {
+        shaSet.add(sha);
+      }
+      const url = normalizeMatchUrl(record.target?.url ?? null);
+      if (url) {
+        urlSet.add(url);
+      }
+    });
+    return { shaSet, urlSet };
+  }, [privateLinkServiceConfigured, privateLinks]);
   const { ndk, signer, signEventTemplate } = useNdk();
   const resolvePrivateLink = useCallback(
     (blob: BlossomBlob) => {
@@ -961,10 +1001,6 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
     (blob: BlossomBlob) => {
       if (!searchQuery.isActive) return true;
 
-      if (isListLikeBlob(blob) || blob.__bloomFolderPlaceholder) {
-        return false;
-      }
-
       const {
         textTerms,
         excludedTextTerms,
@@ -979,6 +1015,49 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
         includeFlags,
         excludeFlags,
       } = searchQuery;
+      const isFolderPlaceholder = Boolean(blob.__bloomFolderPlaceholder);
+      const isParentLink = Boolean(blob.__bloomFolderIsParentLink);
+      const isFolderLike = isFolderPlaceholder || isListLikeBlob(blob);
+
+      if (isFolderPlaceholder && isParentLink) {
+        return false;
+      }
+
+      if (isFolderLike) {
+        const wantsFolderResults = includeFlags.some(flag => flag === "shared" || flag === "shared-folder");
+        if (!wantsFolderResults) {
+          return false;
+        }
+      }
+
+      const rawFolderPath = isFolderPlaceholder ? blob.__bloomFolderTargetPath ?? null : blob.folderPath ?? null;
+      const normalizedFolderPath = normalizeFolderPathInput(rawFolderPath ?? undefined);
+      const canonicalFolderPath =
+        typeof normalizedFolderPath === "string" ? resolveFolderPath(normalizedFolderPath) : null;
+      const folderRecord =
+        canonicalFolderPath !== null ? foldersByPath.get(canonicalFolderPath) ?? null : null;
+      const isSharedFolder =
+        Boolean(isFolderLike && !isParentLink && folderRecord && folderRecord.visibility === "public");
+      const membershipPaths = blob.sha256 ? getFoldersForBlob(blob.sha256) : [];
+      const isSharedViaMembership = membershipPaths.some(path => {
+        const record = foldersByPath.get(path);
+        return record?.visibility === "public";
+      });
+      const isSharedFile =
+        !isFolderLike &&
+        (isSharedViaMembership ||
+          (canonicalFolderPath !== null && folderRecord?.visibility === "public"));
+      const isSharedItem = isSharedFolder || isSharedFile;
+      const normalizedBlobUrl = normalizeMatchUrl(blob.url ?? null);
+      const hasPrivateLink =
+        privateLinkServiceConfigured &&
+        Boolean(
+          privateLinkPresence &&
+            ((blob.sha256 && privateLinkPresence.shaSet.has(blob.sha256.toLowerCase())) ||
+              (normalizedBlobUrl && privateLinkPresence.urlSet.has(normalizedBlobUrl)))
+        );
+      const isPublicBlob = !blob.privateData;
+
       const privateMetadata = blob.privateData?.metadata;
       const privateAudio = privateMetadata?.audio ?? undefined;
       const audioMetadata = metadataMap.get(blob.sha256);
@@ -1081,6 +1160,7 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
       (blob.privateData?.servers ?? []).forEach(addServerCandidate);
       addFolderCandidate(blob.folderPath ?? null);
       addFolderCandidate(privateMetadata?.folderPath ?? null);
+      addFolderCandidate(blob.__bloomFolderTargetPath ?? null);
 
 	      if (sizeComparisons.length > 0) {
 	        const resolvedSize = (() => {
@@ -1214,8 +1294,16 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
         switch (flag) {
           case "private":
             return Boolean(blob.privateData);
+          case "public":
+            return isPublicBlob;
           case "shared":
-            return !blob.privateData;
+            return isSharedItem;
+          case "shared-folder":
+            return isSharedFolder;
+          case "shared-file":
+            return isSharedFile;
+          case "shared-link":
+            return !isFolderLike && hasPrivateLink;
           case "audio":
             return isMusicBlob(blob);
           case "image":
@@ -1423,7 +1511,7 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
 
       return true;
     },
-    [metadataMap, searchQuery]
+    [foldersByPath, getFoldersForBlob, metadataMap, privateLinkPresence, privateLinkServiceConfigured, resolveFolderPath, searchQuery]
   );
 
   const normalizedSelectedServer = selectedServer ? normalizeServerUrl(selectedServer) : null;
