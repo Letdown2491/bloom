@@ -1,6 +1,6 @@
 import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import type { FilterMode } from "../../shared/types/filter";
+import type { FilterMode, SharingFilter } from "../../shared/types/filter";
 import { useWorkspace } from "./WorkspaceContext";
 import { useSelection } from "../selection/SelectionContext";
 import { usePrivateLibrary } from "../../app/context/PrivateLibraryContext";
@@ -819,6 +819,8 @@ export type BrowseTabContainerProps = {
   showStatusMessage: (message: string, tone?: StatusMessageTone, duration?: number) => void;
   viewMode: "grid" | "list";
   filterMode: FilterMode;
+  sharingFilter: SharingFilter;
+  onlyPrivateLinks: boolean;
   filterMenuRef: React.RefObject<HTMLDivElement>;
   isFilterMenuOpen: boolean;
   onCloseFilterMenu: () => void;
@@ -869,6 +871,8 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
   showStatusMessage,
   viewMode,
   filterMode,
+  sharingFilter,
+  onlyPrivateLinks,
   filterMenuRef,
   isFilterMenuOpen,
   onCloseFilterMenu,
@@ -996,6 +1000,81 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
 
   const searchQuery = useMemo(() => parseSearchQuery(searchTerm), [searchTerm]);
   const isSearching = searchQuery.isActive;
+  const resolveSharingDetails = useCallback(
+    (blob: BlossomBlob) => {
+      const isFolderPlaceholder = Boolean(blob.__bloomFolderPlaceholder);
+      const isParentLink = Boolean(blob.__bloomFolderIsParentLink);
+      const isFolderLike = isFolderPlaceholder || isListLikeBlob(blob);
+      const rawFolderPath = isFolderPlaceholder ? blob.__bloomFolderTargetPath ?? null : blob.folderPath ?? null;
+      const normalizedFolderPath = normalizeFolderPathInput(rawFolderPath ?? undefined);
+      const canonicalFolderPath =
+        typeof normalizedFolderPath === "string" ? resolveFolderPath(normalizedFolderPath) : null;
+      const folderRecord =
+        canonicalFolderPath !== null ? foldersByPath.get(canonicalFolderPath) ?? null : null;
+      const membershipPaths = blob.sha256 ? getFoldersForBlob(blob.sha256) : [];
+      const isSharedViaMembership = membershipPaths.some(path => {
+        const record = foldersByPath.get(path);
+        return record?.visibility === "public";
+      });
+      const isSharedFolder =
+        Boolean(isFolderLike && !isParentLink && folderRecord && folderRecord.visibility === "public");
+      const isSharedFile =
+        !isFolderLike &&
+        (isSharedViaMembership ||
+          (canonicalFolderPath !== null && folderRecord?.visibility === "public"));
+      const isSharedItem = isSharedFolder || isSharedFile;
+      const normalizedBlobUrl = normalizeMatchUrl(blob.url ?? null);
+      const hasPrivateLink =
+        privateLinkServiceConfigured &&
+        Boolean(
+          privateLinkPresence &&
+            ((blob.sha256 && privateLinkPresence.shaSet.has(blob.sha256.toLowerCase())) ||
+              (normalizedBlobUrl && privateLinkPresence.urlSet.has(normalizedBlobUrl)))
+        );
+      const isPublicBlob = !blob.privateData;
+      return {
+        isFolderPlaceholder,
+        isParentLink,
+        isFolderLike,
+        isSharedFolder,
+        isSharedFile,
+        isSharedItem,
+        hasPrivateLink,
+        isPublicBlob,
+      };
+    },
+    [foldersByPath, getFoldersForBlob, privateLinkPresence, privateLinkServiceConfigured, resolveFolderPath]
+  );
+  const matchesSharingFilter = useCallback(
+    (blob: BlossomBlob) => {
+      if (blob.sha256 === PRIVATE_PLACEHOLDER_SHA) {
+        return true;
+      }
+      const { isSharedItem, hasPrivateLink } = resolveSharingDetails(blob);
+      if (sharingFilter === "shared" && !isSharedItem) {
+        return false;
+      }
+      if (sharingFilter === "not-shared" && isSharedItem) {
+        return false;
+      }
+      if (onlyPrivateLinks && !hasPrivateLink) {
+        return false;
+      }
+      return true;
+    },
+    [onlyPrivateLinks, resolveSharingDetails, sharingFilter]
+  );
+  const applyContentFilters = useCallback(
+    (source: BlossomBlob[]) => {
+      const typeFiltered =
+        filterMode === "all" ? source : source.filter(blob => matchesFilter(blob, filterMode));
+      if (sharingFilter === "all" && !onlyPrivateLinks) {
+        return typeFiltered;
+      }
+      return typeFiltered.filter(matchesSharingFilter);
+    },
+    [filterMode, matchesSharingFilter, onlyPrivateLinks, sharingFilter]
+  );
 
   const matchesSearch = useCallback(
     (blob: BlossomBlob) => {
@@ -1015,9 +1094,16 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
         includeFlags,
         excludeFlags,
       } = searchQuery;
-      const isFolderPlaceholder = Boolean(blob.__bloomFolderPlaceholder);
-      const isParentLink = Boolean(blob.__bloomFolderIsParentLink);
-      const isFolderLike = isFolderPlaceholder || isListLikeBlob(blob);
+      const {
+        isFolderPlaceholder,
+        isParentLink,
+        isFolderLike,
+        isSharedFolder,
+        isSharedFile,
+        isSharedItem,
+        hasPrivateLink,
+        isPublicBlob,
+      } = resolveSharingDetails(blob);
 
       if (isFolderPlaceholder && isParentLink) {
         return false;
@@ -1029,34 +1115,6 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
           return false;
         }
       }
-
-      const rawFolderPath = isFolderPlaceholder ? blob.__bloomFolderTargetPath ?? null : blob.folderPath ?? null;
-      const normalizedFolderPath = normalizeFolderPathInput(rawFolderPath ?? undefined);
-      const canonicalFolderPath =
-        typeof normalizedFolderPath === "string" ? resolveFolderPath(normalizedFolderPath) : null;
-      const folderRecord =
-        canonicalFolderPath !== null ? foldersByPath.get(canonicalFolderPath) ?? null : null;
-      const isSharedFolder =
-        Boolean(isFolderLike && !isParentLink && folderRecord && folderRecord.visibility === "public");
-      const membershipPaths = blob.sha256 ? getFoldersForBlob(blob.sha256) : [];
-      const isSharedViaMembership = membershipPaths.some(path => {
-        const record = foldersByPath.get(path);
-        return record?.visibility === "public";
-      });
-      const isSharedFile =
-        !isFolderLike &&
-        (isSharedViaMembership ||
-          (canonicalFolderPath !== null && folderRecord?.visibility === "public"));
-      const isSharedItem = isSharedFolder || isSharedFile;
-      const normalizedBlobUrl = normalizeMatchUrl(blob.url ?? null);
-      const hasPrivateLink =
-        privateLinkServiceConfigured &&
-        Boolean(
-          privateLinkPresence &&
-            ((blob.sha256 && privateLinkPresence.shaSet.has(blob.sha256.toLowerCase())) ||
-              (normalizedBlobUrl && privateLinkPresence.urlSet.has(normalizedBlobUrl)))
-        );
-      const isPublicBlob = !blob.privateData;
 
       const privateMetadata = blob.privateData?.metadata;
       const privateAudio = privateMetadata?.audio ?? undefined;
@@ -1511,14 +1569,14 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
 
       return true;
     },
-    [foldersByPath, getFoldersForBlob, metadataMap, privateLinkPresence, privateLinkServiceConfigured, resolveFolderPath, searchQuery]
+    [metadataMap, resolveSharingDetails, searchQuery]
   );
 
   const normalizedSelectedServer = selectedServer ? normalizeServerUrl(selectedServer) : null;
   const normalizeMaybeServerUrl = (value?: string | null) => (value ? normalizeServerUrl(value) : null);
   const serverByUrl = useMemo(() => new Map(servers.map(server => [normalizeServerUrl(server.url), server])), [servers]);
 
-  const hasActiveFilter = filterMode !== "all" || isSearching;
+  const hasActiveFilter = filterMode !== "all" || sharingFilter !== "all" || onlyPrivateLinks || isSearching;
   const isPrivateRootView = activeList?.type === "private";
   const isPrivateFolderView = activeList?.type === "folder" && activeList.scope === "private";
   const isPrivateView = isPrivateRootView || isPrivateFolderView;
@@ -1648,9 +1706,12 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
 
   const hasPrivateMatchingFilter = useMemo(() => {
     if (!hasPrivateFiles) return false;
-    if (filterMode === "all" && !isSearching) return true;
-    return privateBlobs.some(blob => matchesFilter(blob, filterMode) && matchesSearch(blob));
-  }, [filterMode, hasPrivateFiles, isSearching, matchesSearch, privateBlobs]);
+    const filtered = applyContentFilters(privateBlobs);
+    if (!isSearching) {
+      return filtered.length > 0;
+    }
+    return filtered.some(matchesSearch);
+  }, [applyContentFilters, hasPrivateFiles, isSearching, matchesSearch, privateBlobs]);
 
   const openPrivateList = useCallback(() => {
     setActiveList({ type: "private", serverUrl: normalizedSelectedServer });
@@ -1693,18 +1754,11 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
 
   const privateSearchMatches = useMemo(() => {
     if (!isSearching) return [] as BlossomBlob[];
-    const base =
-      filterMode === "all"
-        ? privateBlobs
-        : privateBlobs.filter(blob => matchesFilter(blob, filterMode));
-    return base.filter(matchesSearch);
-  }, [filterMode, isSearching, matchesSearch, privateBlobs]);
+    return applyContentFilters(privateBlobs).filter(matchesSearch);
+  }, [applyContentFilters, isSearching, matchesSearch, privateBlobs]);
 
   const aggregatedFilteredBlobs = useMemo(() => {
-    const base =
-      filterMode === "all"
-        ? aggregated.blobs
-        : aggregated.blobs.filter(blob => matchesFilter(blob, filterMode));
+    const base = applyContentFilters(aggregated.blobs);
     const filtered = excludeListedBlobs(base);
     if (!isSearching) return filtered;
     const matches = filtered.filter(matchesSearch);
@@ -1719,7 +1773,7 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
       merged.push(blob);
     });
     return merged;
-  }, [aggregated.blobs, excludeListedBlobs, filterMode, isSearching, matchesSearch, privateSearchMatches]);
+  }, [aggregated.blobs, applyContentFilters, excludeListedBlobs, isSearching, matchesSearch, privateSearchMatches]);
 
   const aggregatedFolderIndex = useMemo(() => buildFolderIndex(aggregatedFilteredBlobs), [aggregatedFilteredBlobs]);
 
@@ -1794,13 +1848,10 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
   }, [hasPrivateFiles, privateBlobs, privateScopeUrl, serverByUrl]);
 
   const privateVisibleBlobs = useMemo(() => {
-    const byFilter =
-      filterMode === "all"
-        ? privateScopedBlobs
-        : privateScopedBlobs.filter(blob => matchesFilter(blob, filterMode));
-    if (!isSearching) return byFilter;
-    return byFilter.filter(matchesSearch);
-  }, [filterMode, isSearching, matchesSearch, privateScopedBlobs]);
+    const filtered = applyContentFilters(privateScopedBlobs);
+    if (!isSearching) return filtered;
+    return filtered.filter(matchesSearch);
+  }, [applyContentFilters, isSearching, matchesSearch, privateScopedBlobs]);
 
   const privateFolderIndex = useMemo(() => buildFolderIndex(privateVisibleBlobs), [privateVisibleBlobs]);
 
@@ -1828,10 +1879,7 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
 
   const currentFilteredBlobs = useMemo(() => {
     if (!currentSnapshot) return undefined;
-    const base =
-      filterMode === "all"
-        ? currentSnapshot.blobs
-        : currentSnapshot.blobs.filter(blob => matchesFilter(blob, filterMode));
+    const base = applyContentFilters(currentSnapshot.blobs);
     const filtered = excludeListedBlobs(base);
     if (!isSearching) return filtered;
     const matches = filtered.filter(matchesSearch);
@@ -1846,7 +1894,7 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
       merged.push(blob);
     });
     return merged;
-  }, [currentSnapshot, excludeListedBlobs, filterMode, isSearching, matchesSearch, privateSearchMatches]);
+  }, [applyContentFilters, currentSnapshot, excludeListedBlobs, isSearching, matchesSearch, privateSearchMatches]);
 
   const currentFolderIndex = useMemo(
     () => (currentFilteredBlobs ? buildFolderIndex(currentFilteredBlobs) : null),

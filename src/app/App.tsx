@@ -39,7 +39,6 @@ import {
   UploadIcon,
   SettingsIcon,
   EditIcon,
-  LinkIcon,
   LogoutIcon,
 } from "../shared/ui/icons";
 import type { SearchSyntaxSection } from "../shared/types/search";
@@ -2535,7 +2534,7 @@ export default function App() {
   const statusCount = statusMetrics.count;
   const statusSize = statusMetrics.size;
   const showStatusTotals = tab === "browse" || tab === "upload" || tab === "share" || tab === "transfer";
-  const hideServerSelectorTabs: TabId[] = ["profile", "private-links", "relays", "servers", "settings"];
+  const hideServerSelectorTabs: TabId[] = ["profile", "relays", "servers", "settings"];
   const showServerSelector = !hideServerSelectorTabs.includes(tab);
   const showGithubLink = hideServerSelectorTabs.includes(tab);
   const showSupportLink = showGithubLink;
@@ -2565,11 +2564,6 @@ export default function App() {
     setIsUserMenuOpen(false);
   }, [selectTab]);
 
-  const handleSelectPrivateLinks = useCallback(() => {
-    selectTab("private-links");
-    setIsUserMenuOpen(false);
-  }, [selectTab]);
-
   const handleSelectSettings = useCallback(() => {
     selectTab("settings");
     setIsUserMenuOpen(false);
@@ -2578,10 +2572,9 @@ export default function App() {
   const userMenuLinks = useMemo(() =>
     [
       { label: "Edit Profile", icon: EditIcon, handler: handleSelectProfile },
-      { label: "Private Links", icon: LinkIcon, handler: handleSelectPrivateLinks },
       { label: "Settings", icon: SettingsIcon, handler: handleSelectSettings },
     ].sort((a, b) => a.label.localeCompare(b.label)),
-  [handleSelectPrivateLinks, handleSelectProfile, handleSelectSettings]
+  [handleSelectProfile, handleSelectSettings]
   );
 
   const handleDisconnectClick = useCallback(() => {

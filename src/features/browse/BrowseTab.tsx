@@ -1,6 +1,6 @@
 import React, { Suspense, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import type { FilterMode } from "../../shared/types/filter";
+import type { FilterMode, SharingFilter } from "../../shared/types/filter";
 import { BrowseContent, type BrowseContentProps } from "./BrowseContent";
 import type { AudioContextValue } from "../../app/context/AudioContext";
 import type { BlobListProps } from "./ui/BlobList";
@@ -156,7 +156,12 @@ type BrowseControlsProps = {
   isFilterMenuOpen: boolean;
   onToggleFilterMenu: () => void;
   onSelectFilter: (mode: FilterMode) => void;
+  onResetFilters: () => void;
   filterMode: FilterMode;
+  sharingFilter: SharingFilter;
+  onSelectSharingFilter: (mode: SharingFilter) => void;
+  onlyPrivateLinks: boolean;
+  onSetPrivateLinkFilter: (enabled: boolean) => void;
   filterMenuRef: React.RefObject<HTMLDivElement>;
   theme: "dark" | "light";
   showViewToggle: boolean;
@@ -177,7 +182,12 @@ export const BrowseControls: React.FC<BrowseControlsProps> = ({
   isFilterMenuOpen,
   onToggleFilterMenu,
   onSelectFilter,
+  onResetFilters,
   filterMode,
+  sharingFilter,
+  onSelectSharingFilter,
+  onlyPrivateLinks,
+  onSetPrivateLinkFilter,
   filterMenuRef,
   theme,
   showViewToggle,
@@ -187,25 +197,49 @@ export const BrowseControls: React.FC<BrowseControlsProps> = ({
 }) => {
   const isLightTheme = theme === "light";
   const menuContainerClass = isLightTheme
-    ? "absolute right-0 top-full z-50 mt-2 w-48 rounded-xl border border-slate-300 bg-white p-1 text-slate-700 shadow-lg"
-    : "absolute right-0 top-full z-50 mt-2 w-48 rounded-xl border border-slate-800 bg-slate-950/95 p-1 text-slate-100 shadow-lg backdrop-blur";
-  const menuItemClass = (isActive: boolean) =>
+    ? "absolute right-0 top-full z-50 mt-2 w-72 rounded-xl border border-slate-300 bg-white text-slate-700 shadow-xl"
+    : "absolute right-0 top-full z-50 mt-2 w-72 rounded-xl border border-slate-800 bg-slate-950/95 text-slate-100 shadow-xl backdrop-blur";
+  const sectionClass = "space-y-2 px-3 py-2";
+  const sectionHeadingClass = isLightTheme
+    ? "text-[11px] font-semibold uppercase tracking-wide text-slate-500"
+    : "text-[11px] font-semibold uppercase tracking-wide text-slate-400";
+  const helperTextClass = isLightTheme ? "text-xs text-slate-500" : "text-xs text-slate-400";
+  const radioLabelClass = (isActive: boolean) =>
     isLightTheme
-      ? `flex w-full items-center gap-2 px-2 py-2 text-left text-sm transition focus:outline-none ${
-          isActive ? "text-emerald-600" : "text-slate-700 hover:text-emerald-600"
+      ? `flex items-center gap-2 rounded-lg px-2 py-2 text-sm transition ${
+          isActive ? "bg-emerald-100 text-emerald-700" : "text-slate-700 hover:bg-slate-100"
         }`
-      : `flex w-full items-center gap-2 px-2 py-2 text-left text-sm transition focus:outline-none ${
-          isActive ? "text-emerald-200" : "text-slate-100 hover:text-emerald-300"
+      : `flex items-center gap-2 rounded-lg px-2 py-2 text-sm transition ${
+          isActive ? "bg-emerald-500/15 text-emerald-200" : "text-slate-100 hover:bg-slate-800/70"
         }`;
-  const menuDividerClass = isLightTheme ? "mt-1 border-t border-slate-200 pt-1" : "mt-1 border-t border-slate-800 pt-1";
-  const clearFiltersClass =
-    filterMode === "all"
+  const typeOptionClass = (isActive: boolean) =>
+    isLightTheme
+      ? `flex w-full items-center gap-2 rounded-lg px-2 py-2 text-sm transition focus:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500 ${
+          isActive ? "bg-emerald-100 text-emerald-700" : "text-slate-700 hover:bg-slate-100"
+        }`
+      : `flex w-full items-center gap-2 rounded-lg px-2 py-2 text-sm transition focus:outline-none focus-visible:ring-1 focus-visible:ring-emerald-400/80 ${
+          isActive ? "bg-emerald-500/15 text-emerald-200" : "text-slate-100 hover:bg-slate-800/70"
+        }`;
+  const typeIconClass = (isActive: boolean) =>
+    isActive
       ? isLightTheme
-        ? "w-full px-2 py-2 text-left text-sm transition focus:outline-none cursor-default text-slate-400"
-        : "w-full px-2 py-2 text-left text-sm transition focus:outline-none cursor-default text-slate-500"
+        ? "shrink-0 text-emerald-600"
+        : "shrink-0 text-emerald-200"
       : isLightTheme
-        ? "w-full px-2 py-2 text-left text-sm transition focus:outline-none text-slate-700 hover:text-emerald-600"
-        : "w-full px-2 py-2 text-left text-sm transition focus:outline-none text-slate-100 hover:text-emerald-300";
+        ? "shrink-0 text-slate-500"
+        : "shrink-0 text-slate-400";
+  const dividerClass = isLightTheme ? "border-t border-slate-200" : "border-t border-slate-800/70";
+  const hasNonDefaultFilters = filterMode !== "all" || sharingFilter !== "all" || onlyPrivateLinks;
+  const clearFiltersClass = isLightTheme
+    ? `w-full rounded-lg px-3 py-2 text-left text-sm text-slate-700 transition focus:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500 ${
+        hasNonDefaultFilters ? "hover:text-emerald-600" : "cursor-default"
+      }`
+    : `w-full rounded-lg px-3 py-2 text-left text-sm text-slate-100 transition focus:outline-none focus-visible:ring-1 focus-visible:ring-emerald-400/80 ${
+        hasNonDefaultFilters ? "hover:text-emerald-300" : "cursor-default"
+      }`;
+  const clearIconClass = hasNonDefaultFilters
+    ? "h-4 w-4 text-emerald-600 dark:text-emerald-300"
+    : "h-4 w-4 text-slate-700 dark:text-slate-100";
   const buttonDefaultClass = isLightTheme
     ? "border-slate-300 bg-white text-slate-600 hover:bg-slate-100"
     : "border-slate-800 bg-slate-900/70 text-slate-300 hover:border-slate-700";
@@ -216,6 +250,94 @@ export const BrowseControls: React.FC<BrowseControlsProps> = ({
     ? "border-slate-200 bg-slate-100 text-slate-400"
     : "border-slate-800 bg-slate-900/70 text-slate-500";
   const isGrouped = variant === "grouped";
+  const visibilityOptions: Array<{ id: SharingFilter; label: string }> = [
+    { id: "all", label: "All content" },
+    { id: "not-shared", label: "Not shared" },
+    { id: "shared", label: "Shared" },
+  ];
+
+  const renderFilterMenu = () => (
+    <div className="flex flex-col gap-1 py-2" role="presentation">
+      <div className={sectionClass}>
+        <p className={sectionHeadingClass}>Visibility</p>
+        <div className="space-y-1">
+          {visibilityOptions.map(option => {
+            const isActive = sharingFilter === option.id;
+            return (
+              <label key={option.id} className={`${radioLabelClass(isActive)} cursor-pointer`}>
+                <input
+                  type="radio"
+                  name="browse-visibility"
+                  value={option.id}
+                  checked={isActive}
+                  onChange={() => onSelectSharingFilter(option.id)}
+                  className="h-4 w-4 accent-emerald-500"
+                />
+                <span>{option.label}</span>
+              </label>
+            );
+          })}
+        </div>
+      </div>
+      <div className={`${sectionClass} pt-0`}>
+        <label className={`${radioLabelClass(onlyPrivateLinks)} cursor-pointer`}>
+          <input
+            type="checkbox"
+            checked={onlyPrivateLinks}
+            onChange={event => onSetPrivateLinkFilter(event.target.checked)}
+            className="h-4 w-4 accent-emerald-500"
+          />
+          <span className="flex flex-col">
+            <span>Files with private links</span>
+            <span className={helperTextClass}>Only show items with an active private link.</span>
+          </span>
+        </label>
+      </div>
+      <div className={`${sectionClass} ${isLightTheme ? "bg-slate-50/70" : "bg-slate-900/40"}`}>
+        <p className={sectionHeadingClass}>Type</p>
+        <div className="space-y-1">
+          {FILTER_OPTIONS.map(option => {
+            const isActive = filterMode === option.id;
+            return (
+              <button
+                key={option.id}
+                type="button"
+                onClick={() => onSelectFilter(option.id)}
+                className={typeOptionClass(isActive)}
+              >
+                <option.icon size={16} className={typeIconClass(isActive)} />
+                <span>{option.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+      <div className={`${sectionClass} ${dividerClass}`}>
+        <button
+          type="button"
+          className={clearFiltersClass}
+          disabled={!hasNonDefaultFilters}
+          onClick={() => {
+            if (!hasNonDefaultFilters) return;
+            onResetFilters();
+          }}
+        >
+          <span className="flex items-center gap-2">
+            <svg aria-hidden="true" className={clearIconClass} viewBox="0 0 20 20" fill="none">
+              <path
+                d="M6 6l8 8m0-8l-8 8"
+                stroke="currentColor"
+                strokeWidth={1.6}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+            Clear filters
+          </span>
+        </button>
+      </div>
+    </div>
+  );
 
   if (isGrouped) {
     const groupedButtonBase =
@@ -283,7 +405,7 @@ export const BrowseControls: React.FC<BrowseControlsProps> = ({
             disabled={disabled}
             aria-label={filterButtonAriaLabel}
             aria-pressed={filterButtonActive}
-            aria-haspopup="menu"
+            aria-haspopup="dialog"
             aria-expanded={isFilterMenuOpen}
             title={filterButtonLabel}
             className={buttonClass(disabled ? "disabled" : filterButtonActive ? "active" : "default", "icon")}
@@ -292,43 +414,8 @@ export const BrowseControls: React.FC<BrowseControlsProps> = ({
             <span className="sr-only">{filterButtonAriaLabel}</span>
           </button>
           {isFilterMenuOpen && (
-            <div role="menu" className={menuContainerClass}>
-              {FILTER_OPTIONS.map(option => {
-                const isActive = filterMode === option.id;
-                return (
-                  <a
-                    key={option.id}
-                    href="#"
-                    onClick={event => {
-                      event.preventDefault();
-                      onSelectFilter(option.id);
-                    }}
-                    role="menuitemradio"
-                    aria-checked={isActive}
-                    className={menuItemClass(isActive)}
-                  >
-                    <option.icon size={16} />
-                    <span>{option.label}</span>
-                  </a>
-                );
-              })}
-              <div className={menuDividerClass}>
-                <a
-                  href="#"
-                  onClick={event => {
-                    event.preventDefault();
-                    if (filterMode !== "all") {
-                      onSelectFilter("all");
-                    }
-                  }}
-                  role="menuitem"
-                  aria-disabled={filterMode === "all"}
-                  className={clearFiltersClass}
-                  tabIndex={filterMode === "all" ? -1 : 0}
-                >
-                  Clear Filters
-                </a>
-              </div>
+            <div role="dialog" aria-label="Filters" className={menuContainerClass}>
+              {renderFilterMenu()}
             </div>
           )}
         </div>
@@ -380,7 +467,7 @@ export const BrowseControls: React.FC<BrowseControlsProps> = ({
           disabled={disabled}
           aria-label={filterButtonAriaLabel}
           aria-pressed={filterButtonActive}
-          aria-haspopup="menu"
+          aria-haspopup="dialog"
           aria-expanded={isFilterMenuOpen}
           title={filterButtonLabel}
           className={`${buttonBaseClass} ${
@@ -391,43 +478,8 @@ export const BrowseControls: React.FC<BrowseControlsProps> = ({
           <span className="sr-only">{filterButtonAriaLabel}</span>
         </button>
         {isFilterMenuOpen && (
-          <div role="menu" className={menuContainerClass}>
-            {FILTER_OPTIONS.map(option => {
-              const isActive = filterMode === option.id;
-              return (
-                <a
-                  key={option.id}
-                  href="#"
-                  onClick={event => {
-                    event.preventDefault();
-                    onSelectFilter(option.id);
-                  }}
-                  role="menuitemradio"
-                  aria-checked={isActive}
-                  className={menuItemClass(isActive)}
-                >
-                  <option.icon size={16} />
-                  <span>{option.label}</span>
-                </a>
-              );
-            })}
-            <div className={menuDividerClass}>
-              <a
-                href="#"
-                onClick={event => {
-                  event.preventDefault();
-                  if (filterMode !== "all") {
-                    onSelectFilter("all");
-                  }
-                }}
-                role="menuitem"
-                aria-disabled={filterMode === "all"}
-                className={clearFiltersClass}
-                tabIndex={filterMode === "all" ? -1 : 0}
-              >
-                Clear Filters
-              </a>
-            </div>
+          <div role="dialog" aria-label="Filters" className={menuContainerClass}>
+            {renderFilterMenu()}
           </div>
         )}
       </div>

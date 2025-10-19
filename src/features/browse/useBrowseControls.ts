@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useUserPreferences } from "../../app/context/UserPreferencesContext";
-import type { FilterMode } from "../../shared/types/filter";
+import type { FilterMode, SharingFilter } from "../../shared/types/filter";
 import type { SortDirection } from "../../app/context/UserPreferencesContext";
 
 type FilterOption = {
@@ -27,6 +27,8 @@ export const useBrowseControls = () => {
   const { preferences, setDefaultViewMode, setSortDirection } = useUserPreferences();
   const [viewMode, setViewModeState] = useState<"grid" | "list">(() => preferences.defaultViewMode);
   const [filterMode, setFilterMode] = useState<FilterMode>(() => preferences.defaultFilterMode);
+  const [sharingFilter, setSharingFilter] = useState<SharingFilter>("all");
+  const [onlyPrivateLinks, setOnlyPrivateLinks] = useState(false);
   const [isFilterMenuOpen, setIsFilterMenuOpen] = useState(false);
   const [sortDirection, setSortDirectionState] = useState<SortDirection>(preferences.sortDirection);
 
@@ -52,10 +54,17 @@ export const useBrowseControls = () => {
         const nextValue = prev === next ? "all" : next;
         return nextValue;
       });
-      setIsFilterMenuOpen(false);
     },
-    [setFilterMode, setIsFilterMenuOpen]
+    [setFilterMode]
   );
+
+  const selectSharingFilter = useCallback((next: SharingFilter) => {
+    setSharingFilter(next);
+  }, []);
+
+  const setPrivateLinkOnly = useCallback((enabled: boolean) => {
+    setOnlyPrivateLinks(enabled);
+  }, []);
 
   const toggleSortDirection = useCallback(
     () => {
@@ -67,6 +76,12 @@ export const useBrowseControls = () => {
     },
     [setSortDirection]
   );
+
+  const resetFilters = useCallback(() => {
+    setFilterMode("all");
+    setSharingFilter("all");
+    setOnlyPrivateLinks(false);
+  }, []);
 
   useEffect(() => {
     setViewModeState(prev => (prev === preferences.defaultViewMode ? prev : preferences.defaultViewMode));
@@ -86,16 +101,30 @@ export const useBrowseControls = () => {
 
   const filterContext = useMemo(() => {
     const activeOption = filterMode === "all" ? null : OPTION_MAP[filterMode];
-    const filterButtonLabel = activeOption ? activeOption.label : "Filter";
-    const filterButtonAriaLabel = activeOption ? `Filter: ${activeOption.label}` : "Filter files";
-    const filterButtonActive = filterMode !== "all" || isFilterMenuOpen;
+    const descriptors: string[] = [];
+    if (sharingFilter === "not-shared") {
+      descriptors.push("Not shared");
+    } else if (sharingFilter === "shared") {
+      descriptors.push("Shared");
+    }
+    if (onlyPrivateLinks) {
+      descriptors.push("Private links");
+    }
+    if (activeOption) {
+      descriptors.unshift(activeOption.label);
+    }
+    const descriptorText = descriptors.join(" · ");
+    const filterButtonLabel = descriptorText ? `Filters • ${descriptorText}` : "Filters";
+    const filterButtonAriaLabel = descriptorText ? `Filters: ${descriptorText}` : "Filter files";
+    const filterButtonActive =
+      filterMode !== "all" || sharingFilter !== "all" || onlyPrivateLinks || isFilterMenuOpen;
     return {
       filterButtonLabel,
       filterButtonAriaLabel,
       filterButtonActive,
       isFilterMenuOpen,
     };
-  }, [filterMode, isFilterMenuOpen]);
+  }, [filterMode, isFilterMenuOpen, onlyPrivateLinks, sharingFilter]);
 
   const handleTabChange = useCallback((tabId: string) => {
     if (tabId !== "browse") {
@@ -108,6 +137,11 @@ export const useBrowseControls = () => {
     setViewMode,
     filterMode,
     selectFilter,
+    sharingFilter,
+    selectSharingFilter,
+    onlyPrivateLinks,
+    setPrivateLinkOnly,
+    resetFilters,
     ...filterContext,
     openFilterMenu,
     closeFilterMenu,

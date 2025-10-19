@@ -92,6 +92,11 @@ export const Workspace: React.FC<WorkspaceProps> = ({
     setViewMode,
     filterMode,
     selectFilter,
+    sharingFilter,
+    selectSharingFilter,
+    onlyPrivateLinks,
+    setPrivateLinkOnly,
+    resetFilters,
     filterButtonLabel,
     filterButtonAriaLabel,
     filterButtonActive,
@@ -129,6 +134,11 @@ export const Workspace: React.FC<WorkspaceProps> = ({
         onToggleFilterMenu={toggleFilterMenu}
         onSelectFilter={selectFilter}
         filterMode={filterMode}
+        sharingFilter={sharingFilter}
+        onSelectSharingFilter={selectSharingFilter}
+        onlyPrivateLinks={onlyPrivateLinks}
+        onSetPrivateLinkFilter={setPrivateLinkOnly}
+        onResetFilters={resetFilters}
         filterMenuRef={filterMenuRef}
         theme={theme}
         showViewToggle={!isSmallScreen}
@@ -188,6 +198,8 @@ export const Workspace: React.FC<WorkspaceProps> = ({
               showStatusMessage={showStatusMessage}
               viewMode={viewMode}
               filterMode={filterMode}
+              sharingFilter={sharingFilter}
+              onlyPrivateLinks={onlyPrivateLinks}
               filterMenuRef={filterMenuRef}
               isFilterMenuOpen={isFilterMenuOpen}
               onCloseFilterMenu={closeFilterMenu}

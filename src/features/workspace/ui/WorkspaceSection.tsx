@@ -33,10 +33,6 @@ const SettingsPanelLazy = React.lazy(() =>
   import("../../settings/SettingsPanel").then(module => ({ default: module.SettingsPanel }))
 );
 
-const PrivateLinksPanelLazy = React.lazy(() =>
-  import("../../privateLinks/PrivateLinksPanel").then(module => ({ default: module.PrivateLinksPanel }))
-);
-
 const ProfilePanelLazy = React.lazy(() =>
   import("../../profile/ProfilePanel").then(module => ({ default: module.ProfilePanel }))
 );
@@ -378,18 +374,6 @@ export const WorkspaceSection = memo(function WorkspaceSection({
             onUnshareFolder={onUnshareFolder}
             folderShareBusyPath={folderShareBusyPath}
           />
-        </Suspense>
-      )}
-
-      {tab === "private-links" && (
-        <Suspense
-          fallback={
-            <div className="flex flex-1 items-center justify-center text-sm text-slate-400">
-              Loading private links…
-            </div>
-          }
-        >
-          <PrivateLinksPanelLazy />
         </Suspense>
       )}
 
