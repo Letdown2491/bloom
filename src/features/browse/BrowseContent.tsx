@@ -37,7 +37,7 @@ export type BrowseContentProps = {
   onOpenList?: (blob: BlossomBlob) => void;
   defaultSortOption: DefaultSortOption;
   sortDirection: SortDirection;
-  resolvePrivateLink?: (blob: BlossomBlob) => { url: string; alias?: string | null } | null;
+  resolvePrivateLink?: (blob: BlossomBlob) => { url: string; alias?: string | null; expiresAt?: number | null } | null;
 };
 
 export const BrowseContent: React.FC<BrowseContentProps> = ({

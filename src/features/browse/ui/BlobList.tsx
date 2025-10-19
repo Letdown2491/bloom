@@ -66,7 +66,7 @@ export type BlobListProps = {
   onRename?: (blob: BlossomBlob) => void;
   onMove?: (blob: BlossomBlob) => void;
   onOpenList?: (blob: BlossomBlob) => void;
-  resolvePrivateLink?: (blob: BlossomBlob) => { url: string; alias?: string | null } | null;
+  resolvePrivateLink?: (blob: BlossomBlob) => { url: string; alias?: string | null; expiresAt?: number | null } | null;
   folderRecords?: Map<string, FolderListRecord>;
   onShareFolder?: (hint: FolderShareHint) => void;
   onUnshareFolder?: (hint: FolderShareHint) => void;
@@ -367,6 +367,7 @@ export const BlobList: React.FC<BlobListProps> = ({
         serverType: blob.serverType ?? serverType,
         __bloomPrivateLinkUrl: privateLinkUrl,
         __bloomPrivateLinkAlias: privateInfo?.alias ?? null,
+        __bloomPrivateLinkExpiresAt: privateInfo?.expiresAt ?? null,
       };
     });
   }, [blobs, resolvedMeta, baseUrl, requiresAuth, resolvePrivateLink, serverType]);

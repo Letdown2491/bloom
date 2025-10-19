@@ -18,10 +18,20 @@ import type { StatusMessageTone } from "../../shared/types/status";
 import { usePrivateLibrary } from "../../app/context/PrivateLibraryContext";
 import type { PrivateListEntry } from "../../shared/domain/privateList";
 import { useFolderLists } from "../../app/context/FolderListContext";
+import { deriveNameFromPath, isPrivateFolderName } from "../../shared/domain/folderList";
 import { publishNip94Metadata } from "../../shared/api/nip94Publisher";
+import { usePrivateLinks } from "../privateLinks/hooks/usePrivateLinks";
 
 type NdkInstance = NdkContextValue["ndk"];
 type NdkSigner = NdkContextValue["signer"];
+
+type FolderOption = {
+  value: string | null;
+  label: string;
+};
+
+const DEFAULT_PUBLIC_FOLDER_PATH = "Images/Trips";
+const DEFAULT_PRIVATE_FOLDER_PATH = "Trips";
 
 const emptyAudioFields = (): EditDialogAudioFields => ({
   title: "",
@@ -67,6 +77,32 @@ const normalizeRelays = (relays: readonly (string | null | undefined)[]) =>
     .map(url => url?.trim())
     .filter((url): url is string => Boolean(url && url.length > 0));
 
+type PrivateLinkDetails = {
+  alias: string | null;
+  url: string | null;
+  expiresAt: number | null;
+};
+
+const extractPrivateLinkDetails = (blob: BlossomBlob): PrivateLinkDetails => {
+  const aliasRaw =
+    (blob as Record<string, unknown>)["__bloomPrivateLinkAlias"] ??
+    (blob as Record<string, unknown>)["privateLinkAlias"] ??
+    null;
+  const urlRaw =
+    (blob as Record<string, unknown>)["__bloomPrivateLinkUrl"] ??
+    (blob as Record<string, unknown>)["privateLinkUrl"] ??
+    null;
+  const expiresAtRaw =
+    (blob as Record<string, unknown>)["__bloomPrivateLinkExpiresAt"] ??
+    (blob as Record<string, unknown>)["privateLinkExpiresAt"] ??
+    null;
+  return {
+    alias: typeof aliasRaw === "string" && aliasRaw.trim().length > 0 ? aliasRaw.trim() : null,
+    url: typeof urlRaw === "string" && urlRaw.trim().length > 0 ? urlRaw.trim() : null,
+    expiresAt: typeof expiresAtRaw === "number" && Number.isFinite(expiresAtRaw) ? expiresAtRaw : null,
+  };
+};
+
 export type RenameDialogProps = {
   blob: BlossomBlob;
   ndk: NdkInstance | null;
@@ -77,14 +113,29 @@ export type RenameDialogProps = {
 };
 
 export const RenameDialog: React.FC<RenameDialogProps> = ({ blob, ndk, signer, relays, onClose, onStatus }) => {
-  const { entriesBySha, upsertEntries } = usePrivateLibrary();
+  const { entries: privateLibraryEntries, entriesBySha, upsertEntries } = usePrivateLibrary();
   const privateEntry = entriesBySha.get(blob.sha256) ?? null;
   const isPrivate = Boolean(privateEntry);
   const {
+    folders,
     resolveFolderPath,
     getFoldersForBlob,
     setBlobFolderMembership,
   } = useFolderLists();
+  const formatFolderLabel = useCallback((value: string | null) => {
+    if (!value) return "Home";
+    const segments = value.split("/").filter(Boolean);
+    if (segments.length === 0) return "Home";
+    return segments.join(" / ");
+  }, []);
+
+  const formatPrivateFolderLabel = useCallback((value: string | null) => {
+    if (!value) return "Private";
+    const segments = value.split("/").filter(Boolean);
+    if (segments.length === 0) return "Private";
+    return `Private / ${segments.join(" / ")}`;
+  }, []);
+
   const storedAudio = useMemo(
     () => {
       const stored =
@@ -103,6 +154,52 @@ export const RenameDialog: React.FC<RenameDialogProps> = ({ blob, ndk, signer, r
   const [error, setError] = useState<string | null>(null);
   const [folder, setFolder] = useState("");
   const [currentFolderPath, setCurrentFolderPath] = useState<string | null>(null);
+  const [privateLinkDetails, setPrivateLinkDetails] = useState<PrivateLinkDetails>(() =>
+    extractPrivateLinkDetails(blob)
+  );
+  const [privateLinkError, setPrivateLinkError] = useState<string | null>(null);
+
+  const folderOptions = useMemo<FolderOption[]>(() => {
+    if (isPrivate) {
+      const paths = new Set<string>();
+      privateLibraryEntries.forEach(entry => {
+        const raw = normalizeFolderPathInput(entry.metadata?.folderPath ?? undefined);
+        if (raw) paths.add(raw);
+      });
+      const currentNormalized = normalizeFolderPathInput(folder || undefined);
+      if (currentNormalized) paths.add(currentNormalized);
+      const sorted = Array.from(paths).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+      return [
+        { value: null, label: formatPrivateFolderLabel(null) },
+        ...sorted.map(path => ({ value: path, label: formatPrivateFolderLabel(path) })),
+      ];
+    }
+    const paths = new Set<string>();
+    folders.forEach(record => {
+      const normalized = normalizeFolderPathInput(record.path) ?? null;
+      if (!normalized) return;
+      const name = deriveNameFromPath(normalized);
+      if (isPrivateFolderName(name)) return;
+      const canonical = resolveFolderPath(normalized);
+      if (canonical) paths.add(canonical);
+    });
+    const currentNormalized = (() => {
+      const trimmed = folder.trim();
+      if (!trimmed) return null;
+      const normalized = normalizeFolderPathInput(trimmed) ?? trimmed;
+      return resolveFolderPath(normalized);
+    })();
+    if (currentNormalized) paths.add(currentNormalized);
+    const sorted = Array.from(paths).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+    return [
+      { value: null, label: formatFolderLabel(null) },
+      ...sorted.map(path => ({ value: path, label: formatFolderLabel(path) })),
+    ];
+  }, [folder, folders, formatFolderLabel, formatPrivateFolderLabel, isPrivate, privateLibraryEntries, resolveFolderPath]);
+
+  const folderPlaceholder = isPrivate ? "e.g. Trips/2024" : "e.g. Pictures/2024";
+  const folderCustomDefaultPath =
+    folder.trim() || (isPrivate ? DEFAULT_PRIVATE_FOLDER_PATH : DEFAULT_PUBLIC_FOLDER_PATH);
 
   useEffect(() => {
     const music = isMusicBlob(blob) || Boolean(storedAudio);
@@ -130,13 +227,15 @@ export const RenameDialog: React.FC<RenameDialogProps> = ({ blob, ndk, signer, r
     }
 
     const membershipPaths = getFoldersForBlob(blob.sha256);
-    const membershipFolder = membershipPaths[0] ?? null;
-    const fallbackFolderPath =
-      membershipFolder ??
-      normalizeFolderPathInput(blob.folderPath ?? privateEntry?.metadata?.folderPath ?? undefined) ??
-      null;
-    setCurrentFolderPath(membershipFolder);
-    setFolder(fallbackFolderPath ?? "");
+   const membershipFolder = membershipPaths[0] ?? null;
+   const fallbackFolderPath =
+     membershipFolder ??
+     normalizeFolderPathInput(blob.folderPath ?? privateEntry?.metadata?.folderPath ?? undefined) ??
+     null;
+   setCurrentFolderPath(membershipFolder);
+   setFolder(fallbackFolderPath ?? "");
+    setPrivateLinkDetails(extractPrivateLinkDetails(blob));
+    setPrivateLinkError(null);
   }, [blob, getFoldersForBlob, privateEntry, storedAudio]);
 
   const handleAliasChange = useCallback(
@@ -175,6 +274,31 @@ export const RenameDialog: React.FC<RenameDialogProps> = ({ blob, ndk, signer, r
     },
     [error]
   );
+
+  const privateLinkEnabled = Boolean(privateLinkDetails.alias);
+  const {
+    revoke: revokePrivateLink,
+    revoking: revokingPrivateLink,
+    serviceConfigured: privateLinkServiceConfigured,
+  } = usePrivateLinks({ enabled: privateLinkEnabled });
+
+  const handleRevokePrivateLink = useCallback(async () => {
+    const alias = privateLinkDetails.alias;
+    if (!alias) return;
+    if (!privateLinkServiceConfigured) {
+      setPrivateLinkError("Private link service is not configured.");
+      return;
+    }
+    setPrivateLinkError(null);
+    try {
+      await revokePrivateLink(alias);
+      setPrivateLinkDetails({ alias: null, url: null, expiresAt: null });
+      onStatus("Private link revoked.", "success", 2500);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to revoke private link.";
+      setPrivateLinkError(message);
+    }
+  }, [privateLinkDetails.alias, onStatus, privateLinkServiceConfigured, revokePrivateLink]);
 
   const handleSubmit = useCallback(async () => {
     if (busy) return;
@@ -445,6 +569,24 @@ export const RenameDialog: React.FC<RenameDialogProps> = ({ blob, ndk, signer, r
       folder={folder}
       onFolderChange={handleFolderChange}
       folderInvalid={folderHasReservedKeyword}
+      folderOptions={folderOptions}
+      folderPlaceholder={folderPlaceholder}
+      folderCustomDefaultPath={folderCustomDefaultPath}
+      privateLink={
+        privateLinkDetails.alias || privateLinkDetails.url
+          ? {
+              url: privateLinkDetails.url,
+              alias: privateLinkDetails.alias,
+              expiresAt: privateLinkDetails.expiresAt ?? undefined,
+            }
+          : undefined
+      }
+      onRevokePrivateLink={
+        privateLinkDetails.alias && privateLinkServiceConfigured ? handleRevokePrivateLink : undefined
+      }
+      revokingPrivateLink={revokingPrivateLink}
+      revokePrivateLinkError={privateLinkError}
+      disablePrivateLinkRevoke={!privateLinkServiceConfigured || !privateLinkDetails.alias}
     />
   );
 };

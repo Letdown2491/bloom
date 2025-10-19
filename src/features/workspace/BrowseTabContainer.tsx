@@ -958,7 +958,7 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
       const alias = record.alias ?? null;
       const directUrl = alias ? `${privateLinkHost}/${alias}` : record.target?.url ?? null;
       if (!directUrl) return null;
-      return { url: directUrl, alias };
+      return { url: directUrl, alias, expiresAt: record.expiresAt ?? null };
     },
     [findExistingPrivateLink, privateLinkHost, privateLinkServiceConfigured]
   );
