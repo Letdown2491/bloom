@@ -6,6 +6,7 @@ import type { NDKEvent as NdkEvent } from "@nostr-dev-kit/ndk";
 import { deriveServerNameFromUrl } from "../../shared/utils/serverName";
 import type { ManagedServer } from "../../shared/types/servers";
 export type { ManagedServer } from "../../shared/types/servers";
+import { DEFAULT_PUBLIC_RELAYS, sanitizeRelayUrl } from "../../shared/utils/relays";
 
 const DEFAULT_SERVERS: ManagedServer[] = [
   { name: "Primal", url: "https://blossom.primal.net", type: "blossom", requiresAuth: true, sync: false },
@@ -40,11 +41,23 @@ export const sortServersByName = (servers: ManagedServer[]): ManagedServer[] => 
 };
 
 export const useServers = () => {
-  const { ndk, status: ndkStatus, connectionError: ndkError, getModule } = useNdk();
+  const { ndk, status: ndkStatus, connectionError: ndkError, getModule, prepareRelaySet } = useNdk();
   const pubkey = useCurrentPubkey();
   const queryClient = useQueryClient();
 
   const canFetchUserServers = Boolean(ndk && pubkey && ndkStatus !== "error");
+
+  const resolveRelayTargets = useCallback(() => {
+    if (!ndk) return Array.from(DEFAULT_PUBLIC_RELAYS);
+    const base =
+      ndk.explicitRelayUrls && ndk.explicitRelayUrls.length > 0
+        ? ndk.explicitRelayUrls
+        : Array.from(DEFAULT_PUBLIC_RELAYS);
+    const sanitized = base
+      .map(url => sanitizeRelayUrl(url))
+      .filter((url): url is string => Boolean(url));
+    return Array.from(new Set(sanitized));
+  }, [ndk]);
 
   const query = useQuery({
     queryKey: ["servers", pubkey],
@@ -54,11 +67,24 @@ export const useServers = () => {
       if (!ndk || !pubkey) {
         throw new Error("Nostr context unavailable");
       }
-      await ndk.connect().catch(() => undefined);
-      const events = (await ndk.fetchEvents({
-        authors: [pubkey],
-        kinds: [USER_BLOSSOM_SERVER_LIST_KIND],
-      })) as Set<NdkEvent>;
+      const relayTargets = resolveRelayTargets();
+      let relaySet = undefined;
+      if (relayTargets.length > 0) {
+        try {
+          const preparation = await prepareRelaySet(relayTargets, { waitForConnection: true });
+          relaySet = preparation.relaySet ?? undefined;
+        } catch (error) {
+          console.warn("Failed to prepare relays for server list fetch", error);
+        }
+      }
+      const events = (await ndk.fetchEvents(
+        {
+          authors: [pubkey],
+          kinds: [USER_BLOSSOM_SERVER_LIST_KIND],
+        },
+        { closeOnEose: true },
+        relaySet
+      )) as Set<NdkEvent>;
       if (events.size === 0) return [];
       const eventsArray = Array.from(events) as NdkEvent[];
       eventsArray.sort((a, b) => (b.created_at ?? 0) - (a.created_at ?? 0));
@@ -87,7 +113,21 @@ export const useServers = () => {
         return ["server", s.url, s.type, flag, s.note || "", s.name];
       });
       await event.sign();
-      await event.publish();
+      const relayTargets = resolveRelayTargets();
+      let relaySet = undefined;
+      if (relayTargets.length > 0) {
+        try {
+          const preparation = await prepareRelaySet(relayTargets, { waitForConnection: true });
+          relaySet = preparation.relaySet ?? undefined;
+        } catch (error) {
+          console.warn("Failed to prepare relays for server list publish", error);
+        }
+      }
+      if (relaySet) {
+        await event.publish(relaySet);
+      } else {
+        await event.publish();
+      }
       return servers;
     },
     onSuccess: (_, variables) => {

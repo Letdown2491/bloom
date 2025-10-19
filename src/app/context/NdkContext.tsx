@@ -2,6 +2,12 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 import type { NDKRelay, NDKSigner, NDKUser } from "@nostr-dev-kit/ndk";
 import type { EventTemplate, SignedEvent } from "../../shared/api/blossomClient";
 import { loadNdkModule, type NdkModule } from "../../shared/api/ndkModule";
+import {
+  createRelayConnectionManager,
+  type RelayConnectionManager,
+  type RelayPreparationOptions,
+  type RelayPreparationResult,
+} from "../../shared/api/ndkRelayManager";
 import { checkLocalStorageQuota } from "../../shared/utils/storageQuota";
 
 type NdkInstance = InstanceType<NdkModule["default"]>;
@@ -28,6 +34,14 @@ export type NdkContextValue = {
   relayHealth: RelayHealth[];
   ensureConnection: () => Promise<NdkInstance>;
   getModule: () => Promise<NdkModule>;
+  ensureRelays: (
+    relayUrls: readonly string[],
+    options?: RelayPreparationOptions
+  ) => Promise<RelayPreparationResult>;
+  prepareRelaySet: (
+    relayUrls: readonly string[],
+    options?: RelayPreparationOptions
+  ) => Promise<RelayPreparationResult>;
 };
 
 const NdkContext = createContext<NdkContextValue | undefined>(undefined);
@@ -347,6 +361,7 @@ export const NdkProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const lastPersistedRelayMapRef = useRef<Map<string, PersistableRelayHealth>>(new Map());
   const lastRelayPersistAtRef = useRef<number>(0);
   const relayHealthQuotaLimitedRef = useRef(false);
+  const relayManagerRef = useRef<RelayConnectionManager | null>(null);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -404,6 +419,11 @@ export const NdkProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (!ndkRef.current) {
       ndkRef.current = new mod.default({ explicitRelayUrls: DEFAULT_RELAYS });
       setNdk(ndkRef.current);
+      relayManagerRef.current = createRelayConnectionManager(ndkRef.current, ensureNdkModule);
+    }
+
+    if (!relayManagerRef.current && ndkRef.current) {
+      relayManagerRef.current = createRelayConnectionManager(ndkRef.current, ensureNdkModule);
     }
 
     return { ndk: ndkRef.current, module: mod } as { ndk: NdkInstance; module: NdkModule };
@@ -460,6 +480,27 @@ export const NdkProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const getNdkModule = useCallback(async () => {
     return ensureNdkModule();
   }, [ensureNdkModule]);
+
+  const prepareRelaySet = useCallback(
+    async (relayUrls: readonly string[], options?: RelayPreparationOptions): Promise<RelayPreparationResult> => {
+      const { ndk: instance } = await ensureNdkInstance();
+      if (!relayManagerRef.current && instance) {
+        relayManagerRef.current = createRelayConnectionManager(instance, ensureNdkModule);
+      }
+      if (!relayManagerRef.current) {
+        return { relaySet: null, connected: [], pending: [] };
+      }
+      return relayManagerRef.current.prepareRelaySet(relayUrls, options);
+    },
+    [ensureNdkInstance, ensureNdkModule]
+  );
+
+  const ensureRelays = useCallback(
+    async (relayUrls: readonly string[], options?: RelayPreparationOptions): Promise<RelayPreparationResult> => {
+      return prepareRelaySet(relayUrls, options);
+    },
+    [prepareRelaySet]
+  );
 
   useEffect(() => {
     if (!ndk) return;
@@ -617,18 +658,22 @@ export const NdkProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     const handleConnecting = (relay: NDKRelay) => {
       updateRelay(relay.url, { status: "connecting", lastEventAt: Date.now() });
+      relayManagerRef.current?.handlePoolEvent(relay, "connecting");
     };
 
     const handleConnect = (relay: NDKRelay) => {
       updateRelay(relay.url, { status: "connected", lastError: null, lastEventAt: Date.now() });
+      relayManagerRef.current?.handlePoolEvent(relay, "connected");
     };
 
     const handleReady = (relay: NDKRelay) => {
       updateRelay(relay.url, { status: "connected", lastError: null, lastEventAt: Date.now() });
+      relayManagerRef.current?.handlePoolEvent(relay, "connected");
     };
 
     const handleDisconnect = (relay: NDKRelay) => {
       updateRelay(relay.url, { status: "error", lastError: "Disconnected", lastEventAt: Date.now() });
+      relayManagerRef.current?.handlePoolEvent(relay, "error");
     };
 
     const handleNotice = (relay: NDKRelay, message?: string) => {
@@ -858,6 +903,8 @@ export const NdkProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       relayHealth,
       ensureConnection: ensureNdkConnection,
       getModule: getNdkModule,
+      ensureRelays,
+      prepareRelaySet,
     }),
     [
       ndk,
@@ -872,6 +919,8 @@ export const NdkProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       relayHealth,
       ensureNdkConnection,
       getNdkModule,
+      ensureRelays,
+      prepareRelaySet,
     ]
   );
 

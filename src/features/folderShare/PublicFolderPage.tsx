@@ -136,7 +136,7 @@ const mergeMetadataWithHint = (
 };
 
 export const PublicFolderPage: React.FC<PublicFolderPageProps> = ({ naddr }) => {
-  const { ensureConnection } = useNdk();
+  const { ensureConnection, prepareRelaySet } = useNdk();
   const [state, setState] = useState<LoadState>({ status: "idle" });
   const [refreshKey, setRefreshKey] = useState(0);
 
@@ -156,38 +156,29 @@ export const PublicFolderPage: React.FC<PublicFolderPageProps> = ({ naddr }) => 
       try {
         const ndk = await ensureConnection();
         let relayHints: string[] | undefined;
+        let relayPreparation: Awaited<ReturnType<typeof prepareRelaySet>> | null = null;
         if (ndk) {
-          const candidateRelays = Array.isArray(address.relays) && address.relays.length > 0
-            ? address.relays
-            : Array.from(DEFAULT_PUBLIC_RELAYS);
+          const candidateRelays =
+            Array.isArray(address.relays) && address.relays.length > 0
+              ? address.relays
+              : Array.from(DEFAULT_PUBLIC_RELAYS);
           const normalizedRelays = candidateRelays
             .map(url => normalizeRelayUrl(url))
-            .filter(url => url.length > 0);
+            .filter((url): url is string => url.length > 0);
           relayHints = normalizedRelays.length > 0 ? normalizedRelays : undefined;
-          let addedExplicitRelay = false;
-          normalizedRelays.forEach(url => {
-            if (!url) return;
-            const relay = ndk.pool?.relays.get(url);
-            if (relay) {
-              try {
-                relay.connect();
-              } catch (error) {
-                console.warn("Unable to reconnect relay for shared link", url, error);
-              }
-              return;
-            }
+          if (normalizedRelays.length > 0) {
             try {
-              ndk.addExplicitRelay(url, undefined, true);
-              addedExplicitRelay = true;
+              relayPreparation = await prepareRelaySet(normalizedRelays, { waitForConnection: true });
             } catch (error) {
-              console.warn("Unable to add relay from shared link", url, error);
+              console.warn("Unable to prepare relays for shared link", normalizedRelays, error);
             }
-          });
-          if (addedExplicitRelay) {
-            await ndk.connect().catch(() => undefined);
           }
         }
-        const record = await fetchFolderRecordByAddress(ndk, address, relayHints, { timeoutMs: 7000 });
+        const relaySet = relayPreparation?.relaySet ?? undefined;
+        const record = await fetchFolderRecordByAddress(ndk, address, relayHints, {
+          timeoutMs: 7000,
+          relaySet,
+        });
         if (!record) {
           if (!cancelled) {
             setState({ status: "error", reason: "not-found", address });
@@ -200,7 +191,10 @@ export const PublicFolderPage: React.FC<PublicFolderPageProps> = ({ naddr }) => 
           }
           return;
         }
-        const nip94Map = await fetchNip94ByHashes(ndk, record.shas, relayHints, { timeoutMs: 7000 });
+        const nip94Map = await fetchNip94ByHashes(ndk, record.shas, relayHints, {
+          timeoutMs: 7000,
+          relaySet,
+        });
         const items: FolderItem[] = record.shas.map(sha => {
           const normalizedSha = sha.toLowerCase();
           const hint = record.fileHints?.[normalizedSha] ?? null;
@@ -233,7 +227,7 @@ export const PublicFolderPage: React.FC<PublicFolderPageProps> = ({ naddr }) => 
     return () => {
       cancelled = true;
     };
-  }, [ensureConnection, sanitizedNaddr, refreshKey]);
+  }, [ensureConnection, prepareRelaySet, sanitizedNaddr, refreshKey]);
 
   useEffect(() => {
     if (state.status === "ready") {

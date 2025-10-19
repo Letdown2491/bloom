@@ -5,6 +5,7 @@ import { normalizeRelayOrigin, sanitizeRelayUrl } from "../utils/relays";
 import type { EventTemplate } from "../api/blossomClient";
 import { SaveIcon, TrashIcon, CancelIcon, EditIcon, RelayIcon, RefreshIcon, PlusIcon } from "./icons";
 import { loadNdkModule } from "../api/ndkModule";
+import type { RelayPreparationResult } from "../api/ndkRelayManager";
 import type { StatusMessageTone } from "../types/status";
 import { useDialog } from "../../app/context/DialogContext";
 import { useUserPreferences } from "../../app/context/UserPreferencesContext";
@@ -155,7 +156,7 @@ const RelayList: React.FC<RelayListProps> = ({ showStatusMessage, compact = fals
   const { preferences } = useUserPreferences();
   const isLightTheme = preferences.theme === "light";
   const { relayPolicies, loading, refresh } = usePreferredRelays();
-  const { relayHealth, ndk, signer } = useNdk();
+  const { relayHealth, ndk, signer, prepareRelaySet } = useNdk();
   const { confirm } = useDialog();
   const [drafts, setDrafts] = useState<RelayDraft[]>([]);
   const [saving, setSaving] = useState(false);
@@ -244,13 +245,33 @@ const RelayList: React.FC<RelayListProps> = ({ showStatusMessage, compact = fals
       setSaving(true);
       try {
         const template = buildNip65Template(policies);
-        const { NDKEvent } = await loadNdkModule();
+        const candidateUrls = Array.from(
+          new Set(
+            policies
+              .map(policy => sanitizeRelayUrl(policy.url))
+              .filter((url): url is string => Boolean(url))
+          )
+        );
+        let preparation: RelayPreparationResult | null = null;
+        if (candidateUrls.length > 0) {
+          preparation = await prepareRelaySet(candidateUrls, { waitForConnection: true });
+        }
+        const pending = preparation?.pending ?? [];
+        if (pending.length) {
+          console.warn("Some relays are still connecting while saving preferences", pending);
+        }
+        const module = await loadNdkModule();
+        const { NDKEvent } = module;
         const event = new NDKEvent(ndk, template);
         if (!event.created_at) {
           event.created_at = Math.floor(Date.now() / 1000);
         }
         await event.sign();
-        await event.publish();
+        if (preparation?.relaySet) {
+          await event.publish(preparation.relaySet);
+        } else {
+          await event.publish();
+        }
         showStatusMessage(successMessage ?? "Relay preferences saved.", "success");
         await refresh();
       } catch (error) {
@@ -262,7 +283,7 @@ const RelayList: React.FC<RelayListProps> = ({ showStatusMessage, compact = fals
         setSaving(false);
       }
     },
-    [ndk, queuePendingSave, refresh, showStatusMessage, signer]
+    [ndk, prepareRelaySet, queuePendingSave, refresh, showStatusMessage, signer]
   );
 
   const flushPendingSave = useCallback(() => {

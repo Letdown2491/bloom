@@ -28,6 +28,10 @@ type NdkInstance = InstanceType<LoadedNdkModule["default"]> | null;
 type NdkSignerInstance = NDKSigner | null | undefined;
 type NdkUserInstance = NdkUser | null | undefined;
 type NdkInternalUser = NdkUser;
+type NdkRelaySetInstance = InstanceType<LoadedNdkModule["NDKRelaySet"]>;
+type RelayContextOptions = {
+  relaySet?: NdkRelaySetInstance | null;
+};
 
 type EncryptionCapableSigner = NDKSigner & {
   encrypt: (recipient: NdkInternalUser, value: string, scheme?: "nip44" | "nip04") => Promise<string>;
@@ -233,7 +237,8 @@ const publishPrivateLinkEvent = async (
   ndk: NdkInstance | null,
   signer: NdkSignerInstance | null,
   user: NdkUserInstance | null,
-  options: PublishPrivateLinkOptions
+  options: PublishPrivateLinkOptions,
+  relayContext?: RelayContextOptions
 ): Promise<PrivateLinkRecord> => {
   if (!ndk) throw new Error("NDK unavailable");
   if (!signer) throw new Error("Connect a Nostr signer to continue.");
@@ -288,9 +293,21 @@ const publishPrivateLinkEvent = async (
   });
   relayUrls.add(PRIVATE_LINK_REQUIRED_RELAY);
 
-  const relaySet = module.NDKRelaySet.fromRelayUrls(Array.from(relayUrls), ndk);
+  let relaySet: NdkRelaySetInstance | null = relayContext?.relaySet ?? null;
+  if (!relaySet) {
+    try {
+      relaySet = module.NDKRelaySet.fromRelayUrls(Array.from(relayUrls), ndk);
+    } catch (error) {
+      console.warn("Failed to build relay set for private link publish", error);
+      relaySet = null;
+    }
+  }
 
-  await event.publish(relaySet);
+  if (relaySet) {
+    await event.publish(relaySet);
+  } else {
+    await event.publish();
+  }
 
   const nowSeconds = Math.floor(Date.now() / 1000);
   return {
@@ -311,7 +328,8 @@ export const createPrivateLink = async (
   ndk: NdkInstance | null,
   signer: NdkSignerInstance | null,
   user: NdkUserInstance | null,
-  input: CreatePrivateLinkInput
+  input: CreatePrivateLinkInput,
+  relayContext?: RelayContextOptions
 ): Promise<PrivateLinkRecord> => {
   const alias = normalizeAlias(input.alias);
   if (!alias) throw new Error("Alias must contain letters or numbers.");
@@ -322,14 +340,15 @@ export const createPrivateLink = async (
     target,
     displayName: input.displayName ?? null,
     expiresAt: input.expiresAt ?? null,
-  });
+  }, relayContext);
 };
 
 export const revokePrivateLink = async (
   ndk: NdkInstance | null,
   signer: NdkSignerInstance | null,
   user: NdkUserInstance | null,
-  alias: string
+  alias: string,
+  relayContext?: RelayContextOptions
 ): Promise<PrivateLinkRecord> => {
   const normalizedAlias = normalizeAlias(alias);
   if (!normalizedAlias) throw new Error("Alias is required.");
@@ -340,13 +359,14 @@ export const revokePrivateLink = async (
     target: null,
     revokedAt: now,
     createdAt: now,
-  });
+  }, relayContext);
 };
 
 export const loadPrivateLinks = async (
   ndk: NdkInstance | null,
   signer: NdkSignerInstance | null,
-  user: NdkUserInstance | null
+  user: NdkUserInstance | null,
+  relayContext?: RelayContextOptions
 ): Promise<PrivateLinkRecord[]> => {
   if (!ndk || !signer || !user) return [];
   if (!isPrivateLinkServiceConfigured()) return [];
@@ -354,15 +374,22 @@ export const loadPrivateLinks = async (
 
   const module = await loadNdkModule();
   const serviceUser = await getServiceUser(ndk, module);
-  await ndk.connect().catch(() => undefined);
-  const relaySet = module.NDKRelaySet.fromRelayUrls([PRIVATE_LINK_REQUIRED_RELAY], ndk);
+  let relaySet: NdkRelaySetInstance | null = relayContext?.relaySet ?? null;
+  if (!relaySet) {
+    try {
+      relaySet = module.NDKRelaySet.fromRelayUrls([PRIVATE_LINK_REQUIRED_RELAY], ndk);
+    } catch (error) {
+      console.warn("Failed to build relay set for private link load", error);
+      relaySet = null;
+    }
+  }
   const eventsSet = (await ndk.fetchEvents(
     {
       kinds: [PRIVATE_LINK_EVENT_KIND],
       authors: [user.pubkey],
     },
     undefined,
-    relaySet
+    relaySet ?? undefined
   )) as Set<NdkEvent>;
 
   const map = new Map<string, PrivateLinkRecord>();

@@ -36,7 +36,7 @@ const loadNip46Module = async (): Promise<Nip46Module> => {
 };
 
 export const Nip46Provider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { ndk, adoptSigner } = useNdk();
+  const { ndk, adoptSigner, prepareRelaySet } = useNdk();
 
   const moduleRef = useRef<Nip46Module | null>(null);
   const [codec, setCodec] = useState<Nip46Codec | null>(null);
@@ -115,7 +115,7 @@ export const Nip46Provider: React.FC<{ children: React.ReactNode }> = ({ childre
     const nextService = new mod.Nip46Service({
       codec,
       sessionManager,
-      transport: mod.createNdkTransport(ndk),
+      transport: mod.createNdkTransport(ndk, { prepareRelaySet }),
     });
 
     setService(prev => {
@@ -128,7 +128,7 @@ export const Nip46Provider: React.FC<{ children: React.ReactNode }> = ({ childre
       void nextService.destroy().catch(() => undefined);
       setTransportReady(false);
     };
-  }, [codec, ndk, sessionManager]);
+  }, [codec, ndk, sessionManager, prepareRelaySet]);
 
   useEffect(() => {
     if (!ready || !transportReady || !service) return;

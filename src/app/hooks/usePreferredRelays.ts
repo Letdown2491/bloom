@@ -37,36 +37,57 @@ const parseRelayPoliciesFromTags = (tags: string[][]): RelayPolicy[] => {
 };
 
 export const usePreferredRelays = () => {
-  const { ndk } = useNdk();
+  const { ndk, prepareRelaySet } = useNdk();
   const pubkey = useCurrentPubkey();
   const [relayPolicies, setRelayPolicies] = useState<RelayPolicy[]>([]);
   const [loading, setLoading] = useState(false);
 
-  const fetchRelayPolicies = useCallback(async (): Promise<RelayPolicy[]> => {
-    if (!ndk || !pubkey) return [];
+  const fetchRelayPolicies = useCallback(
+    async (options?: { waitForConnection?: boolean }): Promise<RelayPolicy[]> => {
+      if (!ndk || !pubkey) return [];
 
-    try {
-      const relayEvent = await ndk.fetchEvent({ kinds: [10002], authors: [pubkey] });
-      let policies: RelayPolicy[] = relayEvent ? parseRelayPoliciesFromTags(relayEvent.tags) : [];
+      const candidateRelays = ndk.explicitRelayUrls?.length
+        ? ndk.explicitRelayUrls
+        : Array.from(DEFAULT_PUBLIC_RELAYS);
+      const sanitizedTargets = candidateRelays
+        .map(url => sanitizeRelayUrl(url))
+        .filter((url): url is string => Boolean(url));
 
-      if (policies.length === 0) {
-        const metadataEvent = await ndk.fetchEvent({ kinds: [0], authors: [pubkey] });
-        if (metadataEvent?.content) {
-          try {
-            const metadata = JSON.parse(metadataEvent.content);
-            const extracted = extractPreferredRelays(metadata);
-            policies = extracted.map(url => ({ url, read: true, write: true }));
-          } catch (_error) {
-            // Ignore metadata parse errors; fallback remains empty.
-          }
+      if (sanitizedTargets.length) {
+        const uniqueTargets = Array.from(new Set(sanitizedTargets));
+        try {
+          await prepareRelaySet(uniqueTargets, {
+            waitForConnection: options?.waitForConnection ?? false,
+          });
+        } catch (_error) {
+          // Ignore connection preparation failures; fallback to fetch attempt.
         }
       }
 
-      return policies;
-    } catch (_error) {
-      return [];
-    }
-  }, [ndk, pubkey]);
+      try {
+        const relayEvent = await ndk.fetchEvent({ kinds: [10002], authors: [pubkey] });
+        let policies: RelayPolicy[] = relayEvent ? parseRelayPoliciesFromTags(relayEvent.tags) : [];
+
+        if (policies.length === 0) {
+          const metadataEvent = await ndk.fetchEvent({ kinds: [0], authors: [pubkey] });
+          if (metadataEvent?.content) {
+            try {
+              const metadata = JSON.parse(metadataEvent.content);
+              const extracted = extractPreferredRelays(metadata);
+              policies = extracted.map(url => ({ url, read: true, write: true }));
+            } catch (_error) {
+              // Ignore metadata parse errors; fallback remains empty.
+            }
+          }
+        }
+
+        return policies;
+      } catch (_error) {
+        return [];
+      }
+    },
+    [ndk, prepareRelaySet, pubkey]
+  );
 
   const refresh = useCallback(async () => {
     if (!ndk || !pubkey) {
@@ -75,7 +96,7 @@ export const usePreferredRelays = () => {
       return;
     }
     setLoading(true);
-    const policies = await fetchRelayPolicies();
+    const policies = await fetchRelayPolicies({ waitForConnection: true });
     setRelayPolicies(policies);
     setLoading(false);
   }, [fetchRelayPolicies, ndk, pubkey]);
@@ -135,7 +156,11 @@ export const usePreferredRelays = () => {
         pool.removeRelay(normalized);
       }
     });
-  }, [ndk, relayPolicies]);
+
+    if (unique.length > 0) {
+      void prepareRelaySet(unique, { waitForConnection: false }).catch(() => undefined);
+    }
+  }, [ndk, prepareRelaySet, relayPolicies]);
 
   const poolRelays = useMemo(() => {
     if (!ndk?.pool) return [] as string[];

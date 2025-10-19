@@ -417,14 +417,20 @@ export const decodeFolderNaddr = (value: string): FolderListAddress | null => {
   }
 };
 
+type NdkRelaySetInstance = InstanceType<Awaited<ReturnType<typeof loadNdkModule>>["NDKRelaySet"]>;
+
+type FetchFolderRecordOptions = {
+  timeoutMs?: number;
+  relaySet?: NdkRelaySetInstance | null;
+};
+
 export const fetchFolderRecordByAddress = async (
   ndk: NdkInstance | null,
   address: FolderListAddress,
   relayUrls?: readonly string[],
-  options?: { timeoutMs?: number }
+  options?: FetchFolderRecordOptions
 ): Promise<FolderListRecord | null> => {
   if (!ndk) return null;
-  await ndk.connect().catch(() => undefined);
   const filters = [
     {
       kinds: [address.kind],
@@ -433,8 +439,10 @@ export const fetchFolderRecordByAddress = async (
       limit: 1,
     },
   ];
-  let relaySet: InstanceType<Awaited<ReturnType<typeof loadNdkModule>>["NDKRelaySet"]> | undefined;
-  if (relayUrls && relayUrls.length > 0) {
+  let relaySet: NdkRelaySetInstance | undefined;
+  if (options?.relaySet) {
+    relaySet = options.relaySet;
+  } else if (relayUrls && relayUrls.length > 0) {
     try {
       const module = await loadNdkModule();
       relaySet = module.NDKRelaySet.fromRelayUrls(relayUrls, ndk);

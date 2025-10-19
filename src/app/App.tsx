@@ -41,6 +41,7 @@ import {
   LogoutIcon,
 } from "../shared/ui/icons";
 import { FolderShareDialog } from "../features/share/ui/FolderShareDialog";
+import { FolderShareRelayPrompt } from "../features/share/ui/FolderShareRelayPrompt";
 import { StatusFooter } from "../shared/ui/StatusFooter";
 import { WorkspaceSection } from "../features/workspace/ui/WorkspaceSection";
 import {
@@ -50,6 +51,12 @@ import {
   type FolderListRecord,
   type FolderFileHint,
 } from "../shared/domain/folderList";
+import type {
+  FolderSharePhases,
+  PublishOperationSummary,
+  PublishPhaseState,
+  RelayPublishFailure,
+} from "../features/share/ui/folderShareStatus";
 
 const ConnectSignerDialogLazy = React.lazy(() =>
   import("../features/nip46/ConnectSignerDialog").then(module => ({ default: module.ConnectSignerDialog }))
@@ -115,6 +122,23 @@ type FolderShareDialogState = {
   record: FolderListRecord;
   naddr: string;
   shareUrl: string;
+  phases?: FolderSharePhases;
+  relayHints?: readonly string[];
+  shareBlobs?: BlossomBlob[] | null;
+};
+
+type FolderShareRelayPromptState = {
+  record: FolderListRecord;
+  normalizedPath: string;
+  relayOptions: string[];
+  request: ShareFolderRequest;
+};
+
+type ShareFolderExecutionRequest = {
+  record: FolderListRecord;
+  normalizedPath: string;
+  relayHints: readonly string[];
+  request: ShareFolderRequest;
 };
 
 const collectRelayUrls = (relays: readonly string[]) => {
@@ -130,7 +154,7 @@ const collectRelayUrls = (relays: readonly string[]) => {
 
 export default function App() {
   const queryClient = useQueryClient();
-  const { connect, disconnect, user, signer, ndk, getModule } = useNdk();
+  const { connect, disconnect, user, signer, ndk, getModule, prepareRelaySet } = useNdk();
   const {
     snapshot: nip46Snapshot,
     service: nip46Service,
@@ -154,8 +178,17 @@ export default function App() {
     syncState,
   } = useUserPreferences();
   const { confirm } = useDialog();
-  const { effectiveRelays } = usePreferredRelays();
+  const { effectiveRelays, relayPolicies } = usePreferredRelays();
   useAliasSync(effectiveRelays, Boolean(pubkey));
+
+  const preferredWriteRelays = useMemo(
+    () => relayPolicies.filter(policy => policy.write).map(policy => policy.url),
+    [relayPolicies]
+  );
+  const shareRelayCandidates = useMemo(
+    () => (preferredWriteRelays.length > 0 ? preferredWriteRelays : effectiveRelays),
+    [effectiveRelays, preferredWriteRelays]
+  );
 
   const keepSearchExpanded = preferences.keepSearchExpanded;
 
@@ -200,6 +233,7 @@ export default function App() {
   const audio = useAudio();
   const { foldersByPath, resolveFolderPath, setFolderVisibility } = useFolderLists();
   const [folderShareBusyPath, setFolderShareBusyPath] = useState<string | null>(null);
+  const [folderShareRelayPrompt, setFolderShareRelayPrompt] = useState<FolderShareRelayPromptState | null>(null);
   const [folderShareDialog, setFolderShareDialog] = useState<FolderShareDialogState | null>(null);
 
   const { enabled: syncEnabled, loading: syncLoading, error: syncError, pending: syncPending, lastSyncedAt: syncLastSyncedAt } = syncState;
@@ -459,59 +493,73 @@ export default function App() {
     []
   );
 
-  const ensureRelayConnections = useCallback(
-    async (relayUrls: readonly string[]) => {
-      if (!ndk) return;
-      const targets = collectRelayUrls(relayUrls);
-      if (!targets.length) return;
-      let attemptedConnection = false;
-      targets.forEach(url => {
-        const relay = ndk.pool?.relays.get(url);
-        if (relay) {
-          if (typeof relay.connect === "function") {
-            try {
-              relay.connect();
-              attemptedConnection = true;
-            } catch (error) {
-              console.warn("Unable to connect to relay", url, error);
-            }
-          }
-          return;
-        }
-        try {
-          ndk.addExplicitRelay(url, undefined, true);
-          attemptedConnection = true;
-        } catch (error) {
-          console.warn("Unable to add relay for sharing", url, error);
-        }
-      });
-      if (attemptedConnection) {
-        try {
-          await ndk.connect();
-        } catch (error) {
-          console.warn("Failed to establish relay connections for sharing", error);
-        }
-      }
-    },
-    [ndk]
-  );
-
   const ensureFolderListOnRelays = useCallback(
-    async (record: FolderListRecord, relayUrls: readonly string[], blobs?: BlossomBlob[]) => {
-      if (!ndk || !signer || !user) return record;
+    async (
+      record: FolderListRecord,
+      relayUrls: readonly string[],
+      blobs?: BlossomBlob[],
+      options?: { allowedShas?: ReadonlySet<string> | null }
+    ): Promise<{ record: FolderListRecord; summary: PublishOperationSummary }> => {
       const sanitizedRelays = collectRelayUrls(relayUrls.length ? relayUrls : DEFAULT_PUBLIC_RELAYS);
-      if (!sanitizedRelays.length) return record;
-      await ensureRelayConnections(sanitizedRelays);
+      const baseSummary: PublishOperationSummary = {
+        total: sanitizedRelays.length,
+        succeeded: 0,
+        failed: [],
+      };
+      if (!ndk || !signer || !user) {
+        return {
+          record,
+          summary: {
+            ...baseSummary,
+            error: "Signer unavailable",
+          },
+        };
+      }
+      if (!sanitizedRelays.length) {
+        return {
+          record,
+          summary: {
+            ...baseSummary,
+            error: "No relays configured",
+          },
+        };
+      }
+      const { relaySet } = await prepareRelaySet(sanitizedRelays, { waitForConnection: true });
+      if (!relaySet) {
+        return {
+          record,
+          summary: {
+            ...baseSummary,
+            error: "Unable to connect to relays",
+            failed: sanitizedRelays.map(url => ({ url, message: "Connection pending" })),
+          },
+        };
+      }
+
+      const allowedInput = options?.allowedShas;
+      const allowedSet = allowedInput
+        ? new Set(Array.from(allowedInput).map(value => value.toLowerCase()).filter(value => value.length === 64))
+        : null;
+      const isAllowedSha = (sha: string) => {
+        if (!allowedSet) return true;
+        return allowedSet.has(sha);
+      };
 
       const shaSet = new Set<string>();
       record.shas.forEach(sha => {
         if (typeof sha === "string" && sha.length === 64) {
-          shaSet.add(sha.toLowerCase());
+          const normalized = sha.toLowerCase();
+          if (isAllowedSha(normalized)) {
+            shaSet.add(normalized);
+          }
         }
       });
       blobs?.forEach(blob => {
         if (blob?.sha256 && blob.sha256.length === 64) {
-          shaSet.add(blob.sha256.toLowerCase());
+          const normalized = blob.sha256.toLowerCase();
+          if (isAllowedSha(normalized)) {
+            shaSet.add(normalized);
+          }
         }
       });
       const shas = Array.from(shaSet).sort((a, b) => a.localeCompare(b));
@@ -526,6 +574,7 @@ export default function App() {
       const registerBlobHint = (blob?: BlossomBlob | null) => {
         if (!blob?.sha256 || blob.sha256.length !== 64) return;
         const sha = blob.sha256.toLowerCase();
+        if (!isAllowedSha(sha)) return;
         if (!hintMap[sha]) {
           hintMap[sha] = { sha };
         }
@@ -564,9 +613,14 @@ export default function App() {
         fileHints: Object.keys(effectiveHints).length > 0 ? effectiveHints : record.fileHints,
       };
 
+      const summary: PublishOperationSummary = {
+        total: sanitizedRelays.length,
+        succeeded: 0,
+        failed: [],
+      };
+
       try {
         const module = await getModule();
-        const relaySet = module.NDKRelaySet.fromRelayUrls(sanitizedRelays, ndk);
         const createdAt = Math.floor(Date.now() / 1000);
         const template = buildFolderEventTemplate(shareRecord, shareRecord.pubkey ?? user.pubkey, {
           createdAt,
@@ -579,26 +633,116 @@ export default function App() {
         event.tags = template.tags;
         event.content = template.content;
         await event.sign();
-        await event.publish(relaySet);
+        try {
+          const publishedRelays = await event.publish(relaySet, undefined, sanitizedRelays.length);
+          const successUrls = new Set<string>();
+          publishedRelays.forEach(relay => {
+            const normalized = sanitizeRelayUrl(relay.url);
+            if (normalized) {
+              successUrls.add(normalized);
+            }
+          });
+          summary.succeeded = successUrls.size;
+          summary.failed = sanitizedRelays
+            .filter(url => !successUrls.has(url))
+            .map(url => ({ url, message: "No acknowledgement" }));
+          summary.error = summary.failed.length ? "Some relays did not acknowledge the folder list." : undefined;
+        } catch (publishError) {
+          const successUrls = new Set<string>();
+          const failedMap = new Map<string, string | undefined>();
+          if (
+            publishError &&
+            typeof publishError === "object" &&
+            "publishedToRelays" in publishError &&
+            publishError.publishedToRelays instanceof Set
+          ) {
+            (publishError.publishedToRelays as Set<InstanceType<typeof module.NDKRelay>>).forEach(relay => {
+              const normalized = sanitizeRelayUrl(relay.url);
+              if (normalized) {
+                successUrls.add(normalized);
+              }
+            });
+          }
+          if (
+            publishError &&
+            typeof publishError === "object" &&
+            "errors" in publishError &&
+            publishError.errors instanceof Map
+          ) {
+            (publishError.errors as Map<InstanceType<typeof module.NDKRelay>, Error>).forEach(
+              (err, relayInstance) => {
+                const normalized = sanitizeRelayUrl(relayInstance.url);
+                if (normalized) {
+                  failedMap.set(normalized, err instanceof Error ? err.message : String(err));
+                }
+              }
+            );
+          }
+          summary.succeeded = successUrls.size;
+          const failedUrls = sanitizedRelays.filter(url => !successUrls.has(url));
+          summary.failed = failedUrls.map(url => ({
+            url,
+            message: failedMap.get(url) ?? (publishError instanceof Error ? publishError.message : "Publish failed"),
+          }));
+          summary.error =
+            summary.failed.length > 0
+              ? publishError instanceof Error
+                ? publishError.message
+                : "Failed to publish to some relays"
+              : publishError instanceof Error
+                ? publishError.message
+                : "Publish error";
+          console.warn("Failed to republish folder list to share relays", publishError);
+        }
       } catch (error) {
+        summary.error = error instanceof Error ? error.message : "Unexpected error";
+        summary.failed =
+          sanitizedRelays.length > 0
+            ? sanitizedRelays.map(url => ({
+                url,
+                message: summary.error ?? "Unexpected error",
+              }))
+            : [];
         console.warn("Failed to republish folder list to share relays", error);
       }
 
-      return shareRecord;
+      return { record: shareRecord, summary };
     },
-    [ensureRelayConnections, getModule, ndk, signer, user]
+    [getModule, ndk, prepareRelaySet, signer, user]
   );
 
   const ensureFolderMetadataOnRelays = useCallback(
-    async (record: FolderListRecord, relayUrls: readonly string[], blobs?: BlossomBlob[]) => {
-      if (!ndk) return;
+    async (
+      record: FolderListRecord,
+      relayUrls: readonly string[],
+      blobs?: BlossomBlob[]
+    ): Promise<PublishOperationSummary> => {
       const sanitizedRelays = collectRelayUrls(relayUrls.length ? relayUrls : DEFAULT_PUBLIC_RELAYS);
-      if (!sanitizedRelays.length) return;
-      await ensureRelayConnections(sanitizedRelays);
+      const summary: PublishOperationSummary = {
+        total: sanitizedRelays.length,
+        succeeded: 0,
+        failed: [],
+      };
+      if (!ndk) {
+        summary.error = "Nostr connection unavailable";
+        return summary;
+      }
+      if (!sanitizedRelays.length) {
+        summary.error = "No relays configured";
+        return summary;
+      }
+      const { relaySet } = await prepareRelaySet(sanitizedRelays, { waitForConnection: true });
+      if (!relaySet) {
+        summary.error = "Unable to prepare relays";
+        summary.failed = sanitizedRelays.map(url => ({ url, message: "Connection pending" }));
+        return summary;
+      }
       const module = await getModule();
-      const relaySet = module.NDKRelaySet.fromRelayUrls(sanitizedRelays, ndk);
       const shas = Array.from(new Set(record.shas.map(sha => sha?.toLowerCase()).filter(Boolean) as string[]));
-      if (!shas.length) return;
+      if (!shas.length) {
+        summary.succeeded = sanitizedRelays.length;
+        return summary;
+      }
 
       const blobLookup = new Map<string, BlossomBlob>();
       blobs?.forEach(blob => {
@@ -649,7 +793,7 @@ export default function App() {
       }
 
       const found = new Set<string>();
-      const publishTasks: Promise<void>[] = [];
+      const eventsToPublish: InstanceType<typeof module.NDKEvent>[] = [];
 
       fetchedEvents.forEach(raw => {
         if (!raw || !Array.isArray(raw.tags)) return;
@@ -661,11 +805,7 @@ export default function App() {
         if (!shas.includes(sha)) return;
         found.add(sha);
         const event = new module.NDKEvent(ndk, raw);
-        publishTasks.push(
-          event.publish(relaySet).then(() => undefined).catch(error => {
-            console.warn("Failed to republish metadata event", error);
-          })
-        );
+        eventsToPublish.push(event);
       });
 
       const missing = shas.filter(sha => !found.has(sha));
@@ -675,25 +815,283 @@ export default function App() {
           if (!blob || !blob.url) return;
           const template = buildNip94EventTemplate({ blob });
           const event = new module.NDKEvent(ndk, template);
-          publishTasks.push(
-            (async () => {
-              await event.sign();
-              await event.publish(relaySet);
-            })().catch(error => {
-              console.warn("Failed to publish metadata for", sha, error);
-            })
-          );
+          eventsToPublish.push(event);
           found.add(sha);
         });
       }
 
-      await Promise.all(publishTasks);
+      if (!eventsToPublish.length) {
+        summary.succeeded = sanitizedRelays.length;
+        return summary;
+      }
+
+      const relayFailures = new Map<string, string>();
+      const relaySuccesses = new Map<string, number>();
+
+      const trackSuccess = (url: string) => {
+        relaySuccesses.set(url, (relaySuccesses.get(url) ?? 0) + 1);
+      };
+      const trackFailure = (url: string, message: string) => {
+        if (relayFailures.has(url)) return;
+        relayFailures.set(url, message);
+      };
+
+      for (const event of eventsToPublish) {
+        try {
+          if (!event.sig) {
+            await event.sign();
+          }
+          const published = await event.publish(relaySet, undefined, sanitizedRelays.length);
+          published.forEach(relay => {
+            const normalized = sanitizeRelayUrl(relay.url);
+            if (normalized) {
+              trackSuccess(normalized);
+            }
+          });
+        } catch (publishError) {
+          const successUrls = new Set<string>();
+          const failureMap = new Map<string, string | undefined>();
+          if (
+            publishError &&
+            typeof publishError === "object" &&
+            "publishedToRelays" in publishError &&
+            publishError.publishedToRelays instanceof Set
+          ) {
+            (publishError.publishedToRelays as Set<InstanceType<typeof module.NDKRelay>>).forEach(relay => {
+              const normalized = sanitizeRelayUrl(relay.url);
+              if (normalized) {
+                successUrls.add(normalized);
+                trackSuccess(normalized);
+              }
+            });
+          }
+          if (
+            publishError &&
+            typeof publishError === "object" &&
+            "errors" in publishError &&
+            publishError.errors instanceof Map
+          ) {
+            (publishError.errors as Map<InstanceType<typeof module.NDKRelay>, Error>).forEach((err, relayInstance) => {
+              const normalized = sanitizeRelayUrl(relayInstance.url);
+              if (normalized) {
+                failureMap.set(normalized, err instanceof Error ? err.message : String(err));
+              }
+            });
+          }
+          const fallbackMessage =
+            publishError instanceof Error ? publishError.message : "Failed to publish metadata event";
+          sanitizedRelays.forEach(url => {
+            if (successUrls.has(url)) return;
+            trackFailure(url, failureMap.get(url) ?? fallbackMessage);
+          });
+          console.warn("Failed to publish metadata event to all relays", publishError);
+        }
+      }
+
+      const succeededRelays = sanitizedRelays.filter(
+        url => !relayFailures.has(url) && (relaySuccesses.get(url) ?? 0) >= eventsToPublish.length
+      );
+      summary.succeeded = succeededRelays.length;
+      summary.failed = sanitizedRelays
+        .filter(url => !succeededRelays.includes(url))
+        .map(url => ({
+          url,
+          message: relayFailures.get(url) ?? "No acknowledgement",
+        }));
+      summary.error =
+        summary.failed.length > 0 ? "Some relays did not receive file metadata." : undefined;
 
       if (shas.some(sha => !found.has(sha))) {
         console.warn("Some shared items are missing metadata events", shas.filter(sha => !found.has(sha)));
       }
+
+      return summary;
     },
-    [getModule, ndk, signer]
+    [getModule, ndk, prepareRelaySet, signer]
+  );
+
+  const shareFolderWithRelays = useCallback(
+    async ({ record, normalizedPath, relayHints, request }: ShareFolderExecutionRequest) => {
+      const sanitizedHints = collectRelayUrls(relayHints.length ? relayHints : shareRelayCandidates);
+      if (!sanitizedHints.length) {
+        showStatusMessage("Select at least one relay before sharing.", "error", 4000);
+        return;
+      }
+      if (folderShareBusyPath && folderShareBusyPath !== normalizedPath) {
+        showStatusMessage("Another folder is updating. Please wait.", "info", 2500);
+        return;
+      }
+      if (folderShareBusyPath === normalizedPath) {
+        showStatusMessage("Folder sharing in progress…", "info", 2500);
+        return;
+      }
+
+      const allowedShaSet = new Set<string>();
+      (request.blobs ?? []).forEach(blob => {
+        if (blob?.sha256 && blob.sha256.length === 64) {
+          allowedShaSet.add(blob.sha256.toLowerCase());
+        }
+      });
+
+      setFolderShareBusyPath(normalizedPath);
+      try {
+        let nextRecord = record;
+        showStatusMessage("Making folder public…", "info", 2500);
+        const published = await setFolderVisibility(normalizedPath, "public");
+        nextRecord = published ?? record;
+        if (nextRecord.visibility !== "public") {
+          showStatusMessage("Unable to share this folder right now.", "error", 4500);
+          return;
+        }
+        showStatusMessage("Folder is now public.", "success", 2500);
+
+        const listPublish = await ensureFolderListOnRelays(nextRecord, sanitizedHints, request.blobs, {
+          allowedShas: allowedShaSet,
+        });
+        const shareRecord = listPublish.record;
+        const ownerPubkey = shareRecord.pubkey ?? user?.pubkey ?? null;
+        const naddr = encodeFolderNaddr(shareRecord, ownerPubkey, sanitizedHints);
+        if (!naddr) {
+          showStatusMessage("Unable to build a share link for this folder.", "error", 4500);
+          return;
+        }
+        const origin =
+          typeof window !== "undefined" && window.location?.origin ? window.location.origin : "https://bloomapp.me";
+        const shareUrl = `${origin}/folders/${encodeURIComponent(naddr)}`;
+
+        setFolderShareDialog({
+          record: shareRecord,
+          naddr,
+          shareUrl,
+          relayHints: sanitizedHints,
+          shareBlobs: request.blobs ?? null,
+          phases: {
+            list: {
+              status: listPublish.summary.failed.length > 0 ? "partial" : "ready",
+              total: sanitizedHints.length,
+              succeeded: Math.max(0, sanitizedHints.length - listPublish.summary.failed.length),
+              failed: listPublish.summary.failed,
+              message: listPublish.summary.error,
+            },
+            metadata: {
+              status: "publishing",
+              total: sanitizedHints.length,
+              succeeded: 0,
+              failed: [],
+            },
+          },
+        });
+
+        if (listPublish.summary.failed.length > 0) {
+          showStatusMessage(
+            "Share link ready. Some relays still need attention—retry from the share dialog.",
+            "success",
+            4500
+          );
+        } else {
+          showStatusMessage("Share link ready.", "success", 2000);
+        }
+
+        void (async () => {
+          try {
+            const metadataSummary = await ensureFolderMetadataOnRelays(shareRecord, sanitizedHints, request.blobs);
+            setFolderShareDialog(current => {
+              if (!current || current.record.path !== shareRecord.path) return current;
+              const relayUniverse = current.relayHints && current.relayHints.length > 0
+                ? collectRelayUrls(current.relayHints)
+                : sanitizedHints;
+              const baseTotal = relayUniverse.length;
+              const listPhase: PublishPhaseState =
+                current.phases?.list ?? {
+                  status: "ready",
+                  total: baseTotal,
+                  succeeded: baseTotal,
+                  failed: [],
+                };
+              const remainingFailures = metadataSummary.failed;
+              return {
+                ...current,
+                relayHints: relayUniverse,
+                phases: {
+                  list: listPhase,
+                  metadata: {
+                    status: remainingFailures.length > 0 ? "partial" : "ready",
+                    total: baseTotal,
+                    succeeded: Math.max(0, baseTotal - remainingFailures.length),
+                    failed: remainingFailures,
+                    message: metadataSummary.error,
+                  },
+                },
+              };
+            });
+            if (metadataSummary.failed.length > 0) {
+              showStatusMessage(
+                "Some relays did not receive file details. Retry from the share dialog.",
+                "warning",
+                6000
+              );
+            }
+          } catch (metadataError) {
+            console.warn("Failed to publish folder metadata for share", metadataError);
+            setFolderShareDialog(current => {
+              if (!current || current.record.path !== shareRecord.path) return current;
+              const relayUniverse = current.relayHints && current.relayHints.length > 0
+                ? collectRelayUrls(current.relayHints)
+                : sanitizedHints;
+              const baseTotal = relayUniverse.length;
+              const nextPhases =
+                current.phases ?? {
+                  list: {
+                    status: "ready",
+                    total: baseTotal,
+                    succeeded: baseTotal,
+                    failed: [],
+                  },
+                  metadata: {
+                    status: "publishing",
+                    total: baseTotal,
+                    succeeded: 0,
+                    failed: [],
+                  },
+                };
+              return {
+                ...current,
+                relayHints: relayUniverse,
+                phases: {
+                  ...nextPhases,
+                  metadata: {
+                    status: "error",
+                    total: baseTotal,
+                    succeeded: nextPhases.metadata.succeeded ?? 0,
+                    failed: nextPhases.metadata.failed ?? [],
+                    message: metadataError instanceof Error ? metadataError.message : "Failed to publish metadata",
+                  },
+                },
+              };
+            });
+            showStatusMessage(
+              "Some file details are still publishing. Previews may take a bit longer to appear.",
+              "warning",
+              5000
+            );
+          }
+        })();
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Failed to share folder.";
+        showStatusMessage(message, "error", 5000);
+      } finally {
+        setFolderShareBusyPath(null);
+      }
+    },
+    [
+      shareRelayCandidates,
+      folderShareBusyPath,
+      showStatusMessage,
+      setFolderVisibility,
+      ensureFolderListOnRelays,
+      ensureFolderMetadataOnRelays,
+      user?.pubkey,
+    ]
   );
 
   const handleShareFolder = useCallback(
@@ -716,8 +1114,7 @@ export default function App() {
         const existingHintRecord =
           folderShareDialog?.record?.path === record.path ? folderShareDialog.record : record;
         const ownerPubkey = existingHintRecord.pubkey ?? user?.pubkey ?? null;
-        const relayCandidates = effectiveRelays.length ? effectiveRelays : Array.from(DEFAULT_PUBLIC_RELAYS);
-        const relayHints = collectRelayUrls(relayCandidates);
+        const relayHints = collectRelayUrls(shareRelayCandidates);
         const naddrExisting = encodeFolderNaddr(
           existingHintRecord,
           ownerPubkey,
@@ -730,7 +1127,29 @@ export default function App() {
           return;
         }
         const shareUrlExisting = `${originExisting}/folders/${encodeURIComponent(naddrExisting)}`;
-        setFolderShareDialog({ record: existingHintRecord, naddr: naddrExisting, shareUrl: shareUrlExisting });
+        setFolderShareDialog(current => {
+          const readyPhase: PublishPhaseState = {
+            status: "ready",
+            total: relayHints.length,
+            succeeded: relayHints.length,
+            failed: [],
+          };
+          const nextPhases =
+            current && current.record.path === existingHintRecord.path && current.phases
+              ? current.phases
+              : {
+                  list: readyPhase,
+                  metadata: { ...readyPhase },
+                };
+          return {
+            record: existingHintRecord,
+            naddr: naddrExisting,
+            shareUrl: shareUrlExisting,
+            phases: nextPhases,
+            relayHints,
+            shareBlobs: current?.shareBlobs ?? null,
+          };
+        });
         return;
       }
       if (folderShareBusyPath && folderShareBusyPath !== normalizedPath) {
@@ -741,66 +1160,299 @@ export default function App() {
         showStatusMessage("Folder sharing in progress…", "info", 2500);
         return;
       }
-      setFolderShareBusyPath(normalizedPath);
-      try {
-        let nextRecord = record;
-        showStatusMessage("Making folder public…", "info", 2500);
-        const published = await setFolderVisibility(normalizedPath, "public");
-        nextRecord = published ?? record;
-        showStatusMessage("Folder is now public.", "success", 2500);
-        if (nextRecord.visibility !== "public") {
-          showStatusMessage("Unable to share this folder right now.", "error", 4500);
-          return;
-        }
-        const relayCandidates = effectiveRelays.length ? effectiveRelays : Array.from(DEFAULT_PUBLIC_RELAYS);
-        const relayHints = collectRelayUrls(relayCandidates);
-        if (!relayHints.length) {
-          showStatusMessage("Configure at least one relay before sharing.", "error", 4000);
-          return;
-        }
-        const shareRecord = await ensureFolderListOnRelays(nextRecord, relayHints, request.blobs);
-        const ownerPubkey = shareRecord.pubkey ?? user?.pubkey ?? null;
-        const naddr = encodeFolderNaddr(shareRecord, ownerPubkey, relayHints);
-        if (!naddr) {
-          showStatusMessage("Unable to build a share link for this folder.", "error", 4500);
-          return;
-        }
-        const origin =
-          typeof window !== "undefined" && window.location?.origin ? window.location.origin : "https://bloomapp.me";
-        const shareUrl = `${origin}/folders/${encodeURIComponent(naddr)}`;
-        setFolderShareDialog({ record: shareRecord, naddr, shareUrl });
-        showStatusMessage("Share link ready.", "success", 2000);
-        void (async () => {
-          try {
-            await ensureFolderMetadataOnRelays(shareRecord, relayHints, request.blobs);
-          } catch (metadataError) {
-            console.warn("Failed to publish folder metadata for share", metadataError);
-            showStatusMessage(
-              "Some file details are still publishing. Previews may take a bit longer to appear.",
-              "warning",
-              5000
-            );
-          }
-        })();
-      } catch (error) {
-        const message = error instanceof Error ? error.message : "Failed to share folder.";
-        showStatusMessage(message, "error", 5000);
-      } finally {
-        setFolderShareBusyPath(null);
+      const relayOptions = collectRelayUrls(shareRelayCandidates);
+      if (!relayOptions.length) {
+        showStatusMessage("Configure at least one relay before sharing.", "error", 4000);
+        return;
       }
+
+      setFolderShareRelayPrompt({
+        record,
+        normalizedPath,
+        relayOptions,
+        request,
+      });
     },
     [
       resolveFolderPath,
       foldersByPath,
       folderShareBusyPath,
-      setFolderVisibility,
-      ensureFolderListOnRelays,
-      ensureFolderMetadataOnRelays,
+      folderShareDialog,
+      setFolderShareRelayPrompt,
       showStatusMessage,
-      effectiveRelays,
+      shareRelayCandidates,
       user?.pubkey,
     ]
   );
+
+  const handleRetryFolderList = useCallback(async () => {
+    if (!folderShareDialog) return;
+    const { record, relayHints, shareBlobs, phases } = folderShareDialog;
+    const failedUrls = phases?.list?.failed?.map(entry => entry.url).filter(Boolean) ?? [];
+    const relayTargets = failedUrls.length
+      ? collectRelayUrls(failedUrls)
+      : relayHints && relayHints.length > 0
+        ? collectRelayUrls(relayHints)
+        : collectRelayUrls(shareRelayCandidates);
+    if (!relayTargets.length) {
+      showStatusMessage("No relays available to retry.", "info", 3500);
+      return;
+    }
+    if (phases?.list.status === "publishing") {
+      showStatusMessage("Folder list update already in progress…", "info", 2500);
+      return;
+    }
+    setFolderShareDialog(current => {
+      if (!current || current.record.path !== record.path) return current;
+      const existingList = current.phases?.list;
+      const existingMetadata = current.phases?.metadata;
+      const relayUniverse = current.relayHints && current.relayHints.length > 0
+        ? collectRelayUrls(current.relayHints)
+        : collectRelayUrls(shareRelayCandidates);
+      const baseTotal = relayUniverse.length;
+      const succeededBefore = existingList
+        ? Math.min(existingList.succeeded, baseTotal)
+        : Math.max(0, baseTotal - relayTargets.length);
+      const nextList: PublishPhaseState = {
+        status: "publishing",
+        total: baseTotal,
+        succeeded: succeededBefore,
+        failed: existingList?.failed ? [...existingList.failed] : relayTargets.map(url => ({ url })),
+      };
+      const nextMetadata: PublishPhaseState = existingMetadata
+        ? { ...existingMetadata }
+        : { status: "idle", total: null, succeeded: 0, failed: [] };
+      return {
+        ...current,
+        relayHints: relayUniverse,
+        phases: {
+          list: nextList,
+          metadata: nextMetadata,
+        },
+      };
+    });
+    try {
+      const allowedShaSet = new Set<string>();
+      (shareBlobs ?? []).forEach(blob => {
+        if (blob?.sha256 && blob.sha256.length === 64) {
+          allowedShaSet.add(blob.sha256.toLowerCase());
+        }
+      });
+      if (allowedShaSet.size === 0) {
+        record.shas.forEach(sha => {
+          if (typeof sha === "string" && sha.length === 64) {
+            allowedShaSet.add(sha.toLowerCase());
+          }
+        });
+      }
+
+      const result = await ensureFolderListOnRelays(record, relayTargets, shareBlobs ?? undefined, {
+        allowedShas: allowedShaSet,
+      });
+      setFolderShareDialog(current => {
+        if (!current || current.record.path !== record.path) return current;
+        const relayUniverse = current.relayHints && current.relayHints.length > 0
+          ? collectRelayUrls(current.relayHints)
+          : collectRelayUrls(shareRelayCandidates);
+        const baseTotal = relayUniverse.length;
+        const currentMetadata = current.phases?.metadata ?? {
+          status: "idle" as const,
+          total: baseTotal,
+          succeeded: 0,
+          failed: [] as RelayPublishFailure[],
+        };
+        const remainingFailures = result.summary.failed;
+        return {
+          ...current,
+          record: result.record,
+          relayHints: relayUniverse,
+          phases: {
+            list: {
+              status: remainingFailures.length > 0 ? "partial" : "ready",
+              total: baseTotal,
+              succeeded: Math.max(0, baseTotal - remainingFailures.length),
+              failed: remainingFailures,
+              message: result.summary.error,
+            },
+            metadata: currentMetadata,
+          },
+        };
+      });
+      if (result.summary.failed.length === 0) {
+        showStatusMessage("Folder list republished to all relays.", "success", 3000);
+      } else {
+        showStatusMessage("Retry completed, but some relays still need attention.", "warning", 5000);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to republish folder list.";
+      setFolderShareDialog(current => {
+        if (!current || current.record.path !== record.path) return current;
+        const relayUniverse = current.relayHints && current.relayHints.length > 0
+          ? collectRelayUrls(current.relayHints)
+          : collectRelayUrls(shareRelayCandidates);
+        const baseTotal = relayUniverse.length;
+        const currentMetadata = current.phases?.metadata ?? {
+          status: "idle" as const,
+          total: baseTotal,
+          succeeded: 0,
+          failed: [] as RelayPublishFailure[],
+        };
+        const previousList = current.phases?.list;
+        return {
+          ...current,
+          relayHints: relayUniverse,
+          phases: {
+            list: {
+              status: "error",
+              total: baseTotal,
+              succeeded: previousList?.succeeded ?? 0,
+              failed: previousList?.failed ? [...previousList.failed] : [],
+              message,
+            },
+            metadata: currentMetadata,
+          },
+        };
+      });
+      showStatusMessage(message, "error", 5000);
+    }
+  }, [ensureFolderListOnRelays, folderShareDialog, shareRelayCandidates, showStatusMessage]);
+
+  const handleRetryFolderMetadata = useCallback(async () => {
+    if (!folderShareDialog) return;
+    const { record, relayHints, shareBlobs, phases } = folderShareDialog;
+    const failedUrls = phases?.metadata?.failed?.map(entry => entry.url).filter(Boolean) ?? [];
+    const relayTargets = failedUrls.length
+      ? collectRelayUrls(failedUrls)
+      : relayHints && relayHints.length > 0
+        ? collectRelayUrls(relayHints)
+        : collectRelayUrls(shareRelayCandidates);
+    if (!relayTargets.length) {
+      showStatusMessage("No relays available to retry.", "info", 3500);
+      return;
+    }
+    if (phases?.metadata.status === "publishing") {
+      showStatusMessage("File details are already publishing…", "info", 2500);
+      return;
+    }
+    setFolderShareDialog(current => {
+      if (!current || current.record.path !== record.path) return current;
+      const relayUniverse = current.relayHints && current.relayHints.length > 0
+        ? collectRelayUrls(current.relayHints)
+        : collectRelayUrls(shareRelayCandidates);
+      const baseTotal = relayUniverse.length;
+      const currentList = current.phases?.list ?? {
+        status: "ready" as const,
+        total: baseTotal,
+        succeeded: Math.max(0, baseTotal - relayTargets.length),
+        failed: [] as RelayPublishFailure[],
+      };
+      const currentMetadata = current.phases?.metadata;
+      const nextMetadata: PublishPhaseState = {
+        status: "publishing",
+        total: baseTotal,
+        succeeded: currentMetadata ? Math.min(currentMetadata.succeeded, baseTotal) : Math.max(0, baseTotal - relayTargets.length),
+        failed: currentMetadata?.failed ? [...currentMetadata.failed] : relayTargets.map(url => ({ url })),
+      };
+      return {
+        ...current,
+        relayHints: relayUniverse,
+        phases: {
+          list: currentList,
+          metadata: nextMetadata,
+        },
+      };
+    });
+    try {
+      const summary = await ensureFolderMetadataOnRelays(record, relayTargets, shareBlobs ?? undefined);
+      setFolderShareDialog(current => {
+        if (!current || current.record.path !== record.path) return current;
+        const relayUniverse = current.relayHints && current.relayHints.length > 0
+          ? collectRelayUrls(current.relayHints)
+          : collectRelayUrls(shareRelayCandidates);
+        const baseTotal = relayUniverse.length;
+        const currentList = current.phases?.list ?? {
+          status: "ready" as const,
+          total: baseTotal,
+          succeeded: Math.max(0, baseTotal - summary.failed.length),
+          failed: [] as RelayPublishFailure[],
+        };
+        return {
+          ...current,
+          relayHints: relayUniverse,
+          phases: {
+            list: currentList,
+            metadata: {
+              status: summary.failed.length > 0 ? "partial" : "ready",
+              total: baseTotal,
+              succeeded: Math.max(0, baseTotal - summary.failed.length),
+              failed: summary.failed,
+              message: summary.error,
+            },
+          },
+        };
+      });
+      if (summary.failed.length === 0) {
+        showStatusMessage("File details republished to all relays.", "success", 3000);
+      } else {
+        showStatusMessage("Some relays still need file details. Retry again if needed.", "warning", 5000);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to republish metadata.";
+      setFolderShareDialog(current => {
+        if (!current || current.record.path !== record.path) return current;
+        const relayUniverse = current.relayHints && current.relayHints.length > 0
+          ? collectRelayUrls(current.relayHints)
+          : collectRelayUrls(shareRelayCandidates);
+        const baseTotal = relayUniverse.length;
+        const currentList = current.phases?.list ?? {
+          status: "ready" as const,
+          total: baseTotal,
+          succeeded: Math.max(0, baseTotal - relayTargets.length),
+          failed: [] as RelayPublishFailure[],
+        };
+        const previousMetadata = current.phases?.metadata;
+        return {
+          ...current,
+          relayHints: relayUniverse,
+          phases: {
+            list: currentList,
+            metadata: {
+              status: "error",
+              total: baseTotal,
+              succeeded: previousMetadata?.succeeded ?? 0,
+              failed: previousMetadata?.failed ? [...previousMetadata.failed] : [],
+              message,
+            },
+          },
+        };
+      });
+      showStatusMessage(message, "error", 5000);
+    }
+  }, [ensureFolderMetadataOnRelays, folderShareDialog, shareRelayCandidates, showStatusMessage]);
+
+  const handleConfirmShareRelays = useCallback(
+    async (selectedRelays: readonly string[]) => {
+      if (!folderShareRelayPrompt) return;
+      const sanitized = collectRelayUrls(selectedRelays.length ? selectedRelays : folderShareRelayPrompt.relayOptions);
+      if (!sanitized.length) {
+        showStatusMessage("Choose at least one relay to publish to.", "warning", 4000);
+        return;
+      }
+      const payload: ShareFolderExecutionRequest = {
+        record: folderShareRelayPrompt.record,
+        normalizedPath: folderShareRelayPrompt.normalizedPath,
+        relayHints: sanitized,
+        request: folderShareRelayPrompt.request,
+      };
+      setFolderShareRelayPrompt(null);
+      await shareFolderWithRelays(payload);
+    },
+    [folderShareRelayPrompt, shareFolderWithRelays, showStatusMessage]
+  );
+
+  const handleCancelShareRelayPrompt = useCallback(() => {
+    setFolderShareRelayPrompt(null);
+  }, []);
 
   const handleUnshareFolder = useCallback(
     async (request: ShareFolderRequest) => {
@@ -1747,6 +2399,15 @@ export default function App() {
           </Suspense>
         )}
 
+        {folderShareRelayPrompt ? (
+          <FolderShareRelayPrompt
+            record={folderShareRelayPrompt.record}
+            relays={folderShareRelayPrompt.relayOptions}
+            onConfirm={handleConfirmShareRelays}
+            onCancel={handleCancelShareRelayPrompt}
+          />
+        ) : null}
+
         {folderShareDialog ? (
           <FolderShareDialog
             record={folderShareDialog.record}
@@ -1754,6 +2415,9 @@ export default function App() {
             naddr={folderShareDialog.naddr}
             onClose={handleCloseFolderShareDialog}
             onStatus={showStatusMessage}
+            phases={folderShareDialog.phases}
+            onRetryList={handleRetryFolderList}
+            onRetryMetadata={handleRetryFolderMetadata}
           />
         ) : null}
 

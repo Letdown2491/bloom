@@ -1,6 +1,7 @@
 import type NDK from "@nostr-dev-kit/ndk";
 import type { NDKRelay, NDKFilter, NDKSubscription, NDKRelayStatus } from "@nostr-dev-kit/ndk";
 import { loadNdkModule, type NdkModule } from "../../ndkModule";
+import type { RelayPreparationOptions, RelayPreparationResult } from "../../ndkRelayManager";
 
 import type { NostrFilter, TransportConfig } from "./types";
 
@@ -88,7 +89,14 @@ const convertFilter = (filter: NostrFilter): NDKFilter => {
   return { ...rest } as NDKFilter;
 };
 
-export const createNdkTransport = (ndk: NDK): TransportConfig => {
+type RelayHelpers = {
+  prepareRelaySet?: (
+    relayUrls: readonly string[],
+    options?: RelayPreparationOptions
+  ) => Promise<RelayPreparationResult>;
+};
+
+export const createNdkTransport = (ndk: NDK, helpers?: RelayHelpers): TransportConfig => {
   return {
     publish: async event => {
       const runtime = await getRuntime();
@@ -98,24 +106,33 @@ export const createNdkTransport = (ndk: NDK): TransportConfig => {
 
       const relayUrls = event.relays ?? [];
       const ndkEvent = new runtime.NDKEvent(ndk, event);
-      let relaySet: InstanceType<NdkModule["NDKRelaySet"]> | undefined;
       let effectiveRelaySet: InstanceType<NdkModule["NDKRelaySet"]> | undefined;
       if (relayUrls.length) {
-        relaySet = runtime.NDKRelaySet.fromRelayUrls(relayUrls, ndk);
-        const relays = Array.from(relaySet.relays);
+        if (helpers?.prepareRelaySet) {
+          const { relaySet, pending } = await helpers.prepareRelaySet(relayUrls, {
+            waitForConnection: true,
+          });
+          if (pending.length) {
+            pending.forEach(logRelayWarning);
+          }
+          effectiveRelaySet = relaySet ?? undefined;
+        } else {
+          const relaySet = runtime.NDKRelaySet.fromRelayUrls(relayUrls, ndk);
+          const relays = Array.from(relaySet.relays);
 
-        if (relays.length) {
-          await Promise.all(relays.map(relay => waitForRelayConnection(relay, ndk)));
+          if (relays.length) {
+            await Promise.all(relays.map(relay => waitForRelayConnection(relay, ndk)));
+          }
+
+          const pendingRelays = relays
+            .filter(relay => relay.status !== runtime.NDKRelayStatus.CONNECTED)
+            .map(relay => relay.url);
+          if (pendingRelays.length) {
+            pendingRelays.forEach(logRelayWarning);
+          }
+
+          effectiveRelaySet = relaySet;
         }
-
-        const pendingRelays = relays
-          .filter(relay => relay.status !== runtime.NDKRelayStatus.CONNECTED)
-          .map(relay => relay.url);
-        if (pendingRelays.length) {
-          pendingRelays.forEach(logRelayWarning);
-        }
-
-        effectiveRelaySet = relaySet;
       }
 
       try {
@@ -145,6 +162,16 @@ export const createNdkTransport = (ndk: NDK): TransportConfig => {
             .filter(url => url.length > 0)
         )
       );
+      if (relayUrls.length && helpers?.prepareRelaySet) {
+        void helpers
+          .prepareRelaySet(relayUrls, { waitForConnection: false })
+          .then(result => {
+            if (result.pending.length) {
+              result.pending.forEach(logRelayWarning);
+            }
+          })
+          .catch(() => undefined);
+      }
       const options = relayUrls.length
         ? { closeOnEose: false, relayUrls }
         : { closeOnEose: false };

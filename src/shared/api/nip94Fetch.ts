@@ -4,6 +4,12 @@ import { loadNdkModule } from "./ndkModule";
 
 type LoadedNdkModule = Awaited<ReturnType<typeof loadNdkModule>>;
 type NdkInstance = InstanceType<LoadedNdkModule["default"]> | null;
+type NdkRelaySetInstance = InstanceType<LoadedNdkModule["NDKRelaySet"]>;
+
+type FetchNip94Options = {
+  timeoutMs?: number;
+  relaySet?: NdkRelaySetInstance | null;
+};
 
 const sanitizeHashes = (hashes: readonly string[]) =>
   Array.from(
@@ -18,12 +24,11 @@ export const fetchNip94ByHashes = async (
   ndk: NdkInstance,
   hashes: readonly string[],
   relayUrls?: readonly string[],
-  options?: { timeoutMs?: number }
+  options?: FetchNip94Options
 ): Promise<Map<string, Nip94ParsedEvent>> => {
   if (!ndk) return new Map();
   const targets = sanitizeHashes(hashes);
   if (!targets.length) return new Map();
-  await ndk.connect().catch(() => undefined);
   const limit = Math.min(Math.max(targets.length * 2, 12), 200);
   const filters = [
     {
@@ -37,8 +42,10 @@ export const fetchNip94ByHashes = async (
       limit,
     },
   ];
-  let relaySet: InstanceType<Awaited<ReturnType<typeof loadNdkModule>>["NDKRelaySet"]> | undefined;
-  if (relayUrls && relayUrls.length > 0) {
+  let relaySet: NdkRelaySetInstance | undefined;
+  if (options?.relaySet) {
+    relaySet = options.relaySet;
+  } else if (relayUrls && relayUrls.length > 0) {
     try {
       const module = await loadNdkModule();
       relaySet = module.NDKRelaySet.fromRelayUrls(relayUrls, ndk);

@@ -6,6 +6,7 @@ import {
   publishPrivateList,
   type PrivateListEntry,
 } from "../../shared/domain/privateList";
+import { DEFAULT_PUBLIC_RELAYS, sanitizeRelayUrl } from "../../shared/utils/relays";
 
 type PrivateLibraryContextValue = {
   entries: PrivateListEntry[];
@@ -20,7 +21,7 @@ type PrivateLibraryContextValue = {
 const PrivateLibraryContext = createContext<PrivateLibraryContextValue | undefined>(undefined);
 
 export const PrivateLibraryProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { ndk, signer, user } = useNdk();
+  const { ndk, signer, user, prepareRelaySet } = useNdk();
   const [entries, setEntries] = useState<PrivateListEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
@@ -31,6 +32,18 @@ export const PrivateLibraryProvider: React.FC<{ children: React.ReactNode }> = (
     setEntries([]);
   }, []);
 
+  const resolveRelayTargets = useCallback(() => {
+    if (!ndk) return [] as string[];
+    const base =
+      ndk.explicitRelayUrls && ndk.explicitRelayUrls.length > 0
+        ? ndk.explicitRelayUrls
+        : Array.from(DEFAULT_PUBLIC_RELAYS);
+    const sanitized = base
+      .map(url => sanitizeRelayUrl(url))
+      .filter((url): url is string => Boolean(url));
+    return Array.from(new Set(sanitized));
+  }, [ndk]);
+
   const refresh = useCallback(async () => {
     if (!ndk || !signer || !user) {
       reset();
@@ -38,7 +51,17 @@ export const PrivateLibraryProvider: React.FC<{ children: React.ReactNode }> = (
     }
     setLoading(true);
     try {
-      const list = await loadPrivateList(ndk, signer, user);
+      const relayTargets = resolveRelayTargets();
+      let relaySet = undefined;
+      if (relayTargets.length > 0) {
+        try {
+          const preparation = await prepareRelaySet(relayTargets, { waitForConnection: true });
+          relaySet = preparation.relaySet ?? undefined;
+        } catch (prepError) {
+          console.warn("Failed to prepare relays for private list load", prepError);
+        }
+      }
+      const list = await loadPrivateList(ndk, signer, user, { relaySet });
       entriesRef.current = list;
       setEntries(list);
       setError(null);
@@ -48,7 +71,7 @@ export const PrivateLibraryProvider: React.FC<{ children: React.ReactNode }> = (
     } finally {
       setLoading(false);
     }
-  }, [ndk, reset, signer, user]);
+  }, [ndk, prepareRelaySet, reset, resolveRelayTargets, signer, user]);
 
   useEffect(() => {
     void refresh();
@@ -61,11 +84,21 @@ export const PrivateLibraryProvider: React.FC<{ children: React.ReactNode }> = (
       }
       if (!updates.length) return;
       const merged = mergePrivateEntries(entriesRef.current, updates);
-      await publishPrivateList(ndk, signer, user, merged);
+      const relayTargets = resolveRelayTargets();
+      let relaySet = undefined;
+      if (relayTargets.length > 0) {
+        try {
+          const preparation = await prepareRelaySet(relayTargets, { waitForConnection: true });
+          relaySet = preparation.relaySet ?? undefined;
+        } catch (prepError) {
+          console.warn("Failed to prepare relays for private list publish", prepError);
+        }
+      }
+      await publishPrivateList(ndk, signer, user, merged, { relaySet });
       entriesRef.current = merged;
       setEntries(merged);
     },
-    [ndk, signer, user]
+    [ndk, prepareRelaySet, resolveRelayTargets, signer, user]
   );
 
   const entriesBySha = useMemo(() => {
@@ -86,11 +119,21 @@ export const PrivateLibraryProvider: React.FC<{ children: React.ReactNode }> = (
       const targetSet = new Set(targets);
       const next = entriesRef.current.filter(entry => !targetSet.has(entry.sha256));
       if (next.length === entriesRef.current.length) return;
-      await publishPrivateList(ndk, signer, user, next);
+      const relayTargets = resolveRelayTargets();
+      let relaySet = undefined;
+      if (relayTargets.length > 0) {
+        try {
+          const preparation = await prepareRelaySet(relayTargets, { waitForConnection: true });
+          relaySet = preparation.relaySet ?? undefined;
+        } catch (prepError) {
+          console.warn("Failed to prepare relays for private list removal", prepError);
+        }
+      }
+      await publishPrivateList(ndk, signer, user, next, { relaySet });
       entriesRef.current = next;
       setEntries(next);
     },
-    [ndk, signer, user]
+    [ndk, prepareRelaySet, resolveRelayTargets, signer, user]
   );
 
   const value = useMemo<PrivateLibraryContextValue>(

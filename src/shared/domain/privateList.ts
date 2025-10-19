@@ -2,6 +2,13 @@ import type { NDKEvent as NdkEvent, NDKUser, NDKSigner } from "@nostr-dev-kit/nd
 import { normalizeFolderPathInput } from "../utils/blobMetadataStore";
 import { loadNdkModule } from "../api/ndkModule";
 
+type LoadedModule = Awaited<ReturnType<typeof loadNdkModule>>;
+type NdkRelaySetInstance = InstanceType<LoadedModule["NDKRelaySet"]>;
+
+type PrivateListOptions = {
+  relaySet?: NdkRelaySetInstance | null;
+};
+
 export const PRIVATE_LIST_KIND = 30000;
 export const PRIVATE_LIST_IDENTIFIER = "private";
 
@@ -127,15 +134,19 @@ const sanitizeAudioMetadata = (value: unknown): PrivateAudioMetadata | null | un
 export const loadPrivateList = async (
   ndk: any,
   signer: NDKSigner | null,
-  user: NDKUser | null
+  user: NDKUser | null,
+  options?: PrivateListOptions
 ): Promise<PrivateListEntry[]> => {
   if (!ndk || !signer || !user) return [];
-  await ndk.connect().catch(() => undefined);
-  const events = (await ndk.fetchEvents({
-    authors: [user.pubkey],
-    kinds: [PRIVATE_LIST_KIND],
-    "#d": [PRIVATE_LIST_IDENTIFIER],
-  })) as Set<NdkEvent>;
+  const events = (await ndk.fetchEvents(
+    {
+      authors: [user.pubkey],
+      kinds: [PRIVATE_LIST_KIND],
+      "#d": [PRIVATE_LIST_IDENTIFIER],
+    },
+    { closeOnEose: true },
+    options?.relaySet ?? undefined
+  )) as Set<NdkEvent>;
   if (!events || events.size === 0) return [];
   const sorted = Array.from(events).sort((a, b) => (b.created_at ?? 0) - (a.created_at ?? 0));
   const latest = sorted[0];
@@ -162,7 +173,8 @@ export const publishPrivateList = async (
   ndk: any,
   signer: NDKSigner | null,
   user: NDKUser | null,
-  entries: PrivateListEntry[]
+  entries: PrivateListEntry[],
+  options?: PrivateListOptions
 ) => {
   if (!ndk || !signer || !user) throw new Error("Nostr signer unavailable");
   if (!ensureSigner(signer)) throw new Error("Signer does not support encryption");
@@ -191,7 +203,11 @@ export const publishPrivateList = async (
   const plaintext = JSON.stringify(serialized);
   event.content = await signer.encrypt(user, plaintext, "nip44");
   await event.sign();
-  await event.publish();
+  if (options?.relaySet) {
+    await event.publish(options.relaySet);
+  } else {
+    await event.publish();
+  }
 };
 
 export const mergePrivateEntries = (
