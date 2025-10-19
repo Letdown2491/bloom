@@ -8,6 +8,7 @@ const FOLDER_LIST_PREFIX = "bloom-folder:";
 const ROOT_IDENTIFIER = `${FOLDER_LIST_PREFIX}__root__`;
 const VISIBILITY_TAG_NAMESPACE = "bloom";
 const VISIBILITY_TAG_KEY = "visibility";
+const SHARE_POLICY_TAG_KEY = "share-policy";
 
 type LoadedNdkModule = Awaited<ReturnType<typeof loadNdkModule>>;
 type NdkInstance = InstanceType<LoadedNdkModule["default"]> | null;
@@ -17,6 +18,7 @@ type NdkUserInstance = NDKUser | null | undefined;
 type RawNdkEvent = NdkEvent;
 
 export type FolderListVisibility = "public" | "private";
+export type FolderSharePolicy = "all" | "private-only" | "public-only";
 
 export type FolderFileHint = {
   sha: string;
@@ -27,6 +29,7 @@ export type FolderFileHint = {
   mimeType?: string | null;
   size?: number | null;
   name?: string | null;
+  privateLinkAlias?: string | null;
 };
 
 export type FolderListRecord = {
@@ -39,6 +42,7 @@ export type FolderListRecord = {
   visibility: FolderListVisibility;
   pubkey?: string;
   fileHints?: Record<string, FolderFileHint>;
+  sharePolicy?: FolderSharePolicy | null;
 };
 
 export type FolderListAddress = {
@@ -106,6 +110,18 @@ const parseVisibility = (event: RawNdkEvent): FolderListVisibility => {
   return value === "public" ? "public" : "private";
 };
 
+const parseSharePolicy = (event: RawNdkEvent): FolderSharePolicy | null => {
+  const tag = event.tags.find(
+    entry => Array.isArray(entry) && entry[0] === VISIBILITY_TAG_NAMESPACE && entry[1] === SHARE_POLICY_TAG_KEY
+  );
+  if (!tag) return null;
+  const raw = typeof tag[2] === "string" ? tag[2].toLowerCase() : null;
+  if (raw === "private-only" || raw === "public-only" || raw === "all") {
+    return raw;
+  }
+  return null;
+};
+
 export const parseFolderEvent = (event: RawNdkEvent): FolderListRecord | null => {
   const dTag = event.tags.find(tag => Array.isArray(tag) && tag[0] === "d");
   if (!dTag || typeof dTag[1] !== "string") return null;
@@ -137,6 +153,7 @@ export const parseFolderEvent = (event: RawNdkEvent): FolderListRecord | null =>
         mimeType?: string | null;
         size?: number | string | null;
         name?: string | null;
+        privateLinkAlias?: string | null;
       };
       const requiresAuth =
         typeof parsed.requiresAuth === "boolean"
@@ -159,6 +176,7 @@ export const parseFolderEvent = (event: RawNdkEvent): FolderListRecord | null =>
         mimeType: parsed.mimeType ?? undefined,
         size: Number.isFinite(sizeValue) ? Number(sizeValue) : undefined,
         name: parsed.name ?? undefined,
+        privateLinkAlias: parsed.privateLinkAlias ?? undefined,
       };
     } catch {
       // ignore malformed payloads
@@ -174,6 +192,7 @@ export const parseFolderEvent = (event: RawNdkEvent): FolderListRecord | null =>
     visibility: parseVisibility(event),
     pubkey: event.pubkey,
     fileHints: Object.keys(fileHints).length > 0 ? fileHints : undefined,
+    sharePolicy: parseSharePolicy(event),
   };
 };
 
@@ -197,7 +216,7 @@ export const loadFolderLists = async (ndk: NdkInstance | null, pubkey: string | 
 export const buildFolderEventTemplate = (
   record: FolderListRecord,
   pubkey: string,
-  options?: { createdAt?: number; fileHints?: Iterable<FolderFileHint> }
+  options?: { createdAt?: number; fileHints?: Iterable<FolderFileHint>; sharePolicy?: FolderSharePolicy | null }
 ) => {
   const normalizedPath = normalizeFolderPathInput(record.path) ?? "";
   const identifier = encodeIdentifier(normalizedPath);
@@ -223,6 +242,14 @@ export const buildFolderEventTemplate = (
   shaTags.forEach(sha => tags.push(["x", sha]));
   const visibility = record.visibility ?? "private";
   tags.push([VISIBILITY_TAG_NAMESPACE, VISIBILITY_TAG_KEY, visibility]);
+  const sharePolicy = options?.sharePolicy ?? record.sharePolicy ?? null;
+  if (sharePolicy && sharePolicy !== "all") {
+    tags.push([VISIBILITY_TAG_NAMESPACE, SHARE_POLICY_TAG_KEY, sharePolicy]);
+  } else {
+    // Ensure previously published share-policy tags are cleared by emitting explicit "all"
+    // Consumers treat absence as "all", but including the tag keeps multi-device clients aligned.
+    tags.push([VISIBILITY_TAG_NAMESPACE, SHARE_POLICY_TAG_KEY, "all"]);
+  }
   if (options?.fileHints) {
     for (const hint of options.fileHints) {
       if (!hint || typeof hint.sha !== "string" || hint.sha.trim().length !== 64) continue;
@@ -237,6 +264,7 @@ export const buildFolderEventTemplate = (
           mimeType: hint.mimeType ?? undefined,
           size: typeof hint.size === "number" && Number.isFinite(hint.size) ? Math.trunc(hint.size) : undefined,
           name: hint.name ?? undefined,
+          privateLinkAlias: hint.privateLinkAlias ?? undefined,
         });
         if (payload && payload !== "{}") {
           tags.push([VISIBILITY_TAG_NAMESPACE, "file", sha, payload]);
@@ -267,6 +295,7 @@ const buildFolderEvent = async (
   const { NDKEvent } = await loadNdkModule();
   const template = buildFolderEventTemplate(record, user.pubkey, {
     fileHints: record.fileHints ? Object.values(record.fileHints) : undefined,
+    sharePolicy: record.sharePolicy ?? null,
   });
   const event = new NDKEvent(ndk);
   event.kind = template.kind;
@@ -302,6 +331,7 @@ export const publishFolderList = async (
     updatedAt: event.created_at ?? Math.floor(Date.now() / 1000),
     visibility: record.visibility ?? "private",
     pubkey: user.pubkey,
+    sharePolicy: record.sharePolicy ?? null,
   };
 };
 
@@ -315,6 +345,7 @@ export const buildDefaultFolderRecord = (
     visibility?: FolderListVisibility;
     pubkey?: string;
     fileHints?: Record<string, FolderFileHint>;
+    sharePolicy?: FolderSharePolicy | null;
   }
 ): FolderListRecord => {
   const normalized = normalizeFolderPath(path);
@@ -329,6 +360,7 @@ export const buildDefaultFolderRecord = (
     visibility,
     pubkey: options?.pubkey,
     fileHints: options?.fileHints,
+    sharePolicy: options?.sharePolicy ?? null,
   };
 };
 

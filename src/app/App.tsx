@@ -16,7 +16,9 @@ import { useSelection } from "../features/selection/SelectionContext";
 import { deriveServerNameFromUrl } from "../shared/utils/serverName";
 import { DEFAULT_PUBLIC_RELAYS, sanitizeRelayUrl } from "../shared/utils/relays";
 import { buildNip94EventTemplate } from "../shared/api/nip94";
-import { ShareFolderRequest } from "../shared/types/shareFolder";
+import { ShareFolderRequest, type ShareFolderItem } from "../shared/types/shareFolder";
+import { usePrivateLinks } from "../features/privateLinks/hooks/usePrivateLinks";
+import type { PrivateLinkRecord } from "../shared/domain/privateLinks";
 
 import type { ShareCompletion, SharePayload, ShareMode } from "../features/share/ui/ShareComposer";
 import type { BlossomBlob } from "../shared/api/blossomClient";
@@ -42,6 +44,7 @@ import {
 } from "../shared/ui/icons";
 import { FolderShareDialog } from "../features/share/ui/FolderShareDialog";
 import { FolderShareRelayPrompt } from "../features/share/ui/FolderShareRelayPrompt";
+import { FolderSharePolicyPrompt } from "../features/share/ui/FolderSharePolicyPrompt";
 import { StatusFooter } from "../shared/ui/StatusFooter";
 import { WorkspaceSection } from "../features/workspace/ui/WorkspaceSection";
 import {
@@ -50,6 +53,7 @@ import {
   buildFolderEventTemplate,
   type FolderListRecord,
   type FolderFileHint,
+  type FolderSharePolicy,
 } from "../shared/domain/folderList";
 import type {
   FolderSharePhases,
@@ -125,6 +129,21 @@ type FolderShareDialogState = {
   phases?: FolderSharePhases;
   relayHints?: readonly string[];
   shareBlobs?: BlossomBlob[] | null;
+  shareItems?: ShareFolderItem[] | null;
+};
+
+type FolderSharePolicyPromptState = {
+  record: FolderListRecord;
+  normalizedPath: string;
+  relayOptions: string[];
+  request: ShareFolderRequest;
+  items: ShareFolderItem[];
+  counts: {
+    total: number;
+    privateOnly: number;
+    publicOnly: number;
+  };
+  defaultPolicy: FolderSharePolicy;
 };
 
 type FolderShareRelayPromptState = {
@@ -132,13 +151,159 @@ type FolderShareRelayPromptState = {
   normalizedPath: string;
   relayOptions: string[];
   request: ShareFolderRequest;
+  items: ShareFolderItem[];
+  sharePolicy: FolderSharePolicy;
 };
 
 type ShareFolderExecutionRequest = {
   record: FolderListRecord;
   normalizedPath: string;
   relayHints: readonly string[];
-  request: ShareFolderRequest;
+  items: ShareFolderItem[];
+  sharePolicy: FolderSharePolicy;
+};
+
+const normalizeLinkValue = (value?: string | null): string | null => {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+};
+
+const deriveServerUrlFromLink = (url: string, sha: string): string | null => {
+  if (!url || !sha) return null;
+  const trimmedUrl = url.trim();
+  const normalizedSha = sha.toLowerCase();
+  try {
+    const parsed = new URL(trimmedUrl);
+    const strippedPath = parsed.pathname.replace(new RegExp(`${normalizedSha}.*$`, "i"), "");
+    const normalizedPath = strippedPath.replace(/\/+$/, "");
+    const base = `${parsed.origin}${normalizedPath}`;
+    return base.replace(/\/+$/, "");
+  } catch {
+    const index = trimmedUrl.toLowerCase().indexOf(normalizedSha);
+    if (index >= 0) {
+      return trimmedUrl.slice(0, index).replace(/\/+$/, "");
+    }
+  }
+  return null;
+};
+
+const resolveBlobServerUrl = (blob: BlossomBlob): string | null => {
+  const explicit = normalizeLinkValue(blob.serverUrl);
+  if (explicit) {
+    return explicit.replace(/\/+$/, "");
+  }
+  const direct = normalizeLinkValue(blob.url);
+  const sha = typeof blob.sha256 === "string" ? blob.sha256.trim().toLowerCase() : "";
+  if (direct && sha.length === 64) {
+    const derived = deriveServerUrlFromLink(direct, sha);
+    if (derived) return derived;
+  }
+  return null;
+};
+
+const resolvePublicBlobUrl = (blob: BlossomBlob): string | null => {
+  const direct = normalizeLinkValue(blob.url);
+  if (direct) return direct;
+  const server = resolveBlobServerUrl(blob);
+  const sha = typeof blob.sha256 === "string" ? blob.sha256.trim().toLowerCase() : "";
+  if (server && sha.length === 64) {
+    return `${server}/${sha}`;
+  }
+  return null;
+};
+
+const buildShareItemsFromRequest = (request: ShareFolderRequest): ShareFolderItem[] => {
+  if (Array.isArray(request.items) && request.items.length > 0) {
+    return request.items
+      .filter(item => item && item.blob && typeof item.blob.sha256 === "string")
+      .map(item => ({
+        blob: item.blob,
+        privateLinkAlias: item.privateLinkAlias ?? null,
+        privateLinkUrl: item.privateLinkUrl ?? null,
+      }));
+  }
+  if (Array.isArray(request.blobs) && request.blobs.length > 0) {
+    return request.blobs
+      .filter(blob => blob && typeof blob.sha256 === "string")
+      .map(blob => ({
+        blob,
+        privateLinkAlias: null,
+        privateLinkUrl: null,
+      }));
+  }
+  return [];
+};
+
+const filterItemsByPolicy = (items: ShareFolderItem[], policy: FolderSharePolicy): ShareFolderItem[] => {
+  return items.filter(item => {
+    const hasPrivate = Boolean(item.privateLinkUrl);
+    const hasPublic = Boolean(resolvePublicBlobUrl(item.blob));
+    if (policy === "private-only") return hasPrivate;
+    if (policy === "public-only") return !hasPrivate && hasPublic;
+    return hasPrivate || hasPublic;
+  });
+};
+
+const buildItemsFromRecord = (
+  record: FolderListRecord,
+  activeLinks: Map<string, PrivateLinkRecord>,
+  privateLinkHost: string
+): ShareFolderItem[] => {
+  const normalizedHost = privateLinkHost ? privateLinkHost.replace(/\/+$/, "") : "";
+  const items: ShareFolderItem[] = [];
+  record.shas.forEach(sha => {
+    if (typeof sha !== "string" || sha.length !== 64) return;
+    const normalizedSha = sha.toLowerCase();
+    const hint = record.fileHints?.[normalizedSha] ?? record.fileHints?.[sha] ?? null;
+    const hintUrl = normalizeLinkValue(hint?.url);
+    const hintedServer = normalizeLinkValue(hint?.serverUrl);
+    const serverUrl = hintedServer ? hintedServer.replace(/\/+$/, "") : undefined;
+    const requiresAuth =
+      typeof hint?.requiresAuth === "boolean" ? hint.requiresAuth : undefined;
+    const aliasRecord = activeLinks.get(normalizedSha) ?? null;
+    const alias = aliasRecord?.alias ?? null;
+    const hasHost = normalizedHost.length > 0;
+    const isPrivateUrl = Boolean(
+      hasHost && hint?.privateLinkAlias && hintUrl && hintUrl.startsWith(normalizedHost)
+    );
+    const derivedPublicUrl =
+      !isPrivateUrl && hintUrl
+        ? hintUrl
+        : serverUrl
+          ? `${serverUrl}/${normalizedSha}`
+          : undefined;
+    const sizeValue =
+      typeof hint?.size === "number" && Number.isFinite(hint.size) ? hint.size : undefined;
+    const normalizedServerType =
+      hint?.serverType === "blossom" || hint?.serverType === "nip96" || hint?.serverType === "satellite"
+        ? hint.serverType
+        : undefined;
+    const blob: BlossomBlob = {
+      sha256: normalizedSha,
+    };
+    if (derivedPublicUrl) blob.url = derivedPublicUrl;
+    const effectiveServer =
+      serverUrl ??
+      (derivedPublicUrl
+        ? deriveServerUrlFromLink(derivedPublicUrl, normalizedSha) ?? undefined
+        : undefined);
+    if (effectiveServer) blob.serverUrl = effectiveServer;
+    if (typeof requiresAuth === "boolean") blob.requiresAuth = requiresAuth;
+    if (normalizedServerType) blob.serverType = normalizedServerType;
+    if (typeof sizeValue === "number") blob.size = sizeValue;
+    if (hint?.mimeType) blob.type = hint.mimeType;
+    if (hint?.name) blob.name = hint.name;
+
+    const privateLinkUrl = alias && hasHost ? `${normalizedHost}/${alias}` : undefined;
+    const item: ShareFolderItem = {
+      blob,
+      privateLinkAlias: alias ?? undefined,
+      privateLinkUrl,
+    };
+    items.push(item);
+  });
+  return items;
 };
 
 const collectRelayUrls = (relays: readonly string[]) => {
@@ -232,7 +397,16 @@ export default function App() {
 
   const audio = useAudio();
   const { foldersByPath, resolveFolderPath, setFolderVisibility } = useFolderLists();
+  const {
+    links: privateLinkRecords,
+    serviceConfigured: privateLinkServiceConfigured,
+    serviceHost: privateLinkServiceHost,
+    isLoading: privateLinksLoading,
+    isFetching: privateLinksFetching,
+  } = usePrivateLinks({ enabled: Boolean(user && signer) });
+  const privateLinkHost = useMemo(() => privateLinkServiceHost.replace(/\/+$/, ""), [privateLinkServiceHost]);
   const [folderShareBusyPath, setFolderShareBusyPath] = useState<string | null>(null);
+  const [folderSharePolicyPrompt, setFolderSharePolicyPrompt] = useState<FolderSharePolicyPromptState | null>(null);
   const [folderShareRelayPrompt, setFolderShareRelayPrompt] = useState<FolderShareRelayPromptState | null>(null);
   const [folderShareDialog, setFolderShareDialog] = useState<FolderShareDialogState | null>(null);
 
@@ -288,6 +462,7 @@ export default function App() {
   const pendingSaveRef = useRef<PendingSave | null>(null);
   const retryPendingSaveTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [pendingSaveVersion, setPendingSaveVersion] = useState(0);
+  const autoRepublishInFlightRef = useRef<Set<string>>(new Set());
 
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
@@ -498,7 +673,11 @@ export default function App() {
       record: FolderListRecord,
       relayUrls: readonly string[],
       blobs?: BlossomBlob[],
-      options?: { allowedShas?: ReadonlySet<string> | null }
+      options?: {
+        allowedShas?: ReadonlySet<string> | null;
+        sharePolicy?: FolderSharePolicy | null;
+        items?: ShareFolderItem[] | null;
+      }
     ): Promise<{ record: FolderListRecord; summary: PublishOperationSummary }> => {
       const sanitizedRelays = collectRelayUrls(relayUrls.length ? relayUrls : DEFAULT_PUBLIC_RELAYS);
       const baseSummary: PublishOperationSummary = {
@@ -545,24 +724,51 @@ export default function App() {
         return allowedSet.has(sha);
       };
 
-      const shaSet = new Set<string>();
-      record.shas.forEach(sha => {
-        if (typeof sha === "string" && sha.length === 64) {
-          const normalized = sha.toLowerCase();
-          if (isAllowedSha(normalized)) {
-            shaSet.add(normalized);
-          }
-        }
+      const policyRaw = options?.sharePolicy ?? record.sharePolicy ?? "all";
+      const sharePolicy: FolderSharePolicy =
+        policyRaw === "private-only" || policyRaw === "public-only" ? policyRaw : "all";
+
+      const candidateItemsSource =
+        options?.items && options.items.length > 0
+          ? options.items
+          : Array.isArray(blobs)
+            ? blobs
+                .filter((blob): blob is BlossomBlob => Boolean(blob && typeof blob.sha256 === "string"))
+                .map(blob => ({
+                  blob,
+                  privateLinkAlias: null,
+                  privateLinkUrl: null,
+                }))
+            : [];
+
+      const normalizedItems = candidateItemsSource
+        .filter(item => item && item.blob && typeof item.blob.sha256 === "string")
+        .map(item => ({
+          blob: item.blob,
+          privateLinkAlias: item.privateLinkAlias ?? null,
+          privateLinkUrl: item.privateLinkUrl ?? null,
+        }));
+
+      const shareableItems = normalizedItems.filter(item => {
+        const hasPrivate = Boolean(item.privateLinkUrl);
+        const trimmedUrl = typeof item.blob.url === "string" ? item.blob.url.trim() : "";
+        const trimmedServer = typeof item.blob.serverUrl === "string" ? item.blob.serverUrl.trim() : "";
+        const hasPublic = Boolean(trimmedUrl || trimmedServer);
+        if (sharePolicy === "private-only") return hasPrivate;
+        if (sharePolicy === "public-only") return !hasPrivate && hasPublic;
+        return hasPrivate || hasPublic;
       });
-      blobs?.forEach(blob => {
-        if (blob?.sha256 && blob.sha256.length === 64) {
-          const normalized = blob.sha256.toLowerCase();
-          if (isAllowedSha(normalized)) {
-            shaSet.add(normalized);
-          }
-        }
+
+      const filteredItems = shareableItems.filter(item => {
+        const sha = item.blob.sha256?.toLowerCase();
+        if (!sha || sha.length !== 64) return false;
+        if (!isAllowedSha(sha)) return false;
+        return true;
       });
-      const shas = Array.from(shaSet).sort((a, b) => a.localeCompare(b));
+
+      const shas = Array.from(
+        new Set(filteredItems.map(item => (item.blob.sha256 as string).toLowerCase()))
+      ).sort((a, b) => a.localeCompare(b));
 
       const baseHints = record.fileHints ?? {};
       const hintMap: Record<string, FolderFileHint> = {};
@@ -571,27 +777,59 @@ export default function App() {
         hintMap[sha] = existing ? { ...existing, sha } : { sha };
       });
 
-      const registerBlobHint = (blob?: BlossomBlob | null) => {
+      const applyItemToHint = (item: ShareFolderItem) => {
+        const blob = item.blob;
         if (!blob?.sha256 || blob.sha256.length !== 64) return;
         const sha = blob.sha256.toLowerCase();
-        if (!isAllowedSha(sha)) return;
         if (!hintMap[sha]) {
           hintMap[sha] = { sha };
         }
         const entry = hintMap[sha];
-        const normalizedServer = blob.serverUrl ? blob.serverUrl.replace(/\/+$/, "") : undefined;
-        const fallbackUrl = normalizedServer ? `${normalizedServer}/${blob.sha256}` : undefined;
-        const resolvedUrl = blob.url?.trim() || fallbackUrl;
-        if (resolvedUrl) entry.url = resolvedUrl;
-        if (normalizedServer) entry.serverUrl = normalizedServer;
+        const normalizedServer = resolveBlobServerUrl(blob) ?? undefined;
+        if (normalizedServer) {
+          entry.serverUrl = normalizedServer;
+        }
         if (typeof blob.requiresAuth === "boolean") entry.requiresAuth = blob.requiresAuth;
         if (blob.serverType) entry.serverType = blob.serverType;
         if (blob.type) entry.mimeType = blob.type;
         if (typeof blob.size === "number" && Number.isFinite(blob.size)) entry.size = blob.size;
         if (blob.name) entry.name = blob.name;
+
+        const publicUrl = resolvePublicBlobUrl(blob) ?? undefined;
+
+        if (sharePolicy === "private-only") {
+          if (item.privateLinkUrl) {
+            entry.url = item.privateLinkUrl;
+            if (item.privateLinkAlias) entry.privateLinkAlias = item.privateLinkAlias;
+            else if (entry.privateLinkAlias !== undefined) delete entry.privateLinkAlias;
+          } else if (entry.url) {
+            delete entry.url;
+            if (entry.privateLinkAlias !== undefined) delete entry.privateLinkAlias;
+          }
+        } else if (sharePolicy === "public-only") {
+          if (publicUrl) {
+            entry.url = publicUrl;
+            if (entry.privateLinkAlias !== undefined) delete entry.privateLinkAlias;
+          } else if (entry.url) {
+            delete entry.url;
+            if (entry.privateLinkAlias !== undefined) delete entry.privateLinkAlias;
+          }
+        } else {
+          if (item.privateLinkUrl) {
+            entry.url = item.privateLinkUrl;
+            if (item.privateLinkAlias) entry.privateLinkAlias = item.privateLinkAlias;
+            else if (entry.privateLinkAlias !== undefined) delete entry.privateLinkAlias;
+          } else if (publicUrl) {
+            entry.url = publicUrl;
+            if (entry.privateLinkAlias !== undefined) delete entry.privateLinkAlias;
+          } else if (entry.url) {
+            delete entry.url;
+            if (entry.privateLinkAlias !== undefined) delete entry.privateLinkAlias;
+          }
+        }
       };
 
-      blobs?.forEach(registerBlobHint);
+      filteredItems.forEach(applyItemToHint);
 
       const effectiveHints = Object.fromEntries(
         Object.entries(hintMap).filter(([, hint]) => {
@@ -602,6 +840,7 @@ export default function App() {
           if (hint.mimeType) return true;
           if (typeof hint.size === "number" && Number.isFinite(hint.size)) return true;
           if (hint.name) return true;
+          if (hint.privateLinkAlias) return true;
           return false;
         })
       );
@@ -611,6 +850,7 @@ export default function App() {
         shas,
         pubkey: record.pubkey ?? user.pubkey,
         fileHints: Object.keys(effectiveHints).length > 0 ? effectiveHints : record.fileHints,
+        sharePolicy,
       };
 
       const summary: PublishOperationSummary = {
@@ -625,6 +865,7 @@ export default function App() {
         const template = buildFolderEventTemplate(shareRecord, shareRecord.pubkey ?? user.pubkey, {
           createdAt,
           fileHints: shareRecord.fileHints ? Object.values(shareRecord.fileHints) : undefined,
+          sharePolicy: shareRecord.sharePolicy ?? null,
         });
         const event = new module.NDKEvent(ndk);
         event.kind = template.kind;
@@ -910,8 +1151,116 @@ export default function App() {
     [getModule, ndk, prepareRelaySet, signer]
   );
 
+  useEffect(() => {
+    if (!privateLinkServiceConfigured) return;
+    if (privateLinksLoading || privateLinksFetching) return;
+    if (!ndk || !signer || !user) return;
+    if (!shareRelayCandidates.length) return;
+    if (!privateLinkHost) return;
+    if (folderShareBusyPath) return;
+
+    const activeLinks = new Map<string, PrivateLinkRecord>();
+    privateLinkRecords.forEach(record => {
+      if (!record || record.status !== "active" || record.isExpired) return;
+      const sha = record.target?.sha256;
+      if (!sha || sha.length !== 64) return;
+      activeLinks.set(sha.toLowerCase(), record);
+    });
+
+    const folderRecords = Array.from(foldersByPath.values());
+    folderRecords.forEach(record => {
+      if (!record || record.visibility !== "public") return;
+      const policy: FolderSharePolicy = record.sharePolicy === "private-only" || record.sharePolicy === "public-only"
+        ? record.sharePolicy
+        : "all";
+      const allItems = buildItemsFromRecord(record, activeLinks, privateLinkHost);
+      const filteredItems = filterItemsByPolicy(allItems, policy);
+      const desiredShaSet = new Set(filteredItems.map(item => item.blob.sha256.toLowerCase()));
+      const currentShaSet = new Set(
+        (record.shas ?? []).map(sha => (typeof sha === "string" ? sha.toLowerCase() : String(sha)))
+      );
+
+      let needsRepublish = false;
+      if (desiredShaSet.size !== currentShaSet.size) {
+        needsRepublish = true;
+      } else {
+        for (const sha of desiredShaSet) {
+          if (!currentShaSet.has(sha)) {
+            needsRepublish = true;
+            break;
+          }
+        }
+      }
+
+      if (!needsRepublish) {
+        const hints = record.fileHints ?? {};
+        for (const item of filteredItems) {
+          const sha = item.blob.sha256.toLowerCase();
+          const hint = hints[sha];
+          const currentAlias = hint?.privateLinkAlias ?? null;
+          const expectedAlias = item.privateLinkAlias ?? null;
+          if (policy === "public-only") {
+            if (currentAlias) {
+              needsRepublish = true;
+              break;
+            }
+          } else {
+            if (Boolean(expectedAlias) !== Boolean(currentAlias)) {
+              needsRepublish = true;
+              break;
+            }
+            if (expectedAlias && currentAlias && expectedAlias !== currentAlias) {
+              needsRepublish = true;
+              break;
+            }
+          }
+        }
+      }
+
+      if (!needsRepublish) return;
+
+      const pathKey = record.path ?? record.identifier;
+      if (!pathKey) return;
+      if (autoRepublishInFlightRef.current.has(pathKey)) return;
+      autoRepublishInFlightRef.current.add(pathKey);
+
+      const blobs = filteredItems.map(item => item.blob);
+      const allowedShas = new Set(filteredItems.map(item => item.blob.sha256.toLowerCase()));
+
+      void (async () => {
+        try {
+          const result = await ensureFolderListOnRelays(record, shareRelayCandidates, blobs, {
+            allowedShas,
+            sharePolicy: policy,
+            items: filteredItems,
+          });
+          if (result.summary.failed.length && result.summary.failed.length === result.summary.total) {
+            console.warn("Auto-republish failed for shared folder", record.path || record.identifier);
+          }
+        } catch (error) {
+          console.warn("Auto-republish encountered an error for shared folder", record.path || record.identifier, error);
+        } finally {
+          autoRepublishInFlightRef.current.delete(pathKey);
+        }
+      })();
+    });
+  }, [
+    privateLinkServiceConfigured,
+    privateLinksLoading,
+    privateLinksFetching,
+    privateLinkRecords,
+    privateLinkHost,
+    foldersByPath,
+    shareRelayCandidates,
+    ensureFolderListOnRelays,
+    folderShareBusyPath,
+    ndk,
+    signer,
+    user,
+  ]);
+
   const shareFolderWithRelays = useCallback(
-    async ({ record, normalizedPath, relayHints, request }: ShareFolderExecutionRequest) => {
+    async ({ record, normalizedPath, relayHints, items, sharePolicy }: ShareFolderExecutionRequest) => {
       const sanitizedHints = collectRelayUrls(relayHints.length ? relayHints : shareRelayCandidates);
       if (!sanitizedHints.length) {
         showStatusMessage("Select at least one relay before sharing.", "error", 4000);
@@ -927,11 +1276,12 @@ export default function App() {
       }
 
       const allowedShaSet = new Set<string>();
-      (request.blobs ?? []).forEach(blob => {
-        if (blob?.sha256 && blob.sha256.length === 64) {
-          allowedShaSet.add(blob.sha256.toLowerCase());
+      items.forEach(item => {
+        if (item?.blob?.sha256 && item.blob.sha256.length === 64) {
+          allowedShaSet.add(item.blob.sha256.toLowerCase());
         }
       });
+      const filteredBlobs = items.map(item => item.blob);
 
       setFolderShareBusyPath(normalizedPath);
       try {
@@ -945,8 +1295,10 @@ export default function App() {
         }
         showStatusMessage("Folder is now public.", "success", 2500);
 
-        const listPublish = await ensureFolderListOnRelays(nextRecord, sanitizedHints, request.blobs, {
+        const listPublish = await ensureFolderListOnRelays(nextRecord, sanitizedHints, filteredBlobs, {
           allowedShas: allowedShaSet,
+          sharePolicy,
+          items,
         });
         const shareRecord = listPublish.record;
         const ownerPubkey = shareRecord.pubkey ?? user?.pubkey ?? null;
@@ -964,7 +1316,8 @@ export default function App() {
           naddr,
           shareUrl,
           relayHints: sanitizedHints,
-          shareBlobs: request.blobs ?? null,
+          shareBlobs: filteredBlobs,
+          shareItems: items,
           phases: {
             list: {
               status: listPublish.summary.failed.length > 0 ? "partial" : "ready",
@@ -994,7 +1347,7 @@ export default function App() {
 
         void (async () => {
           try {
-            const metadataSummary = await ensureFolderMetadataOnRelays(shareRecord, sanitizedHints, request.blobs);
+            const metadataSummary = await ensureFolderMetadataOnRelays(shareRecord, sanitizedHints, filteredBlobs);
             setFolderShareDialog(current => {
               if (!current || current.record.path !== shareRecord.path) return current;
               const relayUniverse = current.relayHints && current.relayHints.length > 0
@@ -1110,48 +1463,55 @@ export default function App() {
         showStatusMessage("The Private folder cannot be shared.", "info", 3500);
         return;
       }
-      if (record.visibility === "public") {
-        const existingHintRecord =
-          folderShareDialog?.record?.path === record.path ? folderShareDialog.record : record;
-        const ownerPubkey = existingHintRecord.pubkey ?? user?.pubkey ?? null;
-        const relayHints = collectRelayUrls(shareRelayCandidates);
-        const naddrExisting = encodeFolderNaddr(
-          existingHintRecord,
-          ownerPubkey,
-          relayHints.length ? relayHints : undefined
-        );
-        const originExisting =
-          typeof window !== "undefined" && window.location?.origin ? window.location.origin : "https://bloomapp.me";
-        if (!naddrExisting) {
-          showStatusMessage("Unable to build a share link for this folder.", "error", 4500);
-          return;
+      let items = buildShareItemsFromRequest(request);
+      if (!items.length) {
+        const activeLinks = new Map<string, PrivateLinkRecord>();
+        privateLinkRecords.forEach(link => {
+          if (!link || link.status !== "active" || link.isExpired) return;
+          const sha = link.target?.sha256;
+          if (!sha || sha.length !== 64) return;
+          activeLinks.set(sha.toLowerCase(), link);
+        });
+        const fallbackItems = buildItemsFromRecord(record, activeLinks, privateLinkHost);
+        if (fallbackItems.length) {
+          items = fallbackItems;
         }
-        const shareUrlExisting = `${originExisting}/folders/${encodeURIComponent(naddrExisting)}`;
-        setFolderShareDialog(current => {
-          const readyPhase: PublishPhaseState = {
-            status: "ready",
-            total: relayHints.length,
-            succeeded: relayHints.length,
-            failed: [],
-          };
-          const nextPhases =
-            current && current.record.path === existingHintRecord.path && current.phases
-              ? current.phases
-              : {
-                  list: readyPhase,
-                  metadata: { ...readyPhase },
-                };
-          return {
-            record: existingHintRecord,
-            naddr: naddrExisting,
-            shareUrl: shareUrlExisting,
-            phases: nextPhases,
-            relayHints,
-            shareBlobs: current?.shareBlobs ?? null,
-          };
+      }
+
+      const shareableItems = filterItemsByPolicy(items, "all");
+      if (shareableItems.length === 0) {
+        showStatusMessage("No shareable files found in this folder.", "info", 3500);
+        return;
+      }
+      const privateCount = filterItemsByPolicy(shareableItems, "private-only").length;
+      const publicCount = filterItemsByPolicy(shareableItems, "public-only").length;
+      const defaultPolicy = record.sharePolicy ?? "all";
+
+      const relayOptions = collectRelayUrls(shareRelayCandidates);
+      if (!relayOptions.length) {
+        showStatusMessage("Configure at least one relay before sharing.", "error", 4000);
+        return;
+      }
+
+      if (record.visibility === "public") {
+        const targetRecord =
+          folderShareDialog?.record?.path === record.path ? folderShareDialog.record : record;
+        setFolderSharePolicyPrompt({
+          record: targetRecord,
+          normalizedPath,
+          relayOptions,
+          request,
+          items: shareableItems,
+          counts: {
+            total: shareableItems.length,
+            privateOnly: privateCount,
+            publicOnly: publicCount,
+          },
+          defaultPolicy,
         });
         return;
       }
+
       if (folderShareBusyPath && folderShareBusyPath !== normalizedPath) {
         showStatusMessage("Another folder is updating. Please wait.", "info", 2500);
         return;
@@ -1160,17 +1520,18 @@ export default function App() {
         showStatusMessage("Folder sharing in progress…", "info", 2500);
         return;
       }
-      const relayOptions = collectRelayUrls(shareRelayCandidates);
-      if (!relayOptions.length) {
-        showStatusMessage("Configure at least one relay before sharing.", "error", 4000);
-        return;
-      }
-
-      setFolderShareRelayPrompt({
+      setFolderSharePolicyPrompt({
         record,
         normalizedPath,
         relayOptions,
         request,
+        items: shareableItems,
+        counts: {
+          total: shareableItems.length,
+          privateOnly: privateCount,
+          publicOnly: publicCount,
+        },
+        defaultPolicy,
       });
     },
     [
@@ -1178,16 +1539,43 @@ export default function App() {
       foldersByPath,
       folderShareBusyPath,
       folderShareDialog,
-      setFolderShareRelayPrompt,
+      setFolderSharePolicyPrompt,
       showStatusMessage,
       shareRelayCandidates,
       user?.pubkey,
+      privateLinkRecords,
+      privateLinkHost,
     ]
+  );
+
+  const handleCancelSharePolicyPrompt = useCallback(() => {
+    setFolderSharePolicyPrompt(null);
+  }, []);
+
+  const handleConfirmSharePolicy = useCallback(
+    (policy: FolderSharePolicy) => {
+      if (!folderSharePolicyPrompt) return;
+      const { record, normalizedPath, relayOptions, request, items } = folderSharePolicyPrompt;
+      const nextRequest: ShareFolderRequest = {
+        ...request,
+        sharePolicy: policy,
+      };
+      setFolderSharePolicyPrompt(null);
+      setFolderShareRelayPrompt({
+        record,
+        normalizedPath,
+        relayOptions,
+        request: nextRequest,
+        items,
+        sharePolicy: policy,
+      });
+    },
+    [folderSharePolicyPrompt]
   );
 
   const handleRetryFolderList = useCallback(async () => {
     if (!folderShareDialog) return;
-    const { record, relayHints, shareBlobs, phases } = folderShareDialog;
+    const { record, relayHints, shareBlobs, shareItems, phases } = folderShareDialog;
     const failedUrls = phases?.list?.failed?.map(entry => entry.url).filter(Boolean) ?? [];
     const relayTargets = failedUrls.length
       ? collectRelayUrls(failedUrls)
@@ -1232,10 +1620,21 @@ export default function App() {
       };
     });
     try {
+      const retryItems =
+        shareItems && shareItems.length > 0
+          ? shareItems
+          : (shareBlobs ?? [])
+              .filter((blob): blob is BlossomBlob => Boolean(blob && typeof blob.sha256 === "string"))
+              .map(blob => ({
+                blob,
+                privateLinkAlias: null,
+                privateLinkUrl: null,
+              }));
+
       const allowedShaSet = new Set<string>();
-      (shareBlobs ?? []).forEach(blob => {
-        if (blob?.sha256 && blob.sha256.length === 64) {
-          allowedShaSet.add(blob.sha256.toLowerCase());
+      retryItems.forEach(item => {
+        if (item?.blob?.sha256 && item.blob.sha256.length === 64) {
+          allowedShaSet.add(item.blob.sha256.toLowerCase());
         }
       });
       if (allowedShaSet.size === 0) {
@@ -1248,6 +1647,8 @@ export default function App() {
 
       const result = await ensureFolderListOnRelays(record, relayTargets, shareBlobs ?? undefined, {
         allowedShas: allowedShaSet,
+        sharePolicy: record.sharePolicy ?? folderShareDialog.record.sharePolicy ?? null,
+        items: retryItems,
       });
       setFolderShareDialog(current => {
         if (!current || current.record.path !== record.path) return current;
@@ -1266,6 +1667,8 @@ export default function App() {
           ...current,
           record: result.record,
           relayHints: relayUniverse,
+          shareBlobs: retryItems.map(item => item.blob),
+          shareItems: retryItems,
           phases: {
             list: {
               status: remainingFailures.length > 0 ? "partial" : "ready",
@@ -1442,7 +1845,8 @@ export default function App() {
         record: folderShareRelayPrompt.record,
         normalizedPath: folderShareRelayPrompt.normalizedPath,
         relayHints: sanitized,
-        request: folderShareRelayPrompt.request,
+        items: folderShareRelayPrompt.items,
+        sharePolicy: folderShareRelayPrompt.sharePolicy,
       };
       setFolderShareRelayPrompt(null);
       await shareFolderWithRelays(payload);
@@ -2398,6 +2802,16 @@ export default function App() {
             />
           </Suspense>
         )}
+
+        {folderSharePolicyPrompt ? (
+          <FolderSharePolicyPrompt
+            record={folderSharePolicyPrompt.record}
+            counts={folderSharePolicyPrompt.counts}
+            defaultPolicy={folderSharePolicyPrompt.defaultPolicy}
+            onConfirm={handleConfirmSharePolicy}
+            onCancel={handleCancelSharePolicyPrompt}
+          />
+        ) : null}
 
         {folderShareRelayPrompt ? (
           <FolderShareRelayPrompt

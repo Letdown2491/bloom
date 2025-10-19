@@ -52,6 +52,8 @@ export type BlossomBlob = {
   __bloomFolderTargetPath?: string | null;
   __bloomFolderScope?: "aggregated" | "server" | "private";
   __bloomFolderIsParentLink?: boolean;
+  __bloomPrivateLinkUrl?: string | null;
+  __bloomPrivateLinkAlias?: string | null;
 };
 
 export type EventTemplate = {

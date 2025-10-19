@@ -14,6 +14,7 @@ import {
   PlayIcon,
   ChevronDownIcon,
   ShareIcon,
+  LinkIcon,
   SyncIndicatorIcon,
   TrashIcon,
   CancelIcon,
@@ -23,6 +24,7 @@ import {
   LockIcon,
   CopyIcon,
   TransferIcon,
+  SettingsIcon,
 } from "../../../shared/ui/icons";
 import { PRIVATE_PLACEHOLDER_SHA } from "../../../shared/constants/private";
 import type { FileKind } from "../../../shared/ui/icons";
@@ -64,6 +66,7 @@ export type BlobListProps = {
   onRename?: (blob: BlossomBlob) => void;
   onMove?: (blob: BlossomBlob) => void;
   onOpenList?: (blob: BlossomBlob) => void;
+  resolvePrivateLink?: (blob: BlossomBlob) => { url: string; alias?: string | null } | null;
   folderRecords?: Map<string, FolderListRecord>;
   onShareFolder?: (hint: FolderShareHint) => void;
   onUnshareFolder?: (hint: FolderShareHint) => void;
@@ -317,6 +320,7 @@ export const BlobList: React.FC<BlobListProps> = ({
   onRename,
   onMove,
   onOpenList,
+  resolvePrivateLink,
   folderRecords,
   onShareFolder,
   onUnshareFolder,
@@ -348,6 +352,11 @@ export const BlobList: React.FC<BlobListProps> = ({
       const privateMeta = blob.privateData?.metadata;
       const mergedType = overrides?.type ?? privateMeta?.type ?? blob.type;
       const mergedName = overrides?.name ?? privateMeta?.name ?? blob.name;
+      const privateInfo = resolvePrivateLink?.(blob) ?? null;
+      const privateLinkUrl =
+        typeof privateInfo?.url === "string" && privateInfo.url.trim().length > 0
+          ? privateInfo.url.trim()
+          : null;
       return {
         ...blob,
         type: mergedType,
@@ -356,9 +365,11 @@ export const BlobList: React.FC<BlobListProps> = ({
         serverUrl: normalizedBase ?? blob.serverUrl,
         requiresAuth: blob.requiresAuth ?? requiresAuth,
         serverType: blob.serverType ?? serverType,
+        __bloomPrivateLinkUrl: privateLinkUrl,
+        __bloomPrivateLinkAlias: privateInfo?.alias ?? null,
       };
     });
-  }, [blobs, resolvedMeta, baseUrl, requiresAuth, serverType]);
+  }, [blobs, resolvedMeta, baseUrl, requiresAuth, resolvePrivateLink, serverType]);
 
   const audioMetadata = useAudioMetadataMap(decoratedBlobs);
   const { entriesBySha } = usePrivateLibrary();
@@ -1845,23 +1856,36 @@ const GridCard = React.memo<GridCardProps>(
       const items: GridDropdownItem[] = [];
       let addedRename = false;
       if (folderShareHint && onShareFolder) {
-        if (folderVisibility === "public" && onUnshareFolder) {
+        if (folderVisibility === "public") {
           items.push({
-            key: "unshare-folder",
-            label: shareBusy ? "Unsharing…" : "Unshare Folder",
-            icon: <LockIcon size={14} />, 
-            ariaLabel: "Unshare folder",
+            key: "folder-share-options",
+            label: shareBusy ? "Opening…" : "Share Options",
+            icon: <SettingsIcon size={14} />,
+            ariaLabel: "Share options",
             onSelect: () => {
               if (shareBusy) return;
-              onUnshareFolder({ ...folderShareHint });
+              onShareFolder({ ...folderShareHint });
             },
             disabled: shareBusy,
           });
+          if (onUnshareFolder) {
+            items.push({
+              key: "unshare-folder",
+              label: shareBusy ? "Unsharing…" : "Unshare Folder",
+              icon: <LockIcon size={14} />,
+              ariaLabel: "Unshare folder",
+              onSelect: () => {
+                if (shareBusy) return;
+                onUnshareFolder({ ...folderShareHint });
+              },
+              disabled: shareBusy,
+            });
+          }
         } else {
           items.push({
             key: "share-folder",
             label: shareBusy ? "Sharing…" : "Share Folder",
-            icon: <ShareIcon size={14} />, 
+            icon: <ShareIcon size={14} />,
             ariaLabel: "Share folder",
             onSelect: () => {
               if (shareBusy) return;
@@ -1870,6 +1894,10 @@ const GridCard = React.memo<GridCardProps>(
             disabled: shareBusy,
           });
         }
+        items.push({
+          key: "folder-actions-separator",
+          type: "separator",
+        });
       }
       if (blob.url && !isListBlob) {
         items.push({
@@ -2068,7 +2096,23 @@ const GridCard = React.memo<GridCardProps>(
         );
       }
       if (!onShare) return null;
-      const disabled = isPrivateItem || !blob.url;
+      const normalizedServerUrl =
+        typeof blob.serverUrl === "string" && blob.serverUrl.trim().length > 0
+          ? blob.serverUrl.trim().replace(/\/+$/, "")
+          : "";
+      const publicUrl =
+        typeof blob.url === "string" && blob.url.trim().length > 0
+          ? blob.url.trim()
+          : normalizedServerUrl && blob.sha256
+            ? `${normalizedServerUrl}/${blob.sha256}`
+            : null;
+      const privateLinkUrl =
+        typeof blob.__bloomPrivateLinkUrl === "string" && blob.__bloomPrivateLinkUrl.trim().length > 0
+          ? blob.__bloomPrivateLinkUrl.trim()
+          : null;
+      const hasPublicLink = Boolean(publicUrl);
+      const hasPrivateLink = Boolean(privateLinkUrl);
+      const disabled = isPrivateItem || (!hasPublicLink && !hasPrivateLink);
       const shareDisabledClass = disabled ? disabledNeutralButtonClass : "";
       const shareDisabledMessage = isListBlob ? "Private folders cannot be shared" : "Private files cannot be shared";
       const title = disabled
@@ -2103,6 +2147,43 @@ const GridCard = React.memo<GridCardProps>(
               role="menu"
               aria-label="Share options"
             >
+              {hasPublicLink ? (
+                <a
+                  href="#"
+                  role="menuitem"
+                  className={makeItemClass()}
+                  onClick={event => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    setShareMenuOpen(false);
+                    if (publicUrl && typeof navigator !== "undefined" && navigator.clipboard) {
+                      void navigator.clipboard.writeText(publicUrl).catch(() => undefined);
+                    }
+                  }}
+                >
+                  <LinkIcon size={14} />
+                  <span>Copy link</span>
+                </a>
+              ) : null}
+              {hasPrivateLink ? (
+                <a
+                  href="#"
+                  role="menuitem"
+                  className={makeItemClass()}
+                  onClick={event => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    setShareMenuOpen(false);
+                    if (privateLinkUrl && typeof navigator !== "undefined" && navigator.clipboard) {
+                      void navigator.clipboard.writeText(privateLinkUrl).catch(() => undefined);
+                    }
+                  }}
+                >
+                  <LockIcon size={14} />
+                  <span>Copy private link</span>
+                </a>
+              ) : null}
+              {hasPublicLink || hasPrivateLink ? <div className={dropdownSeparatorClass} role="none" /> : null}
               <a
                 href="#"
                 role="menuitem"
@@ -2968,6 +3049,7 @@ const ListRowComponent: React.FC<ListRowProps> = ({
     const disabledClass = disabled ? "cursor-not-allowed opacity-50 hover:bg-transparent" : "";
     return `${base} ${variantClass} ${disabledClass}`.trim();
   };
+  const dropdownSeparatorClass = isLightTheme ? "my-1 h-px bg-slate-200" : "my-1 h-px bg-slate-700/60";
 
   useEffect(() => {
     if (!shareMenuOpen) return;
@@ -2997,10 +3079,20 @@ const ListRowComponent: React.FC<ListRowProps> = ({
     setShareMenuOpen(false);
   }, [blob.sha256, folderShareHint, onShareFolder]);
 
-  const shareMenuDisabled = useMemo(
-    () => Boolean(folderShareHint && onShareFolder) || !onShare || isPrivateItem || !blob.url,
-    [folderShareHint, onShare, onShareFolder, isPrivateItem, blob.url]
-  );
+  const shareMenuDisabled = useMemo(() => {
+    if (folderShareHint && onShareFolder) return true;
+    if (!onShare || isPrivateItem) return true;
+    const normalizedServerUrl =
+      typeof blob.serverUrl === "string" && blob.serverUrl.trim().length > 0
+        ? blob.serverUrl.trim().replace(/\/+$/, "")
+        : "";
+    const hasPublicLink =
+      (typeof blob.url === "string" && blob.url.trim().length > 0) ||
+      (normalizedServerUrl && blob.sha256);
+    const hasPrivateLink =
+      typeof blob.__bloomPrivateLinkUrl === "string" && blob.__bloomPrivateLinkUrl.trim().length > 0;
+    return !hasPublicLink && !hasPrivateLink;
+  }, [blob.serverUrl, blob.sha256, blob.url, blob.__bloomPrivateLinkUrl, folderShareHint, isPrivateItem, onShare, onShareFolder]);
 
   useEffect(() => {
     if (shareMenuDisabled) {
@@ -3034,7 +3126,23 @@ const ListRowComponent: React.FC<ListRowProps> = ({
       );
     }
     if (!onShare) return null;
-    const disabled = isPrivateItem || !blob.url;
+    const normalizedServerUrl =
+      typeof blob.serverUrl === "string" && blob.serverUrl.trim().length > 0
+        ? blob.serverUrl.trim().replace(/\/+$/, "")
+        : "";
+    const publicUrl =
+      typeof blob.url === "string" && blob.url.trim().length > 0
+        ? blob.url.trim()
+        : normalizedServerUrl && blob.sha256
+          ? `${normalizedServerUrl}/${blob.sha256}`
+          : null;
+    const privateLinkUrl =
+      typeof blob.__bloomPrivateLinkUrl === "string" && blob.__bloomPrivateLinkUrl.trim().length > 0
+        ? blob.__bloomPrivateLinkUrl.trim()
+        : null;
+    const hasPublicLink = Boolean(publicUrl);
+    const hasPrivateLink = Boolean(privateLinkUrl);
+    const disabled = isPrivateItem || (!hasPublicLink && !hasPrivateLink);
     const ariaLabel = isMusicListView ? "Share track" : "Share blob";
     const title = disabled
       ? isPrivateItem
@@ -3061,71 +3169,126 @@ const ListRowComponent: React.FC<ListRowProps> = ({
           <ShareIcon size={16} />
         </button>
         {shareMenuOpen ? (
-          <div
-            ref={shareMenuRef}
-            className={`${menuBaseClass} absolute right-0 top-full mt-2 origin-top visible opacity-100`}
-            role="menu"
-            aria-label="Share options"
-          >
-            <a
-              href="#"
-              role="menuitem"
-              className={makeItemClass()}
-              onClick={event => {
-                event.preventDefault();
-                event.stopPropagation();
-                setShareMenuOpen(false);
-                onShare?.(blob);
-              }}
+            <div
+              ref={shareMenuRef}
+              className={`${menuBaseClass} absolute right-0 top-full mt-2 origin-top visible opacity-100`}
+              role="menu"
+              aria-label="Share options"
             >
-              <ShareIcon size={14} />
-              <span>Share publicly</span>
-            </a>
-            <a
-              href="#"
-              role="menuitem"
-              className={makeItemClass()}
-              onClick={event => {
-                event.preventDefault();
-                event.stopPropagation();
-                setShareMenuOpen(false);
-                onShare?.(blob, { mode: "private-link" });
-              }}
-            >
-              <LockIcon size={14} />
-              <span>Share privately</span>
-            </a>
-          </div>
+              {hasPublicLink ? (
+                <a
+                  href="#"
+                  role="menuitem"
+                  className={makeItemClass()}
+                  onClick={event => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    setShareMenuOpen(false);
+                    if (publicUrl && typeof navigator !== "undefined" && navigator.clipboard) {
+                      void navigator.clipboard.writeText(publicUrl).catch(() => undefined);
+                    }
+                  }}
+                >
+                  <LinkIcon size={14} />
+                  <span>Copy link</span>
+                </a>
+              ) : null}
+              {hasPrivateLink ? (
+                <a
+                  href="#"
+                  role="menuitem"
+                  className={makeItemClass()}
+                  onClick={event => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    setShareMenuOpen(false);
+                    if (privateLinkUrl && typeof navigator !== "undefined" && navigator.clipboard) {
+                      void navigator.clipboard.writeText(privateLinkUrl).catch(() => undefined);
+                    }
+                  }}
+                >
+                  <LockIcon size={14} />
+                  <span>Copy private link</span>
+                </a>
+              ) : null}
+              {hasPublicLink || hasPrivateLink ? <div className={dropdownSeparatorClass} role="none" /> : null}
+              <a
+                href="#"
+                role="menuitem"
+                className={makeItemClass()}
+                onClick={event => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  setShareMenuOpen(false);
+                  onShare?.(blob);
+                }}
+              >
+                <ShareIcon size={14} />
+                <span>Share publicly</span>
+              </a>
+              <a
+                href="#"
+                role="menuitem"
+                className={makeItemClass()}
+                onClick={event => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  setShareMenuOpen(false);
+                  onShare?.(blob, { mode: "private-link" });
+                }}
+              >
+                <LockIcon size={14} />
+                <span>Share privately</span>
+              </a>
+            </div>
         ) : null}
       </div>
     );
   })();
 
-  type DropdownItem = {
-    key: string;
-    label: string;
-    icon: React.ReactNode;
-    onSelect: () => void;
-    ariaLabel?: string;
-    variant?: "destructive";
-    disabled?: boolean;
-  };
+  type DropdownItem =
+    | {
+        key: string;
+        type: "separator";
+      }
+    | {
+        key: string;
+        label: string;
+        icon: React.ReactNode;
+        onSelect: () => void;
+        ariaLabel?: string;
+        variant?: "destructive";
+        disabled?: boolean;
+      };
 
   const dropdownItems: DropdownItem[] = [];
 
   if (folderShareHint && onShareFolder) {
-    if (folderVisibility === "public" && onUnshareFolder) {
+    if (folderVisibility === "public") {
       dropdownItems.push({
-        key: "unshare-folder",
-        label: shareBusy ? "Unsharing…" : "Unshare Folder",
-        icon: <LockIcon size={14} />,
-        ariaLabel: "Unshare folder",
+        key: "folder-share-options",
+        label: shareBusy ? "Opening…" : "Share Options",
+        icon: <SettingsIcon size={14} />,
+        ariaLabel: "Share options",
         onSelect: () => {
           if (shareBusy) return;
-          onUnshareFolder({ ...folderShareHint });
+          onShareFolder({ ...folderShareHint });
         },
         disabled: shareBusy,
       });
+      if (onUnshareFolder) {
+        dropdownItems.push({
+          key: "unshare-folder",
+          label: shareBusy ? "Unsharing…" : "Unshare Folder",
+          icon: <LockIcon size={14} />,
+          ariaLabel: "Unshare folder",
+          onSelect: () => {
+            if (shareBusy) return;
+            onUnshareFolder({ ...folderShareHint });
+          },
+          disabled: shareBusy,
+        });
+      }
     } else {
       dropdownItems.push({
         key: "share-folder",
@@ -3139,6 +3302,10 @@ const ListRowComponent: React.FC<ListRowProps> = ({
         disabled: shareBusy,
       });
     }
+    dropdownItems.push({
+      key: "folder-actions-separator",
+      type: "separator",
+    });
   }
 
   if (!isListBlob && blob.url) {
@@ -3219,26 +3386,31 @@ const ListRowComponent: React.FC<ListRowProps> = ({
               role="menu"
               aria-label="More actions"
             >
-              {dropdownItems.map(item => (
-                <a
-                  key={item.key}
-                  href="#"
-                  role="menuitem"
-                  aria-label={item.ariaLabel ?? item.label}
-                  className={makeItemClass(item.variant, item.disabled)}
-                  aria-disabled={item.disabled || undefined}
-                  onClick={event => {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    if (item.disabled) return;
-                    item.onSelect();
-                    setMenuOpen(false);
-                  }}
-                >
-                  {item.icon}
-                  <span>{item.label}</span>
-                </a>
-              ))}
+              {dropdownItems.map(item => {
+                if ("type" in item) {
+                  return <div key={item.key} className={dropdownSeparatorClass} role="separator" aria-hidden="true" />;
+                }
+                return (
+                  <a
+                    key={item.key}
+                    href="#"
+                    role="menuitem"
+                    aria-label={item.ariaLabel ?? item.label}
+                    className={makeItemClass(item.variant, item.disabled)}
+                    aria-disabled={item.disabled || undefined}
+                    onClick={event => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      if (item.disabled) return;
+                      item.onSelect();
+                      setMenuOpen(false);
+                    }}
+                  >
+                    {item.icon}
+                    <span>{item.label}</span>
+                  </a>
+                );
+              })}
             </div>
           ) : null}
         </div>

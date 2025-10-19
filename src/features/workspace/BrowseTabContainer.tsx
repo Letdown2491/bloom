@@ -906,6 +906,18 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
     [privateLinks, privateLinkServiceConfigured]
   );
   const { ndk, signer, signEventTemplate } = useNdk();
+  const resolvePrivateLink = useCallback(
+    (blob: BlossomBlob) => {
+      if (!privateLinkServiceConfigured) return null;
+      const record = findExistingPrivateLink(blob);
+      if (!record) return null;
+      const alias = record.alias ?? null;
+      const directUrl = alias ? `${privateLinkHost}/${alias}` : record.target?.url ?? null;
+      if (!directUrl) return null;
+      return { url: directUrl, alias };
+    },
+    [findExistingPrivateLink, privateLinkHost, privateLinkServiceConfigured]
+  );
   const pubkey = useCurrentPubkey();
   const { entriesBySha, removeEntries, upsertEntries } = usePrivateLibrary();
   const {
@@ -2061,6 +2073,24 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
       const normalizedServer = serverUrl ? normalizeServerUrl(serverUrl) : null;
       const hasUrl = (value: unknown): value is string => typeof value === "string" && value.trim().length > 0;
       const normalizePath = (value?: string | null) => normalizeFolderPathInput(value ?? undefined) ?? "";
+      const deriveServerFromUrl = (value: string, sha: string): string | null => {
+        if (!value || !sha) return null;
+        const trimmed = value.trim();
+        const normalizedSha = sha.toLowerCase();
+        try {
+          const parsed = new URL(trimmed);
+          const strippedPath = parsed.pathname.replace(new RegExp(`${normalizedSha}.*$`, "i"), "");
+          const normalizedPath = strippedPath.replace(/\/+$/, "");
+          const base = `${parsed.origin}${normalizedPath}`;
+          return base.replace(/\/+$/, "");
+        } catch {
+          const index = trimmed.toLowerCase().indexOf(normalizedSha);
+          if (index >= 0) {
+            return trimmed.slice(0, index).replace(/\/+$/, "");
+          }
+        }
+        return null;
+      };
 
       const mergeWithFallback = (primary: BlossomBlob, fallback: BlossomBlob): BlossomBlob => {
         if (primary === fallback) return primary;
@@ -2154,7 +2184,36 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
           deduped.set(key, mergeWithFallback(resolved, existing));
         }
       });
-      return Array.from(deduped.values());
+      return Array.from(deduped.values()).map(candidate => {
+        const blob: BlossomBlob = { ...candidate };
+        const sha = typeof blob.sha256 === "string" ? blob.sha256.trim().toLowerCase() : "";
+        const directUrl =
+          typeof blob.url === "string" && blob.url.trim().length > 0 ? blob.url.trim() : null;
+        const explicitServer =
+          typeof blob.serverUrl === "string" && blob.serverUrl.trim().length > 0
+            ? blob.serverUrl.trim().replace(/\/+$/, "")
+            : null;
+
+        let effectiveServer = explicitServer;
+        if (!effectiveServer && directUrl && sha.length === 64) {
+          const derived = deriveServerFromUrl(directUrl, sha);
+          if (derived) {
+            effectiveServer = derived;
+          }
+        }
+
+        if (effectiveServer) {
+          blob.serverUrl = effectiveServer;
+        }
+
+        if (directUrl) {
+          blob.url = directUrl;
+        } else if (effectiveServer && sha.length === 64) {
+          blob.url = `${effectiveServer}/${sha}`;
+        }
+
+        return blob;
+      });
     },
     [aggregated.blobs, blobVariantsBySha, currentSnapshot, normalizeMaybeServerUrl]
   );
@@ -2164,14 +2223,39 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
       const normalizedPath = normalizeFolderPathInput(hint.path ?? undefined) ?? "";
       if (!normalizedPath) return;
       const blobs = collectFolderBlobs(hint.scope, normalizedPath, hint.serverUrl ?? null);
+      const items = blobs.map(blob => {
+        if (!privateLinkServiceConfigured) {
+          return {
+            blob,
+            privateLinkAlias: null,
+            privateLinkUrl: null,
+          };
+        }
+        const existing = findExistingPrivateLink(blob);
+        if (!existing) {
+          return {
+            blob,
+            privateLinkAlias: null,
+            privateLinkUrl: null,
+          };
+        }
+        const alias = existing.alias;
+        const url = alias ? `${privateLinkHost}/${alias}` : null;
+        return {
+          blob,
+          privateLinkAlias: alias ?? null,
+          privateLinkUrl: url,
+        };
+      });
       onShareFolder({
         path: normalizedPath,
         scope: hint.scope,
         serverUrl: hint.serverUrl ?? null,
         blobs,
+        items,
       });
     },
-    [collectFolderBlobs, onShareFolder]
+    [collectFolderBlobs, onShareFolder, privateLinkServiceConfigured, findExistingPrivateLink, privateLinkHost]
   );
 
   const handleUnshareFolderHint = useCallback(
@@ -3488,6 +3572,7 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
           onRename={handleRenameBlob}
           onMove={handleMoveRequest}
           onPlay={handlePlayBlob}
+          resolvePrivateLink={resolvePrivateLink}
           currentTrackUrl={audio.current?.url}
           currentTrackStatus={audio.status}
           filterMode={filterMode}

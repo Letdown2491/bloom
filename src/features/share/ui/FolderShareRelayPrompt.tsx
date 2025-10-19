@@ -33,14 +33,12 @@ export const FolderShareRelayPrompt: React.FC<FolderShareRelayPromptProps> = ({
   onCancel,
 }) => {
   const folderLabel = useMemo(() => {
-    const name = record.name?.trim();
-    if (name) return name;
-    const path = record.path?.trim();
-    if (path) return path;
-    return "Shared folder";
+    const name = record.name?.trim() || "Shared folder";
+    const path = record.path?.trim() || "/";
+    return `${name} (${path})`;
   }, [record.name, record.path]);
 
-  const [showSelection, setShowSelection] = useState(false);
+  const [showSelection, setShowSelection] = useState(() => record.visibility !== "public");
   const [selected, setSelected] = useState<Set<string>>(() => new Set(relays));
   const [submitting, setSubmitting] = useState(false);
   const mountedRef = useRef(true);
@@ -51,6 +49,12 @@ export const FolderShareRelayPrompt: React.FC<FolderShareRelayPromptProps> = ({
       mountedRef.current = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (record.visibility !== "public") {
+      setShowSelection(true);
+    }
+  }, [record.visibility, record.path]);
 
   useEffect(() => {
     setSelected(new Set(relays));
@@ -108,9 +112,8 @@ export const FolderShareRelayPrompt: React.FC<FolderShareRelayPromptProps> = ({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4">
       <div className="w-full max-w-lg rounded-2xl border border-slate-800 bg-slate-900/90 p-6 shadow-xl">
-        <h2 className="text-lg font-semibold text-slate-100">Share folder</h2>
-        <p className="mt-2 text-sm text-slate-300">{folderLabel}</p>
-        <p className="mt-1 text-xs text-slate-500 break-all">{record.path || "(root)"}</p>
+        <h2 className="text-lg font-semibold text-slate-100">Select where to share</h2>
+        <p className="mt-2 text-sm text-slate-300 break-all">{folderLabel}</p>
         <p className="mt-4 text-sm text-slate-300">
           Sharing this folder will make it publicly accessible to anyone with the link. We will publish the folder
           details to your preferred relays (NIP-65) so other clients can find it.

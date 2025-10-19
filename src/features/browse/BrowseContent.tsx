@@ -37,6 +37,7 @@ export type BrowseContentProps = {
   onOpenList?: (blob: BlossomBlob) => void;
   defaultSortOption: DefaultSortOption;
   sortDirection: SortDirection;
+  resolvePrivateLink?: (blob: BlossomBlob) => { url: string; alias?: string | null } | null;
 };
 
 export const BrowseContent: React.FC<BrowseContentProps> = ({
@@ -69,6 +70,7 @@ export const BrowseContent: React.FC<BrowseContentProps> = ({
   onOpenList,
   defaultSortOption,
   sortDirection,
+  resolvePrivateLink,
 }) => {
   const isMusicView = filterMode === "music";
   const commonProps: Pick<
@@ -81,8 +83,9 @@ export const BrowseContent: React.FC<BrowseContentProps> = ({
     | "onCopy"
   | "onShare"
   | "onRename"
-  | "onMove"
-  | "onPlay"
+    | "onMove"
+    | "onPlay"
+  | "resolvePrivateLink"
     | "onShareFolder"
     | "currentTrackUrl"
     | "currentTrackStatus"
@@ -106,6 +109,7 @@ export const BrowseContent: React.FC<BrowseContentProps> = ({
     onRename,
     onMove,
     onPlay,
+    resolvePrivateLink,
     currentTrackUrl,
     currentTrackStatus,
     isMusicView,
