@@ -4,10 +4,17 @@ import { loadNdkModule, type NdkModule } from "../../ndkModule";
 import type { RelayPreparationOptions, RelayPreparationResult } from "../../ndkRelayManager";
 
 import type { NostrFilter, TransportConfig } from "./types";
+import { sanitizeRelayUrl } from "../../../utils/relays";
 
-const RELAY_WARNING_THROTTLE_MS = 10_000;
-const relayWarningTimestamps = new Map<string, number>();
 const RELAY_CONNECT_TIMEOUT_MS = 5_000;
+const relayWarningTimestamps = new Map<string, number>();
+const RELAY_WARNING_INTERVAL_MS = 60_000;
+const relayWarningKey = (url: string) => sanitizeRelayUrl(url) ?? url.trim();
+const clearRelayWarning = (url: string) => {
+  const key = relayWarningKey(url);
+  if (!key) return;
+  relayWarningTimestamps.delete(key);
+};
 const getRuntime = (() => {
   let promise: Promise<NdkModule> | null = null;
   return () => {
@@ -27,11 +34,13 @@ const isConnectedStatus = (status: NDKRelayStatus, runtime: NdkModule) => {
 };
 
 const logRelayWarning = (url: string) => {
+  const key = relayWarningKey(url);
+  if (!key) return;
   const now = Date.now();
-  const previous = relayWarningTimestamps.get(url) ?? 0;
-  if (now - previous < RELAY_WARNING_THROTTLE_MS) return;
-  relayWarningTimestamps.set(url, now);
-  console.warn("Relay not connected yet for NIP-46 publish", url);
+  const previous = relayWarningTimestamps.get(key);
+  if (previous && now - previous < RELAY_WARNING_INTERVAL_MS) return;
+  relayWarningTimestamps.set(key, now);
+  console.debug?.("Relay not connected yet for NIP-46 publish", key);
 };
 
 const waitForRelayConnection = async (
@@ -78,6 +87,7 @@ const waitForRelayConnection = async (
   });
 
   if (connectionEstablished) {
+    clearRelayWarning(relay.url);
     return true;
   }
 
@@ -164,8 +174,9 @@ export const createNdkTransport = (ndk: NDK, helpers?: RelayHelpers): TransportC
       );
       if (relayUrls.length && helpers?.prepareRelaySet) {
         void helpers
-          .prepareRelaySet(relayUrls, { waitForConnection: false })
+          .prepareRelaySet(relayUrls, { waitForConnection: true })
           .then(result => {
+            result.connected.forEach(clearRelayWarning);
             if (result.pending.length) {
               result.pending.forEach(logRelayWarning);
             }

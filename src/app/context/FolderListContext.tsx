@@ -2,6 +2,7 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 import { useQueryClient } from "@tanstack/react-query";
 
 import { useNdk } from "./NdkContext";
+import { useSyncPipeline } from "./SyncPipelineContext";
 import {
   addShaToRecord,
   buildDefaultFolderRecord,
@@ -44,6 +45,7 @@ const FolderListContext = createContext<FolderListContextValue | undefined>(unde
 
 export const FolderListProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { ndk, signer, user } = useNdk();
+  const { stage, allowRelayRefresh, markRelayStageComplete } = useSyncPipeline();
   const queryClient = useQueryClient();
   const [folders, setFolders] = useState<FolderListRecord[]>([]);
   const [loading, setLoading] = useState(false);
@@ -51,6 +53,8 @@ export const FolderListProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const foldersRef = useRef(new Map<string, FolderListRecord>());
   const foldersByShaRef = useRef(new Map<string, string[]>());
   const [foldersBySha, setFoldersBySha] = useState<Map<string, string[]>>(new Map());
+  const refreshTriggeredRef = useRef(false);
+  const refreshCompletedRef = useRef(false);
 
   const hydrateMetadataFromRecords = useCallback((records: FolderListRecord[]) => {
     records.forEach(record => {
@@ -158,10 +162,35 @@ export const FolderListProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   }, [ndk, updateState, user]);
 
   useEffect(() => {
-    void refresh();
-  }, [refresh]);
+    if (stage === "idle" || stage === "settings" || stage === "server") {
+      refreshTriggeredRef.current = false;
+      refreshCompletedRef.current = false;
+    }
+  }, [stage]);
 
   useEffect(() => {
+    if (!allowRelayRefresh) return;
+    if (refreshCompletedRef.current) return;
+    if (refreshTriggeredRef.current) return;
+    refreshTriggeredRef.current = true;
+    let cancelled = false;
+    void (async () => {
+      try {
+        await refresh();
+      } finally {
+        if (!cancelled) {
+          refreshCompletedRef.current = true;
+          markRelayStageComplete();
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [allowRelayRefresh, markRelayStageComplete, refresh]);
+
+  useEffect(() => {
+    if (!allowRelayRefresh) return;
     if (!ndk || !user) return;
     const filter = {
       kinds: [FOLDER_LIST_CONSTANTS.KIND],
@@ -180,7 +209,7 @@ export const FolderListProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       disposed = true;
       subscription.stop();
     };
-  }, [ndk, user, applyRemoteFolderRecord]);
+  }, [allowRelayRefresh, applyRemoteFolderRecord, ndk, user]);
 
   const findRecordByName = useCallback((name: string, excludePath?: string) => {
     const target = name.trim().toLowerCase();

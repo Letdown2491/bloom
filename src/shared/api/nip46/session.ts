@@ -1,3 +1,4 @@
+import { sanitizeRelayUrl } from "../../utils/relays";
 import { Nip46EncryptionAlgorithm } from "./types";
 import { generateKeypair, Nip46Keypair, exportPrivateKey } from "./keys";
 
@@ -71,6 +72,18 @@ export class SessionManager {
         const normalized: RemoteSignerSession = {
           ...session,
         };
+        const sanitizedRelays = normalizeRelayList(normalized.relays);
+        if (sanitizedRelays.changed) {
+          normalized.relays = sanitizedRelays.values;
+          needsPersist = true;
+        }
+        if (normalized.pendingRelays) {
+          const sanitizedPending = normalizeRelayList(normalized.pendingRelays);
+          if (sanitizedPending.changed) {
+            normalized.pendingRelays = sanitizedPending.values.length ? sanitizedPending.values : null;
+            needsPersist = true;
+          }
+        }
         if (normalized.authChallengeUrl === undefined) {
           normalized.authChallengeUrl = null;
         }
@@ -191,12 +204,14 @@ export class SessionManager {
       input.token.type === "nostrconnect" ? input.token.clientPubkey : input.token.remoteSignerPubkey;
     const randomSuffix = Math.random().toString(36).substring(2, 10);
     const sessionId = `${input.token.type}:${baseId}:${now}:${randomSuffix}`;
-    const relays = Array.from(new Set(input.token.relays.filter(relay => relay.trim().length > 0)));
+    const relayNormalization = normalizeRelayList(input.token.relays);
+    const relays = relayNormalization.values;
     const basePermissions =
       input.token.type === "nostrconnect"
         ? Array.from(new Set(input.token.permissions))
         : [];
     const permissions = mergePermissions(basePermissions);
+    const algorithm = input.algorithm ?? input.token.algorithm ?? "nip44";
 
     const session: RemoteSignerSession = {
       id: sessionId,
@@ -207,7 +222,7 @@ export class SessionManager {
       relays,
       permissions,
       status: "pairing",
-      algorithm: input.algorithm ?? "nip44",
+      algorithm,
       nostrConnectSecret: input.token.secret,
       metadata: input.metadata ?? input.token.metadata,
       lastError: null,
@@ -248,9 +263,10 @@ export interface ParsedNostrConnectToken {
   type: "nostrconnect";
   clientPubkey: string;
   relays: string[];
-  secret: string;
+  secret?: string;
   permissions: string[];
   metadata?: RemoteSignerMetadata;
+  algorithm?: Nip46EncryptionAlgorithm;
   rawParams: Record<string, string | string[]>;
 }
 
@@ -260,6 +276,7 @@ export interface ParsedBunkerToken {
   relays: string[];
   secret?: string;
   metadata?: RemoteSignerMetadata;
+  algorithm?: Nip46EncryptionAlgorithm;
   rawParams: Record<string, string | string[]>;
 }
 
@@ -293,6 +310,26 @@ const mergePermissions = (tokenPermissions: string[]): string[] => {
     if (!permissions.includes(permission)) permissions.push(permission);
   });
   return permissions;
+};
+
+interface RelayNormalizationResult {
+  values: string[];
+  changed: boolean;
+}
+
+const normalizeRelayList = (relays: readonly string[] | null | undefined): RelayNormalizationResult => {
+  if (!relays?.length) return { values: [], changed: Boolean(relays && relays.length) };
+  const values: string[] = [];
+  const seen = new Set<string>();
+  relays.forEach(relay => {
+    const sanitized = sanitizeRelayUrl(relay);
+    if (!sanitized) return;
+    if (seen.has(sanitized)) return;
+    seen.add(sanitized);
+    values.push(sanitized);
+  });
+  const changed = values.length !== relays.length || values.some((value, index) => value !== relays[index]);
+  return { values, changed };
 };
 
 const decodeMetadata = (value: string | null): RemoteSignerMetadata | undefined => {
@@ -339,6 +376,14 @@ const parsePermissions = (value: string | null): string[] => {
     .filter(Boolean);
 };
 
+const parseAlgorithm = (value: string | null): Nip46EncryptionAlgorithm | undefined => {
+  if (!value) return undefined;
+  const normalized = value.trim().toLowerCase().replace(/-/g, "");
+  if (normalized === "nip44") return "nip44";
+  if (normalized === "nip04") return "nip04";
+  return undefined;
+};
+
 export const parseNostrConnectUri = (uri: string): ParsedNostrConnectToken => {
   if (!uri.startsWith("nostrconnect://")) {
     throw new Error("Invalid nostrconnect URI");
@@ -357,12 +402,12 @@ export const parseNostrConnectUri = (uri: string): ParsedNostrConnectToken => {
     throw new Error("nostrconnect URI must include at least one relay parameter");
   }
   const secretValue = params.get("secret");
-  const secret = secretValue?.trim();
-  if (!secret) {
-    throw new Error("nostrconnect URI must include a non-empty secret parameter");
-  }
+  const secret = secretValue?.trim() ?? undefined;
   const metadata = decodeMetadata(params.get("metadata"));
   const perms = parsePermissions(params.get("perms"));
+  const algorithm = parseAlgorithm(
+    params.get("alg") ?? params.get("algorithm") ?? params.get("encryption")
+  );
 
   return {
     type: "nostrconnect",
@@ -371,6 +416,7 @@ export const parseNostrConnectUri = (uri: string): ParsedNostrConnectToken => {
     secret,
     metadata,
     permissions: perms,
+    algorithm,
     rawParams: collectParams(params),
   };
 };
@@ -387,6 +433,9 @@ export const parseBunkerUri = (uri: string): ParsedBunkerToken => {
   const relays = params.getAll("relay").map(relay => decodeURIComponent(relay));
   const secret = params.get("secret") ?? undefined;
   const metadata = decodeMetadata(params.get("metadata"));
+  const algorithm = parseAlgorithm(
+    params.get("alg") ?? params.get("algorithm") ?? params.get("encryption")
+  );
 
   return {
     type: "bunker",
@@ -394,6 +443,7 @@ export const parseBunkerUri = (uri: string): ParsedBunkerToken => {
     relays,
     secret,
     metadata,
+    algorithm,
     rawParams: collectParams(params),
   };
 };

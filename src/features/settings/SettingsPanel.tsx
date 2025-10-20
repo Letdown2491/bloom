@@ -33,6 +33,7 @@ import {
 import { ServerList } from "../workspace/ui/ServerList";
 const RelayListLazy = React.lazy(() => import("../../shared/ui/RelayList"));
 import { useIsCompactScreen } from "../../shared/hooks/useIsCompactScreen";
+import { useIndexedDbStorageSummary } from "../../shared/hooks/useIndexedDbStorageSummary";
 import { useStorageQuota } from "../../shared/hooks/useStorageQuota";
 import { formatBytes } from "../../shared/utils/storageQuota";
 import { useFolderLists } from "../../app/context/FolderListContext";
@@ -40,6 +41,9 @@ import { encodeFolderNaddr, isPrivateFolderName } from "../../shared/domain/fold
 import { usePreferredRelays } from "../../app/hooks/usePreferredRelays";
 import { useCurrentPubkey } from "../../app/context/NdkContext";
 import { DEFAULT_PUBLIC_RELAYS, sanitizeRelayUrl } from "../../shared/utils/relays";
+import { clearPreviewInlineStorage } from "../../shared/utils/blobPreviewCache";
+import { resetManifestStore } from "../../shared/utils/folderManifestStore";
+import { resetCacheDb } from "../../shared/utils/cacheDb";
 
 type FilterOption = {
   id: FilterMode;
@@ -519,6 +523,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const searchDescriptionId = React.useId();
   const localStorageHeadingId = React.useId();
   const cacheStorageHeadingId = React.useId();
+  const indexedDbHeadingId = React.useId();
   const storageFeedbackId = React.useId();
   const [serverActions, setServerActions] = React.useState<React.ReactNode | null>(null);
   const [relayActions, setRelayActions] = React.useState<React.ReactNode | null>(null);
@@ -545,12 +550,40 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
     refresh: refreshStorageQuota,
     clear: clearLocalStorageAction,
     isSupported: isStorageSupported,
+    originUsage: originUsageBytes,
     originQuota: originQuotaBytes,
     approximateCacheUsage: approximateCacheBytes,
     cacheSupported,
     cacheEstimate,
     clearCache: clearCacheStorage,
   } = useStorageQuota();
+  const {
+    supported: indexedDbSupported,
+    measuring: indexedDbMeasuring,
+    measurement: indexedDbMeasurement,
+    error: indexedDbError,
+    totalBytes: indexedDbTotalBytes,
+    refresh: refreshIndexedDb,
+  } = useIndexedDbStorageSummary();
+  const indexedDbCacheBuckets = React.useMemo(
+    () => indexedDbMeasurement?.cacheDb?.buckets ?? [],
+    [indexedDbMeasurement]
+  );
+  const indexedDbCacheTotalBytes = indexedDbMeasurement?.cacheDb?.totalBytes ?? 0;
+  const indexedDbManifestStats = indexedDbMeasurement?.manifest ?? null;
+  const indexedDbMeasuredAt = indexedDbMeasurement?.measuredAt ?? null;
+  const indexedDbBucketSummaries = React.useMemo(
+    () =>
+      indexedDbCacheBuckets.filter(bucket => bucket.approxBytes > 0 || bucket.entryCount > 0),
+    [indexedDbCacheBuckets]
+  );
+  const indexedDbManifestUpdatedAt = indexedDbManifestStats?.lastUpdatedAt ?? null;
+  const indexedDbManifestLastUpdated = React.useMemo(() => {
+    const updatedAt = indexedDbManifestUpdatedAt;
+    if (!updatedAt || !Number.isFinite(updatedAt)) return null;
+    return formatRelativeTime(updatedAt);
+  }, [indexedDbManifestUpdatedAt]);
+  const [clearingIndexedDb, setClearingIndexedDb] = React.useState(false);
 
   const [clearingLocalStorage, setClearingLocalStorage] = React.useState(false);
   const [clearingCacheStorage, setClearingCacheStorage] = React.useState(false);
@@ -592,11 +625,23 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
     return Math.max(0, Math.min(100, (cacheUsageBytes / cacheCapacityBytes) * 100));
   }, [cacheUsageBytes, cacheCapacityBytes]);
   const cacheBarClass = getProgressBarClass(cacheProgressWidth, theme);
+  const indexedDbBrowserBytes = React.useMemo(() => {
+    if (originUsageBytes == null) return null;
+    const remainder = originUsageBytes - storageSnapshot.totalBytes - cacheUsageBytes;
+    if (!Number.isFinite(remainder)) return null;
+    return Math.max(0, remainder);
+  }, [cacheUsageBytes, originUsageBytes, storageSnapshot.totalBytes]);
+  const indexedDbDisplayBytes = React.useMemo(() => {
+    if (indexedDbBrowserBytes == null) return indexedDbTotalBytes;
+    if (indexedDbTotalBytes <= 0) return indexedDbBrowserBytes;
+    return Math.max(indexedDbTotalBytes, indexedDbBrowserBytes);
+  }, [indexedDbBrowserBytes, indexedDbTotalBytes]);
 
   const handleStorageRefresh = React.useCallback(() => {
     setStorageFeedback(null);
     refreshStorageQuota("settings-panel:manual-refresh");
-  }, [refreshStorageQuota]);
+    void refreshIndexedDb();
+  }, [refreshIndexedDb, refreshStorageQuota]);
 
   const handleClearLocalStorage = React.useCallback(() => {
     if (!isStorageSupported || clearingLocalStorage) return;
@@ -632,45 +677,84 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   }, [clearLocalStorageAction, clearingLocalStorage, isStorageSupported, refreshStorageQuota]);
 
   const handleClearCacheStorage = React.useCallback(() => {
-    if (!cacheSupported || clearingCacheStorage) return;
+    if (clearingCacheStorage) return;
     setClearingCacheStorage(true);
     setStorageFeedback(null);
     void (async () => {
       try {
-        const result = await clearCacheStorage();
-        if (!result) {
+        const [cacheResult, inlineResult] = await Promise.all([
+          cacheSupported ? clearCacheStorage() : Promise.resolve(null),
+          clearPreviewInlineStorage(),
+        ]);
+        if (cacheSupported && !cacheResult) {
           setStorageFeedback({
             tone: "warning",
             text: "Cache storage is unavailable in this environment.",
           });
           return;
         }
-        if (result.failed.length > 0) {
+        const cacheFailures = cacheResult?.failed?.length ?? 0;
+        const inlineFailures = inlineResult.failures;
+        if (cacheFailures > 0 || inlineFailures > 0) {
           setStorageFeedback({
             tone: "error",
-            text: "Unable to clear every cache entry. Close other tabs or retry after refreshing Bloom.",
+            text: "Unable to clear every preview entry. Close other tabs or retry after refreshing Bloom.",
           });
-        } else if (result.cleared.length === 0) {
+          return;
+        }
+        const cacheCleared = cacheResult?.cleared?.length ?? 0;
+        const inlineRemoved = inlineResult.inlineRemoved + inlineResult.legacyRemoved;
+        if (cacheCleared === 0 && inlineRemoved === 0 && !inlineResult.metaCleared) {
           setStorageFeedback({
             tone: "warning",
             text: "Preview cache was already empty.",
           });
-        } else {
-          setStorageFeedback({
-            tone: "success",
-            text: "Preview cache cleared successfully.",
-          });
+          return;
         }
+        const inlineNote =
+          inlineRemoved > 0
+            ? ` Removed ${inlineRemoved} inline preview${inlineRemoved === 1 ? "" : "s"}.`
+            : "";
+        setStorageFeedback({
+          tone: "success",
+          text: `Preview cache cleared successfully.${inlineNote}`,
+        });
       } catch (error) {
         setStorageFeedback({
           tone: "error",
-          text: "Clearing cache storage failed unexpectedly. Try again after refreshing Bloom.",
+          text: "Clearing preview cache failed unexpectedly. Try again after refreshing Bloom.",
         });
       } finally {
         setClearingCacheStorage(false);
+        void refreshIndexedDb();
       }
     })();
-  }, [cacheSupported, clearingCacheStorage, clearCacheStorage]);
+  }, [cacheSupported, clearingCacheStorage, clearCacheStorage, refreshIndexedDb]);
+  const handleClearIndexedDb = React.useCallback(() => {
+    if (clearingIndexedDb) return;
+    setClearingIndexedDb(true);
+    setStorageFeedback(null);
+    void (async () => {
+      try {
+        await clearPreviewInlineStorage();
+        await resetCacheDb();
+        await resetManifestStore();
+        setStorageFeedback({
+          tone: "success",
+          text: "IndexedDB storage cleared. Bloom will rebuild previews as you browse.",
+        });
+      } catch (error) {
+        setStorageFeedback({
+          tone: "error",
+          text: "Clearing IndexedDB storage failed unexpectedly. Try again after refreshing Bloom.",
+        });
+      } finally {
+        setClearingIndexedDb(false);
+        refreshStorageQuota("settings-panel:clear-indexeddb");
+        void refreshIndexedDb();
+      }
+    })();
+  }, [clearingIndexedDb, refreshIndexedDb, refreshStorageQuota]);
   const { defaultServerSelectValue, defaultServerExists } = React.useMemo(() => {
     if (!defaultServerUrl) {
       return { defaultServerSelectValue: "", defaultServerExists: false };
@@ -1260,7 +1344,12 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
         cards: [
         (
           <div key="storage-widgets" className="grid gap-4 lg:grid-cols-2">
-            <SettingCard key="storage-local" headingId={localStorageHeadingId} title="Local storage">
+            <SettingCard
+              key="storage-local"
+              headingId={localStorageHeadingId}
+              title="Local storage"
+              description="Bloom keeps lightweight settings and preferences here so the app remembers your choices."
+            >
               {!isStorageSupported ? (
                 <p className="text-xs text-slate-500">Local storage is unavailable in this environment, so Bloom keeps settings in memory only.</p>
               ) : (
@@ -1345,7 +1434,12 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 </>
               )}
             </SettingCard>
-            <SettingCard key="storage-cache" headingId={cacheStorageHeadingId} title="Cache storage">
+            <SettingCard
+              key="storage-cache"
+              headingId={cacheStorageHeadingId}
+              title="Cache storage"
+              description="Bloom stores downloaded preview images here so file lists stay fast without re-fetching."
+            >
               {cacheSupported ? (
                 <>
                   <div className="space-y-2">
@@ -1419,6 +1513,148 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
               )}
             </SettingCard>
           </div>
+        ),
+        (
+          <SettingCard
+            key="storage-indexeddb"
+            headingId={indexedDbHeadingId}
+            title="IndexedDB storage"
+            description="Bloom caches previews and folder manifests to speed up browsing."
+          >
+            {!indexedDbSupported ? (
+              <p className="text-xs text-slate-500">
+                IndexedDB is unavailable, so Bloom keeps previews and metadata only for the current session.
+              </p>
+            ) : (
+              <>
+                <div className="flex items-center gap-3">
+                  <div
+                    className={`flex h-10 w-10 items-center justify-center rounded-xl ${
+                      indexedDbMeasuring
+                        ? "bg-slate-800 text-slate-400"
+                        : theme === "light"
+                          ? "bg-blue-700 text-white"
+                          : "bg-emerald-500/20 text-emerald-300"
+                    }`}
+                  >
+                    <DownloadIcon size={18} />
+                  </div>
+                  <div className="flex flex-col text-xs text-slate-400">
+                    <span>Total cached</span>
+                    <span className="text-sm font-medium text-slate-200">
+                      {indexedDbMeasuring ? "Measuring…" : formatBytes(indexedDbDisplayBytes)}
+                    </span>
+                    {indexedDbMeasuredAt ? (
+                      <span className="text-[11px] text-slate-500">
+                        Measured {formatRelativeTime(indexedDbMeasuredAt)}
+                      </span>
+                    ) : null}
+                  </div>
+                </div>
+                <dl className="mt-3 grid gap-3 text-xs text-slate-400 md:grid-cols-2">
+                  <div className="rounded-xl border border-slate-700/70 bg-slate-900/20 p-3">
+                    <div className="flex items-center justify-between text-slate-300">
+                      <dt>Preview cache</dt>
+                      <dd className="text-slate-200">
+                        {indexedDbMeasuring ? "…" : formatBytes(indexedDbCacheTotalBytes)}
+                      </dd>
+                    </div>
+                    {indexedDbBucketSummaries.length > 0 ? (
+                      <div className="mt-2 space-y-1 text-[11px] text-slate-500">
+                        {indexedDbBucketSummaries.map(bucket => (
+                          <div key={bucket.id} className="flex justify-between">
+                            <span>{bucket.label}</span>
+                            <span className="text-slate-300">{formatBytes(bucket.approxBytes)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="mt-2 text-[11px] text-slate-500">No cached previews yet.</p>
+                    )}
+                  </div>
+                  <div className="rounded-xl border border-slate-700/70 bg-slate-900/20 p-3">
+                    <div className="flex items-center justify-between text-slate-300">
+                      <dt>Folder manifest</dt>
+                      <dd className="text-slate-200">
+                        {indexedDbMeasuring
+                          ? "…"
+                          : indexedDbManifestStats
+                            ? formatBytes(indexedDbManifestStats.approxBytes)
+                            : "—"}
+                      </dd>
+                    </div>
+                    {indexedDbManifestStats ? (
+                      <div className="mt-2 space-y-1 text-[11px] text-slate-500">
+                        <div className="flex justify-between">
+                          <span>Stored views</span>
+                          <span className="text-slate-300">{indexedDbManifestStats.viewCount}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>First-level items</span>
+                          <span className="text-slate-300">{indexedDbManifestStats.itemCount}</span>
+                        </div>
+                        {indexedDbManifestLastUpdated ? (
+                          <div className="flex justify-between">
+                            <span>Last updated</span>
+                            <span className="text-slate-300">{indexedDbManifestLastUpdated}</span>
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : (
+                      <p className="mt-2 text-[11px] text-slate-500">
+                        Manifest data appears after browsing your folders.
+                      </p>
+                    )}
+                  </div>
+                </dl>
+                {indexedDbError ? (
+                  <p className="mt-3 text-[11px] text-amber-300">{indexedDbError}</p>
+                ) : null}
+                <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={handleClearIndexedDb}
+                    disabled={clearingIndexedDb || indexedDbMeasuring}
+                    className={`group inline-flex items-center gap-2 rounded-lg border px-3 py-1.5 text-xs font-medium transition focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-slate-900 ${
+                      clearingIndexedDb || indexedDbMeasuring
+                        ? "cursor-not-allowed border-slate-600 text-slate-500"
+                        : theme === "light"
+                          ? "border-blue-600/70 text-blue-800 hover:border-blue-500 hover:text-blue-600"
+                          : "border-emerald-500/70 text-emerald-200 hover:border-emerald-400 hover:text-emerald-100"
+                    }`}
+                  >
+                    <TrashIcon
+                      size={14}
+                      className={`shrink-0 transition-colors ${
+                        theme === "light"
+                          ? "text-blue-800 group-hover:text-blue-600"
+                          : "text-emerald-200 group-hover:text-emerald-100"
+                      }`}
+                    />
+                    <span
+                      className={`transition-colors ${
+                        theme === "light"
+                          ? "text-blue-800 group-hover:text-blue-600"
+                          : "text-emerald-200 group-hover:text-emerald-100"
+                      }`}
+                      style={theme === "light" ? { color: "#1d4ed8" } : undefined}
+                    >
+                      {clearingIndexedDb ? "Clearing…" : "Clear IndexedDB"}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleStorageRefresh}
+                    disabled={indexedDbMeasuring}
+                    className="inline-flex items-center gap-2 rounded-lg border border-slate-600 px-3 py-1.5 text-xs font-medium text-slate-200 transition hover:border-emerald-500 hover:text-emerald-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-slate-900 disabled:cursor-not-allowed disabled:opacity-70"
+                  >
+                    <RefreshIcon size={14} className="shrink-0" />
+                    <span>{indexedDbMeasuring ? "Measuring…" : "Refresh"}</span>
+                  </button>
+                </div>
+              </>
+            )}
+          </SettingCard>
         ),
         (
           <div key="storage-note" className="text-xs text-slate-400">
@@ -1598,6 +1834,17 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
     cacheCapacityBytes,
     cacheBarClass,
     originQuotaBytes,
+    indexedDbSupported,
+    indexedDbDisplayBytes,
+    indexedDbMeasuredAt,
+    indexedDbCacheTotalBytes,
+    indexedDbBucketSummaries,
+    indexedDbManifestStats,
+    indexedDbManifestLastUpdated,
+    indexedDbError,
+    indexedDbMeasuring,
+    clearingIndexedDb,
+    handleClearIndexedDb,
   ]);
 
   const [activeSectionId, setActiveSectionId] = React.useState(() => sections[0]?.id ?? "primary");

@@ -11,6 +11,7 @@ import {
   LogoutIcon,
   ChevronDownIcon,
 } from "./icons";
+import { useSyncPipeline } from "../../app/context/SyncPipelineContext";
 
 type StatusFooterProps = {
   isSignedIn: boolean;
@@ -63,6 +64,7 @@ export const StatusFooter = memo(function StatusFooter({
   compactUploadActive = false,
   onCompactUploadClick,
 }: StatusFooterProps) {
+  const { settingsReady } = useSyncPipeline();
   const [settingsMenuOpen, setSettingsMenuOpen] = useState(false);
   const settingsButtonRef = useRef<HTMLAnchorElement | null>(null);
   const settingsMenuRef = useRef<HTMLDivElement | null>(null);
@@ -151,8 +153,8 @@ export const StatusFooter = memo(function StatusFooter({
   const serverArrowClass = theme === "light" ? "text-slate-500" : "text-slate-400";
   const compactUploadButtonClass =
     theme === "light"
-      ? `flex h-8 items-center gap-2 rounded-lg border border-slate-200 bg-white/90 px-3 text-xs font-medium text-slate-700 shadow-toolbar transition hover:border-blue-400 hover:text-blue-700 focus:outline-none ${lightFocusRing}`
-      : "flex h-8 items-center gap-2 rounded-lg border border-slate-800/70 bg-slate-900/60 px-3 text-xs font-medium text-slate-200 shadow-toolbar transition hover:border-emerald-400 hover:text-emerald-300 focus:outline-none focus-visible:focus-emerald-ring";
+      ? `flex h-8 items-center gap-2 rounded-lg border border-slate-200 bg-white/90 px-3 text-xs font-medium text-slate-700 shadow-toolbar transition hover:border-blue-400 hover:text-blue-700 focus:outline-none disabled:cursor-not-allowed disabled:opacity-60 ${lightFocusRing}`
+      : "flex h-8 items-center gap-2 rounded-lg border border-slate-800/70 bg-slate-900/60 px-3 text-xs font-medium text-slate-200 shadow-toolbar transition hover:border-emerald-400 hover:text-emerald-300 focus:outline-none focus-visible:focus-emerald-ring disabled:cursor-not-allowed disabled:opacity-60";
   const compactUploadActiveClass =
     theme === "light"
       ? "border-blue-400 text-blue-700 shadow-toolbar"
@@ -399,11 +401,12 @@ export const StatusFooter = memo(function StatusFooter({
 
       {showCompactUploadControl && onCompactUploadClick ? (
         <div className="ml-auto flex shrink-0 items-center sm:hidden">
-          <button
-            type="button"
-            onClick={onCompactUploadClick}
-            className={`${compactUploadButtonClass} ${compactUploadActive ? compactUploadActiveClass : ""}`}
-          >
+            <button
+              type="button"
+              onClick={onCompactUploadClick}
+              disabled={!settingsReady}
+              className={`${compactUploadButtonClass} ${compactUploadActive ? compactUploadActiveClass : ""}`}
+            >
             {CompactUploadIcon ? <CompactUploadIcon size={14} aria-hidden="true" /> : null}
             <span className="font-medium">{compactUploadLabel}</span>
           </button>

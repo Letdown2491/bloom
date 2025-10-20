@@ -221,11 +221,22 @@ export class RequestQueue {
       ? Math.max(0, Math.floor(Math.min(...timestampCandidates) / 1000) - 30)
       : Math.max(0, nowSeconds - defaultWindowSeconds);
 
+    const relayCandidates = new Set<string>();
+    this.options.sessionManager.getSessions().forEach(session => {
+      session.relays.forEach(relay => {
+        const normalized = typeof relay === "string" ? relay.trim().replace(/\/*$/, "") : "";
+        if (normalized) relayCandidates.add(normalized);
+      });
+    });
+
     const filter: NostrFilter = {
       kinds: [REQUEST_KIND],
       since: sinceSeconds,
     };
     filter["#p"] = clientKeys;
+    if (relayCandidates.size) {
+      filter.relays = Array.from(relayCandidates);
+    }
 
     const filters: NostrFilter[] = [filter];
 

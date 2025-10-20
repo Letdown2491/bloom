@@ -37,6 +37,7 @@ import { usePrivateLinks } from "../privateLinks/hooks/usePrivateLinks";
 import type { PrivateLinkRecord } from "../../shared/domain/privateLinks";
 import { publishNip94Metadata, extractExtraNip94Tags } from "../../shared/api/nip94Publisher";
 import { usePreferredRelays } from "../../app/hooks/usePreferredRelays";
+import { useFolderManifest } from "./hooks/useFolderManifest";
 
 type MetadataSyncTarget = {
   blob: BlossomBlob;
@@ -963,6 +964,7 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
     [findExistingPrivateLink, privateLinkHost, privateLinkServiceConfigured]
   );
   const pubkey = useCurrentPubkey();
+  const folderManifest = useFolderManifest();
   const { entriesBySha, removeEntries, upsertEntries } = usePrivateLibrary();
   const {
     folders,
@@ -1779,7 +1781,7 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
 
   const aggregatedFolderPath = activeFolder?.scope === "aggregated" ? activeFolder.path : "";
 
-  const visibleAggregatedBlobs = useMemo(() => {
+  const baseAggregatedBlobs = useMemo(() => {
     if (hasActiveFilter) {
       if (!isSearching && privatePlaceholderBlob && hasPrivateMatchingFilter) {
         return [privatePlaceholderBlob, ...aggregatedFilteredBlobs];
@@ -1804,6 +1806,42 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
     isSearching,
     privatePlaceholderBlob,
     getFolderDisplayName,
+  ]);
+  const aggregatedParentPathKey = useMemo(() => {
+    const target = aggregatedFolderPath ? normalizeFolderPathInput(aggregatedFolderPath) : "";
+    return typeof target === "string" ? target : "";
+  }, [aggregatedFolderPath]);
+  const aggregatedManifestView = useMemo(() => {
+    if (!folderManifest.ready || folderManifest.disabled || !browsingAllServers) return null;
+    if (hasActiveFilter) return null;
+    return folderManifest.getView("aggregated", aggregatedParentPathKey);
+  }, [aggregatedParentPathKey, browsingAllServers, folderManifest, hasActiveFilter]);
+  const aggregatedInitialLoading = useMemo(
+    () => snapshots.some(snapshot => snapshot.isLoading && snapshot.blobs.length === 0),
+    [snapshots]
+  );
+  const visibleAggregatedBlobs = useMemo(() => {
+    if (
+      folderManifest.ready &&
+      !folderManifest.disabled &&
+      browsingAllServers &&
+      !hasActiveFilter &&
+      baseAggregatedBlobs.length === 0 &&
+      aggregatedInitialLoading &&
+      aggregatedManifestView &&
+      aggregatedManifestView.length > 0
+    ) {
+      return aggregatedManifestView;
+    }
+    return baseAggregatedBlobs;
+  }, [
+    aggregatedInitialLoading,
+    aggregatedManifestView,
+    baseAggregatedBlobs,
+    browsingAllServers,
+    folderManifest.disabled,
+    folderManifest.ready,
+    hasActiveFilter,
   ]);
 
   const privateScopedBlobs = useMemo(() => {
@@ -1903,7 +1941,7 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
 
   const currentFolderPath = activeFolder?.scope === "server" ? activeFolder.path : "";
 
-  const currentVisibleBlobs = useMemo(() => {
+  const baseCurrentVisibleBlobs = useMemo(() => {
     if (!currentFilteredBlobs) return undefined;
     const serverInfo = currentSnapshot?.server;
     if (hasActiveFilter) {
@@ -1935,6 +1973,114 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
     privatePlaceholderBlob,
     currentFolderIndex,
     getFolderDisplayName,
+  ]);
+  const serverParentPathKey = useMemo(() => {
+    if (activeFolder?.scope !== "server") return "";
+    const normalized = normalizeFolderPathInput(activeFolder.path ?? undefined);
+    return typeof normalized === "string" ? normalized : "";
+  }, [activeFolder]);
+  const serverScopeKey = useMemo(
+    () => (normalizedSelectedServer ? `server:${normalizedSelectedServer}` : null),
+    [normalizedSelectedServer]
+  );
+  const privateParentPathKey = useMemo(() => {
+    if (activeFolder?.scope !== "private") return "";
+    const normalized = normalizeFolderPathInput(activeFolder.path ?? undefined);
+    return typeof normalized === "string" ? normalized : "";
+  }, [activeFolder]);
+  const serverManifestView = useMemo(() => {
+    if (!folderManifest.ready || folderManifest.disabled) return null;
+    if (!serverScopeKey) return null;
+    if (hasActiveFilter) return null;
+    return folderManifest.getView(serverScopeKey, serverParentPathKey);
+  }, [folderManifest, hasActiveFilter, serverParentPathKey, serverScopeKey]);
+  const serverInitialLoading = useMemo(() => {
+    if (!serverScopeKey) return false;
+    if (!currentSnapshot) return false;
+    return currentSnapshot.isLoading && (currentSnapshot.blobs?.length ?? 0) === 0;
+  }, [currentSnapshot, serverScopeKey]);
+  const currentVisibleBlobs = useMemo(() => {
+    if (
+      folderManifest.ready &&
+      !folderManifest.disabled &&
+      serverScopeKey &&
+      !hasActiveFilter &&
+      serverManifestView &&
+      serverManifestView.length > 0 &&
+      (!baseCurrentVisibleBlobs || baseCurrentVisibleBlobs.length === 0) &&
+      serverInitialLoading
+    ) {
+      return serverManifestView;
+    }
+    return baseCurrentVisibleBlobs;
+  }, [
+    baseCurrentVisibleBlobs,
+    folderManifest.disabled,
+    folderManifest.ready,
+    hasActiveFilter,
+    serverInitialLoading,
+    serverManifestView,
+    serverScopeKey,
+  ]);
+
+  const viewMatchesStored = useCallback(
+    (scopeKey: string, parentPath: string, items: readonly BlossomBlob[]) => {
+      const existing = folderManifest.getView(scopeKey, parentPath);
+      if (!existing) return false;
+      if (existing.length !== items.length) return false;
+      for (let index = 0; index < items.length; index += 1) {
+        const left = items[index];
+        const right = existing[index];
+        if (!left || !right) return false;
+        if (left.sha256 !== right.sha256) return false;
+        if (Boolean(left.__bloomFolderPlaceholder) !== Boolean(right.__bloomFolderPlaceholder)) return false;
+      }
+      return true;
+    },
+    [folderManifest]
+  );
+
+  useEffect(() => {
+    if (!folderManifest.ready || folderManifest.disabled) return;
+    if (hasActiveFilter) return;
+
+    if (isPrivateView) {
+      const scopeKey = `private:${privateScopeUrl ?? "all"}`;
+      const items = visiblePrivateBlobs;
+      if (viewMatchesStored(scopeKey, privateParentPathKey, items)) return;
+      folderManifest.saveView(scopeKey, privateParentPathKey, items);
+      return;
+    }
+
+    if (serverScopeKey) {
+      if (!currentSnapshot) return;
+      const isLoading = currentSnapshot.isLoading && (currentSnapshot.blobs?.length ?? 0) === 0;
+      if (isLoading) return;
+      const items = baseCurrentVisibleBlobs ?? [];
+      if (viewMatchesStored(serverScopeKey, serverParentPathKey, items)) return;
+      folderManifest.saveView(serverScopeKey, serverParentPathKey, items);
+      return;
+    }
+
+    const isAggregatedLoading = snapshots.some(snapshot => snapshot.isLoading && snapshot.blobs.length === 0);
+    if (isAggregatedLoading) return;
+    if (viewMatchesStored("aggregated", aggregatedParentPathKey, baseAggregatedBlobs)) return;
+    folderManifest.saveView("aggregated", aggregatedParentPathKey, baseAggregatedBlobs);
+  }, [
+    aggregatedParentPathKey,
+    baseAggregatedBlobs,
+    baseCurrentVisibleBlobs,
+    currentSnapshot,
+    folderManifest,
+    hasActiveFilter,
+    isPrivateView,
+    privateParentPathKey,
+    privateScopeUrl,
+    serverParentPathKey,
+    serverScopeKey,
+    snapshots,
+    viewMatchesStored,
+    visiblePrivateBlobs,
   ]);
 
   const resolveBlobBySha = useCallback(

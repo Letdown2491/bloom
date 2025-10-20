@@ -1,4 +1,5 @@
-import React, { createContext, useContext, useMemo } from "react";
+import React, { createContext, useContext, useEffect, useMemo, useRef } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import type { ManagedServer } from "../../shared/types/servers";
 import { useServerData } from "./hooks/useServerData";
 import type { ServerSnapshot, BlobDistribution } from "./hooks/useServerData";
@@ -9,6 +10,7 @@ import { usePrivateLibrary } from "../../app/context/PrivateLibraryContext";
 import type { PrivateListEntry } from "../../shared/domain/privateList";
 import type { BlossomBlob } from "../../shared/api/blossomClient";
 import { PRIVATE_SERVER_NAME } from "../../shared/constants/private";
+import { useSyncPipeline } from "../../app/context/SyncPipelineContext";
 
 type ServerDataResult = ReturnType<typeof useServerData>;
 
@@ -46,6 +48,8 @@ export const WorkspaceProvider: React.FC<WorkspaceProviderProps> = ({
   onSelectServer,
   children,
 }) => {
+  const queryClient = useQueryClient();
+  const { stage, allowServerFetch, markServerStageComplete } = useSyncPipeline();
   const { entries: privateEntries } = usePrivateLibrary();
   const syncEnabledServers = useMemo(() => servers.filter(server => server.sync), [servers]);
   const syncEnabledServerUrls = useMemo(() => syncEnabledServers.map(server => server.url), [syncEnabledServers]);
@@ -69,6 +73,7 @@ export const WorkspaceProvider: React.FC<WorkspaceProviderProps> = ({
   const { snapshots, distribution, aggregated } = useServerData(servers, {
     prioritizedServerUrls: eagerServerUrls,
     foregroundServerUrl: selectedServer ?? servers[0]?.url ?? null,
+    networkEnabled: allowServerFetch,
   });
 
   const currentSnapshot = useMemo(
@@ -91,6 +96,60 @@ export const WorkspaceProvider: React.FC<WorkspaceProviderProps> = ({
   }, [distribution, serverNameByUrl]);
 
   const privateServerMap = useMemo(() => new Map(servers.map(server => [server.url, server])), [servers]);
+
+  const serverStageTriggeredRef = useRef(false);
+  const serverFetchStartedRef = useRef(false);
+  const serverStageCompletedRef = useRef(false);
+
+  useEffect(() => {
+    if (stage === "idle" || stage === "settings") {
+      serverStageTriggeredRef.current = false;
+      serverFetchStartedRef.current = false;
+      serverStageCompletedRef.current = false;
+    }
+  }, [stage]);
+
+  useEffect(() => {
+    if (stage !== "server") return;
+    if (!allowServerFetch) return;
+    if (serverStageCompletedRef.current) return;
+    if (!serverStageTriggeredRef.current) {
+      serverStageTriggeredRef.current = true;
+      if (!servers.length) {
+        serverStageCompletedRef.current = true;
+        markServerStageComplete();
+        return;
+      }
+      queryClient.invalidateQueries({ queryKey: ["server-blobs"] }).catch(() => undefined);
+    }
+
+    if (servers.length === 0) {
+      if (!serverStageCompletedRef.current) {
+        serverStageCompletedRef.current = true;
+        markServerStageComplete();
+      }
+      return;
+    }
+
+    if (snapshots.some(snapshot => snapshot.isLoading)) {
+      serverFetchStartedRef.current = true;
+      return;
+    }
+
+    if (queryClient.isFetching({ queryKey: ["server-blobs"] }) > 0) {
+      serverFetchStartedRef.current = true;
+      return;
+    }
+
+    if (!serverFetchStartedRef.current) {
+      return;
+    }
+
+    if (!serverStageCompletedRef.current) {
+      serverStageCompletedRef.current = true;
+      markServerStageComplete();
+    }
+  }, [allowServerFetch, markServerStageComplete, queryClient, servers.length, snapshots, stage]);
 
   const privateBlobs = useMemo(() => {
     return privateEntries.map(entry => {

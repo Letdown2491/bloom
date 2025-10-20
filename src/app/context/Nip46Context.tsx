@@ -59,6 +59,8 @@ export const Nip46Provider: React.FC<{ children: React.ReactNode }> = ({ childre
   const fetchTrackerRef = useRef(new Map<string, number>());
   const activeSessionRef = useRef<string | null>(null);
   const reconnectTrackerRef = useRef(new Set<string>());
+  const reconnectCooldownRef = useRef(new Map<string, number>());
+  const RECONNECT_COOLDOWN_MS = 60_000;
 
   useEffect(() => {
     let cancelled = false;
@@ -158,13 +160,21 @@ export const Nip46Provider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   useEffect(() => {
     if (!ready || !transportReady || !service || !sessionManager || !ndk) return;
+    const now = Date.now();
     snapshot.sessions.forEach(session => {
       if (session.status === "revoked") return;
       if (session.lastError) return;
       if (session.status !== "active") return;
       if (!session.remoteSignerPubkey) return;
       if (reconnectTrackerRef.current.has(session.id)) return;
+      const lastAttempt = reconnectCooldownRef.current.get(session.id);
+      if (lastAttempt && now - lastAttempt < RECONNECT_COOLDOWN_MS) return;
+      if (session.lastSeenAt && now - session.lastSeenAt < RECONNECT_COOLDOWN_MS) {
+        reconnectCooldownRef.current.set(session.id, now);
+        return;
+      }
       reconnectTrackerRef.current.add(session.id);
+      reconnectCooldownRef.current.set(session.id, now);
       void service
         .connectSession(session.id)
         .catch(error => {

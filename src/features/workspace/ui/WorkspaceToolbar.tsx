@@ -11,6 +11,7 @@ import {
   ShareIcon,
 } from "../../../shared/ui/icons";
 import { useIsCompactScreen } from "../../../shared/hooks/useIsCompactScreen";
+import { useSyncPipeline } from "../../../app/context/SyncPipelineContext";
 
 type NavTab = {
   id: TabId;
@@ -66,10 +67,11 @@ const WorkspaceToolbarComponent: React.FC<WorkspaceToolbarProps> = ({
   navTabs,
 }) => {
   const isCompactScreen = useIsCompactScreen();
+  const { settingsReady } = useSyncPipeline();
   const hasBreadcrumbs = Boolean(browseNavigationState?.segments.length);
   const showBreadcrumbs = !isCompactScreen && hasBreadcrumbs;
   const searchButtonStateClass =
-    showAuthPrompt || keepSearchExpanded ? GROUP_BUTTON_DISABLED : GROUP_BUTTON_DEFAULT;
+    showAuthPrompt || !settingsReady || keepSearchExpanded ? GROUP_BUTTON_DISABLED : GROUP_BUTTON_DEFAULT;
   const browseControlsSegments = browseHeaderControls
     ? React.Children.toArray(browseHeaderControls)
     : activeTab === "browse"
@@ -104,7 +106,7 @@ const WorkspaceToolbarComponent: React.FC<WorkspaceToolbarProps> = ({
       <button
         key={item.id}
         onClick={() => onSelectTab(targetTab)}
-        disabled={showAuthPrompt}
+        disabled={showAuthPrompt || !settingsReady}
         aria-label={label}
         title={label}
         className={`${GROUP_BUTTON_BASE} ${isActive ? GROUP_BUTTON_ACTIVE : GROUP_BUTTON_DEFAULT} px-4 justify-center`}
@@ -127,7 +129,7 @@ const WorkspaceToolbarComponent: React.FC<WorkspaceToolbarProps> = ({
         <button
           type="button"
           onClick={onNavigateHome}
-          disabled={showAuthPrompt}
+          disabled={showAuthPrompt || !settingsReady}
           aria-label="Home"
           className="px-3 py-2 text-sm rounded-xl border flex items-center gap-2 transition disabled:cursor-not-allowed disabled:opacity-60 border-slate-800 bg-slate-900/70 text-slate-300 hover:border-slate-700"
         >
@@ -138,7 +140,7 @@ const WorkspaceToolbarComponent: React.FC<WorkspaceToolbarProps> = ({
           <button
             type="button"
             onClick={onNavigateUp}
-            disabled={showAuthPrompt || !canNavigateUp}
+            disabled={showAuthPrompt || !settingsReady || !canNavigateUp}
             className="px-3 py-2 text-sm rounded-xl border flex items-center gap-2 transition disabled:cursor-not-allowed disabled:opacity-40 border-slate-800 bg-slate-900/70 text-slate-300 hover:border-slate-700"
             aria-label="Go back"
           >
@@ -180,7 +182,7 @@ const WorkspaceToolbarComponent: React.FC<WorkspaceToolbarProps> = ({
                 <button
                   type="button"
                   onClick={segment.onNavigate}
-                  disabled={showAuthPrompt}
+                  disabled={showAuthPrompt || !settingsReady}
                   className="max-w-[10rem] truncate rounded-lg border border-slate-800 bg-slate-900/70 px-2 py-1 text-left transition hover:border-slate-700 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                     <span className="flex items-center gap-1">
@@ -202,7 +204,7 @@ const WorkspaceToolbarComponent: React.FC<WorkspaceToolbarProps> = ({
           <button
             type="button"
             onClick={onToggleSearch}
-            disabled={showAuthPrompt || keepSearchExpanded}
+            disabled={showAuthPrompt || !settingsReady || keepSearchExpanded}
             aria-label="Search files"
             aria-pressed={isSearchOpen}
             className={`${GROUP_BUTTON_BASE} ${searchButtonStateClass} w-11 justify-center`}

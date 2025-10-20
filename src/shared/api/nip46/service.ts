@@ -62,6 +62,7 @@ export class Nip46Service {
     if (!relays.length) {
       throw new Error("NIP-46 invitations must include at least one relay URL.");
     }
+    const algorithm = options?.algorithm ?? "nip44";
     let secret = options?.secret?.trim() ?? "";
     if (!secret) {
       secret = generateSecret();
@@ -75,13 +76,14 @@ export class Nip46Service {
       secret,
       permissions,
       metadata,
+      algorithm,
     });
 
     const result = await this.options.sessionManager.createSession({
       token,
       keypair,
       metadata,
-      algorithm: options?.algorithm,
+      algorithm,
     });
 
     await this.init();
@@ -169,10 +171,11 @@ interface InvitationTokenInput {
   secret: string;
   permissions: string[];
   metadata?: RemoteSignerMetadata;
+  algorithm: Nip46EncryptionAlgorithm;
 }
 
 const createTokenFromInvitation = (input: InvitationTokenInput): ParsedNostrConnectToken => {
-  const { clientPubkey, relays, secret, permissions, metadata } = input;
+  const { clientPubkey, relays, secret, permissions, metadata, algorithm } = input;
   const rawParams: Record<string, string | string[]> = {};
   if (relays.length) rawParams.relay = [...relays];
   if (secret) rawParams.secret = secret;
@@ -181,6 +184,7 @@ const createTokenFromInvitation = (input: InvitationTokenInput): ParsedNostrConn
   if (metadata?.url) rawParams.url = metadata.url;
   if (metadata?.image) rawParams.image = metadata.image;
   if (metadata) rawParams.metadata = JSON.stringify(metadata);
+  if (algorithm) rawParams.alg = algorithm;
 
   return {
     type: "nostrconnect",
@@ -189,6 +193,7 @@ const createTokenFromInvitation = (input: InvitationTokenInput): ParsedNostrConn
     secret,
     permissions,
     metadata,
+    algorithm,
     rawParams,
   };
 };
@@ -232,6 +237,9 @@ const buildNostrConnectUri = (token: ParsedNostrConnectToken): string => {
   }
   if (token.permissions.length) {
     params.set("perms", token.permissions.join(","));
+  }
+  if (token.algorithm) {
+    params.set("alg", token.algorithm);
   }
   if (token.metadata) {
     if (token.metadata.name) {
