@@ -795,6 +795,8 @@ export const BlobList: React.FC<BlobListProps> = ({
 
 const LIST_ROW_HEIGHT = 68;
 const LIST_ROW_HEIGHT_COMPACT = 96;
+const MIN_LIST_OVERSCAN = 4;
+const MAX_LIST_OVERSCAN = 12;
 const LIST_ROW_GAP = 4;
 
 const ListLayout: React.FC<{
@@ -947,6 +949,11 @@ const ListLayout: React.FC<{
   }, [listWidth]);
   const estimatedHeight = (listRowHeight + LIST_ROW_GAP) * Math.min(blobs.length, 8);
   const listHeight = container.height > 0 ? container.height : Math.min(480, Math.max(listRowHeight + LIST_ROW_GAP, estimatedHeight));
+  const listOverscanCount = useMemo(() => {
+    const visibleRows = container.height > 0 ? Math.max(1, Math.ceil(container.height / (listRowHeight + LIST_ROW_GAP))) : 4;
+    const dynamicOverscan = visibleRows + 2;
+    return Math.min(MAX_LIST_OVERSCAN, Math.max(MIN_LIST_OVERSCAN, dynamicOverscan));
+  }, [container.height, listRowHeight]);
 
   const headerIndicator = useCallback(
     (key: SortKey) => {
@@ -1274,7 +1281,7 @@ const ListLayout: React.FC<{
           itemSize={listRowHeight + LIST_ROW_GAP}
             width={listWidth}
             onItemsRendered={handleItemsRendered}
-            overscanCount={6}
+            overscanCount={listOverscanCount}
             outerRef={listOuterRef}
             itemData={itemData}
           >
@@ -1348,7 +1355,6 @@ const GridLayout: React.FC<{
   const CARD_WIDTH = 220;
   const HORIZONTAL_GAP = 8;
   const VERTICAL_GAP = 12;
-  const OVERSCAN_ROWS = 2;
   const FALLBACK_MAX_WIDTH = 1280;
   const FALLBACK_HORIZONTAL_PADDING = HORIZONTAL_GAP * 2;
   const FALLBACK_MIN_ROWS = 3;
@@ -1376,6 +1382,7 @@ const GridLayout: React.FC<{
   const [openMenuBlob, setOpenMenuBlob] = useState<string | null>(null);
   const dropdownRefs = useRef<Map<string, HTMLDivElement | null>>(new Map());
   const getMenuBoundary = useCallback(() => viewportRef.current, []);
+  const prefetchedVisibleRef = useRef<Set<string>>(new Set());
 
   useLayoutEffect(() => {
     const el = viewportRef.current;
@@ -1459,8 +1466,15 @@ const GridLayout: React.FC<{
   );
   const rowHeight = CARD_HEIGHT + VERTICAL_GAP;
   const rowCount = Math.ceil(blobs.length / columnCount);
-  const visibleRowCount = viewportHeight > 0 ? Math.ceil(viewportHeight / rowHeight) + OVERSCAN_ROWS * 2 : rowCount;
-  const startRow = Math.max(0, Math.floor(scrollTop / rowHeight) - OVERSCAN_ROWS);
+  const overscanRows = useMemo(() => {
+    if (viewportHeight <= 0) return 2;
+    const visibleRows = Math.max(1, Math.ceil(viewportHeight / rowHeight));
+    const dynamicOverscan = Math.ceil(visibleRows / 3);
+    return Math.max(1, Math.min(3, dynamicOverscan));
+  }, [viewportHeight, rowHeight]);
+  const visibleRowCount =
+    viewportHeight > 0 ? Math.ceil(viewportHeight / rowHeight) + overscanRows * 2 : rowCount;
+  const startRow = Math.max(0, Math.floor(scrollTop / rowHeight) - overscanRows);
   const endRow = Math.min(rowCount, startRow + visibleRowCount);
   const visibleItems = useMemo(() => {
     const result: Array<{ blob: BlossomBlob; row: number; col: number }> = [];
@@ -1475,6 +1489,36 @@ const GridLayout: React.FC<{
     }
     return result;
   }, [blobs, columnCount, endRow, startRow]);
+
+  useEffect(() => {
+    if (!visibleItems.length) return;
+    const seen = prefetchedVisibleRef.current;
+    visibleItems.forEach(({ blob }) => {
+      const sha = blob.sha256;
+      if (!sha || seen.has(sha)) return;
+      seen.add(sha);
+      onBlobVisible(sha);
+    });
+  }, [visibleItems, onBlobVisible]);
+
+  useEffect(() => {
+    if (!blobs.length) {
+      prefetchedVisibleRef.current.clear();
+      return;
+    }
+    const valid = new Set<string>();
+    blobs.forEach(blob => {
+      if (blob?.sha256) {
+        valid.add(blob.sha256);
+      }
+    });
+    const tracked = prefetchedVisibleRef.current;
+    tracked.forEach(sha => {
+      if (!valid.has(sha)) {
+        tracked.delete(sha);
+      }
+    });
+  }, [blobs]);
 
   const handleToggleMenu = useCallback((sha: string) => {
     setOpenMenuBlob(current => (current === sha ? null : sha));

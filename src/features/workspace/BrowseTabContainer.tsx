@@ -84,6 +84,36 @@ type SearchFlag =
   | "document"
   | "pdf";
 
+type SearchTokenSignature = {
+  name: string | null;
+  label: string | null;
+  type: string | null;
+  folderPath: string | null;
+  serverUrl: string | null;
+  targetPath: string | null;
+  size: number | null;
+  privateSize: number | null;
+  uploaded: number | null;
+  privateUpdatedAt: number | null;
+  privateName: string | null;
+  privateFolderPath: string | null;
+  privateType: string | null;
+  privateServersRef: readonly string[] | null;
+  privateMetadataRef: Record<string, unknown> | null;
+  privateAudioRef: Record<string, unknown> | null;
+  audioMetadataRef: BlobAudioMetadata | undefined;
+};
+
+type CachedSearchTokens = {
+  signature: SearchTokenSignature;
+  textCandidates: string[];
+  fieldCandidates: Partial<Record<SearchField, string[]>>;
+  resolvedSize?: number;
+  resolvedDuration?: number;
+  resolvedYear?: number;
+  resolvedUploaded?: number;
+};
+
 type SizeComparison = {
   operator: ">" | ">=" | "<" | "<=" | "=";
   value: number;
@@ -999,6 +1029,7 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
 
   const metadataSource = useMemo(() => [...aggregated.blobs, ...privateBlobs], [aggregated.blobs, privateBlobs]);
   const metadataMap = useAudioMetadataMap(metadataSource);
+  const searchTokenCacheRef = useRef(new WeakMap<BlossomBlob, CachedSearchTokens>());
 
   const searchQuery = useMemo(() => parseSearchQuery(searchTerm), [searchTerm]);
   const isSearching = searchQuery.isActive;
@@ -1078,6 +1109,325 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
     [filterMode, matchesSharingFilter, onlyPrivateLinks, sharingFilter]
   );
 
+  const signaturesEqual = (prev: SearchTokenSignature, next: SearchTokenSignature) => {
+    return (
+      prev.name === next.name &&
+      prev.label === next.label &&
+      prev.type === next.type &&
+      prev.folderPath === next.folderPath &&
+      prev.serverUrl === next.serverUrl &&
+      prev.targetPath === next.targetPath &&
+      prev.size === next.size &&
+      prev.privateSize === next.privateSize &&
+      prev.uploaded === next.uploaded &&
+      prev.privateUpdatedAt === next.privateUpdatedAt &&
+      prev.privateName === next.privateName &&
+      prev.privateFolderPath === next.privateFolderPath &&
+      prev.privateType === next.privateType &&
+      prev.privateServersRef === next.privateServersRef &&
+      prev.privateMetadataRef === next.privateMetadataRef &&
+      prev.privateAudioRef === next.privateAudioRef &&
+      prev.audioMetadataRef === next.audioMetadataRef
+    );
+  };
+
+  const buildSearchTokens = (
+    blob: BlossomBlob,
+    signature: SearchTokenSignature,
+    privateMetadata: Record<string, unknown> | null,
+    audioMetadata: BlobAudioMetadata | undefined
+  ): CachedSearchTokens => {
+    const getPrivateValue = <T = unknown>(key: string): T | undefined => {
+      if (!privateMetadata) return undefined;
+      return (privateMetadata as Record<string, unknown>)[key] as T | undefined;
+    };
+    const privateAudio = (getPrivateValue<Record<string, unknown> | null>("audio") ?? null) as
+      | Record<string, unknown>
+      | null;
+
+    const coerceValue = (value: unknown): string | undefined => {
+      if (typeof value === "string") {
+        const trimmed = value.trim();
+        return trimmed ? trimmed : undefined;
+      }
+      if (typeof value === "number" && Number.isFinite(value)) {
+        return String(value);
+      }
+      return undefined;
+    };
+
+    const coerceLower = (value: unknown): string | undefined => {
+      const coerced = coerceValue(value);
+      return coerced ? coerced.toLowerCase() : undefined;
+    };
+
+    const coerceNumeric = (value: unknown): number | undefined => {
+      if (typeof value === "number" && Number.isFinite(value)) {
+        return value;
+      }
+      if (typeof value === "string") {
+        const trimmed = value.trim();
+        if (!trimmed) return undefined;
+        const parsed = Number(trimmed);
+        if (Number.isFinite(parsed)) {
+          return parsed;
+        }
+      }
+      return undefined;
+    };
+
+    const textSet = new Set<string>();
+    const typeSet = new Set<string>();
+    const mimeSet = new Set<string>();
+    const serverSet = new Set<string>();
+    const folderSet = new Set<string>();
+
+    const addTextCandidate = (value?: string | null) => {
+      const normalized = coerceLower(value);
+      if (normalized) {
+        textSet.add(normalized);
+      }
+    };
+
+    const addMimeCandidate = (value?: string | null) => {
+      const normalized = coerceLower(value);
+      if (!normalized) return;
+      mimeSet.add(normalized);
+      const slashIndex = normalized.indexOf("/");
+      if (slashIndex > 0) {
+        const category = normalized.slice(0, slashIndex);
+        if (category) {
+          mimeSet.add(category);
+          typeSet.add(category);
+        }
+      }
+    };
+
+    const addTypeCandidate = (value?: string | null) => {
+      const extension = extractExtension(value);
+      if (!extension) return;
+      typeSet.add(extension.toLowerCase());
+    };
+
+    const addServerCandidate = (value?: string | null) => {
+      if (typeof value !== "string") return;
+      const normalized = coerceLower(value);
+      if (normalized) {
+        serverSet.add(normalized);
+      }
+      const sanitized = normalizeServerUrl(value);
+      if (sanitized) {
+        serverSet.add(sanitized.toLowerCase());
+      }
+      try {
+        const parsed = new URL(value);
+        serverSet.add(parsed.origin.toLowerCase());
+        serverSet.add(parsed.host.toLowerCase());
+        serverSet.add(parsed.hostname.toLowerCase());
+      } catch {
+        // Ignore parse failures.
+      }
+    };
+
+    const addFolderCandidate = (value?: string | null) => {
+      const normalized = normalizeFolderPathInput(value ?? undefined);
+      if (typeof normalized === "string") {
+        const trimmed = normalized.trim();
+        folderSet.add(trimmed ? trimmed.toLowerCase() : "/");
+      }
+      const lowered = coerceLower(value);
+      if (lowered) {
+        folderSet.add(lowered);
+      }
+    };
+
+    addMimeCandidate(blob.type);
+    addTypeCandidate(blob.name);
+    addTypeCandidate(blob.label);
+    addServerCandidate(blob.serverUrl);
+    addFolderCandidate(blob.folderPath ?? null);
+    addTextCandidate(blob.name);
+    addTextCandidate(blob.label);
+    addTextCandidate(blob.folderPath ?? undefined);
+    addTextCandidate(blob.type);
+    addTextCandidate(blob.serverUrl);
+
+    const privateName = getPrivateValue<string | null>("name") ?? undefined;
+    const privateType = getPrivateValue<string | null>("type") ?? undefined;
+    const privateFolder = getPrivateValue<string | null>("folderPath") ?? undefined;
+
+    addMimeCandidate(privateType);
+    addTypeCandidate(privateName);
+    addFolderCandidate(privateFolder ?? null);
+    addTextCandidate(privateName);
+    addTextCandidate(privateFolder);
+    addTextCandidate(privateType);
+
+    const privateServers = Array.isArray((blob.privateData as { servers?: string[] } | undefined)?.servers)
+      ? ((blob.privateData as { servers?: string[] } | undefined)?.servers as string[])
+      : [];
+    privateServers.forEach(server => addServerCandidate(server));
+
+    const targetPath = blob.__bloomFolderTargetPath ?? null;
+    if (targetPath) {
+      addFolderCandidate(targetPath);
+      addTextCandidate(targetPath);
+    }
+
+    const audioStrings: Partial<Record<keyof BlobAudioMetadata, string>> = {};
+    const audioNumbers: Partial<Record<keyof BlobAudioMetadata, number>> = {};
+
+    const assignAudioString = (field: keyof BlobAudioMetadata, fallback?: string | undefined) => {
+      const fromPublic = coerceLower(audioMetadata?.[field]);
+      const fromPrivate = coerceLower(privateAudio?.[field as string]);
+      const value = fromPublic ?? fromPrivate ?? (fallback ? fallback.toLowerCase() : undefined);
+      if (value) {
+        audioStrings[field] = value;
+      }
+    };
+
+    const assignAudioNumber = (field: keyof BlobAudioMetadata) => {
+      const fromPublic = coerceNumeric(audioMetadata?.[field]);
+      if (typeof fromPublic === "number") {
+        audioNumbers[field] = fromPublic;
+        return;
+      }
+      const fromPrivate = coerceNumeric(privateAudio?.[field as string]);
+      if (typeof fromPrivate === "number") {
+        audioNumbers[field] = fromPrivate;
+      }
+    };
+
+    assignAudioString("artist");
+    assignAudioString("album");
+    assignAudioString("genre");
+    const titleFallback = coerceValue(privateName) ?? coerceValue(blob.name);
+    assignAudioString("title", titleFallback);
+    assignAudioString("year");
+
+    assignAudioNumber("durationSeconds");
+    assignAudioNumber("year");
+
+    Object.values(audioStrings).forEach(value => {
+      if (value) {
+        textSet.add(value);
+      }
+    });
+
+    const typeTokens = Array.from(typeSet);
+    const mimeTokens = Array.from(mimeSet);
+    const serverTokens = Array.from(serverSet);
+    const folderTokens = Array.from(folderSet);
+
+    typeTokens.forEach(token => textSet.add(token));
+    mimeTokens.forEach(token => textSet.add(token));
+    serverTokens.forEach(token => textSet.add(token));
+    folderTokens.forEach(token => textSet.add(token));
+
+    const fieldCandidates: Partial<Record<SearchField, string[]>> = {};
+
+    if (audioStrings.artist) {
+      fieldCandidates.artist = [audioStrings.artist];
+    }
+    if (audioStrings.album) {
+      fieldCandidates.album = [audioStrings.album];
+    }
+    if (audioStrings.title) {
+      fieldCandidates.title = [audioStrings.title];
+    }
+    if (audioStrings.genre) {
+      fieldCandidates.genre = [audioStrings.genre];
+    }
+    if (audioStrings.year) {
+      fieldCandidates.year = [audioStrings.year];
+    }
+    if (typeTokens.length > 0) {
+      fieldCandidates.type = typeTokens;
+    }
+    if (mimeTokens.length > 0) {
+      fieldCandidates.mime = mimeTokens;
+    }
+    if (serverTokens.length > 0) {
+      fieldCandidates.server = serverTokens;
+    }
+    if (folderTokens.length > 0) {
+      fieldCandidates.folder = folderTokens;
+    }
+
+    const resolvedSize = (() => {
+      const privateSize = getPrivateValue<number>("size");
+      if (typeof blob.size === "number" && Number.isFinite(blob.size)) return blob.size;
+      if (typeof privateSize === "number" && Number.isFinite(privateSize)) return privateSize;
+      return undefined;
+    })();
+
+    const resolvedDuration = typeof audioNumbers.durationSeconds === "number" ? audioNumbers.durationSeconds : undefined;
+    const resolvedYear =
+      typeof audioNumbers.year === "number" && Number.isFinite(audioNumbers.year)
+        ? Math.floor(audioNumbers.year)
+        : undefined;
+    const resolvedUploaded =
+      typeof blob.uploaded === "number" && Number.isFinite(blob.uploaded) ? blob.uploaded : undefined;
+
+    return {
+      signature,
+      textCandidates: Array.from(textSet),
+      fieldCandidates,
+      resolvedSize,
+      resolvedDuration,
+      resolvedYear,
+      resolvedUploaded,
+    };
+  };
+
+  const getSearchTokens = useCallback(
+    (blob: BlossomBlob): CachedSearchTokens => {
+      const privateMetadata = (blob.privateData?.metadata ?? null) as Record<string, unknown> | null;
+      const audioMetadata = metadataMap.get(blob.sha256);
+
+      const safeNumber = (value: unknown): number | null =>
+        typeof value === "number" && Number.isFinite(value) ? value : null;
+      const safeString = (value: unknown): string | null =>
+        typeof value === "string" ? value : null;
+      const getPrivateValue = <T = unknown>(key: string): T | undefined => {
+        if (!privateMetadata) return undefined;
+        return (privateMetadata as Record<string, unknown>)[key] as T | undefined;
+      };
+
+      const signature: SearchTokenSignature = {
+        name: safeString(blob.name),
+        label: safeString(blob.label),
+        type: safeString(blob.type),
+        folderPath: safeString(blob.folderPath),
+        serverUrl: safeString(blob.serverUrl),
+        targetPath: safeString(blob.__bloomFolderTargetPath),
+        size: safeNumber(blob.size),
+        privateSize: safeNumber(getPrivateValue("size")),
+        uploaded: safeNumber(blob.uploaded),
+        privateUpdatedAt: safeNumber(getPrivateValue("updatedAt")),
+        privateName: safeString(getPrivateValue("name")),
+        privateFolderPath: safeString(getPrivateValue("folderPath")),
+        privateType: safeString(getPrivateValue("type")),
+        privateServersRef: Array.isArray(blob.privateData?.servers)
+          ? (blob.privateData?.servers as readonly string[])
+          : null,
+        privateMetadataRef: privateMetadata,
+        privateAudioRef: getPrivateValue<Record<string, unknown> | null>("audio") ?? null,
+        audioMetadataRef: audioMetadata,
+      };
+
+      const cached = searchTokenCacheRef.current.get(blob);
+      if (cached && signaturesEqual(cached.signature, signature)) {
+        return cached;
+      }
+
+      const built = buildSearchTokens(blob, signature, privateMetadata, audioMetadata);
+      searchTokenCacheRef.current.set(blob, built);
+      return built;
+    },
+    [metadataMap]
+  );
+
   const matchesSearch = useCallback(
     (blob: BlossomBlob) => {
       if (!searchQuery.isActive) return true;
@@ -1118,198 +1468,73 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
         }
       }
 
-      const privateMetadata = blob.privateData?.metadata;
-      const privateAudio = privateMetadata?.audio ?? undefined;
-      const audioMetadata = metadataMap.get(blob.sha256);
+      const tokens = getSearchTokens(blob);
 
-      const coerceValue = (value: unknown): string | undefined => {
-        if (typeof value === "string") {
-          const trimmed = value.trim();
-          return trimmed ? trimmed : undefined;
-        }
-        if (typeof value === "number" && Number.isFinite(value)) {
-          return String(value);
-        }
-        return undefined;
-      };
-
-	      const coerceNumeric = (value: unknown): number | undefined => {
-	        if (typeof value === "number" && Number.isFinite(value)) {
-	          return value;
-	        }
-	        if (typeof value === "string") {
-	          const trimmed = value.trim();
-	          if (!trimmed) return undefined;
-	          const parsed = Number(trimmed);
-	          if (Number.isFinite(parsed)) {
-	            return parsed;
-	          }
-	        }
-	        return undefined;
-	      };
-
-	      const getAudioValue = (field: keyof BlobAudioMetadata) =>
-	        coerceValue(audioMetadata?.[field] ?? (privateAudio ? (privateAudio as any)[field] : undefined));
-
-	      const getAudioNumber = (field: keyof BlobAudioMetadata) =>
-	        coerceNumeric(audioMetadata?.[field] ?? (privateAudio ? (privateAudio as any)[field] : undefined));
-
-      const mimeValueSet = new Set<string>();
-      const typeValueSet = new Set<string>();
-      const serverValueSet = new Set<string>();
-      const folderValueSet = new Set<string>();
-
-      const addMimeCandidate = (value?: string | null) => {
-        const coerced = coerceValue(value);
-        if (!coerced) return;
-        const normalized = coerced.toLowerCase();
-        mimeValueSet.add(normalized);
-        const slashIndex = normalized.indexOf("/");
-        if (slashIndex > 0) {
-          const category = normalized.slice(0, slashIndex);
-          mimeValueSet.add(category);
-          typeValueSet.add(category);
-        }
-      };
-
-      const addTypeCandidate = (value?: string | null) => {
-        const extension = extractExtension(value);
-        if (extension) {
-          typeValueSet.add(extension);
-        }
-      };
-
-      const addServerCandidate = (value?: string | null) => {
-        const coerced = coerceValue(value);
-        if (!coerced) return;
-        serverValueSet.add(coerced.toLowerCase());
-        const normalized = normalizeServerUrl(coerced);
-        serverValueSet.add(normalized.toLowerCase());
-        try {
-          const parsed = new URL(coerced);
-          serverValueSet.add(parsed.origin.toLowerCase());
-          serverValueSet.add(parsed.host.toLowerCase());
-          serverValueSet.add(parsed.hostname.toLowerCase());
-        } catch {
-          // Ignore parse errors for non-URL strings.
-        }
-      };
-
-      const addFolderCandidate = (value?: string | null) => {
-        const normalized = normalizeFolderPathInput(value ?? undefined);
-        if (typeof normalized === "string") {
-          const trimmed = normalized.trim();
-          if (trimmed) {
-            folderValueSet.add(trimmed.toLowerCase());
-          } else {
-            folderValueSet.add("/");
-          }
-        }
-        const coerced = coerceValue(value);
-        if (coerced) {
-          folderValueSet.add(coerced.toLowerCase());
-        }
-      };
-
-      addMimeCandidate(blob.type);
-      addMimeCandidate(privateMetadata?.type);
-      addTypeCandidate(blob.name);
-      addTypeCandidate(privateMetadata?.name);
-      addTypeCandidate(blob.label);
-      addServerCandidate(blob.serverUrl);
-      (blob.privateData?.servers ?? []).forEach(addServerCandidate);
-      addFolderCandidate(blob.folderPath ?? null);
-      addFolderCandidate(privateMetadata?.folderPath ?? null);
-      addFolderCandidate(blob.__bloomFolderTargetPath ?? null);
-
-	      if (sizeComparisons.length > 0) {
-	        const resolvedSize = (() => {
-	          if (typeof blob.size === "number" && Number.isFinite(blob.size)) return blob.size;
-	          const privateSize = privateMetadata?.size;
-	          if (typeof privateSize === "number" && Number.isFinite(privateSize)) return privateSize;
-	          if (typeof privateMetadata?.audio?.durationSeconds === "number") return undefined;
-          return undefined;
-        })();
-        if (typeof resolvedSize !== "number") {
+      if (sizeComparisons.length > 0) {
+        if (typeof tokens.resolvedSize !== "number") {
           return false;
         }
         const satisfiesSizeFilters = sizeComparisons.every(comparison => {
           switch (comparison.operator) {
             case ">":
-              return resolvedSize > comparison.value;
+              return tokens.resolvedSize! > comparison.value;
             case ">=":
-              return resolvedSize >= comparison.value;
+              return tokens.resolvedSize! >= comparison.value;
             case "<":
-              return resolvedSize < comparison.value;
+              return tokens.resolvedSize! < comparison.value;
             case "<=":
-              return resolvedSize <= comparison.value;
+              return tokens.resolvedSize! <= comparison.value;
             case "=":
             default:
-              return resolvedSize === comparison.value;
+              return tokens.resolvedSize! === comparison.value;
           }
         });
-	        if (!satisfiesSizeFilters) {
-	          return false;
-	        }
-	      }
+        if (!satisfiesSizeFilters) {
+          return false;
+        }
+      }
 
-	      const resolvedDuration = (() => {
-	        const publicDuration = getAudioNumber("durationSeconds");
-	        if (typeof publicDuration === "number") return publicDuration;
-	        const privateDuration = coerceNumeric(privateAudio?.durationSeconds);
-	        if (typeof privateDuration === "number") return privateDuration;
-	        return undefined;
-	      })();
-
-	      if (durationComparisons.length > 0) {
-	        if (typeof resolvedDuration !== "number") {
-	          return false;
-	        }
-	        const matchesDuration = durationComparisons.every(comparison => {
-	          switch (comparison.operator) {
-	            case ">":
-	              return resolvedDuration > comparison.value;
-	            case ">=":
-	              return resolvedDuration >= comparison.value;
-	            case "<":
-	              return resolvedDuration < comparison.value;
-	            case "<=":
-	              return resolvedDuration <= comparison.value;
-	            case "=":
-	            default:
-	              return resolvedDuration === comparison.value;
-	          }
-	        });
-	        if (!matchesDuration) {
-	          return false;
-	        }
-	      }
-
-	      const resolvedYear = (() => {
-	        const publicYear = getAudioNumber("year");
-	        if (typeof publicYear === "number") return Math.floor(publicYear);
-	        const privateYear = coerceNumeric(privateAudio?.year);
-        if (typeof privateYear === "number") return Math.floor(privateYear);
-        return undefined;
-      })();
+      if (durationComparisons.length > 0) {
+        if (typeof tokens.resolvedDuration !== "number") {
+          return false;
+        }
+        const matchesDuration = durationComparisons.every(comparison => {
+          switch (comparison.operator) {
+            case ">":
+              return tokens.resolvedDuration! > comparison.value;
+            case ">=":
+              return tokens.resolvedDuration! >= comparison.value;
+            case "<":
+              return tokens.resolvedDuration! < comparison.value;
+            case "<=":
+              return tokens.resolvedDuration! <= comparison.value;
+            case "=":
+            default:
+              return tokens.resolvedDuration! === comparison.value;
+          }
+        });
+        if (!matchesDuration) {
+          return false;
+        }
+      }
 
       if (yearComparisons.length > 0) {
-        if (typeof resolvedYear !== "number") {
+        if (typeof tokens.resolvedYear !== "number") {
           return false;
         }
         const matchesYear = yearComparisons.every(comparison => {
           switch (comparison.operator) {
             case ">":
-              return resolvedYear > comparison.value;
+              return tokens.resolvedYear! > comparison.value;
             case ">=":
-              return resolvedYear >= comparison.value;
+              return tokens.resolvedYear! >= comparison.value;
             case "<":
-              return resolvedYear < comparison.value;
+              return tokens.resolvedYear! < comparison.value;
             case "<=":
-              return resolvedYear <= comparison.value;
+              return tokens.resolvedYear! <= comparison.value;
             case "=":
             default:
-              return resolvedYear === comparison.value;
+              return tokens.resolvedYear! === comparison.value;
           }
         });
         if (!matchesYear) {
@@ -1317,34 +1542,33 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
         }
       }
 
-      const resolvedUploaded =
-        typeof blob.uploaded === "number" && Number.isFinite(blob.uploaded) ? blob.uploaded : undefined;
-
       if (beforeTimestamps.length > 0) {
-        if (typeof resolvedUploaded !== "number") {
+        if (typeof tokens.resolvedUploaded !== "number") {
           return false;
         }
-        const satisfiesBefore = beforeTimestamps.every(threshold => resolvedUploaded < threshold);
+        const satisfiesBefore = beforeTimestamps.every(threshold => tokens.resolvedUploaded! < threshold);
         if (!satisfiesBefore) {
           return false;
         }
       }
 
       if (afterTimestamps.length > 0) {
-        if (typeof resolvedUploaded !== "number") {
+        if (typeof tokens.resolvedUploaded !== "number") {
           return false;
         }
-        const satisfiesAfter = afterTimestamps.every(threshold => resolvedUploaded >= threshold);
+        const satisfiesAfter = afterTimestamps.every(threshold => tokens.resolvedUploaded! >= threshold);
         if (!satisfiesAfter) {
           return false;
         }
       }
 
       if (onRanges.length > 0) {
-        if (typeof resolvedUploaded !== "number") {
+        if (typeof tokens.resolvedUploaded !== "number") {
           return false;
         }
-        const matchesAllRanges = onRanges.every(range => resolvedUploaded >= range.start && resolvedUploaded < range.end);
+        const matchesAllRanges = onRanges.every(
+          range => tokens.resolvedUploaded! >= range.start && tokens.resolvedUploaded! < range.end
+        );
         if (!matchesAllRanges) {
           return false;
         }
@@ -1393,78 +1617,10 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
         }
       }
 
-      const fieldCandidateCache: Partial<Record<SearchField, string[]>> = {};
-      const getFieldCandidates = (field: SearchField): string[] => {
-        if (fieldCandidateCache[field]) {
-          return fieldCandidateCache[field] as string[];
-        }
-        let candidates: string[] = [];
-        switch (field) {
-          case "artist": {
-            const value = getAudioValue("artist");
-            if (value) {
-              candidates = [value.toLowerCase()];
-            }
-            break;
-          }
-          case "album": {
-            const value = getAudioValue("album");
-            if (value) {
-              candidates = [value.toLowerCase()];
-            }
-            break;
-          }
-          case "title": {
-            const value =
-              getAudioValue("title") ??
-              coerceValue(privateMetadata?.name) ??
-              coerceValue(blob.name);
-            if (value) {
-              candidates = [value.toLowerCase()];
-            }
-            break;
-          }
-          case "genre": {
-            const value = getAudioValue("genre");
-            if (value) {
-              candidates = [value.toLowerCase()];
-            }
-            break;
-          }
-          case "year": {
-            const value = getAudioValue("year");
-            if (value) {
-              candidates = [value.toLowerCase()];
-            }
-            break;
-          }
-          case "type": {
-            candidates = Array.from(typeValueSet);
-            break;
-          }
-          case "mime": {
-            candidates = Array.from(mimeValueSet);
-            break;
-          }
-          case "server": {
-            candidates = Array.from(serverValueSet);
-            break;
-          }
-          case "folder": {
-            candidates = Array.from(folderValueSet);
-            break;
-          }
-          default:
-            candidates = [];
-        }
-        fieldCandidateCache[field] = candidates;
-        return candidates;
-      };
-
       const fieldEntries = Object.entries(fieldTerms) as [SearchField, string[]][];
       for (const [field, values] of fieldEntries) {
         if (!values || values.length === 0) continue;
-        const candidates = getFieldCandidates(field);
+        const candidates = tokens.fieldCandidates[field] ?? [];
         if (candidates.length === 0) {
           return false;
         }
@@ -1480,7 +1636,7 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
       const excludedFieldEntries = Object.entries(excludedFieldTerms) as [SearchField, string[]][];
       for (const [field, values] of excludedFieldEntries) {
         if (!values || values.length === 0) continue;
-        const candidates = getFieldCandidates(field);
+        const candidates = tokens.fieldCandidates[field] ?? [];
         if (!candidates.length) continue;
         const hasMatch = values.some(value =>
           candidates.some(candidate => candidate.includes(value))
@@ -1490,88 +1646,36 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
         }
       }
 
-      const buildTextCandidates = () => {
-        const candidates = new Set<string>();
-        const pushCandidate = (value?: string | null) => {
-          const coerced = coerceValue(value);
-          if (coerced) {
-            candidates.add(coerced.toLowerCase());
-          }
-        };
-
-        pushCandidate(blob.name);
-        pushCandidate(blob.label);
-        pushCandidate(blob.folderPath ?? undefined);
-        pushCandidate(privateMetadata?.name);
-        pushCandidate(privateMetadata?.folderPath ?? undefined);
-        pushCandidate(blob.type);
-        pushCandidate(privateMetadata?.type);
-        pushCandidate(getAudioValue("title"));
-        pushCandidate(getAudioValue("artist"));
-        pushCandidate(getAudioValue("album"));
-        pushCandidate(getAudioValue("genre"));
-        pushCandidate(blob.serverUrl);
-
-        typeValueSet.forEach(value => candidates.add(value));
-        mimeValueSet.forEach(value => candidates.add(value));
-        serverValueSet.forEach(value => candidates.add(value));
-        folderValueSet.forEach(value => candidates.add(value));
-
-        const addExtensionCandidate = (value?: string | null) => {
-          const extension = extractExtension(value);
-          if (extension) {
-            candidates.add(extension);
-          }
-        };
-
-        addExtensionCandidate(blob.name);
-        addExtensionCandidate(privateMetadata?.name);
-
-        return candidates;
-      };
-
       if (textTerms.length === 0) {
         if (excludedTextTerms.length > 0) {
-          const candidates = buildTextCandidates();
           for (const term of excludedTextTerms) {
-            for (const candidate of candidates) {
-              if (candidate.includes(term)) {
-                return false;
-              }
+            if (tokens.textCandidates.some(candidate => candidate.includes(term))) {
+              return false;
             }
           }
         }
         return true;
       }
 
-      const candidates = buildTextCandidates();
-
       for (const term of textTerms) {
-        let matched = false;
-        for (const candidate of candidates) {
-          if (candidate.includes(term)) {
-            matched = true;
-            break;
-          }
-        }
+        const matched = tokens.textCandidates.some(candidate => candidate.includes(term));
         if (!matched) {
           return false;
         }
       }
 
       if (excludedTextTerms.length > 0) {
-        for (const term of excludedTextTerms) {
-          for (const candidate of candidates) {
-            if (candidate.includes(term)) {
-              return false;
-            }
-          }
+        const violates = excludedTextTerms.some(term =>
+          tokens.textCandidates.some(candidate => candidate.includes(term))
+        );
+        if (violates) {
+          return false;
         }
       }
 
       return true;
     },
-    [metadataMap, resolveSharingDetails, searchQuery]
+    [getSearchTokens, resolveSharingDetails, searchQuery]
   );
 
   const normalizedSelectedServer = selectedServer ? normalizeServerUrl(selectedServer) : null;

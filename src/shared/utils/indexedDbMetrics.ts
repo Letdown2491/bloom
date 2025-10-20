@@ -1,4 +1,4 @@
-import { getKv, getKvKeys } from "./cacheDb";
+import { getKv, getKvKeys, iterateKvEntries } from "./cacheDb";
 import { getManifestStats, type ManifestStats } from "./folderManifestStore";
 
 const measureStringBytes = (text: string): number => {
@@ -166,79 +166,92 @@ const measureCacheDbUsage = async (): Promise<CacheDbUsage> => {
   const buckets = createEmptyBuckets();
   let totalBytes = 0;
 
-  let keys: string[] = [];
+  const tallyEntry = (key: string, value: unknown) => {
+    const bytes = estimateSerializedBytes(value);
+    totalBytes += bytes;
+
+    if (key.startsWith("preview:inline:v1:")) {
+      buckets.previewInline.approxBytes += bytes;
+      buckets.previewInline.entryCount += 1;
+      return;
+    }
+
+    if (key === "preview:meta:v1") {
+      buckets.previewMeta.approxBytes += bytes;
+      buckets.previewMeta.entryCount += 1;
+      if (value && typeof value === "object") {
+        const snapshot = value as { version?: number; entries?: Record<string, unknown> };
+        if (typeof snapshot.version === "number") {
+          buckets.previewMeta.version = snapshot.version;
+        }
+        if (snapshot.entries && typeof snapshot.entries === "object") {
+          const tracked = Object.values(snapshot.entries).filter(Boolean).length;
+          buckets.previewMeta.trackedPreviews = tracked;
+        }
+      }
+      return;
+    }
+
+    if (key.startsWith("blobMetadata:")) {
+      buckets.blobMetadata.approxBytes += bytes;
+      buckets.blobMetadata.entryCount += 1;
+      if (value && typeof value === "object") {
+        const record = value as Record<string, Record<string, unknown> | undefined>;
+        const serverKeys = Object.keys(record);
+        buckets.blobMetadata.serverCount = serverKeys.length;
+        const fileCount = serverKeys.reduce((total, serverKey) => {
+          const entries = record[serverKey];
+          if (!entries || typeof entries !== "object") return total;
+          return total + Object.keys(entries).length;
+        }, 0);
+        buckets.blobMetadata.fileCount = fileCount;
+      }
+      return;
+    }
+
+    if (key.startsWith("bloom.serverSnapshot:")) {
+      buckets.serverSnapshots.approxBytes += bytes;
+      buckets.serverSnapshots.entryCount += 1;
+      if (value && typeof value === "object") {
+        const payload = value as { blobs?: unknown[] };
+        if (Array.isArray(payload.blobs)) {
+          buckets.serverSnapshots.blobCount += payload.blobs.length;
+        }
+      }
+      return;
+    }
+
+    buckets.other.approxBytes += bytes;
+    buckets.other.entryCount += 1;
+  };
+
+  let iterateSucceeded = false;
   try {
-    keys = await getKvKeys();
+    await iterateKvEntries(entry => {
+      tallyEntry(entry.key, entry.value);
+    });
+    iterateSucceeded = true;
   } catch (error) {
-    keys = [];
+    iterateSucceeded = false;
   }
 
-  await Promise.all(
-    keys.map(async key => {
+  if (!iterateSucceeded) {
+    let keys: string[] = [];
+    try {
+      keys = await getKvKeys();
+    } catch (error) {
+      keys = [];
+    }
+    for (const key of keys) {
       let value: unknown;
       try {
         value = await getKv(key);
       } catch (error) {
         value = undefined;
       }
-      const bytes = estimateSerializedBytes(value);
-      totalBytes += bytes;
-
-      if (key.startsWith("preview:inline:v1:")) {
-        buckets.previewInline.approxBytes += bytes;
-        buckets.previewInline.entryCount += 1;
-        return;
-      }
-
-      if (key === "preview:meta:v1") {
-        buckets.previewMeta.approxBytes += bytes;
-        buckets.previewMeta.entryCount += 1;
-        if (value && typeof value === "object") {
-          const snapshot = value as { version?: number; entries?: Record<string, unknown> };
-          if (typeof snapshot.version === "number") {
-            buckets.previewMeta.version = snapshot.version;
-          }
-          if (snapshot.entries && typeof snapshot.entries === "object") {
-            const tracked = Object.values(snapshot.entries).filter(Boolean).length;
-            buckets.previewMeta.trackedPreviews = tracked;
-          }
-        }
-        return;
-      }
-
-      if (key.startsWith("blobMetadata:")) {
-        buckets.blobMetadata.approxBytes += bytes;
-        buckets.blobMetadata.entryCount += 1;
-        if (value && typeof value === "object") {
-          const record = value as Record<string, Record<string, unknown> | undefined>;
-          const serverKeys = Object.keys(record);
-          buckets.blobMetadata.serverCount = serverKeys.length;
-          const fileCount = serverKeys.reduce((total, serverKey) => {
-            const entries = record[serverKey];
-            if (!entries || typeof entries !== "object") return total;
-            return total + Object.keys(entries).length;
-          }, 0);
-          buckets.blobMetadata.fileCount = fileCount;
-        }
-        return;
-      }
-
-      if (key.startsWith("bloom.serverSnapshot:")) {
-        buckets.serverSnapshots.approxBytes += bytes;
-        buckets.serverSnapshots.entryCount += 1;
-        if (value && typeof value === "object") {
-          const payload = value as { blobs?: unknown[] };
-          if (Array.isArray(payload.blobs)) {
-            buckets.serverSnapshots.blobCount += payload.blobs.length;
-          }
-        }
-        return;
-      }
-
-      buckets.other.approxBytes += bytes;
-      buckets.other.entryCount += 1;
-    })
-  );
+      tallyEntry(key, value);
+    }
+  }
 
   buckets.previewInline.approxBytes = Math.max(0, buckets.previewInline.approxBytes);
   buckets.previewMeta.approxBytes = Math.max(0, buckets.previewMeta.approxBytes);

@@ -10,7 +10,14 @@ import { useCurrentPubkey } from "../../../app/context/NdkContext";
 
 type ViewMap = Map<string, BlossomBlob[]>;
 
-const cloneBlob = (blob: BlossomBlob): BlossomBlob => JSON.parse(JSON.stringify(blob)) as BlossomBlob;
+const supportsStructuredClone = typeof structuredClone === "function";
+
+const cloneBlob = (blob: BlossomBlob): BlossomBlob => {
+  if (supportsStructuredClone) {
+    return structuredClone(blob);
+  }
+  return JSON.parse(JSON.stringify(blob)) as BlossomBlob;
+};
 
 const makeKey = (scopeKey: string, parentPath: string) => scopePathKey(scopeKey, parentPath);
 

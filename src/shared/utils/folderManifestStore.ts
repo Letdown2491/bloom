@@ -3,7 +3,7 @@ const DB_VERSION = 1;
 const STORE_NAME = "views";
 const INDEX_PUBKEY = "by_pubkey";
 const INDEX_SCOPE = "by_pubkey_scope";
-const MAX_VIEWS_PER_SCOPE = 24;
+const BASE_MAX_VIEWS_PER_SCOPE = 24;
 
 type JSONObject = Record<string, unknown>;
 
@@ -59,7 +59,12 @@ const withDb = async <T>(callback: (db: IDBDatabase) => Promise<T>): Promise<T> 
   return callback(db);
 };
 
+const supportsStructuredClone = typeof structuredClone === "function";
+
 const cloneItem = (item: JSONObject): JSONObject => {
+  if (supportsStructuredClone) {
+    return structuredClone(item);
+  }
   return JSON.parse(JSON.stringify(item)) as JSONObject;
 };
 
@@ -90,6 +95,48 @@ export const loadManifestViews = async (pubkey: string): Promise<Map<string, JSO
   });
 };
 
+type ScopeUsageMetrics = {
+  viewCount: number;
+  totalItems: number;
+  approxBytes: number;
+};
+
+const gatherScopeMetrics = async (index: IDBIndex, pubkeyScope: string): Promise<ScopeUsageMetrics> =>
+  new Promise((resolve, reject) => {
+    const metrics: ScopeUsageMetrics = {
+      viewCount: 0,
+      totalItems: 0,
+      approxBytes: 0,
+    };
+    const cursor = index.openCursor(IDBKeyRange.only(pubkeyScope));
+    cursor.onsuccess = () => {
+      const result = cursor.result as IDBCursorWithValue | null;
+      if (!result) {
+        resolve(metrics);
+        return;
+      }
+      const record = result.value as StoredViewRecord;
+      metrics.viewCount += 1;
+      if (Array.isArray(record.items)) {
+        metrics.totalItems += record.items.length;
+      }
+      metrics.approxBytes += estimateSerializedBytes(record);
+      result.continue();
+    };
+    cursor.onerror = () => reject(cursor.error ?? new Error("IndexedDB cursor failed"));
+  });
+
+const resolveMaxViewsForScope = (stats: ScopeUsageMetrics) => {
+  const base = BASE_MAX_VIEWS_PER_SCOPE;
+  if (stats.viewCount <= base) return base;
+  const weightedSize = stats.approxBytes / Math.max(1, stats.viewCount);
+  const sizeFactor = weightedSize > 6_000 ? 0.5 : weightedSize > 3_500 ? 0.75 : 1;
+  const itemFactor = stats.totalItems / Math.max(1, stats.viewCount) > 40 ? 0.6 : stats.totalItems > 20 ? 0.8 : 1;
+  const adaptive = Math.round(base * Math.min(sizeFactor, itemFactor));
+  const upperBound = Math.max(base, Math.min(96, base + Math.floor(stats.viewCount / 3)));
+  return Math.max(base, Math.min(upperBound, adaptive || base));
+};
+
 export const writeManifestView = async (
   pubkey: string,
   scopeKey: string,
@@ -111,15 +158,19 @@ export const writeManifestView = async (
     };
     store.put(record);
     const index = store.index(INDEX_SCOPE);
-    const allRequest = index.getAll(pubkeyScope);
-    const records: StoredViewRecord[] = await new Promise((resolve, reject) => {
-      allRequest.onsuccess = () => resolve((allRequest.result as StoredViewRecord[]) ?? []);
-      allRequest.onerror = () => reject(allRequest.error ?? new Error("IndexedDB read failed"));
-    });
-    if (records.length > MAX_VIEWS_PER_SCOPE) {
-      const sorted = records.sort((a, b) => b.updatedAt - a.updatedAt);
-      const excess = sorted.slice(MAX_VIEWS_PER_SCOPE);
-      excess.forEach(entry => store.delete(entry.id));
+    const metrics = await gatherScopeMetrics(index, pubkeyScope);
+    const limit = resolveMaxViewsForScope(metrics);
+    if (metrics.viewCount > limit) {
+      const allRequest = index.getAll(pubkeyScope);
+      const records: StoredViewRecord[] = await new Promise((resolve, reject) => {
+        allRequest.onsuccess = () => resolve((allRequest.result as StoredViewRecord[]) ?? []);
+        allRequest.onerror = () => reject(allRequest.error ?? new Error("IndexedDB read failed"));
+      });
+      if (records.length > limit) {
+        const sorted = records.sort((a, b) => b.updatedAt - a.updatedAt);
+        const excess = sorted.slice(limit);
+        excess.forEach(entry => store.delete(entry.id));
+      }
     }
     await transactionDone(tx);
   });

@@ -4,6 +4,7 @@ import type {
   Nip46Service,
   SessionManager,
   SessionSnapshot,
+  StorageAdapter,
   TransportConfig,
 } from "../../shared/api/nip46";
 import { useNdk } from "./NdkContext";
@@ -65,10 +66,21 @@ export const Nip46Provider: React.FC<{ children: React.ReactNode }> = ({ childre
   useEffect(() => {
     let cancelled = false;
     void loadNip46Module()
-      .then(mod => {
+      .then(async mod => {
         if (cancelled) return;
         moduleRef.current = mod;
-        const storage = typeof window === "undefined" ? new mod.MemoryStorageAdapter() : new mod.LocalStorageAdapter();
+        let storage: StorageAdapter;
+        if (typeof window === "undefined") {
+          storage = new mod.MemoryStorageAdapter();
+        } else {
+          try {
+            storage = await mod.createStorageAdapter();
+          } catch (error) {
+            console.warn("Falling back to localStorage for NIP-46 sessions", error);
+            storage = new mod.LocalStorageAdapter();
+          }
+        }
+        if (cancelled) return;
         const manager = new mod.SessionManager(storage);
         const codecInstance = mod.createNip46Codec(mod.createDefaultCodecConfig());
         setSessionManager(manager);
@@ -161,18 +173,23 @@ export const Nip46Provider: React.FC<{ children: React.ReactNode }> = ({ childre
   useEffect(() => {
     if (!ready || !transportReady || !service || !sessionManager || !ndk) return;
     const now = Date.now();
+    const activeAdoptedSessionId = activeSessionRef.current;
     snapshot.sessions.forEach(session => {
-      if (session.status === "revoked") return;
-      if (session.lastError) return;
       if (session.status !== "active") return;
       if (!session.remoteSignerPubkey) return;
+      if (session.lastError) return;
+
+      const shouldReconnect =
+        activeAdoptedSessionId === session.id ||
+        (session.lastSeenAt != null && now - session.lastSeenAt <= RECONNECT_COOLDOWN_MS);
+
+      if (!shouldReconnect) {
+        return;
+      }
+
       if (reconnectTrackerRef.current.has(session.id)) return;
       const lastAttempt = reconnectCooldownRef.current.get(session.id);
       if (lastAttempt && now - lastAttempt < RECONNECT_COOLDOWN_MS) return;
-      if (session.lastSeenAt && now - session.lastSeenAt < RECONNECT_COOLDOWN_MS) {
-        reconnectCooldownRef.current.set(session.id, now);
-        return;
-      }
       reconnectTrackerRef.current.add(session.id);
       reconnectCooldownRef.current.set(session.id, now);
       void service

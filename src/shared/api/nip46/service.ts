@@ -11,6 +11,7 @@ import { generateKeypair } from "./keys";
 import { Nip46Method, Nip46EncryptionAlgorithm } from "./types";
 import { RequestQueue } from "./transport/requestQueue";
 import { TransportConfig } from "./transport";
+import { sanitizeRelayUrl } from "../../utils/relays";
 
 interface ServiceOptions {
   codec: Nip46Codec;
@@ -203,9 +204,10 @@ const normalizeRelays = (relays?: string[]): string[] => {
   const unique = new Set<string>();
   relays.forEach(relay => {
     if (typeof relay !== "string") return;
-    const trimmed = relay.trim();
-    if (!trimmed) return;
-    unique.add(trimmed);
+    const sanitized = sanitizeRelayUrl(relay);
+    if (!sanitized) return;
+    const normalized = sanitized.endsWith("/") ? sanitized : `${sanitized}/`;
+    unique.add(normalized);
   });
   return Array.from(unique);
 };
