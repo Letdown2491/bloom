@@ -910,6 +910,63 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
     return Array.from(DEFAULT_RELAYS);
   }, [preferredRelays, poolRelays]);
 
+  const [relaySelections, setRelaySelections] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    setRelaySelections(prev => {
+      let changed = false;
+      const next: Record<string, boolean> = {};
+      effectiveRelays.forEach(url => {
+        if (prev[url] === undefined) changed = true;
+        next[url] = prev[url] ?? true;
+      });
+      Object.keys(prev).forEach(url => {
+        if (!effectiveRelays.includes(url)) changed = true;
+      });
+      if (!changed) {
+        const prevKeys = Object.keys(prev);
+        if (prevKeys.length !== effectiveRelays.length) changed = true;
+      }
+      return changed ? next : prev;
+    });
+  }, [effectiveRelays]);
+
+  const selectedRelays = useMemo(
+    () => effectiveRelays.filter(url => relaySelections[url] !== false),
+    [effectiveRelays, relaySelections]
+  );
+
+  useEffect(() => {
+    setRelayStatuses(prev => {
+      let changed = false;
+      const next: Record<string, RelayState> = {};
+      selectedRelays.forEach(url => {
+        if (prev[url]) {
+          next[url] = prev[url];
+        } else {
+          changed = true;
+        }
+      });
+      Object.keys(prev).forEach(url => {
+        if (!selectedRelays.includes(url)) {
+          changed = true;
+        }
+      });
+      if (!changed) {
+        if (Object.keys(prev).length !== Object.keys(next).length) {
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [selectedRelays]);
+
+  useEffect(() => {
+    if (selectedRelays.length > 0) {
+      setGlobalError(prev => (prev === "Select at least one relay to share." ? null : prev));
+    }
+  }, [selectedRelays]);
+
   const previewDisplayName = useMemo(() => {
     if (profileInfo.displayName) return profileInfo.displayName;
     if (profileInfo.username) return profileInfo.username;
@@ -996,24 +1053,27 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
 
   const successes = useMemo(
     () =>
-      Object.entries(relayStatuses)
-        .filter(([, state]) => state.status === "success")
-        .map(([url]) => url),
-    [relayStatuses]
+      selectedRelays.filter(url => relayStatuses[url]?.status === "success"),
+    [relayStatuses, selectedRelays]
   );
 
   const failures = useMemo(
     () =>
-      Object.entries(relayStatuses)
-        .filter(([, state]) => state.status === "error")
-        .map(([url, state]) => ({ url, message: state.message })),
-    [relayStatuses]
+      selectedRelays
+        .filter(url => relayStatuses[url]?.status === "error")
+        .map(url => ({ url, message: relayStatuses[url]?.message })),
+    [relayStatuses, selectedRelays]
   );
 
   const allComplete = useMemo(() => {
     if (!publishing && Object.keys(relayStatuses).length === 0) return false;
-    return effectiveRelays.every(url => relayStatuses[url]?.status === "success" || relayStatuses[url]?.status === "error");
-  }, [effectiveRelays, relayStatuses, publishing]);
+    return selectedRelays.length > 0
+      ? selectedRelays.every(url => {
+          const status = relayStatuses[url]?.status;
+          return status === "success" || status === "error";
+        })
+      : false;
+  }, [selectedRelays, relayStatuses, publishing]);
 
   const handleShare = async () => {
     if (!payload?.url) {
@@ -1028,9 +1088,13 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
       setGlobalError("Unable to resolve your pubkey. Reconnect your signer and try again.");
       return;
     }
-    const relays = effectiveRelays;
+    const relays = selectedRelays;
     if (!relays.length) {
-      setGlobalError("No relays available. Update your profile with preferred relays and try again.");
+      setGlobalError(
+        effectiveRelays.length === 0
+          ? "No relays available. Update your profile with preferred relays and try again."
+          : "Select at least one relay to share."
+      );
       return;
     }
 
@@ -1522,6 +1586,17 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
   const previewActionCircleClass = isLightTheme
     ? "flex h-9 w-9 items-center justify-center rounded-full bg-slate-100 text-slate-500"
     : "flex h-9 w-9 items-center justify-center rounded-full bg-slate-900/60 text-slate-300";
+  const relayOptionBaseClass = "flex items-center gap-3";
+  const relayCheckboxClass = isLightTheme
+    ? "mt-1 h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+    : "mt-1 h-4 w-4 rounded border-slate-700 bg-slate-950 text-emerald-500 focus:ring-emerald-500";
+  const relayUrlTextClass = isLightTheme
+    ? "font-mono text-[11px] text-slate-700 sm:text-xs"
+    : "font-mono text-[11px] text-slate-200 sm:text-xs";
+  const relaySelectionHintClass = isLightTheme ? "text-xs text-red-500" : "text-xs text-red-300";
+  const relayStatusWrapperClass = isLightTheme
+    ? "flex items-center gap-2 text-xs text-slate-500"
+    : "flex items-center gap-2 text-xs text-slate-400";
 
   const shareAppendix = useMemo(() => {
     if (!payload) return null;
@@ -1564,13 +1639,16 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
     : "Publish note";
   const ShareActionIcon = isDmMode ? SendIcon : NoteIcon;
 
-  const relayLabel = isDmMode
+  const baseRelayLabel = isDmMode
     ? "Using connected relays"
     : usingFallbackRelays
     ? usingDefaultFallback
       ? "Using default Bloom relays"
       : "Using connected relays"
     : "Your preferred relays";
+  const relayLabelSuffix =
+    effectiveRelays.length > 0 ? ` (${selectedRelays.length}/${effectiveRelays.length})` : "";
+  const relayLabel = `${baseRelayLabel}${relayLabelSuffix}`;
   const RelayIcon: React.FC<{ className?: string }> = ({ className }) => (
     <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
       <circle cx="12" cy="12" r="3" />
@@ -1758,14 +1836,36 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
                         {metadataError}
                       </div>
                     )}
-                    <ul className="space-y-1 text-xs text-slate-400">
-                      {effectiveRelays.map(url => (
-                        <li key={url} className="flex items-center justify-between gap-3 text-slate-300">
-                          <span className="font-mono text-[11px] text-slate-200 sm:text-xs">{url}</span>
-                          {renderRelayStatus(url)}
-                        </li>
-                      ))}
+                    <ul className="space-y-2">
+                      {effectiveRelays.map(url => {
+                        const checked = relaySelections[url] !== false;
+                        return (
+                          <li key={url}>
+                            <label className={`${relayOptionBaseClass} ${publishing ? "cursor-not-allowed opacity-60" : "cursor-pointer"}`}>
+                              <input
+                                type="checkbox"
+                                className={relayCheckboxClass}
+                                checked={checked}
+                                onChange={() =>
+                                  setRelaySelections(prev => ({
+                                    ...prev,
+                                    [url]: !checked,
+                                  }))
+                                }
+                                disabled={publishing}
+                              />
+                              <div className="flex flex-1 flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                                <span className={relayUrlTextClass}>{url}</span>
+                                <span className={relayStatusWrapperClass}>{renderRelayStatus(url)}</span>
+                              </div>
+                            </label>
+                          </li>
+                        );
+                      })}
                     </ul>
+                    {selectedRelays.length === 0 && (
+                      <p className={relaySelectionHintClass}>Select at least one relay before sharing.</p>
+                    )}
                   </>
                 )}
               </section>
@@ -1775,7 +1875,7 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
                   type="button"
                   onClick={handleShare}
                   className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-60"
-                  disabled={publishing || !data.url || (isDmMode && !selectedRecipient)}
+                  disabled={publishing || !data.url || (isDmMode && !selectedRecipient) || selectedRelays.length === 0}
                 >
                   <ShareActionIcon className="h-4 w-4" />
                   <span>{shareButtonLabel}</span>

@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { useUserPreferences } from "../../../app/context/UserPreferencesContext";
 import type { FolderListRecord } from "../../../shared/domain/folderList";
 import {
   ChevronRightIcon,
@@ -32,6 +33,11 @@ export const FolderShareRelayPrompt: React.FC<FolderShareRelayPromptProps> = ({
   onConfirm,
   onCancel,
 }) => {
+  const {
+    preferences: { theme },
+  } = useUserPreferences();
+  const isLightTheme = theme === "light";
+
   const folderLabel = useMemo(() => {
     const name = record.name?.trim() || "Shared folder";
     const path = record.path?.trim() || "/";
@@ -109,27 +115,56 @@ export const FolderShareRelayPrompt: React.FC<FolderShareRelayPromptProps> = ({
   const selectedCount = selected.size;
   const totalCount = relays.length;
 
+  const overlayClass = "fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 backdrop-blur-sm p-4";
+  const containerClass = isLightTheme
+    ? "w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-6 text-slate-800 shadow-xl"
+    : "w-full max-w-lg rounded-2xl border border-slate-800 bg-slate-900/90 p-6 shadow-xl text-slate-100";
+  const headingClass = isLightTheme ? "text-lg font-semibold text-slate-900" : "text-lg font-semibold text-slate-100";
+  const folderLabelClass = isLightTheme ? "mt-2 text-sm text-slate-600 break-all" : "mt-2 text-sm text-slate-300 break-all";
+  const descriptionClass = isLightTheme ? "mt-4 text-sm text-slate-600" : "mt-4 text-sm text-slate-300";
+  const helperTextClass = isLightTheme ? "mt-3 text-xs text-slate-500" : "mt-3 text-xs text-slate-500";
+  const selectionIntroClass = isLightTheme ? "flex items-center justify-between text-xs text-slate-500" : "flex items-center justify-between text-xs text-slate-400";
+  const selectionContainerClass = isLightTheme
+    ? "max-h-56 space-y-2 overflow-y-auto rounded-xl border border-slate-200 bg-slate-50 p-3"
+    : "max-h-56 space-y-2 overflow-y-auto rounded-xl border border-slate-800/80 bg-slate-950/60 p-3";
+  const selectionCountClass = isLightTheme ? "text-xs text-slate-500" : "text-xs text-slate-500";
+  const toggleLinkClass = isLightTheme
+    ? "text-emerald-600 hover:text-emerald-500 focus:outline-none disabled:opacity-60"
+    : "text-emerald-300 hover:text-emerald-200 focus:outline-none disabled:opacity-60";
+  const cancelButtonClass = isLightTheme
+    ? "inline-flex items-center gap-2 rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-400 hover:text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-white disabled:opacity-60"
+    : "inline-flex items-center gap-2 rounded-xl border border-slate-700 px-4 py-2 text-sm font-semibold text-slate-200 transition hover:border-slate-600 hover:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-slate-950 disabled:opacity-60";
+  const secondaryButtonClass = isLightTheme
+    ? "inline-flex items-center gap-2 rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-400 hover:text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-white disabled:cursor-not-allowed disabled:opacity-60"
+    : "inline-flex items-center gap-2 rounded-xl border border-slate-700 px-4 py-2 text-sm font-semibold text-slate-200 transition hover:border-slate-600 hover:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-slate-950 disabled:cursor-not-allowed disabled:opacity-60";
+  const primaryButtonClass = isLightTheme
+    ? "inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-white disabled:cursor-not-allowed disabled:opacity-60"
+    : "inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-slate-900 transition hover:bg-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-slate-950 disabled:cursor-not-allowed disabled:opacity-60";
+  const tertiaryButtonClass = isLightTheme
+    ? "inline-flex items-center gap-2 rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-400 hover:text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-white disabled:cursor-not-allowed disabled:opacity-60"
+    : "inline-flex items-center gap-2 rounded-xl border border-slate-700 px-4 py-2 text-sm font-semibold text-slate-200 transition hover:border-slate-600 hover:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-slate-950 disabled:cursor-not-allowed disabled:opacity-60";
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4">
-      <div className="w-full max-w-lg rounded-2xl border border-slate-800 bg-slate-900/90 p-6 shadow-xl">
-        <h2 className="text-lg font-semibold text-slate-100">Select where to share</h2>
-        <p className="mt-2 text-sm text-slate-300 break-all">{folderLabel}</p>
-        <p className="mt-4 text-sm text-slate-300">
+    <div className={overlayClass}>
+      <div className={containerClass}>
+        <h2 className={headingClass}>Select where to share</h2>
+        <p className={folderLabelClass}>{folderLabel}</p>
+        <p className={descriptionClass}>
           Sharing this folder will make it publicly accessible to anyone with the link. We will publish the folder
           details to your preferred relays (NIP-65) so other clients can find it.
         </p>
         {!showSelection ? (
-          <p className="mt-3 text-xs text-slate-500">
+          <p className={helperTextClass}>
             Continue to publish to all {totalCount} configured relays, or review the list before publishing.
           </p>
         ) : (
           <div className="mt-4 space-y-3">
-            <div className="flex items-center justify-between text-xs text-slate-400">
+            <div className={selectionIntroClass}>
               <span>Select the relays to publish this folder to:</span>
               <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  className="text-emerald-300 hover:text-emerald-200 focus:outline-none"
+                  className={toggleLinkClass}
                   onClick={handleSelectAll}
                   disabled={submitting}
                 >
@@ -145,25 +180,34 @@ export const FolderShareRelayPrompt: React.FC<FolderShareRelayPromptProps> = ({
                 </button>
               </div>
             </div>
-            <div className="max-h-56 space-y-2 overflow-y-auto rounded-xl border border-slate-800/80 bg-slate-950/60 p-3">
+            <div className={selectionContainerClass}>
               {relays.map(url => {
                 const checked = selected.has(url);
                 const relayId = `relay-option-${normalizeRelayUrlForId(url)}`;
+                const labelBaseClass = isLightTheme
+                  ? "flex items-center gap-3 rounded-lg border border-transparent px-2 py-1.5 text-sm text-slate-700 transition"
+                  : "flex items-center gap-3 rounded-lg border border-transparent px-2 py-1.5 text-sm text-slate-200 transition";
+                const labelActiveClass = isLightTheme ? "border-emerald-500/60 bg-emerald-50" : "border-slate-700/80";
+                const labelInactiveHoverClass = isLightTheme ? "hover:border-slate-300" : "hover:border-slate-700/80";
                 return (
                   <label
                     key={url}
                     htmlFor={relayId}
-                    className="flex items-center gap-3 rounded-lg border border-transparent px-2 py-1.5 text-sm text-slate-200 hover:border-slate-700/80"
+                    className={`${labelBaseClass} ${checked ? labelActiveClass : labelInactiveHoverClass}`}
                   >
                     <input
                       id={relayId}
                       type="checkbox"
-                      className="h-4 w-4 rounded border-slate-700 bg-slate-900 text-emerald-500 focus:ring-emerald-500"
+                      className={
+                        isLightTheme
+                          ? "h-4 w-4 rounded border-slate-300 bg-white text-emerald-600 focus:ring-emerald-500"
+                          : "h-4 w-4 rounded border-slate-700 bg-slate-900 text-emerald-500 focus:ring-emerald-500"
+                      }
                       checked={checked}
                       disabled={submitting}
                       onChange={() => toggleRelay(url)}
                     />
-                    <span className="font-medium">{formatRelayLabel(url)}</span>
+                    <span className={isLightTheme ? "font-medium text-slate-800" : "font-medium"}>{formatRelayLabel(url)}</span>
                     <span className="text-xs text-slate-500">{url}</span>
                   </label>
                 );
@@ -172,7 +216,7 @@ export const FolderShareRelayPrompt: React.FC<FolderShareRelayPromptProps> = ({
                 <p className="text-xs text-slate-500">No relays configured.</p>
               ) : null}
             </div>
-            <p className="text-xs text-slate-500">
+            <p className={selectionCountClass}>
               {selectedCount}/{totalCount} relays selected.
             </p>
           </div>
@@ -180,7 +224,7 @@ export const FolderShareRelayPrompt: React.FC<FolderShareRelayPromptProps> = ({
         <div className="mt-6 flex items-center justify-between">
           <button
             type="button"
-            className="inline-flex items-center gap-2 rounded-xl border border-slate-700 px-4 py-2 text-sm font-semibold text-slate-200 transition hover:border-slate-600 hover:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-slate-950"
+            className={cancelButtonClass}
             onClick={onCancel}
             disabled={submitting}
           >
@@ -191,7 +235,7 @@ export const FolderShareRelayPrompt: React.FC<FolderShareRelayPromptProps> = ({
             <div className="flex items-center gap-2">
               <button
                 type="button"
-                className="inline-flex items-center gap-2 rounded-xl border border-slate-700 px-4 py-2 text-sm font-semibold text-slate-200 transition hover:border-slate-600 hover:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-slate-950"
+                className={secondaryButtonClass}
                 onClick={() => setShowSelection(true)}
                 disabled={submitting}
               >
@@ -200,7 +244,7 @@ export const FolderShareRelayPrompt: React.FC<FolderShareRelayPromptProps> = ({
               </button>
               <button
                 type="button"
-                className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-slate-900 transition hover:bg-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-slate-950 disabled:cursor-not-allowed disabled:opacity-70"
+                className={primaryButtonClass}
                 onClick={handleContinueWithAll}
                 disabled={submitting}
               >
@@ -212,7 +256,7 @@ export const FolderShareRelayPrompt: React.FC<FolderShareRelayPromptProps> = ({
             <div className="flex items-center gap-2">
               <button
                 type="button"
-                className="inline-flex items-center gap-2 rounded-xl border border-slate-700 px-4 py-2 text-sm font-semibold text-slate-200 transition hover:border-slate-600 hover:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-slate-950"
+                className={tertiaryButtonClass}
                 onClick={() => {
                   setShowSelection(false);
                   handleSelectAll();
@@ -224,7 +268,7 @@ export const FolderShareRelayPrompt: React.FC<FolderShareRelayPromptProps> = ({
               </button>
               <button
                 type="button"
-                className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-slate-900 transition hover:bg-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-slate-950 disabled:cursor-not-allowed disabled:opacity-70"
+                className={primaryButtonClass}
                 onClick={handlePublishSelected}
                 disabled={submitting || selectedCount === 0}
               >

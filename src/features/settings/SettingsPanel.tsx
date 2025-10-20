@@ -1529,7 +1529,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
               <>
                 <div className="flex items-center gap-3">
                   <div
-                    className={`flex h-10 w-10 items-center justify-center rounded-xl ${
+                    className={`flex h-6 w-6 items-center justify-center rounded-lg ${
                       indexedDbMeasuring
                         ? "bg-slate-800 text-slate-400"
                         : theme === "light"
@@ -1537,22 +1537,26 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                           : "bg-emerald-500/20 text-emerald-300"
                     }`}
                   >
-                    <DownloadIcon size={18} />
+                    <DownloadIcon size={12} />
                   </div>
-                  <div className="flex flex-col text-xs text-slate-400">
+                  <div className="flex flex-wrap items-baseline gap-2 text-xs text-slate-400">
                     <span>Total cached</span>
-                    <span className="text-sm font-medium text-slate-200">
+                    <span className="text-xs font-semibold text-slate-200">
                       {indexedDbMeasuring ? "Measuring…" : formatBytes(indexedDbDisplayBytes)}
                     </span>
                     {indexedDbMeasuredAt ? (
-                      <span className="text-[11px] text-slate-500">
-                        Measured {formatRelativeTime(indexedDbMeasuredAt)}
+                      <span className="text-xs text-slate-500">
+                        (Updated {formatRelativeTime(indexedDbMeasuredAt)})
                       </span>
                     ) : null}
                   </div>
                 </div>
                 <dl className="mt-3 grid gap-3 text-xs text-slate-400 md:grid-cols-2">
-                  <div className="rounded-xl border border-slate-700/70 bg-slate-900/20 p-3">
+                  <div
+                    className={`rounded-xl border p-3 ${
+                      theme === "light" ? "border-slate-200 bg-white shadow-sm" : "border-slate-700/70 bg-slate-900/20"
+                    }`}
+                  >
                     <div className="flex items-center justify-between text-slate-300">
                       <dt>Preview cache</dt>
                       <dd className="text-slate-200">
@@ -1572,7 +1576,11 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                       <p className="mt-2 text-[11px] text-slate-500">No cached previews yet.</p>
                     )}
                   </div>
-                  <div className="rounded-xl border border-slate-700/70 bg-slate-900/20 p-3">
+                  <div
+                    className={`rounded-xl border p-3 ${
+                      theme === "light" ? "border-slate-200 bg-white shadow-sm" : "border-slate-700/70 bg-slate-900/20"
+                    }`}
+                  >
                     <div className="flex items-center justify-between text-slate-300">
                       <dt>Folder manifest</dt>
                       <dd className="text-slate-200">
