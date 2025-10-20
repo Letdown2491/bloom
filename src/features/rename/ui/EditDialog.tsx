@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { BlossomBlob } from "../../../shared/api/blossomClient";
 import { useUserPreferences } from "../../../app/context/UserPreferencesContext";
 import { prettyDate } from "../../../shared/utils/format";
@@ -82,9 +83,7 @@ export const EditDialog: React.FC<EditDialogProps> = ({
   } = useUserPreferences();
   const isLightTheme = theme === "light";
 
-  const overlayClass = isLightTheme
-    ? "fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4"
-    : "fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4";
+  const overlayClass = "fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 backdrop-blur-sm p-4";
   const dialogClass = isLightTheme
     ? "w-full max-w-xl rounded-2xl border border-slate-200 bg-white p-6 text-slate-800 shadow-xl"
     : "w-full max-w-xl rounded-2xl border border-slate-800 bg-slate-900/90 p-6 shadow-xl";
@@ -107,6 +106,7 @@ export const EditDialog: React.FC<EditDialogProps> = ({
     : "rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-slate-900 hover:bg-emerald-500 disabled:opacity-50";
   const shaHighlightClass = isLightTheme ? "font-mono text-emerald-600" : "font-mono text-emerald-300";
   const panelNoteClass = isLightTheme ? "mt-2 text-xs text-slate-500" : "mt-2 text-xs text-slate-400";
+  const [mounted, setMounted] = useState(false);
 
   const baseInputClass = isLightTheme
     ? "mt-2 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-slate-800 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
@@ -245,6 +245,11 @@ export const EditDialog: React.FC<EditDialogProps> = ({
       onSubmit();
     }
   };
+
+  useEffect(() => {
+    setMounted(true);
+    return () => setMounted(false);
+  }, []);
 
   const renderMusicFields = () => {
     if (!isMusic) return null;
@@ -403,7 +408,11 @@ export const EditDialog: React.FC<EditDialogProps> = ({
     );
   };
 
-  return (
+  if (!mounted || typeof document === "undefined") {
+    return null;
+  }
+
+  return createPortal(
     <div className={overlayClass} onKeyDown={handleKeyDown}>
       <div className={dialogClass}>
         <h2 className={headingClass}>Edit file details</h2>
@@ -504,6 +513,7 @@ export const EditDialog: React.FC<EditDialogProps> = ({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };

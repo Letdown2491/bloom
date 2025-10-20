@@ -1,6 +1,8 @@
-import { BLOOM_PREVIEW_CACHE_NAME, checkLocalStorageQuota, estimateEntryBytes } from "./storageQuota";
+import { BLOOM_PREVIEW_CACHE_NAME, estimateEntryBytes } from "./storageQuota";
+import { getKv, setKv, deleteKv, getKvKeys } from "./cacheDb";
 
 const CACHE_NAME = BLOOM_PREVIEW_CACHE_NAME;
+const INLINE_DATA_PREFIX = "preview:inline:v1:";
 const LOCAL_STORAGE_PREFIX = "bloom:preview-cache:v1:";
 const MAX_CACHE_BYTES = 4 * 1024 * 1024; // 4MB cap to avoid storing very large previews
 const MAX_LOCAL_STORAGE_ENTRY_BYTES = 120 * 1024; // single preview cap (~120KB)
@@ -8,6 +10,7 @@ const MAX_LOCAL_STORAGE_TOTAL_BYTES = 400 * 1024; // total fallback cap (~400KB)
 const LOCAL_STORAGE_INLINE_LIMIT_BYTES = 60 * 1024; // keep main-thread base64 work tiny
 const LOCAL_STORAGE_META_KEY = `${LOCAL_STORAGE_PREFIX}__meta__`;
 const LOCAL_STORAGE_META_VERSION = 1;
+const PREVIEW_META_KV_KEY = "preview:meta:v1";
 
 type PreviewMetaEntry = {
   size: number;
@@ -23,6 +26,8 @@ type PreviewMetaRecord = {
 let previewMetaCache: Map<string, PreviewMetaEntry> | null = null;
 let previewMetaDirty = false;
 let previewMetaPersistScheduled = false;
+let previewStorageDisabled = false;
+let previewMetaLoadPromise: Promise<void> | null = null;
 
 const scheduleIdleWork = (work: () => void) => {
   if (typeof window === "undefined") {
@@ -67,14 +72,37 @@ function buildCacheRequest(key: string) {
   return new Request(url.toString(), { method: "GET" });
 }
 
-async function readFromLocalStorage(key: string): Promise<Blob | null> {
+const buildInlineStorageKey = (key: string) => `${INLINE_DATA_PREFIX}${key}`;
+const buildLegacyStorageKey = (key: string) => `${LOCAL_STORAGE_PREFIX}${key}`;
+
+async function readFromInlineStore(key: string): Promise<Blob | null> {
   if (typeof window === "undefined") return null;
-  const storageKey = `${LOCAL_STORAGE_PREFIX}${key}`;
+  const inlineKey = buildInlineStorageKey(key);
   let raw: string | null = null;
-  try {
-    raw = window.localStorage.getItem(storageKey);
-  } catch (error) {
-    raw = null;
+
+  if (!previewStorageDisabled) {
+    try {
+      raw = (await getKv<string>(inlineKey)) ?? null;
+    } catch (error) {
+      previewStorageDisabled = true;
+      raw = null;
+    }
+  }
+
+  if (!raw) {
+    try {
+      raw = window.localStorage.getItem(buildLegacyStorageKey(key));
+      if (raw) {
+        if (!previewStorageDisabled) {
+          void setKv(inlineKey, raw).catch(() => {
+            previewStorageDisabled = true;
+          });
+        }
+        window.localStorage.removeItem(buildLegacyStorageKey(key));
+      }
+    } catch (error) {
+      raw = null;
+    }
   }
 
   if (!raw) {
@@ -85,27 +113,25 @@ async function readFromLocalStorage(key: string): Promise<Blob | null> {
   try {
     const response = await fetch(raw);
     if (!response.ok) {
-      deletePreviewStorageEntry(key);
+      await deleteKv(inlineKey).catch(() => undefined);
+      removePreviewMetaEntry(key);
       return null;
     }
     const blob = await response.blob();
     const now = Date.now();
     const meta = getPreviewMeta();
     const existing = meta.get(key);
-    if (existing) {
-      updatePreviewMetaEntry(key, { ...existing, lastAccessed: now });
-    } else {
-      const size = estimateEntryBytes(storageKey, raw);
-      updatePreviewMetaEntry(key, { size, updatedAt: now, lastAccessed: now });
-    }
+    const size = existing?.size ?? estimateEntryBytes(inlineKey, raw);
+    updatePreviewMetaEntry(key, { size, updatedAt: now, lastAccessed: now });
     return blob;
   } catch (error) {
-    deletePreviewStorageEntry(key);
+    await deleteKv(inlineKey).catch(() => undefined);
+    removePreviewMetaEntry(key);
     return null;
   }
 }
 
-async function writeToLocalStorage(key: string, blob: Blob) {
+async function writeToInlineStore(key: string, blob: Blob) {
   if (typeof window === "undefined") return;
   if (blob.size === 0 || blob.size > LOCAL_STORAGE_INLINE_LIMIT_BYTES) return;
   await new Promise<void>(resolve => {
@@ -121,23 +147,36 @@ async function writeToLocalStorage(key: string, blob: Blob) {
           };
           reader.readAsDataURL(blob);
         });
-        const storageKey = `${LOCAL_STORAGE_PREFIX}${key}`;
-        const entrySize = estimateEntryBytes(storageKey, dataUrl);
+        const entrySize = estimateEntryBytes(buildInlineStorageKey(key), dataUrl);
         if (!ensurePreviewStorageCapacity(key, entrySize)) {
           resolve();
           return;
         }
-        try {
-          window.localStorage.setItem(storageKey, dataUrl);
-          const now = Date.now();
-          updatePreviewMetaEntry(key, { size: entrySize, updatedAt: now, lastAccessed: now });
-          const quota = checkLocalStorageQuota("preview-cache");
-          if (quota.status === "critical") {
-            ensurePreviewStorageCapacity(key, 0);
+        let stored = false;
+        if (!previewStorageDisabled) {
+          try {
+            await setKv(buildInlineStorageKey(key), dataUrl);
+            stored = true;
+            window.localStorage.removeItem(buildLegacyStorageKey(key));
+          } catch (error) {
+            previewStorageDisabled = true;
           }
-        } catch (error) {
-          deletePreviewStorageEntry(key);
         }
+        if (!stored) {
+          try {
+            window.localStorage.setItem(buildLegacyStorageKey(key), dataUrl);
+            stored = true;
+          } catch (error) {
+            stored = false;
+          }
+        }
+        if (!stored) {
+          deletePreviewStorageEntry(key);
+          resolve();
+          return;
+        }
+        const now = Date.now();
+        updatePreviewMetaEntry(key, { size: entrySize, updatedAt: now, lastAccessed: now });
       } catch (error) {
         deletePreviewStorageEntry(key);
       } finally {
@@ -202,7 +241,7 @@ export async function getCachedPreviewBlob(serverUrl: string | undefined, sha256
   if (!key) return null;
   const cacheHit = await readFromCacheStorage(key);
   if (cacheHit) return cacheHit;
-  return await readFromLocalStorage(key);
+  return await readFromInlineStore(key);
 }
 
 export async function cachePreviewBlob(serverUrl: string | undefined, sha256: string, blob: Blob) {
@@ -210,7 +249,7 @@ export async function cachePreviewBlob(serverUrl: string | undefined, sha256: st
   if (!key) return;
   if (!blob.type?.startsWith("image/")) return; // only cache image previews
   await writeToCacheStorage(key, blob);
-  await writeToLocalStorage(key, blob);
+  await writeToInlineStore(key, blob);
 }
 
 export async function invalidateCachedPreview(serverUrl: string | undefined, sha256: string) {
@@ -246,20 +285,111 @@ const enqueueMicrotaskShim = (cb: () => void) => {
   }
 };
 
+const readLegacyMetaRecord = (): PreviewMetaRecord | null => {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(LOCAL_STORAGE_META_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as PreviewMetaRecord | null;
+    if (!parsed || typeof parsed !== "object") return null;
+    if (parsed.version !== LOCAL_STORAGE_META_VERSION) return null;
+    return parsed;
+  } catch (error) {
+    return null;
+  }
+};
+
+const populatePreviewMeta = (record: PreviewMetaRecord) => {
+  previewMetaCache = new Map();
+  const entries = record.entries ?? {};
+  Object.entries(entries).forEach(([key, value]) => {
+    if (!key || !value) return;
+    const size = typeof value.size === "number" && Number.isFinite(value.size) ? value.size : 0;
+    if (size <= 0) return;
+    const updatedAt =
+      typeof value.updatedAt === "number" && Number.isFinite(value.updatedAt) ? value.updatedAt : Date.now();
+    const lastAccessed =
+      typeof value.lastAccessed === "number" && Number.isFinite(value.lastAccessed)
+        ? value.lastAccessed
+        : updatedAt;
+    previewMetaCache!.set(key, { size, updatedAt, lastAccessed });
+  });
+  previewMetaDirty = false;
+};
+
+const ensurePreviewMetaLoaded = () => {
+  if (previewMetaCache) return previewMetaCache;
+  previewMetaCache = new Map();
+  if (typeof window === "undefined") {
+    return previewMetaCache;
+  }
+  if (!previewMetaLoadPromise) {
+    previewMetaLoadPromise = (async () => {
+      let record: PreviewMetaRecord | null = null;
+      if (!previewStorageDisabled) {
+        try {
+          const stored = await getKv<PreviewMetaRecord>(PREVIEW_META_KV_KEY);
+          if (stored && typeof stored === "object") {
+            record = stored;
+          }
+        } catch (error) {
+          previewStorageDisabled = true;
+        }
+      }
+      if (!record) {
+        record = readLegacyMetaRecord();
+        if (record && !previewStorageDisabled) {
+          try {
+            await setKv(PREVIEW_META_KV_KEY, record);
+            window.localStorage.removeItem(LOCAL_STORAGE_META_KEY);
+          } catch (error) {
+            previewStorageDisabled = true;
+          }
+        }
+      }
+      if (record) {
+        populatePreviewMeta(record);
+      }
+    })().finally(() => {
+      previewMetaLoadPromise = null;
+    });
+  }
+  return previewMetaCache;
+};
+
 const persistPreviewMeta = () => {
   previewMetaPersistScheduled = false;
   if (!previewMetaDirty || !previewMetaCache) return;
   if (typeof window === "undefined") return;
-  try {
-    const payload: PreviewMetaRecord = { version: LOCAL_STORAGE_META_VERSION, entries: {} };
-    previewMetaCache.forEach((value, key) => {
-      payload.entries[key] = value;
-    });
-    window.localStorage.setItem(LOCAL_STORAGE_META_KEY, JSON.stringify(payload));
-    previewMetaDirty = false;
-  } catch (error) {
-    // Ignore persistence failures (quota, private mode, etc.).
+  const payload: PreviewMetaRecord = { version: LOCAL_STORAGE_META_VERSION, entries: {} };
+  previewMetaCache.forEach((value, key) => {
+    payload.entries[key] = value;
+  });
+
+  const persistLegacy = () => {
+    try {
+      window.localStorage.setItem(LOCAL_STORAGE_META_KEY, JSON.stringify(payload));
+      previewMetaDirty = false;
+    } catch (error) {
+      // Ignore legacy persistence failures.
+    }
+  };
+
+  if (previewStorageDisabled) {
+    persistLegacy();
+    return;
   }
+
+  void (async () => {
+    try {
+      await setKv(PREVIEW_META_KV_KEY, payload);
+      previewMetaDirty = false;
+      window.localStorage.removeItem(LOCAL_STORAGE_META_KEY);
+    } catch (error) {
+      previewStorageDisabled = true;
+      persistLegacy();
+    }
+  })();
 };
 
 const schedulePreviewMetaPersist = () => {
@@ -269,37 +399,7 @@ const schedulePreviewMetaPersist = () => {
   enqueueMicrotaskShim(persistPreviewMeta);
 };
 
-const getPreviewMeta = (): Map<string, PreviewMetaEntry> => {
-  if (previewMetaCache) return previewMetaCache;
-  previewMetaCache = new Map();
-  if (typeof window === "undefined") {
-    return previewMetaCache;
-  }
-  try {
-    const raw = window.localStorage.getItem(LOCAL_STORAGE_META_KEY);
-    if (!raw) return previewMetaCache;
-    const parsed = JSON.parse(raw) as PreviewMetaRecord | null;
-    if (!parsed || typeof parsed !== "object") return previewMetaCache;
-    if (parsed.version !== LOCAL_STORAGE_META_VERSION) return previewMetaCache;
-    const records = parsed.entries;
-    if (!records || typeof records !== "object") return previewMetaCache;
-    Object.entries(records).forEach(([key, value]) => {
-      if (!key || !value) return;
-      const size = typeof value.size === "number" && Number.isFinite(value.size) ? value.size : 0;
-      if (size <= 0) return;
-      const updatedAt =
-        typeof value.updatedAt === "number" && Number.isFinite(value.updatedAt) ? value.updatedAt : Date.now();
-      const lastAccessed =
-        typeof value.lastAccessed === "number" && Number.isFinite(value.lastAccessed)
-          ? value.lastAccessed
-          : updatedAt;
-      previewMetaCache!.set(key, { size, updatedAt, lastAccessed });
-    });
-  } catch (error) {
-    previewMetaCache = new Map();
-  }
-  return previewMetaCache!;
-};
+const getPreviewMeta = (): Map<string, PreviewMetaEntry> => ensurePreviewMetaLoaded();
 
 const removePreviewMetaEntry = (key: string) => {
   const meta = getPreviewMeta();
@@ -327,17 +427,42 @@ const getPreviewMetaTotalSize = (meta: Map<string, PreviewMetaEntry>): number =>
 const cleanupOrphanedPreviewEntries = () => {
   if (typeof window === "undefined") return;
   const meta = getPreviewMeta();
-  let changed = false;
-  meta.forEach((_value, key) => {
-    if (!window.localStorage.getItem(`${LOCAL_STORAGE_PREFIX}${key}`)) {
-      meta.delete(key);
-      changed = true;
+  if (meta.size === 0) return;
+  void (async () => {
+    const removals: string[] = [];
+    for (const key of meta.keys()) {
+      let exists = false;
+      if (!previewStorageDisabled) {
+        try {
+          const stored = await getKv<string>(buildInlineStorageKey(key));
+          exists = typeof stored === "string" && stored.length > 0;
+        } catch (error) {
+          previewStorageDisabled = true;
+        }
+      }
+      if (!exists) {
+        try {
+          const legacy = window.localStorage.getItem(buildLegacyStorageKey(key));
+          exists = typeof legacy === "string" && legacy.length > 0;
+          if (!exists) {
+            window.localStorage.removeItem(buildLegacyStorageKey(key));
+          }
+        } catch (error) {
+          exists = false;
+        }
+      }
+      if (!exists) {
+        removals.push(key);
+      }
     }
-  });
-  if (changed) {
-    previewMetaDirty = true;
-    schedulePreviewMetaPersist();
-  }
+    if (removals.length > 0) {
+      removals.forEach(candidate => {
+        meta.delete(candidate);
+      });
+      previewMetaDirty = true;
+      schedulePreviewMetaPersist();
+    }
+  })();
 };
 
 const enforcePreviewStorageBudget = () => {
@@ -362,10 +487,99 @@ const enforcePreviewStorageBudget = () => {
 cleanupOrphanedPreviewEntries();
 enforcePreviewStorageBudget();
 
-const deletePreviewStorageEntry = (key: string) => {
+export type ClearPreviewInlineResult = {
+  inlineRemoved: number;
+  legacyRemoved: number;
+  metaCleared: boolean;
+  failures: number;
+};
+
+export const clearPreviewInlineStorage = async (): Promise<ClearPreviewInlineResult> => {
+  let inlineRemoved = 0;
+  let legacyRemoved = 0;
+  let failures = 0;
+  let metaCleared = false;
+
+  if (!previewStorageDisabled) {
+    try {
+      const inlineKeys = await getKvKeys(INLINE_DATA_PREFIX);
+      await Promise.all(
+        inlineKeys.map(async key => {
+          try {
+            await deleteKv(key);
+            inlineRemoved += 1;
+          } catch (error) {
+            failures += 1;
+            previewStorageDisabled = true;
+          }
+        })
+      );
+    } catch (error) {
+      previewStorageDisabled = true;
+    }
+  }
+
   if (typeof window !== "undefined") {
     try {
-      window.localStorage.removeItem(`${LOCAL_STORAGE_PREFIX}${key}`);
+      const storage = window.localStorage;
+      const pendingRemoval: string[] = [];
+      for (let index = 0; index < storage.length; index += 1) {
+        const key = storage.key(index);
+        if (key && key.startsWith(LOCAL_STORAGE_PREFIX)) {
+          pendingRemoval.push(key);
+        }
+      }
+      pendingRemoval.forEach(key => {
+        try {
+          storage.removeItem(key);
+          legacyRemoved += 1;
+        } catch (error) {
+          failures += 1;
+        }
+      });
+      try {
+        storage.removeItem(LOCAL_STORAGE_META_KEY);
+        metaCleared = true;
+      } catch (error) {
+        // Ignore meta removal failures.
+      }
+    } catch (error) {
+      // Ignore localStorage enumeration failures.
+    }
+  }
+
+  if (!previewStorageDisabled) {
+    try {
+      await deleteKv(PREVIEW_META_KV_KEY);
+      metaCleared = true;
+    } catch (error) {
+      previewStorageDisabled = true;
+      failures += 1;
+    }
+  }
+
+  previewMetaCache = new Map();
+  previewMetaDirty = false;
+  previewMetaPersistScheduled = false;
+  previewMetaLoadPromise = null;
+  pendingLocalStorageWriteCancels.forEach(cancel => cancel());
+  pendingLocalStorageWriteCancels.clear();
+
+  return {
+    inlineRemoved,
+    legacyRemoved,
+    metaCleared,
+    failures,
+  };
+};
+
+const deletePreviewStorageEntry = (key: string) => {
+  if (!previewStorageDisabled) {
+    void deleteKv(buildInlineStorageKey(key)).catch(() => undefined);
+  }
+  if (typeof window !== "undefined") {
+    try {
+      window.localStorage.removeItem(buildLegacyStorageKey(key));
     } catch (error) {
       // Ignore removal errors.
     }

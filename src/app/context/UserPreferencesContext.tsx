@@ -45,6 +45,7 @@ type UserPreferencesContextValue = {
   setTheme: (theme: "dark" | "light") => void;
   setSyncEnabled: (value: boolean) => Promise<void>;
   syncState: PreferencesSyncState;
+  preferencesReady: boolean;
 };
 
 const DEFAULT_PREFERENCES: UserPreferences = {
@@ -203,6 +204,7 @@ export const UserPreferencesProvider: React.FC<{ children: React.ReactNode }> = 
   const [syncLoading, setSyncLoading] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [hasPending, setHasPending] = useState(false);
+  const [initialSyncReady, setInitialSyncReady] = useState<boolean>(() => !syncEnabled);
 
   const savedSearchesRef = useRef<SyncedSavedSearch[]>([]);
   const syncMetaRef = useRef<SyncMetadata>(initialSyncMeta.current);
@@ -398,10 +400,28 @@ export const UserPreferencesProvider: React.FC<{ children: React.ReactNode }> = 
   }, [applyRemotePreferences, ensureConnection, ndk, preferences, queuePublish, signer, syncEnabled, user]);
 
   useEffect(() => {
-    if (!syncEnabled) return;
-    if (!ndk || !signer || !user) return;
-    if (!isEncryptionCapableSigner(signer)) return;
-    void loadRemotePreferences();
+    if (!syncEnabled) {
+      setInitialSyncReady(true);
+      return;
+    }
+    if (!ndk || !signer || !user || !isEncryptionCapableSigner(signer)) {
+      setInitialSyncReady(true);
+      return;
+    }
+    let cancelled = false;
+    setInitialSyncReady(false);
+    void (async () => {
+      try {
+        await loadRemotePreferences();
+      } finally {
+        if (!cancelled) {
+          setInitialSyncReady(true);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [loadRemotePreferences, ndk, signer, syncEnabled, user]);
 
   useEffect(() => {
@@ -627,6 +647,7 @@ export const UserPreferencesProvider: React.FC<{ children: React.ReactNode }> = 
       setTheme,
       setSyncEnabled,
       syncState,
+      preferencesReady: initialSyncReady,
     }),
     [
       preferences,
@@ -641,6 +662,7 @@ export const UserPreferencesProvider: React.FC<{ children: React.ReactNode }> = 
       setTheme,
       setSyncEnabled,
       syncState,
+      initialSyncReady,
     ]
   );
 

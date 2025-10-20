@@ -7,6 +7,7 @@ import { useFolderLists } from "./context/FolderListContext";
 import { useAudio } from "./context/AudioContext";
 import { useUserPreferences, type DefaultSortOption, type SortDirection } from "./context/UserPreferencesContext";
 import { useDialog } from "./context/DialogContext";
+import { useSyncPipeline } from "./context/SyncPipelineContext";
 import { useServers, ManagedServer, sortServersByName } from "./hooks/useServers";
 import { usePreferredRelays } from "./hooks/usePreferredRelays";
 import { useAliasSync } from "./hooks/useAliasSync";
@@ -342,6 +343,7 @@ export default function App() {
     setSyncEnabled,
     syncState,
   } = useUserPreferences();
+  const { statusMessage: pipelineStatusMessage, statusTone: pipelineStatusTone } = useSyncPipeline();
   const { confirm } = useDialog();
   const { effectiveRelays, relayPolicies } = usePreferredRelays();
   useAliasSync(effectiveRelays, Boolean(pubkey));
@@ -2514,19 +2516,24 @@ export default function App() {
     return { text: "Servers not in sync", tone: "warning" as const };
   }, [syncEnabledServerUrls.length, syncStatus, syncSnapshot.allLinkedServersSynced, syncSnapshot.syncAutoReady]);
 
-  const derivedStatusMessage = statusMessage ?? (syncLoading ? "Syncing settings" : null);
+  const derivedStatusMessage = statusMessage
+    ? statusMessage
+    : pipelineStatusMessage ?? (syncLoading ? "Syncing settings" : null);
   const centerMessage = derivedStatusMessage ?? syncSummary.text;
-  const centerTone = derivedStatusMessage
-    ? derivedStatusMessage === statusMessage
-      ? statusMessageTone === "error"
-        ? "error"
-        : statusMessageTone === "success"
-        ? "success"
-        : "info"
-      : "syncing"
-    : syncSummary.text
-    ? syncSummary.tone
-    : "muted";
+  const centerTone = (() => {
+    if (statusMessage) {
+      if (statusMessageTone === "error") return "error" as const;
+      if (statusMessageTone === "success") return "success" as const;
+      return "info" as const;
+    }
+    if (pipelineStatusMessage) {
+      return pipelineStatusTone;
+    }
+    if (syncLoading) {
+      return "syncing" as const;
+    }
+    return syncSummary.text ? syncSummary.tone : ("muted" as const);
+  })();
   const centerClass = toneClassByKey[centerTone];
 
   const statusSelectValue = selectedServer ?? ALL_SERVERS_VALUE;
@@ -3075,7 +3082,8 @@ const MainNavigation = memo(function MainNavigation({
   const hasBreadcrumbs = Boolean(browseNavigationState?.segments.length);
   const showBreadcrumbs = !isCompactScreen && hasBreadcrumbs;
   const isLightTheme = theme === "light";
-  const allowSearch = !showAuthPrompt;
+  const { settingsReady } = useSyncPipeline();
+  const allowSearch = !showAuthPrompt && settingsReady;
   useEffect(() => {
     if (!allowSearch) {
       setSyntaxOpen(false);
@@ -3118,7 +3126,7 @@ const MainNavigation = memo(function MainNavigation({
       <button
         key={item.id}
         onClick={() => onSelectTab(nextTab)}
-        disabled={showAuthPrompt}
+        disabled={showAuthPrompt || !settingsReady}
         aria-label={label}
         title={label}
         className={mergeClasses(segmentBaseClass, "justify-center", isActive ? segmentActiveClass : segmentDefaultClass)}
@@ -3236,7 +3244,7 @@ const MainNavigation = memo(function MainNavigation({
         <button
           type="button"
           onClick={onBreadcrumbHome}
-          disabled={showAuthPrompt}
+          disabled={showAuthPrompt || !settingsReady}
           aria-label="Home"
           className={homeButtonClass}
         >
@@ -3247,7 +3255,7 @@ const MainNavigation = memo(function MainNavigation({
           <button
             type="button"
             onClick={() => browseNavigationState?.onNavigateUp?.()}
-            disabled={showAuthPrompt || !browseNavigationState?.canNavigateUp}
+            disabled={showAuthPrompt || !settingsReady || !browseNavigationState?.canNavigateUp}
             className={backButtonClass}
             aria-label="Go back"
           >
@@ -3338,7 +3346,7 @@ const MainNavigation = memo(function MainNavigation({
                 <button
                   type="button"
                   onClick={segment.onNavigate}
-                  disabled={showAuthPrompt}
+                  disabled={showAuthPrompt || !settingsReady}
                   className={breadcrumbButtonClass}
                 >
                   {segment.label}
@@ -3378,7 +3386,7 @@ const MainNavigation = memo(function MainNavigation({
               <button
                 type="button"
                 onClick={onToggleSearch}
-                disabled={showAuthPrompt}
+                disabled={showAuthPrompt || !settingsReady}
                 aria-label="Search files"
                 aria-pressed={isSearchOpen}
                 className={mergeClasses(segmentBaseClass, "w-10 justify-center px-0", searchSegmentState)}

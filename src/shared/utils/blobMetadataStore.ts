@@ -1,5 +1,5 @@
 import type { BlossomBlob } from "../api/blossomClient";
-import { checkLocalStorageQuota } from "./storageQuota";
+import { getKv, setKv } from "./cacheDb";
 
 const METADATA_STORAGE_VERSION = "v3";
 
@@ -27,6 +27,7 @@ type StoredMetadata = {
 };
 
 const STORAGE_KEY = `bloom:blob-metadata:${METADATA_STORAGE_VERSION}`;
+const METADATA_KV_KEY = `blobMetadata:${METADATA_STORAGE_VERSION}`;
 const GLOBAL_METADATA_KEY = "__global__";
 const METADATA_STALE_TTL_MS = 1000 * 60 * 60 * 24 * 180; // 180 days
 
@@ -35,6 +36,8 @@ type StoredMetadataRecord = Record<string, Record<string, StoredMetadata>>;
 let cache: StoredMetadataRecord | null = null;
 let metadataVersion = 0;
 const listeners = new Set<() => void>();
+let loadPromise: Promise<void> | null = null;
+let storageDisabled = false;
 
 type PendingMetadataWrite = {
   serverUrl: string | undefined;
@@ -239,42 +242,92 @@ function normalizeServerKey(serverUrl?: string) {
   return serverUrl.replace(/\/+$/, "");
 }
 
-function readCache() {
-  if (cache) return cache;
-  cache = {};
-  if (typeof window === "undefined") {
-    return cache;
-  }
+const readLegacyStorage = (): StoredMetadataRecord | null => {
+  if (typeof window === "undefined") return null;
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return cache;
+    if (!raw) return null;
     const parsed = JSON.parse(raw);
     if (parsed && typeof parsed === "object") {
-      cache = parsed as StoredMetadataRecord;
-      migrateStoredMetadata(cache);
+      const record = parsed as StoredMetadataRecord;
+      migrateStoredMetadata(record);
+      return record;
     }
   } catch (error) {
-    cache = {};
+    // ignore legacy parse failures
   }
-  return cache;
-}
+  return null;
+};
 
-function persist() {
-  if (typeof window === "undefined" || !cache) return;
-  try {
-    const payload = JSON.stringify(cache);
-    window.localStorage.setItem(STORAGE_KEY, payload);
-    const quota = checkLocalStorageQuota("blob-metadata");
-    if (quota.status === "critical") {
-      const pruned = pruneStaleMetadataEntries(cache, METADATA_STALE_TTL_MS);
-      if (pruned) {
-        window.localStorage.setItem(STORAGE_KEY, JSON.stringify(cache));
-        checkLocalStorageQuota("blob-metadata-pruned", { log: false });
+const ensureCacheLoaded = () => {
+  if (cache) return cache;
+  cache = {};
+  if (typeof window === "undefined" || loadPromise) {
+    return cache;
+  }
+  loadPromise = (async () => {
+    let restored: StoredMetadataRecord | null = null;
+    try {
+      const kv = await getKv<StoredMetadataRecord>(METADATA_KV_KEY);
+      if (kv && typeof kv === "object") {
+        restored = kv;
+      }
+    } catch (error) {
+      storageDisabled = true;
+    }
+
+    if (!restored) {
+      restored = readLegacyStorage();
+      if (restored && !storageDisabled) {
+        try {
+          await setKv(METADATA_KV_KEY, restored);
+          window.localStorage.removeItem(STORAGE_KEY);
+        } catch (error) {
+          storageDisabled = true;
+        }
       }
     }
+
+    if (restored) {
+      migrateStoredMetadata(restored);
+      cache = restored;
+      pruneStaleMetadataEntries(cache, METADATA_STALE_TTL_MS);
+      notifyChange();
+    }
+  })().finally(() => {
+    loadPromise = null;
+  });
+  return cache;
+};
+
+function readCache() {
+  return ensureCacheLoaded();
+}
+
+const persistToLegacyStorage = (record: StoredMetadataRecord) => {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(record));
   } catch (error) {
-    // Ignore persistence errors (quota, privacy mode, etc.).
+    // Ignore legacy persistence errors.
   }
+};
+
+function persist() {
+  if (!cache || typeof window === "undefined") return;
+  pruneStaleMetadataEntries(cache, METADATA_STALE_TTL_MS);
+  if (storageDisabled) {
+    persistToLegacyStorage(cache);
+    return;
+  }
+  void (async () => {
+    try {
+      await setKv(METADATA_KV_KEY, cache as StoredMetadataRecord);
+    } catch (error) {
+      storageDisabled = true;
+      persistToLegacyStorage(cache as StoredMetadataRecord);
+    }
+  })();
 }
 
 function notifyChange() {

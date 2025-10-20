@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useUserPreferences } from "../../../app/context/UserPreferencesContext";
 import {
   CopyIcon,
   ChevronDownIcon,
@@ -65,18 +66,18 @@ const describePhaseStatus = (phase: PublishPhaseState): string => {
   }
 };
 
-const classForPhaseStatus = (phase: PublishPhaseState) => {
+const classForPhaseStatus = (phase: PublishPhaseState, isLightTheme: boolean) => {
   switch (phase.status) {
     case "ready":
-      return "text-emerald-300";
+      return isLightTheme ? "text-emerald-600" : "text-emerald-300";
     case "partial":
-      return "text-amber-300";
+      return isLightTheme ? "text-amber-600" : "text-amber-300";
     case "error":
-      return "text-rose-300";
+      return isLightTheme ? "text-rose-500" : "text-rose-300";
     case "publishing":
-      return "text-slate-300";
+      return isLightTheme ? "text-slate-500" : "text-slate-300";
     default:
-      return "text-slate-300";
+      return isLightTheme ? "text-slate-500" : "text-slate-300";
   }
 };
 
@@ -96,6 +97,11 @@ export const FolderShareDialog: React.FC<FolderShareDialogProps> = ({
   onRetryList,
   onRetryMetadata,
 }) => {
+  const {
+    preferences: { theme },
+  } = useUserPreferences();
+  const isLightTheme = theme === "light";
+
   const folderLabel = useMemo(() => {
     const name = record.name?.trim();
     if (name) return name;
@@ -177,26 +183,66 @@ export const FolderShareDialog: React.FC<FolderShareDialogProps> = ({
     return "All configured relays confirmed this share. Anyone with the link can view the folder immediately.";
   }, [phaseRows]);
 
+  const overlayClass = "fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 backdrop-blur-sm p-4";
+  const containerClass = isLightTheme
+    ? "w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-6 text-slate-800 shadow-xl"
+    : "w-full max-w-lg rounded-2xl border border-slate-800 bg-slate-900/90 p-6 text-slate-100 shadow-xl";
+  const headingClass = isLightTheme
+    ? "flex items-center gap-2 text-lg font-semibold text-slate-900"
+    : "flex items-center gap-2 text-lg font-semibold text-slate-100";
+  const folderInfoTextClass = isLightTheme ? "mt-2 text-sm text-slate-600" : "mt-2 text-sm text-slate-300";
+  const folderPathTextClass = isLightTheme ? "text-xs text-slate-500" : "text-xs text-slate-500";
+  const sectionLabelClass = isLightTheme
+    ? "text-xs font-semibold uppercase tracking-wide text-slate-500"
+    : "text-xs font-semibold uppercase tracking-wide text-slate-400";
+  const shareButtonClass = isLightTheme
+    ? "inline-flex flex-1 items-center gap-2 truncate rounded-lg border border-transparent px-2 py-1 text-left text-sm text-emerald-700 underline decoration-dotted underline-offset-2 transition hover:text-emerald-600 focus:outline-none"
+    : "inline-flex flex-1 items-center gap-2 truncate rounded-lg border border-transparent px-2 py-1 text-left text-sm text-emerald-300 underline decoration-dotted underline-offset-2 transition hover:text-emerald-200 focus:outline-none";
+  const previewButtonClass = isLightTheme
+    ? "inline-flex items-center justify-center rounded-lg border border-slate-300 px-2 py-1 text-slate-600 transition hover:border-slate-400 hover:text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-white"
+    : "inline-flex items-center justify-center rounded-lg border border-slate-700 px-2 py-1 text-slate-200 transition hover:border-slate-600 hover:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-slate-950";
+  const phasesContainerClass = isLightTheme
+    ? "space-y-3 rounded-2xl border border-slate-200 bg-slate-50 p-3"
+    : "space-y-3 rounded-2xl border border-slate-800/80 bg-slate-900/50 p-3";
+  const phaseRowClass = isLightTheme
+    ? "flex items-start justify-between gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2"
+    : "flex items-start justify-between gap-3 rounded-xl border border-slate-800/70 bg-slate-950/60 px-3 py-2";
+  const phaseLabelClass = isLightTheme
+    ? "text-xs font-semibold uppercase tracking-wide text-slate-600"
+    : "text-xs font-semibold uppercase tracking-wide text-slate-400";
+  const phaseCountClass = isLightTheme ? "ml-2 text-xs font-normal text-slate-500" : "ml-2 text-xs font-normal text-slate-400";
+  const phaseDetailTextClass = isLightTheme ? "mt-1 text-xs text-slate-500" : "mt-1 text-xs text-slate-500";
+  const retryButtonClass = isLightTheme
+    ? "rounded-lg border border-emerald-500/70 px-2 py-1 text-xs font-semibold text-emerald-600 transition hover:bg-emerald-50 hover:text-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-white"
+    : "rounded-lg border border-emerald-500/60 px-2 py-1 text-xs font-semibold text-emerald-200 transition hover:border-emerald-400 hover:text-emerald-100 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-slate-900";
+  const toggleButtonClass = isLightTheme
+    ? "inline-flex items-center gap-2 rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:border-slate-400 hover:text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-white"
+    : "inline-flex items-center gap-2 rounded-lg border border-slate-700 px-3 py-1.5 text-xs font-semibold text-slate-200 transition hover:border-slate-600 hover:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-slate-900";
+  const phaseMessageClass = isLightTheme ? "text-xs text-slate-500" : "text-xs text-slate-500";
+  const closeButtonClass = isLightTheme
+    ? "rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-white"
+    : "rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-slate-900 transition hover:bg-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-slate-950";
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4">
-      <div className="w-full max-w-lg rounded-2xl border border-slate-800 bg-slate-900/90 p-6 shadow-xl">
-        <h2 className="flex items-center gap-2 text-lg font-semibold text-slate-100">
+    <div className={overlayClass}>
+      <div className={containerClass}>
+        <h2 className={headingClass}>
           <ShareIcon size={18} aria-hidden="true" />
           <span>Share folder</span>
         </h2>
-        <p className="mt-2 text-sm text-slate-300">
-          {folderLabel} <span className="text-xs text-slate-500">({normalizedFolderPath})</span>
+        <p className={folderInfoTextClass}>
+          {folderLabel} <span className={folderPathTextClass}>({normalizedFolderPath})</span>
         </p>
         <div className="mt-6 space-y-4">
           <div>
-            <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">Public link</span>
+            <span className={sectionLabelClass}>Public link</span>
             <div className="mt-2 flex items-center gap-2">
               <button
                 type="button"
                 onClick={() => {
                   void handleCopy(shareUrl, "Link");
                 }}
-                className="inline-flex flex-1 items-center gap-2 truncate rounded-lg border border-transparent px-2 py-1 text-left text-sm text-emerald-300 underline decoration-dotted underline-offset-2 transition hover:text-emerald-200 focus:outline-none"
+                className={shareButtonClass}
                 aria-label="Copy public link"
               >
                 <span className="truncate" title={shareUrl}>
@@ -211,7 +257,7 @@ export const FolderShareDialog: React.FC<FolderShareDialogProps> = ({
                     window.open(shareUrl, "_blank", "noopener");
                   }
                 }}
-                className="inline-flex items-center justify-center rounded-lg border border-slate-700 px-2 py-1 text-slate-200 transition hover:border-slate-600 hover:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-slate-950"
+                className={previewButtonClass}
                 aria-label="Open public link in new tab"
               >
                 <PreviewIcon size={16} aria-hidden="true" />
@@ -219,14 +265,14 @@ export const FolderShareDialog: React.FC<FolderShareDialogProps> = ({
             </div>
           </div>
           <div>
-            <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">Nostr address</span>
+            <span className={sectionLabelClass}>Nostr address</span>
             <div className="mt-2 flex items-center gap-2">
               <button
                 type="button"
                 onClick={() => {
                   void handleCopy(naddr, "NIP-19 address");
                 }}
-                className="inline-flex flex-1 items-center gap-2 truncate rounded-lg border border-transparent px-2 py-1 text-left text-sm text-emerald-300 underline decoration-dotted underline-offset-2 transition hover:text-emerald-200 focus:outline-none"
+                className={shareButtonClass}
                 aria-label="Copy NIP-19 address"
               >
                 <span className="truncate font-mono" title={naddr}>
@@ -241,7 +287,7 @@ export const FolderShareDialog: React.FC<FolderShareDialogProps> = ({
                     window.open(`https://nostr.band/?q=${encodeURIComponent(naddr)}`, "_blank", "noopener");
                   }
                 }}
-                className="inline-flex items-center justify-center rounded-lg border border-slate-700 px-2 py-1 text-slate-200 transition hover:border-slate-600 hover:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-slate-950"
+                className={previewButtonClass}
                 aria-label="View NIP-19 address on nostr.band"
               >
                 <PreviewIcon size={16} aria-hidden="true" />
@@ -249,12 +295,12 @@ export const FolderShareDialog: React.FC<FolderShareDialogProps> = ({
             </div>
           </div>
           {phaseRows.length > 0 ? (
-            <div className="space-y-3 rounded-2xl border border-slate-800/80 bg-slate-900/50 p-3">
+            <div className={phasesContainerClass}>
               {detailsExpanded ? (
                 <div className="space-y-2">
                   {phaseRows.map(row => {
                     const statusLabel = describePhaseStatus(row.phase);
-                    const statusClass = classForPhaseStatus(row.phase);
+                    const statusClass = classForPhaseStatus(row.phase, isLightTheme);
                     const countLabel = formatPhaseCount(row.phase);
                     const firstFailure = row.phase.failed[0];
                     const failureHint =
@@ -277,19 +323,14 @@ export const FolderShareDialog: React.FC<FolderShareDialogProps> = ({
                       typeof row.onRetry === "function" &&
                       (row.phase.status === "partial" || row.phase.status === "error");
                     return (
-                      <div
-                        key={row.id}
-                        className="flex items-start justify-between gap-3 rounded-xl border border-slate-800/70 bg-slate-950/60 px-3 py-2"
-                      >
+                      <div key={row.id} className={phaseRowClass}>
                         <div className="min-w-0">
-                          <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">{row.label}</p>
+                          <p className={phaseLabelClass}>{row.label}</p>
                           <p className={`mt-1 text-sm font-medium ${statusClass}`}>
                             {statusLabel}
-                            {countLabel ? (
-                              <span className="ml-2 text-xs font-normal text-slate-400">{countLabel}</span>
-                            ) : null}
+                            {countLabel ? <span className={phaseCountClass}>{countLabel}</span> : null}
                           </p>
-                          {detailText ? <p className="mt-1 text-xs text-slate-500">{detailText}</p> : null}
+                          {detailText ? <p className={phaseDetailTextClass}>{detailText}</p> : null}
                         </div>
                         {showRetry ? (
                           <button
@@ -299,7 +340,7 @@ export const FolderShareDialog: React.FC<FolderShareDialogProps> = ({
                                 void row.onRetry();
                               }
                             }}
-                            className="rounded-lg border border-emerald-500/60 px-2 py-1 text-xs font-semibold text-emerald-200 transition hover:border-emerald-400 hover:text-emerald-100 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-slate-900"
+                            className={retryButtonClass}
                           >
                             Retry
                           </button>
@@ -311,7 +352,7 @@ export const FolderShareDialog: React.FC<FolderShareDialogProps> = ({
               ) : null}
               <button
                 type="button"
-                className="inline-flex items-center gap-2 rounded-lg border border-slate-700 px-3 py-1.5 text-xs font-semibold text-slate-200 transition hover:border-slate-600 hover:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-slate-900"
+                className={toggleButtonClass}
                 onClick={() => setDetailsExpanded(current => !current)}
               >
                 {detailsExpanded ? (
@@ -323,12 +364,12 @@ export const FolderShareDialog: React.FC<FolderShareDialogProps> = ({
               </button>
             </div>
           ) : null}
-          <p className="text-xs text-slate-500">{phaseMessage}</p>
+          <p className={phaseMessageClass}>{phaseMessage}</p>
         </div>
         <div className="mt-6 flex justify-end">
           <button
             type="button"
-            className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-slate-900 transition hover:bg-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-slate-950"
+            className={closeButtonClass}
             onClick={onClose}
           >
             Close

@@ -8,6 +8,7 @@ import {
   type RelayPreparationOptions,
   type RelayPreparationResult,
 } from "../../shared/api/ndkRelayManager";
+import { sanitizeRelayUrl } from "../../shared/utils/relays";
 import { checkLocalStorageQuota } from "../../shared/utils/storageQuota";
 
 type NdkInstance = InstanceType<NdkModule["default"]>;
@@ -46,12 +47,42 @@ export type NdkContextValue = {
 
 const NdkContext = createContext<NdkContextValue | undefined>(undefined);
 
-const DEFAULT_RELAYS = [
-  "wss://relay.primal.net",
-  "wss://relay.damus.io",
-  "wss://nos.lol",
-  "wss://relay.nsec.app",
-];
+const RAW_DEFAULT_RELAYS = ["wss://purplepag.es", "wss://user.kindpag.es"] as const;
+
+const getNormalizedFallbackRelays = (): string[] => {
+  return RAW_DEFAULT_RELAYS.map(url => normalizeRelayUrl(url)).filter((url): url is string => Boolean(url));
+};
+
+const removeFallbackRelays = (instance: NdkInstance | null | undefined) => {
+  if (!instance) return;
+  const fallbackSet = new Set(getNormalizedFallbackRelays());
+  if (!fallbackSet.size) return;
+  const pool = instance.pool;
+  if (pool) {
+    fallbackSet.forEach(url => {
+      if (!url) return;
+      if (pool.relays.has(url)) {
+        pool.removeRelay(url);
+      } else if (pool.relays.has(`${url}/`)) {
+        pool.removeRelay(`${url}/`);
+      }
+    });
+  }
+  const explicit = instance.explicitRelayUrls ?? [];
+  const filtered = explicit.filter(url => {
+    const normalized = normalizeRelayUrl(url);
+    return normalized ? !fallbackSet.has(normalized) : true;
+  });
+  if (filtered.length !== explicit.length) {
+    instance.explicitRelayUrls = filtered;
+  }
+};
+
+const isFallbackRelay = (url: string | undefined | null): boolean => {
+  const normalized = normalizeRelayUrl(url);
+  if (!normalized) return false;
+  return getNormalizedFallbackRelays().includes(normalized);
+};
 
 const RELAY_HEALTH_STORAGE_KEY = "bloom.ndk.relayHealth.v1";
 const SIGNER_PREFERENCE_STORAGE_KEY = "bloom.ndk.signerPreference.v1";
@@ -91,9 +122,9 @@ type RelayPersistenceResult = RelayPersistenceSnapshot & {
 
 const normalizeRelayUrl = (url: string | undefined | null) => {
   if (!url) return null;
-  const trimmed = url.trim();
-  if (!trimmed) return null;
-  return trimmed.replace(/\/$/, "");
+  const sanitized = sanitizeRelayUrl(url);
+  if (!sanitized) return null;
+  return `${sanitized.replace(/\/+$/, "")}/`;
 };
 
 const toEpochSeconds = (value: number | null | undefined): number | null => {
@@ -263,7 +294,7 @@ const seedRelayHealth = (seed?: RelayHealth[]) => {
   };
 
   seed?.forEach(addEntry);
-  DEFAULT_RELAYS.forEach(url => {
+  getNormalizedFallbackRelays().forEach(url => {
     const normalizedUrl = normalizeRelayUrl(url);
     if (!normalizedUrl) return;
     if (!map.has(normalizedUrl)) {
@@ -417,7 +448,7 @@ export const NdkProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const mod = await ensureNdkModule();
 
     if (!ndkRef.current) {
-      ndkRef.current = new mod.default({ explicitRelayUrls: DEFAULT_RELAYS });
+      ndkRef.current = new mod.default({ explicitRelayUrls: getNormalizedFallbackRelays() });
       setNdk(ndkRef.current);
       relayManagerRef.current = createRelayConnectionManager(ndkRef.current, ensureNdkModule);
     }
@@ -535,16 +566,24 @@ export const NdkProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       });
 
       const next = new Map<string, RelayHealth>();
-      const baseRelays = ndk.explicitRelayUrls?.length ? ndk.explicitRelayUrls : DEFAULT_RELAYS;
+      const explicitRelays = ndk.explicitRelayUrls ?? [];
+      const baseRelays =
+        explicitRelays.length > 0
+          ? explicitRelays
+          : pool.relays.size > 0
+          ? []
+          : getNormalizedFallbackRelays();
+
       baseRelays.forEach(url => {
-        const normalized = url.replace(/\/$/, "");
+        const normalized = normalizeRelayUrl(url);
         if (!normalized) return;
         const existing = previousMap.get(normalized);
         next.set(normalized, existing ?? { url: normalized, status: "connecting", lastError: null, lastEventAt: null });
       });
 
       pool.relays.forEach(relay => {
-        const url = relay.url.replace(/\/$/, "");
+        const url = normalizeRelayUrl(relay.url);
+        if (!url) return;
         const previous = next.get(url) ?? previousMap.get(url);
         next.set(url, {
           url,
@@ -777,6 +816,8 @@ export const NdkProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           const instance = await ensureNdkConnection();
           const nextUser = await nextSigner.user();
           instance.signer = nextSigner;
+          removeFallbackRelays(instance);
+          setRelayHealth(current => current.filter(entry => !isFallbackRelay(entry.url)));
           setSigner(nextSigner);
           setUser(nextUser);
           setStatus("connected");
@@ -794,10 +835,15 @@ export const NdkProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           const instance = ndkRef.current;
           if (instance) {
             instance.signer = undefined;
+            const fallbackRelays = getNormalizedFallbackRelays();
+            if (fallbackRelays.length) {
+              instance.explicitRelayUrls = fallbackRelays;
+            }
           }
           setSigner(null);
           setUser(null);
           setStatus("idle");
+          setRelayHealth(seedRelayHealth());
           persistSignerPreference(null);
           signerPreferenceRef.current = null;
         }

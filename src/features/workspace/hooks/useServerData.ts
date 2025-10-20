@@ -15,7 +15,7 @@ import {
   subscribeToBlobMetadataChanges,
   getBlobMetadataVersion,
 } from "../../../shared/utils/blobMetadataStore";
-import { checkLocalStorageQuota } from "../../../shared/utils/storageQuota";
+import { getKv, setKv } from "../../../shared/utils/cacheDb";
 
 const filterHiddenBlobTypes = (blobs: BlossomBlob[]) =>
   blobs.filter(blob => (blob.type?.toLowerCase() ?? "") !== "inode/x-empty");
@@ -23,11 +23,9 @@ const filterHiddenBlobTypes = (blobs: BlossomBlob[]) =>
 const CACHE_VERSION = 2;
 const SERVER_CACHE_PREFIX = "bloom.serverSnapshot";
 const MAX_CACHED_BLOBS_PRIMARY = 120;
-const MAX_CACHED_BLOBS_SECONDARY = 60;
 const MAX_CACHED_BLOBS_EMERGENCY = 40;
 
 let snapshotStorageBlocked = false;
-let snapshotStorageWarned = false;
 
 const scheduleIdleWork = (work: () => void) => {
   if (typeof window === "undefined") {
@@ -49,10 +47,6 @@ const scheduleIdleWork = (work: () => void) => {
 };
 
 const pendingSnapshotPersistCancels = new Map<string, () => void>();
-
-const isQuotaExceededError = (error: unknown) =>
-  error instanceof DOMException &&
-  (error.name === "QuotaExceededError" || error.code === 22 || error.name === "NS_ERROR_DOM_QUOTA_REACHED");
 
 type CachedBlobMetadata = Pick<PrivateBlobMetadata, "name" | "type">;
 
@@ -152,119 +146,85 @@ const decodeCachedBlob = (blob: CachedBlobSnapshot): BlossomBlob => {
   return decoded;
 };
 
-const loadCachedSnapshot = (url: string): CachedServerSnapshot | null => {
+const migrateLegacySnapshot = (url: string): CachedServerSnapshot | null => {
   if (typeof window === "undefined") return null;
   try {
-    const raw = window.localStorage.getItem(buildCacheKey(url));
-    if (!raw) return null;
-    const payload = JSON.parse(raw) as Partial<CachedSnapshotPayload> | null;
-    if (!payload || typeof payload.version !== "number") return null;
-    if (!Array.isArray(payload.blobs)) return null;
+    const legacy = window.localStorage.getItem(buildCacheKey(url));
+    if (!legacy) return null;
+    const payload = JSON.parse(legacy) as Partial<CachedSnapshotPayload> | null;
+    if (!payload || typeof payload.version !== "number" || !Array.isArray(payload.blobs)) {
+      window.localStorage.removeItem(buildCacheKey(url));
+      return null;
+    }
     const updatedAt = typeof payload.updatedAt === "number" ? payload.updatedAt : undefined;
     let blobs: BlossomBlob[];
     if (payload.version !== CACHE_VERSION) {
-      // Legacy payload: sanitize into the latest shape.
       blobs = (payload.blobs as BlossomBlob[]).map(sanitizeCacheableBlob).map(decodeCachedBlob);
-      return { blobs, updatedAt };
+    } else {
+      blobs = (payload.blobs as CachedBlobSnapshot[]).map(decodeCachedBlob);
     }
-    blobs = (payload.blobs as CachedBlobSnapshot[]).map(decodeCachedBlob);
+    try {
+      void setKv(buildCacheKey(url), {
+        version: CACHE_VERSION,
+        updatedAt: updatedAt ?? Date.now(),
+        blobs: blobs.map(sanitizeCacheableBlob),
+      });
+    } catch {
+      // Ignore migration failures.
+    }
+    window.localStorage.removeItem(buildCacheKey(url));
     return { blobs, updatedAt };
   } catch (error) {
-    console.warn("Unable to read cached server snapshot", error);
+    window.localStorage.removeItem(buildCacheKey(url));
     return null;
   }
 };
 
-const persistSnapshotCacheNow = (url: string, blobs: BlossomBlob[]) => {
-  const key = buildCacheKey(url);
-  const timestamp = Date.now();
-  const attemptPersist = (limit: number) => {
-    const trimmed = blobs.slice(0, limit).map(sanitizeCacheableBlob);
-    const payload: CachedSnapshotPayload = {
-      version: CACHE_VERSION,
-      updatedAt: timestamp,
-      blobs: trimmed,
-    };
-    window.localStorage.setItem(key, JSON.stringify(payload));
-  };
-
-  const enforceQuotaAfterPersist = (limitUsed: number) => {
-    let currentLimit = limitUsed;
-    const quota = checkLocalStorageQuota("server-snapshot");
-    if (quota.status !== "critical") return;
-    const fallbackLimits: number[] = [];
-    if (currentLimit > MAX_CACHED_BLOBS_SECONDARY) {
-      fallbackLimits.push(MAX_CACHED_BLOBS_SECONDARY);
-    }
-    if (currentLimit > MAX_CACHED_BLOBS_EMERGENCY) {
-      fallbackLimits.push(MAX_CACHED_BLOBS_EMERGENCY);
-    }
-
-    for (const fallback of fallbackLimits) {
-      try {
-        window.localStorage.removeItem(key);
-        attemptPersist(fallback);
-        const followUp = checkLocalStorageQuota(`server-snapshot-${fallback}`, { log: false });
-        if (followUp.status !== "critical") {
-          if (!snapshotStorageWarned && fallback < currentLimit) {
-            snapshotStorageWarned = true;
-            console.info("Snapshot caching reduced: storage quota pressure detected.");
-          }
-          return;
-        }
-        currentLimit = fallback;
-      } catch (error) {
-        if (isQuotaExceededError(error)) {
-          currentLimit = fallback;
-          continue;
-        }
-        console.warn("Unable to persist cached server snapshot", error);
-        return;
-      }
-    }
-
-    snapshotStorageBlocked = true;
-    window.localStorage.removeItem(key);
-    if (!snapshotStorageWarned) {
-      snapshotStorageWarned = true;
-      console.info("Snapshot caching disabled: storage quota exceeded.");
-    }
-  };
-
+const loadCachedSnapshot = async (url: string): Promise<CachedServerSnapshot | null> => {
+  if (typeof window === "undefined") return null;
   try {
-    window.localStorage.removeItem(key);
-    attemptPersist(MAX_CACHED_BLOBS_PRIMARY);
-    enforceQuotaAfterPersist(MAX_CACHED_BLOBS_PRIMARY);
-  } catch (error) {
-    if (isQuotaExceededError(error)) {
-      try {
-        window.localStorage.removeItem(key);
-        attemptPersist(MAX_CACHED_BLOBS_SECONDARY);
-        if (!snapshotStorageWarned) {
-          snapshotStorageWarned = true;
-          console.info("Snapshot caching reduced: storage quota pressure detected.");
-        }
-        enforceQuotaAfterPersist(MAX_CACHED_BLOBS_SECONDARY);
-        return;
-      } catch (secondaryError) {
-        if (isQuotaExceededError(secondaryError)) {
-          snapshotStorageBlocked = true;
-          if (!snapshotStorageWarned) {
-            snapshotStorageWarned = true;
-            console.info("Snapshot caching disabled: storage quota exceeded.");
-          }
-          return;
-        }
-        console.warn("Unable to persist cached server snapshot", secondaryError);
-        return;
-      }
+    const payload = await getKv<CachedSnapshotPayload>(buildCacheKey(url));
+    if (!payload || !Array.isArray(payload.blobs)) {
+      return migrateLegacySnapshot(url);
     }
-    console.warn("Unable to persist cached server snapshot", error);
+    const blobs = payload.blobs.map(decodeCachedBlob);
+    return {
+      blobs,
+      updatedAt: typeof payload.updatedAt === "number" ? payload.updatedAt : undefined,
+    };
+  } catch (error) {
+    return migrateLegacySnapshot(url);
+  }
+};
+
+const persistSnapshotCacheNow = async (url: string, blobs: BlossomBlob[]) => {
+  if (typeof window === "undefined") return;
+  const trimmedLimit = (() => {
+    if (snapshotStorageBlocked) return MAX_CACHED_BLOBS_EMERGENCY;
+    return MAX_CACHED_BLOBS_PRIMARY;
+  })();
+  const trimmed = blobs.slice(0, trimmedLimit).map(sanitizeCacheableBlob);
+  const payload: CachedSnapshotPayload = {
+    version: CACHE_VERSION,
+    updatedAt: Date.now(),
+    blobs: trimmed,
+  };
+  try {
+    await setKv(buildCacheKey(url), payload);
+    snapshotStorageBlocked = false;
+  } catch (error) {
+    snapshotStorageBlocked = true;
+    try {
+      window.localStorage.removeItem(buildCacheKey(url));
+      window.localStorage.setItem(buildCacheKey(url), JSON.stringify(payload));
+    } catch {
+      // Ignore localStorage fallback failures.
+    }
   }
 };
 
 const persistSnapshotCache = (url: string, blobs: BlossomBlob[]) => {
-  if (typeof window === "undefined" || snapshotStorageBlocked) return;
+  if (typeof window === "undefined") return;
   const cancelExisting = pendingSnapshotPersistCancels.get(url);
   if (cancelExisting) {
     cancelExisting();
@@ -273,7 +233,7 @@ const persistSnapshotCache = (url: string, blobs: BlossomBlob[]) => {
   const snapshot = blobs.slice();
   const cancel = scheduleIdleWork(() => {
     pendingSnapshotPersistCancels.delete(url);
-    persistSnapshotCacheNow(url, snapshot);
+    void persistSnapshotCacheNow(url, snapshot);
   });
   if (cancel) {
     pendingSnapshotPersistCancels.set(url, cancel);
@@ -308,6 +268,7 @@ type UseServerDataOptions = {
   backgroundPrefetchDelayMs?: number;
   maxConcurrentQueries?: number;
   foregroundServerUrl?: string | null;
+  networkEnabled?: boolean;
 };
 
 const DEFAULT_BACKGROUND_DELAY_MS = 1200;
@@ -337,6 +298,7 @@ export const useServerData = (servers: ManagedServer[], options?: UseServerDataO
     backgroundPrefetchDelayMs = DEFAULT_BACKGROUND_DELAY_MS,
     maxConcurrentQueries = DEFAULT_MAX_CONCURRENT,
     foregroundServerUrl = null,
+    networkEnabled = true,
   } = options ?? {};
 
   const normalizedPrioritizedUrls = useMemo(() => {
@@ -354,41 +316,33 @@ export const useServerData = (servers: ManagedServer[], options?: UseServerDataO
     return ordered;
   }, [servers, prioritizedServerUrls, foregroundServerUrl]);
 
-  const [cachedSnapshots, setCachedSnapshots] = useState<Map<string, CachedServerSnapshot>>(() => {
-    const map = new Map<string, CachedServerSnapshot>();
-    if (typeof window === "undefined") return map;
-    servers.forEach(server => {
-      const cached = loadCachedSnapshot(server.url);
-      if (cached) {
-        map.set(server.url, cached);
-      }
-    });
-    return map;
-  });
+  const [cachedSnapshots, setCachedSnapshots] = useState<Map<string, CachedServerSnapshot>>(new Map());
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const allowed = buildServerMap(servers);
-    setCachedSnapshots(prev => {
-      let changed = false;
-      const next = new Map(prev);
-      next.forEach((_, url) => {
-        if (!allowed.has(url)) {
-          next.delete(url);
-          changed = true;
-        }
-      });
-      servers.forEach(server => {
-        if (next.has(server.url)) return;
-        const cached = loadCachedSnapshot(server.url);
+    let cancelled = false;
+    (async () => {
+      const map = new Map<string, CachedServerSnapshot>();
+      for (const server of servers) {
+        const cached = await loadCachedSnapshot(server.url);
         if (cached) {
-          next.set(server.url, cached);
-          changed = true;
+          map.set(server.url, cached);
+          const queryKey = ["server-blobs", server.url, pubkey, server.type];
+          queryClient.setQueryData(queryKey, mergeBlobsWithStoredMetadata(server.url, cached.blobs));
         }
-      });
-      return changed ? next : prev;
+      }
+      if (!cancelled) {
+        setCachedSnapshots(map);
+      }
+    })().catch(() => {
+      if (!cancelled) {
+        setCachedSnapshots(new Map());
+      }
     });
-  }, [servers]);
+    return () => {
+      cancelled = true;
+    };
+  }, [pubkey, queryClient, servers]);
 
   const [activeServerUrls, setActiveServerUrls] = useState<Set<string>>(() => {
     const initial = new Set<string>();
@@ -587,24 +541,23 @@ export const useServerData = (servers: ManagedServer[], options?: UseServerDataO
     queries: servers.map(server => {
       const isActive = activeServerUrls.has(server.url);
       const cached = cachedSnapshots.get(server.url);
-      const cachedBlobs = cached?.blobs;
-      const hasCachedData = Boolean(cachedBlobs?.length);
+      const hasCachedData = Boolean(cached?.blobs?.length);
       return {
         queryKey: ["server-blobs", server.url, pubkey, server.type],
         enabled:
+          networkEnabled &&
           isActive &&
           !!pubkey &&
           (server.type === "satellite"
             ? Boolean(signEventTemplate)
             : !server.requiresAuth || !!signer),
-        initialData: cachedBlobs,
-        initialDataUpdatedAt: cached?.updatedAt,
+        placeholderData: cached ? () => cached.blobs : undefined,
         staleTime: 60_000,
         refetchOnMount: hasCachedData ? false : "always",
         refetchOnWindowFocus: false,
         refetchOnReconnect: false,
         queryFn: async (): Promise<BlossomBlob[]> => {
-          if (!pubkey) return cachedBlobs ?? [];
+          if (!pubkey) return cached?.blobs ?? [];
           if (server.type === "blossom") {
             const blobs = await listUserBlobs(
               server.url,

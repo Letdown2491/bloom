@@ -111,4 +111,14 @@ export const getCodecConfigForAlgorithm = (algorithm: Nip46EncryptionAlgorithm):
   };
 };
 
-export const createDefaultCodecConfig = (): Nip46CodecConfig => getCodecConfigForAlgorithm("nip44");
+export const createDefaultCodecConfig = (): Nip46CodecConfig => {
+  const nip44Config = getCodecConfigForAlgorithm("nip44");
+  const nip04Config = getCodecConfigForAlgorithm("nip04");
+  const selectConfig = (algorithm: Nip46EncryptionAlgorithm): Nip46CodecConfig =>
+    algorithm === "nip04" ? nip04Config : nip44Config;
+
+  return {
+    encrypt: (plaintext, context) => selectConfig(context.algorithm).encrypt(plaintext, context),
+    decrypt: (ciphertext, context) => selectConfig(context.algorithm).decrypt(ciphertext, context),
+  };
+};

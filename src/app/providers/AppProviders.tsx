@@ -8,6 +8,7 @@ import { UserPreferencesProvider } from "../context/UserPreferencesContext";
 import { PrivateLibraryProvider } from "../context/PrivateLibraryContext";
 import { FolderListProvider } from "../context/FolderListContext";
 import { DialogProvider } from "../context/DialogContext";
+import { SyncPipelineProvider } from "../context/SyncPipelineContext";
 
 const client = new QueryClient({
   defaultOptions: {
@@ -25,13 +26,15 @@ export const AppProviders: React.FC<{ children: React.ReactNode }> = ({ children
         <Nip46Provider>
           <AudioProvider>
             <UserPreferencesProvider>
-              <PrivateLibraryProvider>
-                <FolderListProvider>
-                  <DialogProvider>
-                    <SelectionProvider>{children}</SelectionProvider>
-                  </DialogProvider>
-                </FolderListProvider>
-              </PrivateLibraryProvider>
+              <SyncPipelineProvider>
+                <PrivateLibraryProvider>
+                  <FolderListProvider>
+                    <DialogProvider>
+                      <SelectionProvider>{children}</SelectionProvider>
+                    </DialogProvider>
+                  </FolderListProvider>
+                </PrivateLibraryProvider>
+              </SyncPipelineProvider>
             </UserPreferencesProvider>
           </AudioProvider>
         </Nip46Provider>

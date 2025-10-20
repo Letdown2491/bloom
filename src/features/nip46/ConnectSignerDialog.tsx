@@ -4,7 +4,6 @@ import type { RemoteSignerSession } from "../../shared/api/nip46";
 import { useNip46Pairing } from "./hooks/useNip46Pairing";
 import { useNip46 } from "../../app/context/Nip46Context";
 import { useNdk } from "../../app/context/NdkContext";
-import { DEFAULT_PUBLIC_RELAYS } from "../../shared/utils/relays";
 
 const BLOOM_METADATA = {
   name: "Bloom",
@@ -13,13 +12,18 @@ const BLOOM_METADATA = {
   description: "Bloom remote signer pairing",
 } as const;
 
-const DEFAULT_INVITATION_RELAYS = Array.from(DEFAULT_PUBLIC_RELAYS);
+const DEFAULT_INVITATION_RELAYS: string[] = [
+  "wss://relay.primal.net",
+  "wss://relay.nsec.app",
+  "wss://theforest.nostr1.com",
+];
 
 const buildNostrConnectUriFromSession = (session: RemoteSignerSession): string => {
   const params = new URLSearchParams();
   session.relays.forEach(relay => params.append("relay", relay));
   if (session.nostrConnectSecret) params.set("secret", session.nostrConnectSecret);
   if (session.permissions.length) params.set("perms", session.permissions.join(","));
+  if (session.algorithm) params.set("alg", session.algorithm);
   if (session.metadata?.name) params.set("name", session.metadata.name);
   if (session.metadata?.url) params.set("url", session.metadata.url);
   if (session.metadata?.image) params.set("image", session.metadata.image);
@@ -397,32 +401,8 @@ export const ConnectSignerDialog: React.FC<ConnectSignerDialogProps> = ({ open, 
                     {invitationError}
                   </div>
                 ) : null}
-                <div className="space-y-3 text-xs text-slate-300">
-                  <p className="font-medium uppercase tracking-wide text-slate-400">How to connect</p>
-                  <ol className="space-y-2">
-                    <li className="flex gap-2">
-                      <span className="mt-0.5 h-5 w-5 shrink-0 rounded-full bg-emerald-600 text-center text-[11px] font-semibold leading-5 text-slate-50">
-                        1
-                      </span>
-                      <span>Open your remote signer and start the pairing flow.</span>
-                    </li>
-                    <li className="flex gap-2">
-                      <span className="mt-0.5 h-5 w-5 shrink-0 rounded-full bg-emerald-600 text-center text-[11px] font-semibold leading-5 text-slate-50">
-                        2
-                      </span>
-                      <span>Scan the QR code or copy the invitation link provided below.</span>
-                    </li>
-                    <li className="flex gap-2">
-                      <span className="mt-0.5 h-5 w-5 shrink-0 rounded-full bg-emerald-600 text-center text-[11px] font-semibold leading-5 text-slate-50">
-                        3
-                      </span>
-                      <span>Approve the request inside your signer. Bloom will connect automatically once approved.</span>
-                    </li>
-                  </ol>
-                </div>
-
                 <div className="flex flex-col items-center gap-4">
-                  <div className="flex h-48 w-48 items-center justify-center rounded-xl border border-slate-800 bg-slate-950/60 p-3">
+                  <div className="flex h-60 w-60 items-center justify-center rounded-xl border border-slate-800 bg-slate-950/60 p-3">
                     {qrDataUrl ? (
                       <img src={qrDataUrl} alt="nostrconnect invitation" className="h-full w-full rounded-md" />
                     ) : invitationBusy ? (

@@ -4,10 +4,19 @@ import { loadNdkModule, type NdkModule } from "../../ndkModule";
 import type { RelayPreparationOptions, RelayPreparationResult } from "../../ndkRelayManager";
 
 import type { NostrFilter, TransportConfig } from "./types";
+import { sanitizeRelayUrl } from "../../../utils/relays";
 
-const RELAY_WARNING_THROTTLE_MS = 10_000;
-const relayWarningTimestamps = new Map<string, number>();
 const RELAY_CONNECT_TIMEOUT_MS = 5_000;
+const relayWarningTimestamps = new Map<string, number>();
+const RELAY_WARNING_INTERVAL_MS = 60_000;
+const RELAY_CACHE_TTL_MS = 30_000;
+const relaySetCache = new Map<string, { result: RelayPreparationResult; expiresAt: number }>();
+const relayWarningKey = (url: string) => sanitizeRelayUrl(url) ?? url.trim();
+const clearRelayWarning = (url: string) => {
+  const key = relayWarningKey(url);
+  if (!key) return;
+  relayWarningTimestamps.delete(key);
+};
 const getRuntime = (() => {
   let promise: Promise<NdkModule> | null = null;
   return () => {
@@ -27,11 +36,13 @@ const isConnectedStatus = (status: NDKRelayStatus, runtime: NdkModule) => {
 };
 
 const logRelayWarning = (url: string) => {
+  const key = relayWarningKey(url);
+  if (!key) return;
   const now = Date.now();
-  const previous = relayWarningTimestamps.get(url) ?? 0;
-  if (now - previous < RELAY_WARNING_THROTTLE_MS) return;
-  relayWarningTimestamps.set(url, now);
-  console.warn("Relay not connected yet for NIP-46 publish", url);
+  const previous = relayWarningTimestamps.get(key);
+  if (previous && now - previous < RELAY_WARNING_INTERVAL_MS) return;
+  relayWarningTimestamps.set(key, now);
+  console.debug?.("Relay not connected yet for NIP-46 publish", key);
 };
 
 const waitForRelayConnection = async (
@@ -78,6 +89,7 @@ const waitForRelayConnection = async (
   });
 
   if (connectionEstablished) {
+    clearRelayWarning(relay.url);
     return true;
   }
 
@@ -97,6 +109,42 @@ type RelayHelpers = {
 };
 
 export const createNdkTransport = (ndk: NDK, helpers?: RelayHelpers): TransportConfig => {
+  const canonicalRelayKey = (urls: readonly string[]) =>
+    urls
+      .map(url => sanitizeRelayUrl(url)?.replace(/\/+$/, ""))
+      .filter((url): url is string => Boolean(url))
+      .sort()
+      .join(",");
+
+  const cacheRelayResult = (urls: readonly string[], result: RelayPreparationResult) => {
+    if (!urls.length) return;
+    const key = canonicalRelayKey(urls);
+    if (!key) return;
+    if (relaySetCache.size > 64) {
+      const oldestKey = Array.from(relaySetCache.entries()).sort((a, b) => a[1].expiresAt - b[1].expiresAt)[0]?.[0];
+      if (oldestKey) {
+        relaySetCache.delete(oldestKey);
+      }
+    }
+    relaySetCache.set(key, {
+      result,
+      expiresAt: Date.now() + RELAY_CACHE_TTL_MS,
+    });
+  };
+
+  const getCachedRelayResult = (urls: readonly string[]): RelayPreparationResult | null => {
+    if (!urls.length) return null;
+    const key = canonicalRelayKey(urls);
+    if (!key) return null;
+    const cached = relaySetCache.get(key);
+    if (!cached) return null;
+    if (cached.expiresAt < Date.now()) {
+      relaySetCache.delete(key);
+      return null;
+    }
+    return cached.result;
+  };
+
   return {
     publish: async event => {
       const runtime = await getRuntime();
@@ -109,9 +157,17 @@ export const createNdkTransport = (ndk: NDK, helpers?: RelayHelpers): TransportC
       let effectiveRelaySet: InstanceType<NdkModule["NDKRelaySet"]> | undefined;
       if (relayUrls.length) {
         if (helpers?.prepareRelaySet) {
-          const { relaySet, pending } = await helpers.prepareRelaySet(relayUrls, {
-            waitForConnection: true,
-          });
+          const cached = getCachedRelayResult(relayUrls);
+          const preparation =
+            cached ??
+            (await helpers.prepareRelaySet(relayUrls, {
+              waitForConnection: true,
+            }));
+          if (!cached) {
+            cacheRelayResult(relayUrls, preparation);
+          }
+          const { relaySet, pending, connected } = preparation;
+          connected.forEach(clearRelayWarning);
           if (pending.length) {
             pending.forEach(logRelayWarning);
           }
@@ -163,9 +219,16 @@ export const createNdkTransport = (ndk: NDK, helpers?: RelayHelpers): TransportC
         )
       );
       if (relayUrls.length && helpers?.prepareRelaySet) {
-        void helpers
-          .prepareRelaySet(relayUrls, { waitForConnection: false })
+        const cached = getCachedRelayResult(relayUrls);
+        const promise = cached
+          ? Promise.resolve(cached)
+          : helpers.prepareRelaySet(relayUrls, { waitForConnection: true }).then(result => {
+              cacheRelayResult(relayUrls, result);
+              return result;
+            });
+        void promise
           .then(result => {
+            result.connected.forEach(clearRelayWarning);
             if (result.pending.length) {
               result.pending.forEach(logRelayWarning);
             }
