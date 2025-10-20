@@ -38,6 +38,7 @@ export type BrowseContentProps = {
   defaultSortOption: DefaultSortOption;
   sortDirection: SortDirection;
   resolvePrivateLink?: (blob: BlossomBlob) => { url: string; alias?: string | null; expiresAt?: number | null } | null;
+  privateLinkServiceConfigured: boolean;
 };
 
 export const BrowseContent: React.FC<BrowseContentProps> = ({
@@ -71,6 +72,7 @@ export const BrowseContent: React.FC<BrowseContentProps> = ({
   defaultSortOption,
   sortDirection,
   resolvePrivateLink,
+  privateLinkServiceConfigured,
 }) => {
   const isMusicView = filterMode === "music";
   const commonProps: Pick<
@@ -98,6 +100,7 @@ export const BrowseContent: React.FC<BrowseContentProps> = ({
     | "folderRecords"
     | "onUnshareFolder"
     | "folderShareBusyPath"
+    | "privateLinkServiceConfigured"
   > = {
     selected: selectedBlobs,
     viewMode,
@@ -122,6 +125,7 @@ export const BrowseContent: React.FC<BrowseContentProps> = ({
     onShareFolder,
     onUnshareFolder,
     folderShareBusyPath,
+    privateLinkServiceConfigured,
   };
 
   if (browsingAllServers) {

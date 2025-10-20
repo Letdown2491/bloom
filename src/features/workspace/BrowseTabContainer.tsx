@@ -3971,6 +3971,7 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
           onShareFolder={handleShareFolderHint}
           onUnshareFolder={handleUnshareFolderHint}
           folderShareBusyPath={folderShareBusyPath}
+          privateLinkServiceConfigured={privateLinkServiceConfigured}
         />
         </Suspense>
       </div>

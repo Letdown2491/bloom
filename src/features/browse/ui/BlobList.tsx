@@ -14,7 +14,6 @@ import {
   PlayIcon,
   ChevronDownIcon,
   ShareIcon,
-  LinkIcon,
   SyncIndicatorIcon,
   TrashIcon,
   CancelIcon,
@@ -41,6 +40,7 @@ import { useDialog } from "../../../app/context/DialogContext";
 import type { FolderListRecord } from "../../../shared/domain/folderList";
 import type { FolderShareHint, ShareFolderScope } from "../../../shared/types/shareFolder";
 import type { ShareMode } from "../../share/ui/ShareComposer";
+import { ShareHowDialog } from "../../share/ui/ShareHowDialog";
 
 export type BlobReplicaSummary = {
   count: number;
@@ -77,6 +77,7 @@ export type BlobListProps = {
   showListPreviews?: boolean;
   defaultSortOption: DefaultSortOption;
   sortDirection?: SortDirection;
+  privateLinkServiceConfigured?: boolean;
 };
 
 type DetectedKindMap = Record<string, "image" | "video">;
@@ -112,6 +113,63 @@ export const isListLikeBlob = (blob: BlossomBlob) => {
   const metadataType = blob.privateData?.metadata?.type;
   if (isDirectoryLikeMime(metadataType)) return true;
   return false;
+};
+
+type ShareAvailability = {
+  allowPublic: boolean;
+  allowPrivate: boolean;
+  disabled: boolean;
+  disabledReason: string | null;
+  isPrivateItem: boolean;
+  publicUrl: string | null;
+  privateLinkUrl: string | null;
+};
+
+const computeShareAvailability = (
+  blob: BlossomBlob,
+  privateLinkServiceConfigured: boolean
+): ShareAvailability => {
+  const isListBlob = isListLikeBlob(blob);
+  const isPrivateList = isListBlob && blob.sha256 === PRIVATE_PLACEHOLDER_SHA;
+  const isPrivateBlob = Boolean(blob.privateData);
+  const isPrivateScope = blob.__bloomFolderScope === "private";
+  const isPrivateItem = isPrivateList || isPrivateBlob || isPrivateScope;
+
+  const normalizedServerUrl =
+    typeof blob.serverUrl === "string" && blob.serverUrl.trim().length > 0
+      ? blob.serverUrl.trim().replace(/\/+$/, "")
+      : "";
+  const publicUrl =
+    typeof blob.url === "string" && blob.url.trim().length > 0
+      ? blob.url.trim()
+      : normalizedServerUrl && blob.sha256
+        ? `${normalizedServerUrl}/${blob.sha256}`
+        : null;
+  const privateLinkUrl =
+    typeof blob.__bloomPrivateLinkUrl === "string" && blob.__bloomPrivateLinkUrl.trim().length > 0
+      ? blob.__bloomPrivateLinkUrl.trim()
+      : null;
+
+  const allowPublic = !isPrivateItem && Boolean(publicUrl);
+  const allowPrivate = !isPrivateItem && (Boolean(privateLinkUrl) || privateLinkServiceConfigured);
+  const disabled = !allowPublic && !allowPrivate;
+  const disabledReason = disabled
+    ? isPrivateItem
+      ? isListBlob
+        ? "Private folders cannot be shared"
+        : "Private files cannot be shared"
+      : "Share available once file link is ready"
+    : null;
+
+  return {
+    allowPublic,
+    allowPrivate,
+    disabled,
+    disabledReason,
+    isPrivateItem,
+    publicUrl,
+    privateLinkUrl,
+  };
 };
 
 const DROPDOWN_OFFSET_PX = 8;
@@ -331,6 +389,7 @@ export const BlobList: React.FC<BlobListProps> = ({
   showListPreviews = true,
   defaultSortOption = "updated",
   sortDirection = "descending",
+  privateLinkServiceConfigured = false,
 }) => {
   const handleMove = useCallback(
     (blob: BlossomBlob) => {
@@ -416,6 +475,52 @@ export const BlobList: React.FC<BlobListProps> = ({
     defaultServerType: serverType,
     defaultSignTemplate: signTemplate,
   });
+  const [shareDialogTarget, setShareDialogTarget] = useState<BlossomBlob | null>(null);
+  const shareDialogTargetSha = shareDialogTarget?.sha256 ?? null;
+  const openShareDialog = useCallback((blob: BlossomBlob) => {
+    setShareDialogTarget(blob);
+  }, []);
+  const handleShareDialogClose = useCallback(() => {
+    setShareDialogTarget(null);
+  }, []);
+  const handleShareDialogSelect = useCallback(
+    (mode: "public" | "private") => {
+      setShareDialogTarget(current => {
+        if (!current) return null;
+        if (!onShare) return null;
+        if (mode === "private") {
+          onShare(current, { mode: "private-link" });
+        } else {
+          onShare(current);
+        }
+        return null;
+      });
+    },
+    [onShare]
+  );
+  const shareDialogAvailability = useMemo(
+    () => (shareDialogTarget ? computeShareAvailability(shareDialogTarget, privateLinkServiceConfigured) : null),
+    [shareDialogTarget, privateLinkServiceConfigured]
+  );
+  const shareDialogPublicLink = shareDialogAvailability?.publicUrl ?? null;
+  const shareDialogPrivateLink = shareDialogAvailability?.privateLinkUrl ?? null;
+  const shareDialogHasPrivateLink = Boolean(shareDialogPrivateLink);
+  const shareDialogCanCreatePrivateLink = Boolean(
+    privateLinkServiceConfigured && !(shareDialogAvailability?.isPrivateItem ?? false)
+  );
+  const shareDialogPrivateDisabledReason = useMemo(() => {
+    if (!shareDialogAvailability || shareDialogAvailability.allowPrivate) return null;
+    if (shareDialogAvailability.isPrivateItem) {
+      if (shareDialogTarget && isListLikeBlob(shareDialogTarget)) {
+        return "Private folders cannot be shared.";
+      }
+      return "Private files cannot be shared.";
+    }
+    if (!privateLinkServiceConfigured) {
+      return "Connect a private link service to share privately.";
+    }
+    return shareDialogAvailability.disabledReason;
+  }, [shareDialogAvailability, privateLinkServiceConfigured, shareDialogTarget]);
   const [sortConfig, setSortConfig] = useState<SortConfig | null>(null);
 
   useEffect(() => {
@@ -756,6 +861,9 @@ export const BlobList: React.FC<BlobListProps> = ({
           audioMetadata={audioMetadata}
           showPreviews={showListPreviews}
           resolveCoverEntry={resolveCoverEntry}
+          privateLinkServiceConfigured={privateLinkServiceConfigured}
+          openShareDialog={openShareDialog}
+          activeShareDialogSha={shareDialogTargetSha}
         />
       ) : (
         <GridLayout
@@ -787,8 +895,23 @@ export const BlobList: React.FC<BlobListProps> = ({
           audioMetadata={audioMetadata}
           showPreviews={showGridPreviews}
           resolveCoverEntry={resolveCoverEntry}
+          privateLinkServiceConfigured={privateLinkServiceConfigured}
+          openShareDialog={openShareDialog}
+          activeShareDialogSha={shareDialogTargetSha}
         />
       )}
+      <ShareHowDialog
+        open={Boolean(shareDialogTarget)}
+        onClose={handleShareDialogClose}
+        onSelect={handleShareDialogSelect}
+        allowPublic={Boolean(shareDialogAvailability?.allowPublic)}
+        allowPrivate={Boolean(shareDialogAvailability?.allowPrivate)}
+        hasExistingPrivateLink={shareDialogHasPrivateLink}
+        canCreatePrivateLink={shareDialogCanCreatePrivateLink}
+        privateLinkDisabledReason={shareDialogPrivateDisabledReason}
+        publicLinkUrl={shareDialogPublicLink ?? undefined}
+        privateLinkUrl={shareDialogPrivateLink ?? undefined}
+      />
     </div>
   );
 };
@@ -833,6 +956,9 @@ const ListLayout: React.FC<{
   audioMetadata: Map<string, BlobAudioMetadata>;
   showPreviews: boolean;
   resolveCoverEntry: (coverUrl?: string | null) => PrivateListEntry | null;
+  privateLinkServiceConfigured: boolean;
+  openShareDialog: (blob: BlossomBlob) => void;
+  activeShareDialogSha: string | null;
 }> = ({
   blobs,
   baseUrl,
@@ -867,6 +993,9 @@ const ListLayout: React.FC<{
   audioMetadata,
   showPreviews,
   resolveCoverEntry,
+  privateLinkServiceConfigured,
+  openShareDialog,
+  activeShareDialogSha,
 }) => {
   const handleMove = useCallback(
     (blob: BlossomBlob) => {
@@ -1015,6 +1144,9 @@ const ListLayout: React.FC<{
       isCompactList,
       listRowHeight,
       actionsColumnWidth,
+      privateLinkServiceConfigured,
+      openShareDialog,
+      activeShareDialogSha,
     }),
     [
       blobs,
@@ -1051,6 +1183,9 @@ const ListLayout: React.FC<{
       isCompactList,
       listRowHeight,
       actionsColumnWidth,
+      privateLinkServiceConfigured,
+      openShareDialog,
+      activeShareDialogSha,
     ]
   );
 
@@ -1091,6 +1226,9 @@ const ListLayout: React.FC<{
         onShareFolder: rowOnShareFolder,
         onUnshareFolder: rowOnUnshareFolder,
         folderShareBusyPath: rowFolderShareBusyPath,
+        privateLinkServiceConfigured: rowPrivateLinkServiceConfigured,
+        openShareDialog: rowOpenShareDialog,
+        activeShareDialogSha: rowActiveShareDialogSha,
       } = data;
 
       const blob = listBlobs[index];
@@ -1149,6 +1287,9 @@ const ListLayout: React.FC<{
           getMenuBoundary={rowGetMenuBoundary}
           isCompactList={rowIsCompactList}
           actionsColumnWidth={rowActionsColumnWidth}
+          privateLinkServiceConfigured={rowPrivateLinkServiceConfigured}
+          onOpenShareDialog={rowOpenShareDialog}
+          activeShareDialogSha={rowActiveShareDialogSha}
         />
       );
     },
@@ -1322,6 +1463,9 @@ const GridLayout: React.FC<{
   audioMetadata: Map<string, BlobAudioMetadata>;
   showPreviews: boolean;
   resolveCoverEntry: (coverUrl?: string | null) => PrivateListEntry | null;
+  privateLinkServiceConfigured: boolean;
+  openShareDialog: (blob: BlossomBlob) => void;
+  activeShareDialogSha: string | null;
 }> = ({
   blobs,
   baseUrl,
@@ -1351,6 +1495,9 @@ const GridLayout: React.FC<{
   audioMetadata,
   showPreviews,
   resolveCoverEntry,
+  privateLinkServiceConfigured,
+  openShareDialog,
+  activeShareDialogSha,
 }) => {
   const CARD_WIDTH = 220;
   const HORIZONTAL_GAP = 8;
@@ -1576,6 +1723,9 @@ const GridLayout: React.FC<{
               onCloseMenu={handleCloseMenu}
               dropdownRefs={dropdownRefs}
               getMenuBoundary={getMenuBoundary}
+              privateLinkServiceConfigured={privateLinkServiceConfigured}
+              onOpenShareDialog={openShareDialog}
+              activeShareDialogSha={activeShareDialogSha}
             />
           ))}
           {blobs.length === 0 && (
@@ -1627,6 +1777,9 @@ type GridCardProps = {
   onCloseMenu: () => void;
   dropdownRefs: React.MutableRefObject<Map<string, HTMLDivElement | null>>;
   getMenuBoundary: () => HTMLElement | null;
+  privateLinkServiceConfigured: boolean;
+  onOpenShareDialog: (blob: BlossomBlob) => void;
+  activeShareDialogSha: string | null;
 };
 
 type GridDropdownItem =
@@ -1686,6 +1839,9 @@ const GridCard = React.memo<GridCardProps>(
     onCloseMenu,
     dropdownRefs,
     getMenuBoundary,
+    privateLinkServiceConfigured,
+    onOpenShareDialog,
+    activeShareDialogSha,
   }) => {
     const dropdownContainerRef = useRef<HTMLDivElement | null>(null);
     const menuRef = useRef<HTMLDivElement | null>(null);
@@ -1780,19 +1936,10 @@ const GridCard = React.memo<GridCardProps>(
           }
         : null;
 
-    const shareTriggerRef = useRef<HTMLButtonElement | null>(null);
-    const shareMenuRef = useRef<HTMLDivElement | null>(null);
-    const [shareMenuOpen, setShareMenuOpen] = useState(false);
-    const shareMenuDisabled = useMemo(
-      () => Boolean(folderShareHint && onShareFolder) || !onShare || isPrivateItem || !blob.url,
-      [folderShareHint, onShare, onShareFolder, isPrivateItem, blob.url]
+    const shareAvailability = useMemo(
+      () => computeShareAvailability(blob, privateLinkServiceConfigured),
+      [blob, privateLinkServiceConfigured]
     );
-    const sharePlacement = useDropdownPlacement(shareMenuOpen, shareTriggerRef, shareMenuRef, menuBoundary);
-    const sharePlacementClass =
-      sharePlacement === "up"
-        ? "bottom-full mb-2 origin-bottom"
-        : "top-full mt-2 origin-top";
-    const shareVisibilityClass = sharePlacement ? "visible opacity-100" : "invisible opacity-0 pointer-events-none";
     const disabledNeutralButtonClass = isLightTheme
       ? [
           "disabled:border-slate-300",
@@ -1825,42 +1972,7 @@ const GridCard = React.memo<GridCardProps>(
     const actionsMenuDisabled = isPrivateList && blob.sha256 === PRIVATE_PLACEHOLDER_SHA;
     const disabledNeutralIconClass = isLightTheme ? "text-slate-400" : "text-slate-500";
     const disabledActionsClass = actionsMenuDisabled ? disabledNeutralButtonClass : "";
-
-    useEffect(() => {
-      setShareMenuOpen(false);
-    }, [blob.sha256, folderShareHint, onShareFolder]);
-
-    useEffect(() => {
-      if (!shareMenuOpen) return;
-      if (typeof document === "undefined") return;
-      const handlePointer = (event: Event) => {
-        const target = event.target as Node | null;
-        if (!target) return;
-        const trigger = shareTriggerRef.current;
-        const menu = shareMenuRef.current;
-        if (trigger?.contains(target) || menu?.contains(target)) {
-          return;
-        }
-        setShareMenuOpen(false);
-      };
-      const handleKey = (event: KeyboardEvent) => {
-        if (event.key === "Escape") {
-          setShareMenuOpen(false);
-        }
-      };
-      document.addEventListener("pointerdown", handlePointer);
-      document.addEventListener("keydown", handleKey);
-      return () => {
-        document.removeEventListener("pointerdown", handlePointer);
-        document.removeEventListener("keydown", handleKey);
-      };
-    }, [shareMenuOpen]);
-
-    useEffect(() => {
-      if (shareMenuDisabled) {
-        setShareMenuOpen(false);
-      }
-    }, [shareMenuDisabled]);
+    const isShareDialogActive = activeShareDialogSha === blob.sha256;
 
     const cardStyle = useMemo<React.CSSProperties>(
       () => ({
@@ -1870,9 +1982,9 @@ const GridCard = React.memo<GridCardProps>(
         height,
         transform: `translate3d(${left}px, ${top}px, 0)`,
         willChange: "transform",
-        zIndex: isMenuOpen ? 40 : shareMenuOpen ? 4000 : isSelected ? 30 : undefined,
+        zIndex: isMenuOpen ? 40 : isShareDialogActive ? 45 : isSelected ? 30 : undefined,
       }),
-      [shareMenuOpen, height, isMenuOpen, isSelected, left, top, width]
+      [height, isMenuOpen, isShareDialogActive, isSelected, left, top, width]
     );
     const contentHeight = height * 0.75;
 
@@ -2141,125 +2253,27 @@ const GridCard = React.memo<GridCardProps>(
         );
       }
       if (!onShare) return null;
-      const normalizedServerUrl =
-        typeof blob.serverUrl === "string" && blob.serverUrl.trim().length > 0
-          ? blob.serverUrl.trim().replace(/\/+$/, "")
-          : "";
-      const publicUrl =
-        typeof blob.url === "string" && blob.url.trim().length > 0
-          ? blob.url.trim()
-          : normalizedServerUrl && blob.sha256
-            ? `${normalizedServerUrl}/${blob.sha256}`
-            : null;
-      const privateLinkUrl =
-        typeof blob.__bloomPrivateLinkUrl === "string" && blob.__bloomPrivateLinkUrl.trim().length > 0
-          ? blob.__bloomPrivateLinkUrl.trim()
-          : null;
-      const hasPublicLink = Boolean(publicUrl);
-      const hasPrivateLink = Boolean(privateLinkUrl);
-      const disabled = isPrivateItem || (!hasPublicLink && !hasPrivateLink);
+      const disabled = shareAvailability.disabled;
       const shareDisabledClass = disabled ? disabledNeutralButtonClass : "";
-      const shareDisabledMessage = isListBlob ? "Private folders cannot be shared" : "Private files cannot be shared";
-      const title = disabled
-        ? isPrivateItem
-          ? shareDisabledMessage
-          : "Share available once file link is ready"
-        : "Share";
+      const title = disabled ? shareAvailability.disabledReason ?? "Share unavailable" : "Share";
       const ariaLabel = isAudio ? "Share track" : "Share blob";
       return (
-        <div className="relative h-full w-full">
-          <button
-            ref={shareTriggerRef}
-            className={`${dropdownTriggerClass} h-full w-full rounded-none border-l border-r-0 ${shareDisabledClass}`}
-            onClick={event => {
-              event.stopPropagation();
-              if (disabled) return;
-              setShareMenuOpen(value => !value);
-            }}
-            aria-label={ariaLabel}
-            title={title}
-            type="button"
-            disabled={disabled}
-            aria-haspopup="true"
-            aria-expanded={shareMenuOpen}
-          >
-            <ShareIcon size={18} className={disabled ? disabledNeutralIconClass : undefined} />
-          </button>
-          {shareMenuOpen ? (
-            <div
-              ref={shareMenuRef}
-              className={`${menuBaseClass} ${sharePlacementClass} ${shareVisibilityClass}`}
-              role="menu"
-              aria-label="Share options"
-            >
-              {hasPublicLink ? (
-                <a
-                  href="#"
-                  role="menuitem"
-                  className={makeItemClass()}
-                  onClick={event => {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    setShareMenuOpen(false);
-                    if (publicUrl && typeof navigator !== "undefined" && navigator.clipboard) {
-                      void navigator.clipboard.writeText(publicUrl).catch(() => undefined);
-                    }
-                  }}
-                >
-                  <LinkIcon size={14} />
-                  <span>Copy link</span>
-                </a>
-              ) : null}
-              {hasPrivateLink ? (
-                <a
-                  href="#"
-                  role="menuitem"
-                  className={makeItemClass()}
-                  onClick={event => {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    setShareMenuOpen(false);
-                    if (privateLinkUrl && typeof navigator !== "undefined" && navigator.clipboard) {
-                      void navigator.clipboard.writeText(privateLinkUrl).catch(() => undefined);
-                    }
-                  }}
-                >
-                  <LockIcon size={14} />
-                  <span>Copy private link</span>
-                </a>
-              ) : null}
-              {hasPublicLink || hasPrivateLink ? <div className={dropdownSeparatorClass} role="none" /> : null}
-              <a
-                href="#"
-                role="menuitem"
-                className={makeItemClass()}
-                onClick={event => {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  setShareMenuOpen(false);
-                  onShare?.(blob);
-                }}
-              >
-                <ShareIcon size={14} />
-                <span>Share publicly</span>
-              </a>
-              <a
-                href="#"
-                role="menuitem"
-                className={makeItemClass()}
-                onClick={event => {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  setShareMenuOpen(false);
-                  onShare?.(blob, { mode: "private-link" });
-                }}
-              >
-                <LockIcon size={14} />
-                <span>Share privately</span>
-              </a>
-            </div>
-          ) : null}
-        </div>
+        <button
+          className={`${dropdownTriggerClass} h-full w-full rounded-none border-l border-r-0 ${shareDisabledClass}`}
+          onClick={event => {
+            event.stopPropagation();
+            if (disabled) return;
+            onOpenShareDialog(blob);
+          }}
+          aria-label={ariaLabel}
+          title={title}
+          type="button"
+          disabled={disabled}
+          aria-haspopup={disabled ? undefined : "dialog"}
+          aria-expanded={!disabled && isShareDialogActive}
+        >
+          <ShareIcon size={18} className={disabled ? disabledNeutralIconClass : undefined} />
+        </button>
       );
     })();
 
@@ -2826,6 +2840,9 @@ type ListRowProps = {
   getMenuBoundary?: () => HTMLElement | null;
   isCompactList: boolean;
   actionsColumnWidth: number | null;
+  privateLinkServiceConfigured: boolean;
+  onOpenShareDialog: (blob: BlossomBlob) => void;
+  activeShareDialogSha: string | null;
 };
 
 const ListRowComponent: React.FC<ListRowProps> = ({
@@ -2867,6 +2884,9 @@ const ListRowComponent: React.FC<ListRowProps> = ({
   getMenuBoundary,
   isCompactList,
   actionsColumnWidth,
+  privateLinkServiceConfigured,
+  onOpenShareDialog,
+  activeShareDialogSha,
 }) => {
   const rowStyle = useMemo<React.CSSProperties>(
     () => ({ position: "absolute", top, left, width, height }),
@@ -3064,10 +3084,6 @@ const ListRowComponent: React.FC<ListRowProps> = ({
     };
   }, [menuOpen]);
 
-  const shareTriggerRef = useRef<HTMLButtonElement | null>(null);
-  const shareMenuRef = useRef<HTMLDivElement | null>(null);
-  const [shareMenuOpen, setShareMenuOpen] = useState(false);
-
   const {
     preferences: { theme },
   } = useUserPreferences();
@@ -3096,54 +3112,11 @@ const ListRowComponent: React.FC<ListRowProps> = ({
   };
   const dropdownSeparatorClass = isLightTheme ? "my-1 h-px bg-slate-200" : "my-1 h-px bg-slate-700/60";
 
-  useEffect(() => {
-    if (!shareMenuOpen) return;
-    if (typeof document === "undefined") return;
-    const handlePointer = (event: Event) => {
-      const target = event.target as Node | null;
-      if (!target) return;
-      if (shareTriggerRef.current?.contains(target) || shareMenuRef.current?.contains(target)) {
-        return;
-      }
-      setShareMenuOpen(false);
-    };
-    const handleKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setShareMenuOpen(false);
-      }
-    };
-    document.addEventListener("pointerdown", handlePointer);
-    document.addEventListener("keydown", handleKey);
-    return () => {
-      document.removeEventListener("pointerdown", handlePointer);
-      document.removeEventListener("keydown", handleKey);
-    };
-  }, [shareMenuOpen]);
-
-  useEffect(() => {
-    setShareMenuOpen(false);
-  }, [blob.sha256, folderShareHint, onShareFolder]);
-
-  const shareMenuDisabled = useMemo(() => {
-    if (folderShareHint && onShareFolder) return true;
-    if (!onShare || isPrivateItem) return true;
-    const normalizedServerUrl =
-      typeof blob.serverUrl === "string" && blob.serverUrl.trim().length > 0
-        ? blob.serverUrl.trim().replace(/\/+$/, "")
-        : "";
-    const hasPublicLink =
-      (typeof blob.url === "string" && blob.url.trim().length > 0) ||
-      (normalizedServerUrl && blob.sha256);
-    const hasPrivateLink =
-      typeof blob.__bloomPrivateLinkUrl === "string" && blob.__bloomPrivateLinkUrl.trim().length > 0;
-    return !hasPublicLink && !hasPrivateLink;
-  }, [blob.serverUrl, blob.sha256, blob.url, blob.__bloomPrivateLinkUrl, folderShareHint, isPrivateItem, onShare, onShareFolder]);
-
-  useEffect(() => {
-    if (shareMenuDisabled) {
-      setShareMenuOpen(false);
-    }
-  }, [shareMenuDisabled]);
+  const shareAvailability = useMemo(
+    () => computeShareAvailability(blob, privateLinkServiceConfigured),
+    [blob, privateLinkServiceConfigured]
+  );
+  const isShareDialogActive = activeShareDialogSha === blob.sha256;
 
   const shareButton = (() => {
     if (folderShareHint && onShareFolder) {
@@ -3171,123 +3144,26 @@ const ListRowComponent: React.FC<ListRowProps> = ({
       );
     }
     if (!onShare) return null;
-    const normalizedServerUrl =
-      typeof blob.serverUrl === "string" && blob.serverUrl.trim().length > 0
-        ? blob.serverUrl.trim().replace(/\/+$/, "")
-        : "";
-    const publicUrl =
-      typeof blob.url === "string" && blob.url.trim().length > 0
-        ? blob.url.trim()
-        : normalizedServerUrl && blob.sha256
-          ? `${normalizedServerUrl}/${blob.sha256}`
-          : null;
-    const privateLinkUrl =
-      typeof blob.__bloomPrivateLinkUrl === "string" && blob.__bloomPrivateLinkUrl.trim().length > 0
-        ? blob.__bloomPrivateLinkUrl.trim()
-        : null;
-    const hasPublicLink = Boolean(publicUrl);
-    const hasPrivateLink = Boolean(privateLinkUrl);
-    const disabled = isPrivateItem || (!hasPublicLink && !hasPrivateLink);
+    const disabled = shareAvailability.disabled;
     const ariaLabel = isMusicListView ? "Share track" : "Share blob";
-    const title = disabled
-      ? isPrivateItem
-        ? "Private files cannot be shared"
-        : "Share available once file link is ready"
-      : "Share";
+    const title = disabled ? shareAvailability.disabledReason ?? "Share unavailable" : "Share";
     return (
-      <div className="relative">
-        <button
-          ref={shareTriggerRef}
-          className="p-2 shrink-0 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-slate-800"
-          onClick={event => {
-            event.stopPropagation();
-            if (disabled) return;
-            setShareMenuOpen(value => !value);
-          }}
-          aria-label={ariaLabel}
-          title={title}
-          type="button"
-          disabled={disabled}
-          aria-haspopup="true"
-          aria-expanded={shareMenuOpen}
-        >
-          <ShareIcon size={16} />
-        </button>
-        {shareMenuOpen ? (
-            <div
-              ref={shareMenuRef}
-              className={`${menuBaseClass} absolute right-0 top-full mt-2 origin-top visible opacity-100`}
-              role="menu"
-              aria-label="Share options"
-            >
-              {hasPublicLink ? (
-                <a
-                  href="#"
-                  role="menuitem"
-                  className={makeItemClass()}
-                  onClick={event => {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    setShareMenuOpen(false);
-                    if (publicUrl && typeof navigator !== "undefined" && navigator.clipboard) {
-                      void navigator.clipboard.writeText(publicUrl).catch(() => undefined);
-                    }
-                  }}
-                >
-                  <LinkIcon size={14} />
-                  <span>Copy link</span>
-                </a>
-              ) : null}
-              {hasPrivateLink ? (
-                <a
-                  href="#"
-                  role="menuitem"
-                  className={makeItemClass()}
-                  onClick={event => {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    setShareMenuOpen(false);
-                    if (privateLinkUrl && typeof navigator !== "undefined" && navigator.clipboard) {
-                      void navigator.clipboard.writeText(privateLinkUrl).catch(() => undefined);
-                    }
-                  }}
-                >
-                  <LockIcon size={14} />
-                  <span>Copy private link</span>
-                </a>
-              ) : null}
-              {hasPublicLink || hasPrivateLink ? <div className={dropdownSeparatorClass} role="none" /> : null}
-              <a
-                href="#"
-                role="menuitem"
-                className={makeItemClass()}
-                onClick={event => {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  setShareMenuOpen(false);
-                  onShare?.(blob);
-                }}
-              >
-                <ShareIcon size={14} />
-                <span>Share publicly</span>
-              </a>
-              <a
-                href="#"
-                role="menuitem"
-                className={makeItemClass()}
-                onClick={event => {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  setShareMenuOpen(false);
-                  onShare?.(blob, { mode: "private-link" });
-                }}
-              >
-                <LockIcon size={14} />
-                <span>Share privately</span>
-              </a>
-            </div>
-        ) : null}
-      </div>
+      <button
+        className="p-2 shrink-0 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-slate-800"
+        onClick={event => {
+          event.stopPropagation();
+          if (disabled) return;
+          onOpenShareDialog(blob);
+        }}
+        aria-label={ariaLabel}
+        title={title}
+        type="button"
+        disabled={disabled}
+        aria-haspopup={disabled ? undefined : "dialog"}
+        aria-expanded={!disabled && isShareDialogActive}
+      >
+        <ShareIcon size={16} />
+      </button>
     );
   })();
 
@@ -4323,7 +4199,9 @@ const ListRow = React.memo(ListRowComponent, (prev, next) => {
     prev.isPrivateBlob === next.isPrivateBlob &&
     prev.coverEntry === next.coverEntry &&
     prev.isCompactList === next.isCompactList &&
-    prev.actionsColumnWidth === next.actionsColumnWidth
+    prev.actionsColumnWidth === next.actionsColumnWidth &&
+    prev.privateLinkServiceConfigured === next.privateLinkServiceConfigured &&
+    prev.activeShareDialogSha === next.activeShareDialogSha
   );
 });
 

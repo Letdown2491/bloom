@@ -103,7 +103,7 @@ function extractExpirationTag(event: NostrEvent): number | null {
   return normalizeExpiration(tag[1]);
 }
 
-async function decryptEnvelope(event: NostrEvent): Promise<PrivateLinkEnvelope | null> {
+async function decryptEnvelope(event: NostrEvent, aliasHint?: string): Promise<PrivateLinkEnvelope | null> {
   const ciphertext = event.content;
   const pubkey = event.pubkey;
   if (!ciphertext || !pubkey) return null;
@@ -123,7 +123,7 @@ async function decryptEnvelope(event: NostrEvent): Promise<PrivateLinkEnvelope |
       if (parsed.version !== 1) continue;
       return parsed as PrivateLinkEnvelope;
     } catch (error) {
-      logger.error({ err: error, pubkey, alias }, 'decrypt attempt failed');
+      logger.error({ err: error, pubkey, alias: aliasHint }, 'decrypt attempt failed');
       continue;
     }
   }
@@ -141,7 +141,7 @@ async function fetchAlias(alias: string): Promise<CacheEntry | null> {
   events.sort((a, b) => (b.created_at ?? 0) - (a.created_at ?? 0));
   const nowTs = nowSeconds();
   for (const event of events) {
-    const envelope = await decryptEnvelope(event);
+    const envelope = await decryptEnvelope(event, alias);
     if (!envelope) continue;
     if (envelope.alias !== alias) continue;
     const tagExpiration = extractExpirationTag(event);
