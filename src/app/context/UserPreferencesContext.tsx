@@ -21,6 +21,15 @@ import {
 import type { FilterMode } from "../../shared/types/filter";
 import type { ViewMode, DefaultSortOption, SortDirection, UserPreferences } from "../../shared/types/preferences";
 import { loadNdkModule } from "../../shared/api/ndkModule";
+import {
+  loadStoredPreferences,
+  loadSyncEnabled,
+  loadSyncMetadata,
+  persistSyncEnabled,
+  persistSyncMetadata,
+  persistPreferences,
+  type SyncMetadata,
+} from "../services/preferencesStorage";
 
 export type { DefaultSortOption, SortDirection, UserPreferences } from "../../shared/types/preferences";
 
@@ -48,28 +57,7 @@ type UserPreferencesContextValue = {
   preferencesReady: boolean;
 };
 
-const DEFAULT_PREFERENCES: UserPreferences = {
-  defaultServerUrl: null,
-  defaultViewMode: "list",
-  defaultFilterMode: "all",
-  defaultSortOption: "updated",
-  sortDirection: "descending",
-  showGridPreviews: true,
-  showListPreviews: true,
-  keepSearchExpanded: false,
-  theme: "dark",
-};
-
-const STORAGE_KEY = "bloom:user-preferences";
-const SYNC_ENABLED_KEY = "bloom:user-preferences-sync-enabled";
-const SYNC_META_KEY = "bloom:user-preferences-sync-meta";
-
 const UserPreferencesContext = createContext<UserPreferencesContextValue | undefined>(undefined);
-
-type SyncMetadata = {
-  lastSyncedAt: number | null;
-  lastLocalUpdatedAt: number | null;
-};
 
 type EncryptionCapableSigner = NDKSigner & {
   encrypt: (recipient: { pubkey: string }, value: string, scheme?: "nip44" | "nip04") => Promise<string>;
@@ -79,92 +67,6 @@ type EncryptionCapableSigner = NDKSigner & {
 const isEncryptionCapableSigner = (signer: NDKSigner | null | undefined): signer is EncryptionCapableSigner =>
   Boolean(signer && typeof (signer as any).encrypt === "function" && typeof (signer as any).decrypt === "function");
 
-const readStoredPreferences = (): UserPreferences => {
-  if (typeof window === "undefined") {
-    return DEFAULT_PREFERENCES;
-  }
-
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return DEFAULT_PREFERENCES;
-    const parsed = JSON.parse(raw) as (Partial<UserPreferences> & { showPreviews?: boolean }) | null;
-    const defaultViewMode: ViewMode = parsed?.defaultViewMode === "grid" ? "grid" : "list";
-    const defaultFilterMode: FilterMode = isFilterMode(parsed?.defaultFilterMode) ? parsed.defaultFilterMode! : "all";
-    const defaultSortOption: DefaultSortOption = isSortOption(parsed?.defaultSortOption)
-      ? parsed.defaultSortOption!
-      : "updated";
-    const sortDirection: SortDirection = isSortDirection(parsed?.sortDirection) ? parsed.sortDirection! : "descending";
-    const legacyShowPreviews = typeof parsed?.showPreviews === "boolean" ? parsed.showPreviews : undefined;
-    const showGridPreviews = typeof parsed?.showGridPreviews === "boolean"
-      ? parsed.showGridPreviews
-      : legacyShowPreviews ?? true;
-    const showListPreviews = typeof parsed?.showListPreviews === "boolean"
-      ? parsed.showListPreviews
-      : legacyShowPreviews ?? true;
-    const keepSearchExpanded = typeof parsed?.keepSearchExpanded === "boolean" ? parsed.keepSearchExpanded : false;
-    const defaultServerUrl = typeof parsed?.defaultServerUrl === "string" && parsed.defaultServerUrl.trim()
-      ? parsed.defaultServerUrl.trim()
-      : null;
-    const theme: "dark" | "light" = parsed?.theme === "light" ? "light" : "dark";
-    return {
-      defaultServerUrl,
-      defaultViewMode,
-      defaultFilterMode,
-      defaultSortOption,
-      sortDirection,
-      showGridPreviews,
-      showListPreviews,
-      keepSearchExpanded,
-      theme,
-    };
-  } catch {
-    return DEFAULT_PREFERENCES;
-  }
-};
-
-const readStoredSyncEnabled = (): boolean => {
-  if (typeof window === "undefined") return false;
-  try {
-    const raw = window.localStorage.getItem(SYNC_ENABLED_KEY);
-    if (!raw) return false;
-    if (raw === "1") return true;
-    if (raw === "0") return false;
-    return Boolean(JSON.parse(raw));
-  } catch {
-    return false;
-  }
-};
-
-const readStoredSyncMeta = (): SyncMetadata => {
-  if (typeof window === "undefined") return { lastSyncedAt: null, lastLocalUpdatedAt: null };
-  try {
-    const raw = window.localStorage.getItem(SYNC_META_KEY);
-    if (!raw) return { lastSyncedAt: null, lastLocalUpdatedAt: null };
-    const parsed = JSON.parse(raw) as SyncMetadata;
-    const lastSyncedAt = normalizeTimestamp(parsed?.lastSyncedAt);
-    const lastLocalUpdatedAt = normalizeTimestamp(parsed?.lastLocalUpdatedAt);
-    return {
-      lastSyncedAt,
-      lastLocalUpdatedAt,
-    };
-  } catch {
-    return { lastSyncedAt: null, lastLocalUpdatedAt: null };
-  }
-};
-
-const normalizeTimestamp = (value: unknown): number | null => {
-  if (typeof value !== "number" || !Number.isFinite(value)) return null;
-  const truncated = Math.trunc(value);
-  return truncated >= 0 ? truncated : null;
-};
-
-const isFilterMode = (value: unknown): value is FilterMode =>
-  value === "all" || value === "music" || value === "documents" || value === "images" || value === "pdfs" || value === "videos";
-
-const isSortOption = (value: unknown): value is DefaultSortOption =>
-  value === "name" || value === "servers" || value === "updated" || value === "size";
-
-const isSortDirection = (value: unknown): value is SortDirection => value === "ascending" || value === "descending";
 
 const preferencesEqual = (a: UserPreferences, b: UserPreferences) =>
   a.defaultServerUrl === b.defaultServerUrl &&
@@ -177,29 +79,11 @@ const preferencesEqual = (a: UserPreferences, b: UserPreferences) =>
   a.keepSearchExpanded === b.keepSearchExpanded &&
   a.theme === b.theme;
 
-const persistSyncEnabled = (value: boolean) => {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.setItem(SYNC_ENABLED_KEY, value ? "1" : "0");
-  } catch {
-    // ignore storage failures
-  }
-};
-
-const persistSyncMeta = (meta: SyncMetadata) => {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.setItem(SYNC_META_KEY, JSON.stringify(meta));
-  } catch {
-    // ignore storage failures
-  }
-};
-
 export const UserPreferencesProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { ndk, signer, user, ensureConnection } = useNdk();
-  const [preferences, setPreferences] = useState<UserPreferences>(() => readStoredPreferences());
-  const [syncEnabled, setSyncEnabledState] = useState<boolean>(() => readStoredSyncEnabled());
-  const initialSyncMeta = useRef<SyncMetadata>(readStoredSyncMeta());
+  const [preferences, setPreferences] = useState<UserPreferences>(() => loadStoredPreferences());
+  const [syncEnabled, setSyncEnabledState] = useState<boolean>(() => loadSyncEnabled());
+  const initialSyncMeta = useRef<SyncMetadata>(loadSyncMetadata());
   const [lastSyncedAt, setLastSyncedAt] = useState<number | null>(initialSyncMeta.current.lastSyncedAt);
   const [syncLoading, setSyncLoading] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
@@ -217,12 +101,7 @@ export const UserPreferencesProvider: React.FC<{ children: React.ReactNode }> = 
   const publishInFlightRef = useRef(false);
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    try {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(preferences));
-    } catch {
-      // ignore storage failures
-    }
+    persistPreferences(preferences);
   }, [preferences]);
 
   useEffect(() => {
@@ -276,7 +155,7 @@ export const UserPreferencesProvider: React.FC<{ children: React.ReactNode }> = 
         lastSyncedAt: payload.updated_at,
         lastLocalUpdatedAt: syncMetaRef.current.lastLocalUpdatedAt,
       };
-      persistSyncMeta(syncMetaRef.current);
+      persistSyncMetadata(syncMetaRef.current);
       setLastSyncedAt(payload.updated_at);
       setSyncError(null);
     } catch (error) {
@@ -326,7 +205,7 @@ export const UserPreferencesProvider: React.FC<{ children: React.ReactNode }> = 
         lastSyncedAt: payload.updated_at,
         lastLocalUpdatedAt: syncMetaRef.current.lastLocalUpdatedAt,
       };
-      persistSyncMeta(syncMetaRef.current);
+      persistSyncMetadata(syncMetaRef.current);
       setLastSyncedAt(payload.updated_at);
       setSyncError(null);
       changeOriginRef.current = "remote";
@@ -387,7 +266,7 @@ export const UserPreferencesProvider: React.FC<{ children: React.ReactNode }> = 
           lastSyncedAt: remoteUpdatedAt,
           lastLocalUpdatedAt: lastLocalUpdateAtRef.current,
         };
-        persistSyncMeta(syncMetaRef.current);
+        persistSyncMetadata(syncMetaRef.current);
         setLastSyncedAt(remoteUpdatedAt);
         setSyncError(null);
       }
@@ -480,7 +359,7 @@ export const UserPreferencesProvider: React.FC<{ children: React.ReactNode }> = 
         lastSyncedAt: syncMetaRef.current.lastSyncedAt,
         lastLocalUpdatedAt: timestamp,
       };
-      persistSyncMeta(syncMetaRef.current);
+      persistSyncMetadata(syncMetaRef.current);
       if (syncEnabled) {
         queuePublish(preferences, timestamp);
       }

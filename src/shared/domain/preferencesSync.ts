@@ -1,5 +1,6 @@
 import type { FilterMode } from "../types/filter";
 import type { UserPreferences } from "../types/preferences";
+import { normalizeEpochSeconds } from "../utils/time";
 
 export const PREFERENCES_SYNC_KIND = 30078;
 export const PREFERENCES_SYNC_IDENTIFIER = "bloom:prefs:v1";
@@ -167,8 +168,8 @@ const sanitizeSavedSearch = (value: unknown): SyncedSavedSearch | null => {
   const id = typeof source.id === "string" && source.id.trim() ? source.id.trim() : null;
   const label = typeof source.label === "string" && source.label.trim() ? source.label.trim() : null;
   const query = typeof source.query === "string" && source.query.trim() ? source.query.trim() : null;
-  const createdAt = normalizeTimestamp(source.created_at);
-  const updatedAt = normalizeTimestamp(source.updated_at);
+  const createdAt = normalizeEpochSeconds(source.created_at);
+  const updatedAt = normalizeEpochSeconds(source.updated_at);
   if (!id || !query || !createdAt || !updatedAt) return null;
   return {
     id,
@@ -177,10 +178,4 @@ const sanitizeSavedSearch = (value: unknown): SyncedSavedSearch | null => {
     created_at: createdAt,
     updated_at: updatedAt,
   };
-};
-
-const normalizeTimestamp = (value: unknown): number | null => {
-  if (typeof value !== "number" || !Number.isFinite(value)) return null;
-  const normalized = Math.trunc(value);
-  return normalized >= 0 ? normalized : null;
 };

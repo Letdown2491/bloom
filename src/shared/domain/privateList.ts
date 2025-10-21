@@ -4,6 +4,7 @@ import { loadNdkModule } from "../api/ndkModule";
 
 type LoadedModule = Awaited<ReturnType<typeof loadNdkModule>>;
 type NdkRelaySetInstance = InstanceType<LoadedModule["NDKRelaySet"]>;
+type NdkInstance = InstanceType<LoadedModule["default"]>;
 
 type PrivateListOptions = {
   relaySet?: NdkRelaySetInstance | null;
@@ -55,35 +56,43 @@ type EncryptionCapableSigner = NDKSigner & {
 };
 
 const ensureSigner = (signer: NDKSigner | null | undefined): signer is EncryptionCapableSigner =>
-  Boolean(signer && typeof (signer as any).encrypt === "function" && typeof (signer as any).decrypt === "function");
+  Boolean(
+    signer &&
+      typeof (signer as Partial<EncryptionCapableSigner>).encrypt === "function" &&
+      typeof (signer as Partial<EncryptionCapableSigner>).decrypt === "function"
+  );
 
-const sanitizeEntry = (entry: any): PrivateListEntry | null => {
+const sanitizeEntry = (entry: unknown): PrivateListEntry | null => {
   if (!entry || typeof entry !== "object") return null;
-  const sha256 = typeof entry.sha256 === "string" ? entry.sha256 : null;
+  const source = entry as Record<string, unknown>;
+  const sha256 = typeof source.sha256 === "string" ? source.sha256 : null;
   if (!sha256) return null;
-  const algorithm = entry.encryption?.algorithm;
-  const key = entry.encryption?.key;
-  const iv = entry.encryption?.iv;
-  const audioMetadata = sanitizeAudioMetadata(entry.metadata?.audio);
-  const rawFolderPath = entry.metadata?.folderPath;
+  const encryptionSource = source.encryption as Record<string, unknown> | undefined;
+  const algorithm = typeof encryptionSource?.algorithm === "string" ? encryptionSource.algorithm : undefined;
+  const key = typeof encryptionSource?.key === "string" ? encryptionSource.key : undefined;
+  const iv = typeof encryptionSource?.iv === "string" ? encryptionSource.iv : undefined;
+  const metadataSource = source.metadata as Record<string, unknown> | undefined;
+  const audioMetadata = sanitizeAudioMetadata(metadataSource?.audio);
+  const rawFolderPath = metadataSource?.folderPath;
   const normalizedFolder =
     typeof rawFolderPath === "string"
       ? normalizeFolderPathInput(rawFolderPath) ?? null
       : rawFolderPath === null
         ? null
         : undefined;
-  const metadata = entry.metadata && typeof entry.metadata === "object"
+  const metadata = metadataSource && typeof metadataSource === "object"
     ? {
-        name: typeof entry.metadata.name === "string" ? entry.metadata.name : undefined,
-        type: typeof entry.metadata.type === "string" ? entry.metadata.type : undefined,
-        size: typeof entry.metadata.size === "number" ? entry.metadata.size : undefined,
+        name: typeof metadataSource.name === "string" ? metadataSource.name : undefined,
+        type: typeof metadataSource.type === "string" ? metadataSource.type : undefined,
+        size: typeof metadataSource.size === "number" ? metadataSource.size : undefined,
         audio: audioMetadata,
         folderPath: normalizedFolder,
       }
     : undefined;
-  const servers = Array.isArray(entry.servers)
+  const serversValue = source.servers;
+  const servers = Array.isArray(serversValue)
     ? (() => {
-        const cleaned = entry.servers
+        const cleaned = serversValue
           .filter((value: unknown): value is string => typeof value === "string" && value.trim().length > 0)
           .map((value: string) => value.trim());
         if (!cleaned.length) return undefined;
@@ -91,9 +100,9 @@ const sanitizeEntry = (entry: any): PrivateListEntry | null => {
         return unique.length ? unique : undefined;
       })()
     : undefined;
-  const updatedAt = typeof entry.updatedAt === "number" ? entry.updatedAt : undefined;
+  const updatedAt = typeof source.updatedAt === "number" ? source.updatedAt : undefined;
   const encryption =
-    typeof algorithm === "string" && typeof key === "string" && typeof iv === "string"
+    algorithm && key && iv
       ? { algorithm, key, iv }
       : undefined;
 
@@ -132,7 +141,7 @@ const sanitizeAudioMetadata = (value: unknown): PrivateAudioMetadata | null | un
 };
 
 export const loadPrivateList = async (
-  ndk: any,
+  ndk: NdkInstance | null,
   signer: NDKSigner | null,
   user: NDKUser | null,
   options?: PrivateListOptions
@@ -170,7 +179,7 @@ export const loadPrivateList = async (
 };
 
 export const publishPrivateList = async (
-  ndk: any,
+  ndk: NdkInstance | null,
   signer: NDKSigner | null,
   user: NDKUser | null,
   entries: PrivateListEntry[],

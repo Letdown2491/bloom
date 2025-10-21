@@ -25,7 +25,8 @@ import { PRIVATE_PLACEHOLDER_SHA, PRIVATE_SERVER_NAME } from "../../shared/const
 import { applyFolderUpdate, getBlobMetadataName, normalizeFolderPathInput } from "../../shared/utils/blobMetadataStore";
 import type { BlobAudioMetadata } from "../../shared/utils/blobMetadataStore";
 import { deriveNameFromPath, isPrivateFolderName, type FolderListVisibility } from "../../shared/domain/folderList";
-import { isListLikeBlob, type BlobReplicaSummary } from "../browse/ui/BlobList";
+import { type BlobReplicaSummary } from "../browse/ui/BlobList";
+import { isListLikeBlob } from "../browse/ui/components/blobPreview";
 import type { DefaultSortOption, SortDirection } from "../../app/context/UserPreferencesContext";
 import { buildNip98AuthHeader } from "../../shared/api/nip98";
 import { decryptPrivateBlob } from "../../shared/domain/privateEncryption";
@@ -3195,8 +3196,8 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
 
           clearSelection();
           showStatusMessage("Folder deleted. Syncing metadata…", "success", 3000);
-        } catch (error: any) {
-          const message = error?.message || "Failed to delete folder.";
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "Failed to delete folder.";
           showStatusMessage(message, "error", 4000);
         }
         return;
@@ -3220,9 +3221,10 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
           setActiveList(null);
           clearSelection();
           showStatusMessage("Private list deleted", "success", 2000);
-        } catch (error: any) {
+        } catch (error) {
           console.warn("Failed to delete private list", error);
-          showStatusMessage(error?.message || "Failed to delete private list", "error", 4000);
+          const message = error instanceof Error ? error.message : "Failed to delete private list";
+          showStatusMessage(message, "error", 4000);
         }
         return;
       }
@@ -3278,8 +3280,9 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
         }
         selectManyBlobs([blob.sha256], false);
         showStatusMessage("Blob deleted", "success", 2000);
-      } catch (error: any) {
-        showStatusMessage(error?.message || "Delete failed", "error", 5000);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Delete failed";
+        showStatusMessage(message, "error", 5000);
       }
     },
     [
