@@ -39,14 +39,16 @@ export const useShareWorkflow = () => {
         if (info.displayName) label = info.displayName;
         else if (info.username) label = `@${info.username}`;
         else if (info.nip05) label = info.nip05;
-        else if (info.npub) label = info.npub.length > 12 ? `${info.npub.slice(0, 6)}…${info.npub.slice(-4)}` : info.npub;
+        else if (info.npub)
+          label =
+            info.npub.length > 12 ? `${info.npub.slice(0, 6)}…${info.npub.slice(-4)}` : info.npub;
       }
       if (result.success) {
         clearShareState();
       }
       return label;
     },
-    [clearShareState]
+    [clearShareState],
   );
 
   return {

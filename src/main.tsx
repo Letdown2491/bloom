@@ -7,9 +7,7 @@ import { AppProviders } from "./app/providers/AppProviders";
 import App from "./app/App";
 import { PublicFolderPage } from "./features/folderShare/PublicFolderPage";
 
-type InitialView =
-  | { mode: "app" }
-  | { mode: "public-folder"; naddr: string };
+type InitialView = { mode: "app" } | { mode: "public-folder"; naddr: string };
 
 const resolveInitialView = (): InitialView => {
   if (typeof window === "undefined") {
@@ -40,7 +38,11 @@ const root = createRoot(rootElement);
 root.render(
   <StrictMode>
     <AppProviders>
-      {initialView.mode === "public-folder" ? <PublicFolderPage naddr={initialView.naddr} /> : <App />}
+      {initialView.mode === "public-folder" ? (
+        <PublicFolderPage naddr={initialView.naddr} />
+      ) : (
+        <App />
+      )}
     </AppProviders>
-  </StrictMode>
+  </StrictMode>,
 );

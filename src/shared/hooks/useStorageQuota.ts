@@ -57,9 +57,11 @@ export type UseStorageQuotaResult = {
 };
 
 export const useStorageQuota = (): UseStorageQuotaResult => {
-  const [snapshot, setSnapshot] = useState<StorageQuotaSnapshot>(() => createSnapshot(`${FALLBACK_CONTEXT}:init`));
+  const [snapshot, setSnapshot] = useState<StorageQuotaSnapshot>(() =>
+    createSnapshot(`${FALLBACK_CONTEXT}:init`),
+  );
   const [managedKeys, setManagedKeys] = useState<string[]>(() =>
-    isLocalStorageAccessible() ? listBloomLocalStorageKeys() : []
+    isLocalStorageAccessible() ? listBloomLocalStorageKeys() : [],
   );
   const [originSupported, setOriginSupported] = useState<boolean>(() => hasOriginEstimateSupport());
   const [originEstimate, setOriginEstimate] = useState<OriginStorageEstimate | null>(null);
@@ -101,18 +103,21 @@ export const useStorageQuota = (): UseStorageQuotaResult => {
     return result;
   }, [updateCacheEstimate, updateOriginEstimate]);
 
-  const refresh = useCallback((context?: string) => {
-    const next = createSnapshot(context ?? `${FALLBACK_CONTEXT}:refresh`);
-    setSnapshot(next);
-    if (isLocalStorageAccessible()) {
-      setManagedKeys(listBloomLocalStorageKeys());
-    } else {
-      setManagedKeys([]);
-    }
-    void updateOriginEstimate();
-    void updateCacheEstimate();
-    return next;
-  }, [updateCacheEstimate, updateOriginEstimate]);
+  const refresh = useCallback(
+    (context?: string) => {
+      const next = createSnapshot(context ?? `${FALLBACK_CONTEXT}:refresh`);
+      setSnapshot(next);
+      if (isLocalStorageAccessible()) {
+        setManagedKeys(listBloomLocalStorageKeys());
+      } else {
+        setManagedKeys([]);
+      }
+      void updateOriginEstimate();
+      void updateCacheEstimate();
+      return next;
+    },
+    [updateCacheEstimate, updateOriginEstimate],
+  );
 
   const clear = useCallback(() => {
     const result = clearBloomLocalStorage();

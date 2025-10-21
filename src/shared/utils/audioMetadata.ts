@@ -1,4 +1,5 @@
 import type { IAudioMetadata } from "music-metadata";
+import type * as MusicMetadataModule from "music-metadata";
 
 export type ExtractedAudioMetadata = {
   title?: string;
@@ -13,11 +14,11 @@ export type ExtractedAudioMetadata = {
 
 const MAX_PARSE_BYTES = 16 * 1024 * 1024; // 16 MB is plenty for metadata parsing.
 
-let musicMetadataModule: Promise<typeof import("music-metadata")> | null = null;
+let musicMetadataModule: Promise<typeof MusicMetadataModule> | null = null;
 
 const loadMusicMetadata = async () => {
   if (!musicMetadataModule) {
-    musicMetadataModule = import("music-metadata");
+    musicMetadataModule = import("music-metadata") as Promise<typeof MusicMetadataModule>;
   }
   return musicMetadataModule;
 };
@@ -38,9 +39,10 @@ function normalizeAudioMetadata(metadata: IAudioMetadata): ExtractedAudioMetadat
   const { common, format } = metadata;
   const primaryArtist = resolvePrimaryArtist(common.artist, common.artists);
   const primaryGenre = Array.isArray(common.genre) ? common.genre[0] : common.genre;
-  const durationSeconds = typeof format.duration === "number" && Number.isFinite(format.duration)
-    ? Math.round(format.duration)
-    : undefined;
+  const durationSeconds =
+    typeof format.duration === "number" && Number.isFinite(format.duration)
+      ? Math.round(format.duration)
+      : undefined;
 
   return {
     title: sanitize(common.title),

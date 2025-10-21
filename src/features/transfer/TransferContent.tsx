@@ -45,16 +45,24 @@ export const TransferContent: React.FC<TransferContentProps> = ({
   onBackToBrowse,
   currentSignerMissing,
 }) => {
-  const serverNameMap = React.useMemo(() => new Map(localServers.map(server => [server.url, server.name])), [localServers]);
+  const serverNameMap = React.useMemo(
+    () => new Map(localServers.map(server => [server.url, server.name])),
+    [localServers],
+  );
   const disableTransferAction =
-    transferBusy || transferTargets.length === 0 || selectedBlobItems.length === 0 || localServers.length <= 1;
+    transferBusy ||
+    transferTargets.length === 0 ||
+    selectedBlobItems.length === 0 ||
+    localServers.length <= 1;
 
   return (
     <div className="space-y-6">
       <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4 sm:p-6 space-y-5">
         <div>
           <h2 className="text-base font-semibold text-slate-100">Transfer files</h2>
-          <p className="text-sm text-slate-400">Select where Bloom should copy the files you picked in Browse.</p>
+          <p className="text-sm text-slate-400">
+            Select where Bloom should copy the files you picked in Browse.
+          </p>
         </div>
         {selectedBlobItems.length === 0 ? (
           <div className="rounded-xl border border-slate-800 bg-slate-900/80 p-4 text-sm text-slate-400">
@@ -70,19 +78,23 @@ export const TransferContent: React.FC<TransferContentProps> = ({
                 <span>{prettyBytes(selectedBlobTotalSize)}</span>
               </div>
               <div className="text-xs uppercase tracking-wide text-slate-500">
-                From {Array.from(sourceServerUrls)
+                From{" "}
+                {Array.from(sourceServerUrls)
                   .map(url => serverNameMap.get(url) || url)
                   .join(", ") || "unknown server"}
               </div>
               {missingSourceCount > 0 && (
                 <div className="text-xs text-amber-300">
-                  {missingSourceCount} item{missingSourceCount === 1 ? "" : "s"} could not be fetched right now.
+                  {missingSourceCount} item{missingSourceCount === 1 ? "" : "s"} could not be
+                  fetched right now.
                 </div>
               )}
               <ul className="mt-1 space-y-1 text-xs text-slate-400">
                 {selectedBlobItems.slice(0, 6).map(item => (
                   <li key={item.blob.sha256} className="flex items-center justify-between gap-3">
-                    <span className="truncate">{getBlobMetadataName(item.blob) ?? item.blob.sha256}</span>
+                    <span className="truncate">
+                      {getBlobMetadataName(item.blob) ?? item.blob.sha256}
+                    </span>
                     <span>{prettyBytes(item.blob.size || 0)}</span>
                   </li>
                 ))}
@@ -92,7 +104,9 @@ export const TransferContent: React.FC<TransferContentProps> = ({
               </ul>
             </div>
             <div className="space-y-2">
-              <h3 className="text-xs uppercase tracking-wide text-slate-500">Destination servers</h3>
+              <h3 className="text-xs uppercase tracking-wide text-slate-500">
+                Destination servers
+              </h3>
               {localServers.length === 0 ? (
                 <div className="rounded-xl border border-slate-800 bg-slate-900/70 p-4 text-sm text-slate-400">
                   Add a server in the Servers tab before transferring.
@@ -104,7 +118,9 @@ export const TransferContent: React.FC<TransferContentProps> = ({
                     const requiresSigner = Boolean(server.requiresAuth);
                     const disabled =
                       localServers.length <= 1 ||
-                      (localServers.length === 2 && Boolean(selectedServer) && server.url === selectedServer);
+                      (localServers.length === 2 &&
+                        Boolean(selectedServer) &&
+                        server.url === selectedServer);
                     return (
                       <label
                         key={server.url}
@@ -135,7 +151,9 @@ export const TransferContent: React.FC<TransferContentProps> = ({
                 </div>
               )}
             </div>
-            {transferFeedback && <div className={`text-sm ${transferFeedbackTone}`}>{transferFeedback}</div>}
+            {transferFeedback && (
+              <div className={`text-sm ${transferFeedbackTone}`}>{transferFeedback}</div>
+            )}
             <div className="flex flex-wrap gap-3">
               <button
                 onClick={handleStartTransfer}
@@ -163,10 +181,14 @@ export const TransferContent: React.FC<TransferContentProps> = ({
           <div className="text-sm font-semibold text-slate-100">Transfer activity</div>
           <div className="space-y-3">
             {transferActivity.map(item => {
-              const percent = item.total > 0 ? Math.round((item.transferred / item.total) * 100) : 0;
+              const percent =
+                item.total > 0 ? Math.round((item.transferred / item.total) * 100) : 0;
               const label = serverNameMap.get(item.serverUrl) || item.serverUrl;
               return (
-                <div key={item.id} className="rounded-xl border border-slate-800 bg-slate-900/80 p-3">
+                <div
+                  key={item.id}
+                  className="rounded-xl border border-slate-800 bg-slate-900/80 p-3"
+                >
                   <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-slate-200">
                     <span className="truncate font-medium">{item.fileName}</span>
                     <span className="text-xs text-slate-500">{label}</span>
@@ -191,7 +213,9 @@ export const TransferContent: React.FC<TransferContentProps> = ({
                     <div className="mt-2 text-xs text-emerald-300">Transfer complete.</div>
                   )}
                   {item.status === "error" && (
-                    <div className="mt-2 text-xs text-red-400">{item.message || "Transfer failed"}</div>
+                    <div className="mt-2 text-xs text-red-400">
+                      {item.message || "Transfer failed"}
+                    </div>
                   )}
                 </div>
               );

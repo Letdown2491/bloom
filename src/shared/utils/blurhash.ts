@@ -1,6 +1,8 @@
 import { encode } from "blurhash";
 
-export async function computeBlurhash(file: File): Promise<{ hash: string; width: number; height: number } | undefined> {
+export async function computeBlurhash(
+  file: File,
+): Promise<{ hash: string; width: number; height: number } | undefined> {
   try {
     const bitmap = await createImageBitmap(file);
     const canvas = document.createElement("canvas");

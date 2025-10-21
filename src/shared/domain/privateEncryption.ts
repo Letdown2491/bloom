@@ -31,9 +31,18 @@ const toBase64 = (bytes: Uint8Array): string => {
 };
 
 const importKey = async (rawKey: Uint8Array) => {
-  const view = rawKey.byteOffset === 0 && rawKey.byteLength === rawKey.buffer.byteLength ? rawKey : rawKey.slice();
-  const keyBuffer = view.buffer.slice(view.byteOffset, view.byteOffset + view.byteLength) as ArrayBuffer;
-  return crypto.subtle.importKey("raw", keyBuffer, { name: AES_ALGORITHM }, false, ["encrypt", "decrypt"]);
+  const view =
+    rawKey.byteOffset === 0 && rawKey.byteLength === rawKey.buffer.byteLength
+      ? rawKey
+      : rawKey.slice();
+  const keyBuffer = view.buffer.slice(
+    view.byteOffset,
+    view.byteOffset + view.byteLength,
+  ) as ArrayBuffer;
+  return crypto.subtle.importKey("raw", keyBuffer, { name: AES_ALGORITHM }, false, [
+    "encrypt",
+    "decrypt",
+  ]);
 };
 
 const fromBase64 = (value: string): Uint8Array => {
@@ -81,7 +90,10 @@ export const encryptFileForPrivateUpload = async (file: File): Promise<PrivateEn
   };
 };
 
-export const decryptPrivateBlob = async (data: ArrayBuffer, metadata: PrivateEncryptionMetadata) => {
+export const decryptPrivateBlob = async (
+  data: ArrayBuffer,
+  metadata: PrivateEncryptionMetadata,
+) => {
   const keyBytes = fromBase64(metadata.key);
   const ivBytes = fromBase64(metadata.iv);
   const cryptoKey = await importKey(keyBytes);

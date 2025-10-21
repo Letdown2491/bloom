@@ -20,7 +20,9 @@ export const SwitchControl: React.FC<SwitchControlProps> = ({
   theme = "dark",
 }) => {
   const isLightTheme = theme === "light";
-  const activeTrackClass = isLightTheme ? "border-blue-600 bg-blue-600" : "border-emerald-500/80 bg-emerald-400/90";
+  const activeTrackClass = isLightTheme
+    ? "border-blue-600 bg-blue-600"
+    : "border-emerald-500/80 bg-emerald-400/90";
   const inactiveTrackClass = "border-slate-500/80 bg-slate-600/70";
 
   const trackClass = disabled

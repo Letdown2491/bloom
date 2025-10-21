@@ -4,4 +4,3 @@ export const normalizeEpochSeconds = (value: unknown): number | null => {
   const normalized = Math.trunc(value);
   return normalized >= 0 ? normalized : null;
 };
-

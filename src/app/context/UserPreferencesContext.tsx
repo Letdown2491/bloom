@@ -19,7 +19,12 @@ import {
   type SyncedSavedSearch,
 } from "../../shared/domain/preferencesSync";
 import type { FilterMode } from "../../shared/types/filter";
-import type { ViewMode, DefaultSortOption, SortDirection, UserPreferences } from "../../shared/types/preferences";
+import type {
+  ViewMode,
+  DefaultSortOption,
+  SortDirection,
+  UserPreferences,
+} from "../../shared/types/preferences";
 import { loadNdkModule } from "../../shared/api/ndkModule";
 import {
   loadStoredPreferences,
@@ -31,7 +36,11 @@ import {
   type SyncMetadata,
 } from "../services/preferencesStorage";
 
-export type { DefaultSortOption, SortDirection, UserPreferences } from "../../shared/types/preferences";
+export type {
+  DefaultSortOption,
+  SortDirection,
+  UserPreferences,
+} from "../../shared/types/preferences";
 
 export type PreferencesSyncState = {
   enabled: boolean;
@@ -60,13 +69,26 @@ type UserPreferencesContextValue = {
 const UserPreferencesContext = createContext<UserPreferencesContextValue | undefined>(undefined);
 
 type EncryptionCapableSigner = NDKSigner & {
-  encrypt: (recipient: { pubkey: string }, value: string, scheme?: "nip44" | "nip04") => Promise<string>;
-  decrypt: (sender: { pubkey: string }, value: string, scheme?: "nip44" | "nip04") => Promise<string>;
+  encrypt: (
+    recipient: { pubkey: string },
+    value: string,
+    scheme?: "nip44" | "nip04",
+  ) => Promise<string>;
+  decrypt: (
+    sender: { pubkey: string },
+    value: string,
+    scheme?: "nip44" | "nip04",
+  ) => Promise<string>;
 };
 
-const isEncryptionCapableSigner = (signer: NDKSigner | null | undefined): signer is EncryptionCapableSigner =>
-  Boolean(signer && typeof (signer as any).encrypt === "function" && typeof (signer as any).decrypt === "function");
-
+const isEncryptionCapableSigner = (
+  signer: NDKSigner | null | undefined,
+): signer is EncryptionCapableSigner =>
+  Boolean(
+    signer &&
+      typeof (signer as Partial<EncryptionCapableSigner>).encrypt === "function" &&
+      typeof (signer as Partial<EncryptionCapableSigner>).decrypt === "function",
+  );
 
 const preferencesEqual = (a: UserPreferences, b: UserPreferences) =>
   a.defaultServerUrl === b.defaultServerUrl &&
@@ -84,7 +106,9 @@ export const UserPreferencesProvider: React.FC<{ children: React.ReactNode }> = 
   const [preferences, setPreferences] = useState<UserPreferences>(() => loadStoredPreferences());
   const [syncEnabled, setSyncEnabledState] = useState<boolean>(() => loadSyncEnabled());
   const initialSyncMeta = useRef<SyncMetadata>(loadSyncMetadata());
-  const [lastSyncedAt, setLastSyncedAt] = useState<number | null>(initialSyncMeta.current.lastSyncedAt);
+  const [lastSyncedAt, setLastSyncedAt] = useState<number | null>(
+    initialSyncMeta.current.lastSyncedAt,
+  );
   const [syncLoading, setSyncLoading] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [hasPending, setHasPending] = useState(false);
@@ -185,7 +209,7 @@ export const UserPreferencesProvider: React.FC<{ children: React.ReactNode }> = 
         void flushPending();
       }, 750);
     },
-    [flushPending]
+    [flushPending],
   );
 
   useEffect(() => {
@@ -198,7 +222,11 @@ export const UserPreferencesProvider: React.FC<{ children: React.ReactNode }> = 
   }, [flushPending, ndk, signer, syncEnabled, user]);
 
   const applyRemotePreferences = useCallback(
-    (payload: SyncedPreferencesPayload, nextPreferences: UserPreferences, savedSearches: SyncedSavedSearch[]) => {
+    (
+      payload: SyncedPreferencesPayload,
+      nextPreferences: UserPreferences,
+      savedSearches: SyncedSavedSearch[],
+    ) => {
       savedSearchesRef.current = savedSearches;
       latestSyncedAtRef.current = payload.updated_at;
       syncMetaRef.current = {
@@ -211,7 +239,7 @@ export const UserPreferencesProvider: React.FC<{ children: React.ReactNode }> = 
       changeOriginRef.current = "remote";
       setPreferences(prev => (preferencesEqual(prev, nextPreferences) ? prev : nextPreferences));
     },
-    []
+    [],
   );
 
   const loadRemotePreferences = useCallback(async () => {
@@ -276,7 +304,16 @@ export const UserPreferencesProvider: React.FC<{ children: React.ReactNode }> = 
     } finally {
       setSyncLoading(false);
     }
-  }, [applyRemotePreferences, ensureConnection, ndk, preferences, queuePublish, signer, syncEnabled, user]);
+  }, [
+    applyRemotePreferences,
+    ensureConnection,
+    ndk,
+    preferences,
+    queuePublish,
+    signer,
+    syncEnabled,
+    user,
+  ]);
 
   useEffect(() => {
     if (!syncEnabled) {
@@ -326,7 +363,8 @@ export const UserPreferencesProvider: React.FC<{ children: React.ReactNode }> = 
         if (remoteUpdatedAt <= lastLocalUpdateAtRef.current) return;
         applyRemotePreferences(result.payload, result.preferences, result.savedSearches);
       } catch (error) {
-        const message = error instanceof Error ? error.message : "Failed to process synced preferences.";
+        const message =
+          error instanceof Error ? error.message : "Failed to process synced preferences.";
         setSyncError(message);
       }
     };
@@ -354,7 +392,10 @@ export const UserPreferencesProvider: React.FC<{ children: React.ReactNode }> = 
     if (!origin) return;
     changeOriginRef.current = null;
     if (origin === "local") {
-      const timestamp = lastLocalUpdateAtRef.current > 0 ? lastLocalUpdateAtRef.current : Math.floor(Date.now() / 1000);
+      const timestamp =
+        lastLocalUpdateAtRef.current > 0
+          ? lastLocalUpdateAtRef.current
+          : Math.floor(Date.now() / 1000);
       syncMetaRef.current = {
         lastSyncedAt: syncMetaRef.current.lastSyncedAt,
         lastLocalUpdatedAt: timestamp,
@@ -376,7 +417,11 @@ export const UserPreferencesProvider: React.FC<{ children: React.ReactNode }> = 
     });
     if (nextValue) {
       const baseTimestamp = Math.floor(Date.now() / 1000);
-      const nextTimestamp = Math.max(baseTimestamp, lastLocalUpdateAtRef.current + 1, latestSyncedAtRef.current + 1);
+      const nextTimestamp = Math.max(
+        baseTimestamp,
+        lastLocalUpdateAtRef.current + 1,
+        latestSyncedAtRef.current + 1,
+      );
       lastLocalUpdateAtRef.current = nextTimestamp;
       changeOriginRef.current = "local";
     }
@@ -389,7 +434,7 @@ export const UserPreferencesProvider: React.FC<{ children: React.ReactNode }> = 
         return { ...prev, defaultServerUrl: url };
       });
     },
-    [mutatePreferences]
+    [mutatePreferences],
   );
 
   const setDefaultViewMode = useCallback(
@@ -399,7 +444,7 @@ export const UserPreferencesProvider: React.FC<{ children: React.ReactNode }> = 
         return { ...prev, defaultViewMode: mode };
       });
     },
-    [mutatePreferences]
+    [mutatePreferences],
   );
 
   const setDefaultFilterMode = useCallback(
@@ -409,7 +454,7 @@ export const UserPreferencesProvider: React.FC<{ children: React.ReactNode }> = 
         return { ...prev, defaultFilterMode: mode };
       });
     },
-    [mutatePreferences]
+    [mutatePreferences],
   );
 
   const setDefaultSortOption = useCallback(
@@ -419,7 +464,7 @@ export const UserPreferencesProvider: React.FC<{ children: React.ReactNode }> = 
         return { ...prev, defaultSortOption: option };
       });
     },
-    [mutatePreferences]
+    [mutatePreferences],
   );
 
   const setSortDirection = useCallback(
@@ -429,7 +474,7 @@ export const UserPreferencesProvider: React.FC<{ children: React.ReactNode }> = 
         return { ...prev, sortDirection: direction };
       });
     },
-    [mutatePreferences]
+    [mutatePreferences],
   );
 
   const setShowGridPreviews = useCallback(
@@ -439,7 +484,7 @@ export const UserPreferencesProvider: React.FC<{ children: React.ReactNode }> = 
         return { ...prev, showGridPreviews: value };
       });
     },
-    [mutatePreferences]
+    [mutatePreferences],
   );
 
   const setShowListPreviews = useCallback(
@@ -449,7 +494,7 @@ export const UserPreferencesProvider: React.FC<{ children: React.ReactNode }> = 
         return { ...prev, showListPreviews: value };
       });
     },
-    [mutatePreferences]
+    [mutatePreferences],
   );
 
   const setKeepSearchExpanded = useCallback(
@@ -459,7 +504,7 @@ export const UserPreferencesProvider: React.FC<{ children: React.ReactNode }> = 
         return { ...prev, keepSearchExpanded: value };
       });
     },
-    [mutatePreferences]
+    [mutatePreferences],
   );
 
   const setTheme = useCallback(
@@ -469,7 +514,7 @@ export const UserPreferencesProvider: React.FC<{ children: React.ReactNode }> = 
         return { ...prev, theme };
       });
     },
-    [mutatePreferences]
+    [mutatePreferences],
   );
 
   const setSyncEnabled = useCallback(
@@ -498,7 +543,7 @@ export const UserPreferencesProvider: React.FC<{ children: React.ReactNode }> = 
         setSyncLoading(false);
       }
     },
-    [signer, syncEnabled, user]
+    [signer, syncEnabled, user],
   );
 
   const syncState = useMemo<PreferencesSyncState>(
@@ -509,7 +554,7 @@ export const UserPreferencesProvider: React.FC<{ children: React.ReactNode }> = 
       lastSyncedAt,
       pending: hasPending,
     }),
-    [hasPending, lastSyncedAt, syncEnabled, syncError, syncLoading]
+    [hasPending, lastSyncedAt, syncEnabled, syncError, syncLoading],
   );
 
   const value = useMemo(
@@ -542,10 +587,12 @@ export const UserPreferencesProvider: React.FC<{ children: React.ReactNode }> = 
       setSyncEnabled,
       syncState,
       initialSyncReady,
-    ]
+    ],
   );
 
-  return <UserPreferencesContext.Provider value={value}>{children}</UserPreferencesContext.Provider>;
+  return (
+    <UserPreferencesContext.Provider value={value}>{children}</UserPreferencesContext.Provider>
+  );
 };
 
 export const useUserPreferences = () => {

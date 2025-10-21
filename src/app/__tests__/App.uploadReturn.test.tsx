@@ -215,7 +215,9 @@ vi.mock("../../features/workspace/ui/WorkspaceSection", () => {
 describe("App upload return flow", () => {
   it("restores the previous browse context after a successful upload", async () => {
     const { default: App } = await import("../App");
-    const { __mockState, __mockActiveList } = await import("../../features/workspace/ui/WorkspaceSection");
+    const { __mockState, __mockActiveList } = await import(
+      "../../features/workspace/ui/WorkspaceSection"
+    );
     const user = userEvent.setup();
 
     render(<App />);

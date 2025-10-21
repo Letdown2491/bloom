@@ -15,7 +15,10 @@ export type Nip98AuthOptions = {
 
 export async function buildNip98AuthHeader(signTemplate: SignTemplate, options: Nip98AuthOptions) {
   const method = options.method.toUpperCase();
-  const tags: string[][] = [["u", options.url], ["method", method]];
+  const tags: string[][] = [
+    ["u", options.url],
+    ["method", method],
+  ];
   if (options.payloadHash) {
     tags.push(["payload", options.payloadHash]);
   }

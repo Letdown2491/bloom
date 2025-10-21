@@ -48,7 +48,7 @@ const logRelayWarning = (url: string) => {
 const waitForRelayConnection = async (
   relay: NDKRelay,
   ndk: NDK,
-  timeoutMs = RELAY_CONNECT_TIMEOUT_MS
+  timeoutMs = RELAY_CONNECT_TIMEOUT_MS,
 ): Promise<boolean> => {
   const runtime = await getRuntime();
 
@@ -104,7 +104,7 @@ const convertFilter = (filter: NostrFilter): NDKFilter => {
 type RelayHelpers = {
   prepareRelaySet?: (
     relayUrls: readonly string[],
-    options?: RelayPreparationOptions
+    options?: RelayPreparationOptions,
   ) => Promise<RelayPreparationResult>;
 };
 
@@ -121,7 +121,9 @@ export const createNdkTransport = (ndk: NDK, helpers?: RelayHelpers): TransportC
     const key = canonicalRelayKey(urls);
     if (!key) return;
     if (relaySetCache.size > 64) {
-      const oldestKey = Array.from(relaySetCache.entries()).sort((a, b) => a[1].expiresAt - b[1].expiresAt)[0]?.[0];
+      const oldestKey = Array.from(relaySetCache.entries()).sort(
+        (a, b) => a[1].expiresAt - b[1].expiresAt,
+      )[0]?.[0];
       if (oldestKey) {
         relaySetCache.delete(oldestKey);
       }
@@ -195,7 +197,7 @@ export const createNdkTransport = (ndk: NDK, helpers?: RelayHelpers): TransportC
         await ndkEvent.publish(effectiveRelaySet);
       } catch (error) {
         throw new Error(
-          error instanceof Error ? error.message : "Failed to publish NIP-46 request event"
+          error instanceof Error ? error.message : "Failed to publish NIP-46 request event",
         );
       }
     },
@@ -215,8 +217,8 @@ export const createNdkTransport = (ndk: NDK, helpers?: RelayHelpers): TransportC
           filters
             .flatMap(filter => filter.relays ?? [])
             .map(url => url.replace(/\/*$/, ""))
-            .filter(url => url.length > 0)
-        )
+            .filter(url => url.length > 0),
+        ),
       );
       if (relayUrls.length && helpers?.prepareRelaySet) {
         const cached = getCachedRelayResult(relayUrls);
@@ -235,9 +237,7 @@ export const createNdkTransport = (ndk: NDK, helpers?: RelayHelpers): TransportC
           })
           .catch(() => undefined);
       }
-      const options = relayUrls.length
-        ? { closeOnEose: false, relayUrls }
-        : { closeOnEose: false };
+      const options = relayUrls.length ? { closeOnEose: false, relayUrls } : { closeOnEose: false };
       const subscription = ndk.subscribe(ndkFilters, options, {
         onEvent: async ndkEvent => {
           await runtimePromise;

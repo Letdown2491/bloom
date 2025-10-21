@@ -1,4 +1,12 @@
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import React, {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useNdk } from "./NdkContext";
 import {
   loadPrivateList,
@@ -34,7 +42,8 @@ export const PrivateLibraryProvider: React.FC<{ children: React.ReactNode }> = (
 
   const resolveRelayTargets = useCallback(() => {
     if (!ndk) return [] as string[];
-    const base = ndk.explicitRelayUrls && ndk.explicitRelayUrls.length > 0 ? ndk.explicitRelayUrls : undefined;
+    const base =
+      ndk.explicitRelayUrls && ndk.explicitRelayUrls.length > 0 ? ndk.explicitRelayUrls : undefined;
     return collectRelayTargets(base, DEFAULT_PUBLIC_RELAYS);
   }, [ndk]);
 
@@ -92,7 +101,7 @@ export const PrivateLibraryProvider: React.FC<{ children: React.ReactNode }> = (
       entriesRef.current = merged;
       setEntries(merged);
     },
-    [ndk, prepareRelaySet, resolveRelayTargets, signer, user]
+    [ndk, prepareRelaySet, resolveRelayTargets, signer, user],
   );
 
   const entriesBySha = useMemo(() => {
@@ -105,7 +114,9 @@ export const PrivateLibraryProvider: React.FC<{ children: React.ReactNode }> = (
 
   const removeEntries = useCallback(
     async (shas: string[]) => {
-      const targets = Array.from(new Set(shas.filter(sha => typeof sha === "string" && sha.length > 0)));
+      const targets = Array.from(
+        new Set(shas.filter(sha => typeof sha === "string" && sha.length > 0)),
+      );
       if (!targets.length) return;
       if (!ndk || !signer || !user) {
         throw new Error("Connect your Nostr signer to update private files.");
@@ -127,12 +138,12 @@ export const PrivateLibraryProvider: React.FC<{ children: React.ReactNode }> = (
       entriesRef.current = next;
       setEntries(next);
     },
-    [ndk, prepareRelaySet, resolveRelayTargets, signer, user]
+    [ndk, prepareRelaySet, resolveRelayTargets, signer, user],
   );
 
   const value = useMemo<PrivateLibraryContextValue>(
     () => ({ entries, entriesBySha, loading, error, refresh, upsertEntries, removeEntries }),
-    [entries, entriesBySha, loading, error, refresh, upsertEntries, removeEntries]
+    [entries, entriesBySha, loading, error, refresh, upsertEntries, removeEntries],
   );
 
   return <PrivateLibraryContext.Provider value={value}>{children}</PrivateLibraryContext.Provider>;

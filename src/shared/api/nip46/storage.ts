@@ -1,4 +1,4 @@
-import { SessionSnapshot } from "./session";
+import type { SessionSnapshot } from "./session";
 
 export interface StorageAdapter {
   load: () => Promise<SessionSnapshot | null>;
@@ -21,7 +21,9 @@ let idbPromise: Promise<IDBDatabase> | null = null;
 
 const isQuotaExceededError = (error: unknown) =>
   error instanceof DOMException &&
-  (error.name === "QuotaExceededError" || error.code === 22 || error.name === "NS_ERROR_DOM_QUOTA_REACHED");
+  (error.name === "QuotaExceededError" ||
+    error.code === 22 ||
+    error.name === "NS_ERROR_DOM_QUOTA_REACHED");
 
 const cloneSnapshot = (snapshot: SessionSnapshot): SessionSnapshot => {
   if (typeof structuredClone === "function") {
@@ -102,7 +104,9 @@ export class LocalStorageAdapter implements StorageAdapter {
       if (isQuotaExceededError(error)) {
         this.blocked = true;
         this.lastBlockedTime = Date.now();
-        console.warn("NIP-46 session persistence blocked due to storage quota. Will retry in 1 minute.");
+        console.warn(
+          "NIP-46 session persistence blocked due to storage quota. Will retry in 1 minute.",
+        );
         return;
       }
       console.warn("Failed to persist NIP-46 sessions", error);
@@ -141,7 +145,8 @@ export class IndexedDbStorageAdapter implements StorageAdapter {
         const store = tx.objectStore(IDB_STORE_NAME);
         const record = await new Promise<SnapshotRecord | undefined>((resolve, reject) => {
           const request = store.get(IDB_SNAPSHOT_KEY);
-          request.onsuccess = () => resolve((request.result as SnapshotRecord | undefined) ?? undefined);
+          request.onsuccess = () =>
+            resolve((request.result as SnapshotRecord | undefined) ?? undefined);
           request.onerror = () => reject(request.error ?? new Error("IndexedDB read failed"));
         });
         await new Promise<void>((resolve, reject) => {

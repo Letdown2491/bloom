@@ -45,7 +45,7 @@ export interface NostrEvent {
 export interface NostrFilter {
   kinds?: number[];
   authors?: string[];
-  '#p'?: string[];
+  "#p"?: string[];
   since?: number;
   limit?: number;
   relays?: string[];

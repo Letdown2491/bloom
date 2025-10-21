@@ -34,15 +34,21 @@ type RelayContextOptions = {
 };
 
 type EncryptionCapableSigner = NDKSigner & {
-  encrypt: (recipient: NdkInternalUser, value: string, scheme?: "nip44" | "nip04") => Promise<string>;
+  encrypt: (
+    recipient: NdkInternalUser,
+    value: string,
+    scheme?: "nip44" | "nip04",
+  ) => Promise<string>;
   decrypt: (sender: NdkInternalUser, value: string, scheme?: "nip44" | "nip04") => Promise<string>;
 };
 
-const ensureEncryptionSigner = (signer: NdkSignerInstance | null | undefined): signer is EncryptionCapableSigner =>
+const ensureEncryptionSigner = (
+  signer: NdkSignerInstance | null | undefined,
+): signer is EncryptionCapableSigner =>
   Boolean(
     signer &&
       typeof (signer as EncryptionCapableSigner).encrypt === "function" &&
-      typeof (signer as EncryptionCapableSigner).decrypt === "function"
+      typeof (signer as EncryptionCapableSigner).decrypt === "function",
   );
 
 export type PrivateLinkStatus = "active" | "revoked";
@@ -105,7 +111,11 @@ const getServiceUser = async (ndk: NdkInstance | null, module?: NdkModule) => {
   return new runtime.NDKUser({ pubkey: PRIVATE_LINK_SERVICE_PUBKEY });
 };
 
-const encryptPayload = async (signer: EncryptionCapableSigner, serviceUser: NdkUser, payload: PrivateLinkEnvelope) => {
+const encryptPayload = async (
+  signer: EncryptionCapableSigner,
+  serviceUser: NdkUser,
+  payload: PrivateLinkEnvelope,
+) => {
   const serialized = JSON.stringify(payload);
   try {
     return await signer.encrypt(serviceUser, serialized, "nip44");
@@ -118,7 +128,7 @@ const encryptPayload = async (signer: EncryptionCapableSigner, serviceUser: NdkU
 const decryptPayload = async (
   signer: EncryptionCapableSigner,
   serviceUser: NdkUser,
-  content: string
+  content: string,
 ): Promise<PrivateLinkEnvelope | null> => {
   if (!content) return null;
   let plaintext: string | null = null;
@@ -142,11 +152,20 @@ const decryptPayload = async (
   }
 };
 
-const normalizeTarget = (target: PrivateLinkTarget | null | undefined): PrivateLinkTarget | null => {
+const normalizeTarget = (
+  target: PrivateLinkTarget | null | undefined,
+): PrivateLinkTarget | null => {
   if (!target) return null;
-  const url = typeof target.url === "string" && target.url.trim().length > 0 ? target.url.trim() : null;
-  const server = typeof target.server === "string" && target.server.trim().length > 0 ? target.server.trim() : null;
-  const sha = typeof target.sha256 === "string" && target.sha256.trim().length > 0 ? target.sha256.trim() : null;
+  const url =
+    typeof target.url === "string" && target.url.trim().length > 0 ? target.url.trim() : null;
+  const server =
+    typeof target.server === "string" && target.server.trim().length > 0
+      ? target.server.trim()
+      : null;
+  const sha =
+    typeof target.sha256 === "string" && target.sha256.trim().length > 0
+      ? target.sha256.trim()
+      : null;
   return { url, server, sha256: sha };
 };
 
@@ -168,7 +187,7 @@ const buildRecordFromPayload = (
   event: NdkEvent,
   payload: PrivateLinkEnvelope,
   fallbackAlias: string | null,
-  expirationFromTag: number | null
+  expirationFromTag: number | null,
 ): PrivateLinkRecord | null => {
   const alias = normalizeAlias(payload.alias || fallbackAlias || "");
   if (!alias) return null;
@@ -176,7 +195,8 @@ const buildRecordFromPayload = (
   const status = payload.status === "revoked" ? "revoked" : "active";
   const target = normalizeTarget(status === "revoked" ? null : payload.target);
   const expiresAt = normalizeExpiration(payload.expiresAt ?? expirationFromTag);
-  const isExpired = typeof expiresAt === "number" ? expiresAt <= Math.floor(Date.now() / 1000) : false;
+  const isExpired =
+    typeof expiresAt === "number" ? expiresAt <= Math.floor(Date.now() / 1000) : false;
   return {
     alias,
     status,
@@ -192,7 +212,9 @@ const buildRecordFromPayload = (
 };
 
 const extractAliasTag = (event: NdkEvent): string | null => {
-  const tag = event.tags.find(entry => Array.isArray(entry) && entry[0] === "d" && typeof entry[1] === "string");
+  const tag = event.tags.find(
+    entry => Array.isArray(entry) && entry[0] === "d" && typeof entry[1] === "string",
+  );
   if (!tag) return null;
   const value = typeof tag[1] === "string" ? tag[1] : null;
   if (!value) return null;
@@ -200,7 +222,9 @@ const extractAliasTag = (event: NdkEvent): string | null => {
 };
 
 const extractStatusTag = (event: NdkEvent): PrivateLinkStatus | null => {
-  const tag = event.tags.find(entry => Array.isArray(entry) && entry[0] === "status" && typeof entry[1] === "string");
+  const tag = event.tags.find(
+    entry => Array.isArray(entry) && entry[0] === "status" && typeof entry[1] === "string",
+  );
   if (!tag) return null;
   const raw = typeof tag[1] === "string" ? tag[1] : "";
   const value = raw.trim().toLowerCase();
@@ -209,19 +233,29 @@ const extractStatusTag = (event: NdkEvent): PrivateLinkStatus | null => {
 };
 
 const extractExpirationTag = (event: NdkEvent): number | null => {
-  const tag = event.tags.find(entry => Array.isArray(entry) && entry[0] === "expiration" && typeof entry[1] === "string");
+  const tag = event.tags.find(
+    entry => Array.isArray(entry) && entry[0] === "expiration" && typeof entry[1] === "string",
+  );
   if (!tag) return null;
   return normalizeExpiration(tag[1]);
 };
 
-const resolveTargetFromInput = (url: string, serverUrl?: string | null, sha?: string | null): PrivateLinkTarget => {
+const resolveTargetFromInput = (
+  url: string,
+  serverUrl?: string | null,
+  sha?: string | null,
+): PrivateLinkTarget => {
   const trimmedUrl = url.trim();
   const normalizedSha = sha?.trim() || extractSha256FromUrl(trimmedUrl) || null;
   let normalizedServer = serverUrl?.trim() || null;
   if (!normalizedServer && normalizedSha && trimmedUrl.includes(normalizedSha)) {
     try {
       const parsed = new URL(trimmedUrl);
-      normalizedServer = `${parsed.origin}${parsed.pathname.replace(new RegExp(`${normalizedSha}.*$`), "")}`.replace(/\/$/, "");
+      normalizedServer =
+        `${parsed.origin}${parsed.pathname.replace(new RegExp(`${normalizedSha}.*$`), "")}`.replace(
+          /\/$/,
+          "",
+        );
     } catch {
       normalizedServer = null;
     }
@@ -238,7 +272,7 @@ const publishPrivateLinkEvent = async (
   signer: NdkSignerInstance | null,
   user: NdkUserInstance | null,
   options: PublishPrivateLinkOptions,
-  relayContext?: RelayContextOptions
+  relayContext?: RelayContextOptions,
 ): Promise<PrivateLinkRecord> => {
   if (!ndk) throw new Error("NDK unavailable");
   if (!signer) throw new Error("Connect a Nostr signer to continue.");
@@ -273,7 +307,10 @@ const publishPrivateLinkEvent = async (
   event.kind = PRIVATE_LINK_EVENT_KIND;
   event.pubkey = user.pubkey;
   event.created_at = createdAt;
-  event.tags = [["d", alias], ["status", options.status]];
+  event.tags = [
+    ["d", alias],
+    ["status", options.status],
+  ];
   if (typeof expiresAt === "number") {
     event.tags.push(["expiration", String(expiresAt)]);
   }
@@ -324,18 +361,24 @@ export const createPrivateLink = async (
   signer: NdkSignerInstance | null,
   user: NdkUserInstance | null,
   input: CreatePrivateLinkInput,
-  relayContext?: RelayContextOptions
+  relayContext?: RelayContextOptions,
 ): Promise<PrivateLinkRecord> => {
   const alias = normalizeAlias(input.alias);
   if (!alias) throw new Error("Alias must contain letters or numbers.");
   const target = resolveTargetFromInput(input.url, input.serverUrl, input.sha256);
-  return publishPrivateLinkEvent(ndk, signer, user, {
-    alias,
-    status: "active",
-    target,
-    displayName: input.displayName ?? null,
-    expiresAt: input.expiresAt ?? null,
-  }, relayContext);
+  return publishPrivateLinkEvent(
+    ndk,
+    signer,
+    user,
+    {
+      alias,
+      status: "active",
+      target,
+      displayName: input.displayName ?? null,
+      expiresAt: input.expiresAt ?? null,
+    },
+    relayContext,
+  );
 };
 
 export const revokePrivateLink = async (
@@ -343,25 +386,31 @@ export const revokePrivateLink = async (
   signer: NdkSignerInstance | null,
   user: NdkUserInstance | null,
   alias: string,
-  relayContext?: RelayContextOptions
+  relayContext?: RelayContextOptions,
 ): Promise<PrivateLinkRecord> => {
   const normalizedAlias = normalizeAlias(alias);
   if (!normalizedAlias) throw new Error("Alias is required.");
   const now = Math.floor(Date.now() / 1000);
-  return publishPrivateLinkEvent(ndk, signer, user, {
-    alias: normalizedAlias,
-    status: "revoked",
-    target: null,
-    revokedAt: now,
-    createdAt: now,
-  }, relayContext);
+  return publishPrivateLinkEvent(
+    ndk,
+    signer,
+    user,
+    {
+      alias: normalizedAlias,
+      status: "revoked",
+      target: null,
+      revokedAt: now,
+      createdAt: now,
+    },
+    relayContext,
+  );
 };
 
 export const loadPrivateLinks = async (
   ndk: NdkInstance | null,
   signer: NdkSignerInstance | null,
   user: NdkUserInstance | null,
-  relayContext?: RelayContextOptions
+  relayContext?: RelayContextOptions,
 ): Promise<PrivateLinkRecord[]> => {
   if (!ndk || !signer || !user) return [];
   if (!isPrivateLinkServiceConfigured()) return [];
@@ -384,7 +433,7 @@ export const loadPrivateLinks = async (
       authors: [user.pubkey],
     },
     undefined,
-    relaySet ?? undefined
+    relaySet ?? undefined,
   )) as Set<NdkEvent>;
 
   const map = new Map<string, PrivateLinkRecord>();
@@ -417,8 +466,8 @@ export const generatePrivateLinkAlias = (length = 24): string => {
   if (!cryptoObj?.getRandomValues) {
     while (chars.length < length) {
       const index = Math.floor(Math.random() * alphabet.length);
-    const char = alphabet.charAt(index) || alphabet.charAt(0);
-    chars.push(char);
+      const char = alphabet.charAt(index) || alphabet.charAt(0);
+      chars.push(char);
     }
     return chars.join("");
   }

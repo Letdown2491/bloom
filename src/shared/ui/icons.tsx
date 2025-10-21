@@ -30,7 +30,7 @@ export const GridIcon = createIcon(
     <rect x="14" y="3" width="7" height="7" rx="1.5" />
     <rect x="3" y="14" width="7" height="7" rx="1.5" />
     <rect x="14" y="14" width="7" height="7" rx="1.5" />
-  </>
+  </>,
 );
 
 export const GithubIcon = createIcon(
@@ -38,15 +38,11 @@ export const GithubIcon = createIcon(
     d="M12 .5C5.648.5.5 5.648.5 12c0 5.088 3.292 9.396 7.865 10.925.575.105.786-.25.786-.556 0-.274-.01-1-.015-1.962-3.2.696-3.878-1.544-3.878-1.544-.523-1.33-1.277-1.685-1.277-1.685-1.044-.715.08-.701.08-.701 1.155.081 1.764 1.187 1.764 1.187 1.027 1.76 2.695 1.252 3.352.957.104-.743.402-1.252.732-1.54-2.553-.29-5.238-1.276-5.238-5.684 0-1.256.452-2.285 1.19-3.09-.12-.29-.517-1.454.112-3.033 0 0 .975-.312 3.195 1.18a11.16 11.16 0 0 1 2.91-.392c.988.005 1.98.134 2.91.392 2.22-1.492 3.193-1.18 3.193-1.18.63 1.579.233 2.743.114 3.033.74.805 1.19 1.834 1.19 3.09 0 4.42-2.689 5.39-5.255 5.676.413.354.781 1.047.781 2.11 0 1.523-.014 2.75-.014 3.126 0 .309.208.666.79.553C20.21 21.392 23.5 17.084 23.5 12c0-6.352-5.148-11.5-11.5-11.5Z"
     fill="currentColor"
     stroke="none"
-  />
+  />,
 );
 
 export const LightningIcon = createIcon(
-  <path
-    d="M13 2 4 13h6l-1 9 9-11h-6l1-9Z"
-    fill="currentColor"
-    stroke="none"
-  />
+  <path d="M13 2 4 13h6l-1 9 9-11h-6l1-9Z" fill="currentColor" stroke="none" />,
 );
 
 export const ListIcon = createIcon(
@@ -57,7 +53,7 @@ export const ListIcon = createIcon(
     <path d="M10 12h9" strokeLinecap="round" />
     <circle cx="6" cy="17" r="1.5" fill="currentColor" stroke="none" />
     <path d="M10 17h9" strokeLinecap="round" />
-  </>
+  </>,
 );
 
 export const MusicIcon = createIcon(
@@ -65,87 +61,87 @@ export const MusicIcon = createIcon(
     <path d="M10 17V7.5l8-2V15" />
     <circle cx="10" cy="18.5" r="2.5" />
     <circle cx="18" cy="16.5" r="2.5" />
-  </>
+  </>,
 );
 
 export const ChevronDownIcon = createIcon(
   <>
     <path d="M6 9.5 12 15l6-5.5" />
-  </>
+  </>,
 );
 
 export const ChevronRightIcon = createIcon(
   <>
     <path d="M9 6.5 15 12l-6 5.5" />
-  </>
+  </>,
 );
 
 export const ChevronLeftIcon = createIcon(
   <>
     <path d="M15 6.5 9 12l6 5.5" />
-  </>
+  </>,
 );
 
 export const DoubleChevronUpIcon = createIcon(
   <>
     <path d="m6 15 6-6 6 6" />
     <path d="m6 19 6-6 6 6" />
-  </>
+  </>,
 );
 
 export const DoubleChevronDownIcon = createIcon(
   <>
     <path d="m6 9 6 6 6-6" />
     <path d="m6 5 6 6 6-6" />
-  </>
+  </>,
 );
 
 export const FilterIcon = createIcon(
   <>
     <path d="M4 5h16l-6.5 8v6.5L10.5 21v-8L4 5Z" />
-  </>
+  </>,
 );
 
 export const SearchIcon = createIcon(
   <>
     <circle cx="11" cy="11" r="6" />
     <path d="m20 20-3.5-3.5" />
-  </>
+  </>,
 );
 
 export const CloseIcon = createIcon(
   <>
     <path d="m8 8 8 8" />
     <path d="m16 8-8 8" />
-  </>
+  </>,
 );
 
 export const PlayIcon = createIcon(
   <>
     <path d="M9 6.5v11l9-5.5Z" fill="currentColor" stroke="none" />
     <path d="M9 6.5v11l9-5.5Z" />
-  </>
+  </>,
 );
 
 export const PauseIcon = createIcon(
   <>
     <rect x="7.5" y="6" width="3" height="12" rx="1" />
     <rect x="13.5" y="6" width="3" height="12" rx="1" />
-  </>
+  </>,
 );
 
 export const PreviousIcon = createIcon(
   <>
     <path d="M7 5v14" />
     <path d="M17 5 9 12l8 7Z" />
-  </>
+  </>,
 );
 
 export const NextIcon = createIcon(
   <>
     <path d="M17 5v14" />
     <path d="M7 5l8 7-8 7Z" />
-  </>
+  </>,
 );
 
 export const RepeatIcon = createIcon(
@@ -154,7 +150,7 @@ export const RepeatIcon = createIcon(
     <path d="m15 5 4 4-4 4" />
     <path d="M17 20H9a4 4 0 0 1-4-4v-1" />
     <path d="m9 19-4-4 4-4" />
-  </>
+  </>,
 );
 
 export const RepeatOneIcon = createIcon(
@@ -165,7 +161,7 @@ export const RepeatOneIcon = createIcon(
     <path d="m9 19-4-4 4-4" />
     <path d="M12 11v5" />
     <path d="m10.5 12.5 1.5-1.5 1.5 1.5" />
-  </>
+  </>,
 );
 
 export const ShuffleIcon = createIcon(
@@ -175,13 +171,13 @@ export const ShuffleIcon = createIcon(
     <polyline points="21 16 21 21 16 21" />
     <line x1="4" y1="4" x2="9" y2="9" />
     <line x1="15" y1="15" x2="21" y2="21" />
-  </>
+  </>,
 );
 
 export const StopIcon = createIcon(
   <>
     <rect x="7" y="7" width="10" height="10" rx="1.5" />
-  </>
+  </>,
 );
 
 export const WarningIcon = createIcon(
@@ -189,7 +185,7 @@ export const WarningIcon = createIcon(
     <path d="m12 4 9 16H3l9-16Z" />
     <path d="M12 10v4" />
     <path d="M12 18h.01" />
-  </>
+  </>,
 );
 
 export const FolderIcon = createIcon(
@@ -202,7 +198,7 @@ export const FolderIcon = createIcon(
       strokeLinejoin="round"
     />
     <path d="M3.5 9h17" stroke="white" strokeWidth={1.5} strokeLinecap="round" />
-  </>
+  </>,
 );
 
 export const ImageIcon = createIcon(
@@ -210,14 +206,14 @@ export const ImageIcon = createIcon(
     <rect x="3.5" y="5" width="17" height="14" rx="1.5" />
     <circle cx="9" cy="10" r="1.3" />
     <path d="M4.5 17.5 10 12l3 3 3-2.5 3.5 3" />
-  </>
+  </>,
 );
 
 export const VideoIcon = createIcon(
   <>
     <rect x="3.5" y="6" width="12" height="12" rx="1.5" />
     <path d="M17 9.5 21 8v8l-4-1.5Z" fill="currentColor" stroke="none" />
-  </>
+  </>,
 );
 
 export const DocumentIcon = createIcon(
@@ -226,7 +222,7 @@ export const DocumentIcon = createIcon(
     <path d="M13.5 4v4h4" />
     <path d="M9.5 12h5" />
     <path d="M9.5 16h5" />
-  </>
+  </>,
 );
 
 export const LinkIcon = createIcon(
@@ -234,7 +230,7 @@ export const LinkIcon = createIcon(
     <path d="M10.5 13.5 13.5 10.5" />
     <path d="M8.5 16.5a4 4 0 0 1 0-5.657l2-2a4 4 0 0 1 5.657 0" />
     <path d="M15.5 7.5a4 4 0 0 1 0 5.657l-2 2a4 4 0 0 1-5.657 0" />
-  </>
+  </>,
 );
 
 export type FileKind =
@@ -252,7 +248,7 @@ export const DownloadIcon = createIcon(
     <path d="M12 4v10" />
     <path d="m7.5 11 4.5 4.5L16.5 11" />
     <path d="M5 19h14" />
-  </>
+  </>,
 );
 
 export const TrashIcon = createIcon(
@@ -262,14 +258,14 @@ export const TrashIcon = createIcon(
     <path d="M6.5 7v11A2.5 2.5 0 0 0 9 20.5h6a2.5 2.5 0 0 0 2.5-2.5V7" />
     <path d="M10 11.5v5" />
     <path d="M14 11.5v5" />
-  </>
+  </>,
 );
 
 export const EditIcon = createIcon(
   <>
     <path d="M4 20h3.8a1 1 0 0 0 .7-.29l9.7-9.7a1.5 1.5 0 0 0 0-2.12l-2.38-2.38a1.5 1.5 0 0 0-2.12 0l-9.7 9.7a1 1 0 0 0-.29.7Z" />
     <path d="m13.5 5.5 4 4" />
-  </>
+  </>,
 );
 
 export const SaveIcon = createIcon(
@@ -277,7 +273,7 @@ export const SaveIcon = createIcon(
     <path d="M5.5 4h9.9a1.5 1.5 0 0 1 1.06.44l2.6 2.6a1.5 1.5 0 0 1 .44 1.06V18.5a1.5 1.5 0 0 1-1.5 1.5h-12a1.5 1.5 0 0 1-1.5-1.5V5.5A1.5 1.5 0 0 1 5.5 4Z" />
     <path d="M8 4v4.5h6V4" />
     <path d="m9.5 13.5 2.5 2.5 3.5-3.5" />
-  </>
+  </>,
 );
 
 export const CancelIcon = createIcon(
@@ -285,20 +281,20 @@ export const CancelIcon = createIcon(
     <circle cx="12" cy="12" r="8" />
     <path d="m15 9-6 6" />
     <path d="m9 9 6 6" />
-  </>
+  </>,
 );
 
 export const PlusIcon = createIcon(
   <>
     <path d="M12 5v14" />
     <path d="M5 12h14" />
-  </>
+  </>,
 );
 
 export const StarIcon = createIcon(
   <>
     <path d="m12 4.5 2.18 4.42 4.88.71-3.53 3.44.83 4.86L12 15.68 7.64 18.93l.83-4.86-3.53-3.44 4.88-.71Z" />
-  </>
+  </>,
 );
 
 export const RefreshIcon = createIcon(
@@ -307,7 +303,7 @@ export const RefreshIcon = createIcon(
     <path d="M21 13a9 9 0 0 1-15.53 5.66L3 16" />
     <path d="M21 8v5h-5" />
     <path d="M3 16v-5h5" />
-  </>
+  </>,
 );
 
 export const SyncIndicatorIcon = createIcon(
@@ -316,7 +312,7 @@ export const SyncIndicatorIcon = createIcon(
     <path d="M17.5 3.5H21V7" />
     <path d="M20 12a8 8 0 0 1-13.66 5.66" />
     <path d="m6.5 20.5H3V17" />
-  </>
+  </>,
 );
 
 export const LockIcon = createIcon(
@@ -324,14 +320,14 @@ export const LockIcon = createIcon(
     <rect x="6.5" y="11" width="11" height="9.5" rx="2" />
     <path d="M8.5 11V8.5a3.5 3.5 0 0 1 7 0V11" />
     <circle cx="12" cy="15.5" r="1.2" />
-  </>
+  </>,
 );
 
 export const CopyIcon = createIcon(
   <>
     <rect x="9" y="9" width="11" height="11" rx="2" />
     <path d="M6 15V5a2 2 0 0 1 2-2h10" />
-  </>
+  </>,
 );
 
 export const ShareIcon = createIcon(
@@ -341,14 +337,14 @@ export const ShareIcon = createIcon(
     <circle cx="18" cy="18.5" r="2.5" />
     <path d="M8.2 10.9 15 7.3" />
     <path d="M8.2 13.1 15 16.7" />
-  </>
+  </>,
 );
 
 export const PreviewIcon = createIcon(
   <>
     <path d="M3 12s3.6-6 9-6 9 6 9 6-3.6 6-9 6-9-6-9-6Z" />
     <circle cx="12" cy="12" r="3" />
-  </>
+  </>,
 );
 
 export const HomeIcon = createIcon(
@@ -356,7 +352,7 @@ export const HomeIcon = createIcon(
     <path d="M4 11.5 12 5l8 6.5" />
     <path d="M7.5 10v9.5A1.5 1.5 0 0 0 9 21h6a1.5 1.5 0 0 0 1.5-1.5V10" />
     <path d="M10.5 21v-5h3v5" />
-  </>
+  </>,
 );
 
 export const UploadIcon = createIcon(
@@ -364,7 +360,7 @@ export const UploadIcon = createIcon(
     <path d="M12 5v10" />
     <path d="m7.5 9.5 4.5-4.5 4.5 4.5" />
     <path d="M6 19h12" />
-  </>
+  </>,
 );
 
 export const TransferIcon = createIcon(
@@ -373,7 +369,7 @@ export const TransferIcon = createIcon(
     <path d="M12 5l3 3-3 3" />
     <path d="M18 16h-9" />
     <path d="M12 13l-3 3 3 3" />
-  </>
+  </>,
 );
 
 export const ServersIcon = createIcon(
@@ -382,7 +378,7 @@ export const ServersIcon = createIcon(
     <rect x="4" y="14" width="16" height="6" rx="2" />
     <path d="M8 7h.01" />
     <path d="M8 17h.01" />
-  </>
+  </>,
 );
 
 export const RelayIcon = createIcon(
@@ -392,14 +388,14 @@ export const RelayIcon = createIcon(
     <circle cx="18" cy="18" r="2" />
     <path d="M7.9 9.2 16.1 7.2" />
     <path d="M7.5 10.4l8.8 5.6" />
-  </>
+  </>,
 );
 
 export const SettingsIcon = createIcon(
   <>
     <circle cx="12" cy="12" r="3" />
     <path d="M19.4 15a2 2 0 0 0 .4 2.2l.1.1a1.8 1.8 0 1 1-2.5 2.5l-.1-.1a2 2 0 0 0-2.2-.4 2 2 0 0 0-1.2 1.8V21a1.8 1.8 0 1 1-3.6 0v-.1a2 2 0 0 0-1.2-1.8 2 2 0 0 0-2.2.4l-.1.1a1.8 1.8 0 1 1-2.5-2.5l.1-.1a2 2 0 0 0 .4-2.2 2 2 0 0 0-1.8-1.2H3a1.8 1.8 0 1 1 0-3.6h.1a2 2 0 0 0 1.8-1.2 2 2 0 0 0-.4-2.2l-.1-.1A1.8 1.8 0 0 1 7 3.9l.1.1a2 2 0 0 0 2.2.4A2 2 0 0 0 10.3 3V3a1.8 1.8 0 1 1 3.6 0v.1a2 2 0 0 0 1.2 1.8 2 2 0 0 0 2.2-.4l.1-.1a1.8 1.8 0 1 1 2.5 2.5l-.1.1a2 2 0 0 0-.4 2.2 2 2 0 0 0 1.8 1.2H21a1.8 1.8 0 1 1 0 3.6h-.1a2 2 0 0 0-1.5 1.2Z" />
-  </>
+  </>,
 );
 
 export const LogoutIcon = createIcon(
@@ -407,17 +403,21 @@ export const LogoutIcon = createIcon(
     <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
     <path d="M16 17l5-5-5-5" />
     <path d="M21 12H9" />
-  </>
+  </>,
 );
 
 export const BellIcon = createIcon(
   <>
     <path d="M18 13V11a6 6 0 0 0-12 0v2c0 1.7-.8 3.3-2 4.3-.3.2-.4.5-.4.7 0 .6.4 1 1 1h17c.6 0 1-.4 1-1 0-.3-.1-.5-.4-.7-1.2-1-2.2-2.6-2.2-4.3Z" />
     <path d="M10 19a2 2 0 1 0 4 0" />
-  </>
+  </>,
 );
 
-export const FileTypeIcon: React.FC<{ kind: FileKind; size?: number; className?: string }> = ({ kind, size = 20, className }) => {
+export const FileTypeIcon: React.FC<{ kind: FileKind; size?: number; className?: string }> = ({
+  kind,
+  size = 20,
+  className,
+}) => {
   switch (kind) {
     case "folder":
       return <FolderIcon size={size} className={className} />;

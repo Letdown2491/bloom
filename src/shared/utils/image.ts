@@ -10,7 +10,9 @@ export async function resizeImage(file: File, maxWidth: number, maxHeight: numbe
   const ctx = canvas.getContext("2d");
   if (!ctx) return file;
   ctx.drawImage(bitmap, 0, 0, targetWidth, targetHeight);
-  const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, file.type || "image/jpeg", 0.9));
+  const blob = await new Promise<Blob | null>(resolve =>
+    canvas.toBlob(resolve, file.type || "image/jpeg", 0.9),
+  );
   if (!blob) return file;
   return new File([blob], file.name, { type: blob.type, lastModified: Date.now() });
 }
@@ -23,8 +25,9 @@ export async function stripImageMetadata(file: File): Promise<File> {
   const ctx = canvas.getContext("2d");
   if (!ctx) return file;
   ctx.drawImage(bitmap, 0, 0);
-  const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, file.type || "image/jpeg", 0.9));
+  const blob = await new Promise<Blob | null>(resolve =>
+    canvas.toBlob(resolve, file.type || "image/jpeg", 0.9),
+  );
   if (!blob) return file;
   return new File([blob], file.name, { type: blob.type, lastModified: Date.now() });
 }
-

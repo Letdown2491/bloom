@@ -66,8 +66,8 @@ type ConfirmRequest = {
 
 type PromptRequest = {
   kind: "prompt";
-  options: PromptDialogOptions<any>;
-  resolve: (value: any) => void;
+  options: PromptDialogOptions<unknown>;
+  resolve: (value: unknown) => void;
 };
 
 type AlertRequest = {
@@ -94,28 +94,38 @@ export const DialogProvider: React.FC<DialogProviderProps> = ({ children }) => {
     }
   }, [activeRequest]);
 
-  const enqueue = useCallback((request: DialogRequest) => {
-    if (activeRequest) {
-      queueRef.current = [...queueRef.current, request];
-      return;
-    }
-    setActiveRequest(request);
-  }, [activeRequest]);
+  const enqueue = useCallback(
+    (request: DialogRequest) => {
+      if (activeRequest) {
+        queueRef.current = [...queueRef.current, request];
+        return;
+      }
+      setActiveRequest(request);
+    },
+    [activeRequest],
+  );
 
   const confirm = useCallback(
     (options: ConfirmDialogOptions) =>
       new Promise<boolean>(resolve => {
         enqueue({ kind: "confirm", options, resolve });
       }),
-    [enqueue]
+    [enqueue],
   );
 
   const prompt = useCallback(
     <Value,>(options: PromptDialogOptions<Value>) =>
       new Promise<Value | null>(resolve => {
-        enqueue({ kind: "prompt", options, resolve });
+        const request: PromptRequest = {
+          kind: "prompt",
+          options: options as PromptDialogOptions<unknown>,
+          resolve: value => {
+            resolve(value as Value | null);
+          },
+        };
+        enqueue(request);
       }),
-    [enqueue]
+    [enqueue],
   );
 
   const alert = useCallback(
@@ -123,7 +133,7 @@ export const DialogProvider: React.FC<DialogProviderProps> = ({ children }) => {
       new Promise<void>(resolve => {
         enqueue({ kind: "alert", options, resolve });
       }),
-    [enqueue]
+    [enqueue],
   );
 
   const handleConfirmResult = useCallback(
@@ -133,7 +143,7 @@ export const DialogProvider: React.FC<DialogProviderProps> = ({ children }) => {
       setActiveRequest(null);
       resolver(value);
     },
-    [activeRequest]
+    [activeRequest],
   );
 
   const handlePromptResult = useCallback(
@@ -143,7 +153,7 @@ export const DialogProvider: React.FC<DialogProviderProps> = ({ children }) => {
       setActiveRequest(null);
       resolver(value);
     },
-    [activeRequest]
+    [activeRequest],
   );
 
   const handlePromptCancel = useCallback(() => {
@@ -166,7 +176,7 @@ export const DialogProvider: React.FC<DialogProviderProps> = ({ children }) => {
       prompt,
       alert,
     }),
-    [alert, confirm, prompt]
+    [alert, confirm, prompt],
   );
 
   return (
@@ -196,8 +206,7 @@ const TONE_PRIMARY_CLASS: Record<DialogTone, string> = {
     "rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-slate-900 transition hover:bg-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-slate-950",
   danger:
     "rounded-xl bg-red-600 px-4 py-2 text-sm font-semibold text-slate-50 transition hover:bg-red-500 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 focus:ring-offset-slate-950",
-  info:
-    "rounded-xl bg-sky-600 px-4 py-2 text-sm font-semibold text-slate-50 transition hover:bg-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-500 focus:ring-offset-2 focus:ring-offset-slate-950",
+  info: "rounded-xl bg-sky-600 px-4 py-2 text-sm font-semibold text-slate-50 transition hover:bg-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-500 focus:ring-offset-2 focus:ring-offset-slate-950",
   success:
     "rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-slate-900 transition hover:bg-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-slate-950",
   warning:
@@ -207,7 +216,13 @@ const TONE_PRIMARY_CLASS: Record<DialogTone, string> = {
 const SECONDARY_BUTTON_CLASS =
   "rounded-xl border border-slate-700 px-4 py-2 text-sm font-medium text-slate-200 transition hover:border-slate-600 focus:outline-none focus:ring-2 focus:ring-slate-500 focus:ring-offset-2 focus:ring-offset-slate-950";
 
-const DialogHost: React.FC<DialogHostProps> = ({ request, onConfirm, onPromptSubmit, onPromptCancel, onAlertClose }) => {
+const DialogHost: React.FC<DialogHostProps> = ({
+  request,
+  onConfirm,
+  onPromptSubmit,
+  onPromptCancel,
+  onAlertClose,
+}) => {
   const [promptValue, setPromptValue] = useState("");
   const [promptError, setPromptError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -256,16 +271,16 @@ const DialogHost: React.FC<DialogHostProps> = ({ request, onConfirm, onPromptSub
   const tone: DialogTone = request.options.tone ?? "default";
   const confirmLabel =
     request.kind === "confirm"
-      ? request.options.confirmLabel ?? "Confirm"
+      ? (request.options.confirmLabel ?? "Confirm")
       : request.kind === "prompt"
-        ? request.options.confirmLabel ?? "Submit"
+        ? (request.options.confirmLabel ?? "Submit")
         : undefined;
   const cancelLabel =
     request.kind === "confirm" || request.kind === "prompt"
-      ? request.options.cancelLabel ?? "Cancel"
+      ? (request.options.cancelLabel ?? "Cancel")
       : undefined;
   const acknowledgeLabel =
-    request.kind === "alert" ? request.options.acknowledgeLabel ?? "Got it" : undefined;
+    request.kind === "alert" ? (request.options.acknowledgeLabel ?? "Got it") : undefined;
 
   const overlayKeyDown: React.KeyboardEventHandler<HTMLDivElement> = event => {
     if (event.key === "Escape") {
@@ -363,7 +378,9 @@ const DialogHost: React.FC<DialogHostProps> = ({ request, onConfirm, onPromptSub
                 }}
                 placeholder={request.options.placeholder}
                 className={`w-full rounded-xl border px-3 py-2 text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500 ${
-                  promptError ? "border-red-600 focus:ring-red-500" : "border-slate-700 bg-slate-950"
+                  promptError
+                    ? "border-red-600 focus:ring-red-500"
+                    : "border-slate-700 bg-slate-950"
                 }`}
               />
             </label>
@@ -381,41 +398,33 @@ const DialogHost: React.FC<DialogHostProps> = ({ request, onConfirm, onPromptSub
                 type="button"
                 className={SECONDARY_BUTTON_CLASS}
                 onClick={() => onConfirm(false)}
-          >
-            {cancelLabel ?? "Cancel"}
-          </button>
-          <button
-            type="button"
-            className={TONE_PRIMARY_CLASS[tone]}
-            onClick={() => onConfirm(true)}
-          >
-            {confirmLabel ?? "Confirm"}
-          </button>
-        </>
-      ) : null}
-      {request.kind === "prompt" ? (
-        <>
-          <button type="button" className={SECONDARY_BUTTON_CLASS} onClick={onPromptCancel}>
-            {cancelLabel ?? "Cancel"}
-          </button>
-          <button
-            type="button"
-            className={TONE_PRIMARY_CLASS[tone]}
-            onClick={submitPrompt}
-          >
-            {confirmLabel ?? "Submit"}
-          </button>
-        </>
-      ) : null}
-      {request.kind === "alert" ? (
-        <button
-          type="button"
-          className={TONE_PRIMARY_CLASS[tone]}
-          onClick={onAlertClose}
-        >
-          {acknowledgeLabel ?? "Got it"}
-        </button>
-      ) : null}
+              >
+                {cancelLabel ?? "Cancel"}
+              </button>
+              <button
+                type="button"
+                className={TONE_PRIMARY_CLASS[tone]}
+                onClick={() => onConfirm(true)}
+              >
+                {confirmLabel ?? "Confirm"}
+              </button>
+            </>
+          ) : null}
+          {request.kind === "prompt" ? (
+            <>
+              <button type="button" className={SECONDARY_BUTTON_CLASS} onClick={onPromptCancel}>
+                {cancelLabel ?? "Cancel"}
+              </button>
+              <button type="button" className={TONE_PRIMARY_CLASS[tone]} onClick={submitPrompt}>
+                {confirmLabel ?? "Submit"}
+              </button>
+            </>
+          ) : null}
+          {request.kind === "alert" ? (
+            <button type="button" className={TONE_PRIMARY_CLASS[tone]} onClick={onAlertClose}>
+              {acknowledgeLabel ?? "Got it"}
+            </button>
+          ) : null}
         </div>
       </div>
     </div>

@@ -1,12 +1,17 @@
 import axios, { type AxiosProgressEvent } from "axios";
 import { BloomHttpError, fromAxiosError, httpRequest, requestJson } from "./httpService";
 import { buildNip98AuthHeader } from "./nip98";
-import { resolveUploadSource, type BlossomBlob, type SignTemplate, type UploadSource } from "./blossomClient";
+import {
+  resolveUploadSource,
+  type BlossomBlob,
+  type SignTemplate,
+  type UploadSource,
+} from "./blossomClient";
 
 export type Nip96ResolvedConfig = {
   apiUrl: string;
   downloadUrl: string;
-  raw: Record<string, any>;
+  raw: Record<string, unknown>;
 };
 
 type Nip96ListItem =
@@ -65,7 +70,10 @@ function resolveAbsolute(base: string, value?: string) {
 async function fetchConfig(baseUrl: string, depth = 0): Promise<Nip96ResolvedConfig> {
   if (depth > 4) throw new Error("Too many NIP-96 delegation redirects");
   const normalizedBase = normalizeBase(baseUrl);
-  const wellKnownUrl = new URL("/.well-known/nostr/nip96.json", ensureTrailingSlash(normalizedBase)).toString();
+  const wellKnownUrl = new URL(
+    "/.well-known/nostr/nip96.json",
+    ensureTrailingSlash(normalizedBase),
+  ).toString();
   const data = await requestJson<Record<string, unknown>>({
     url: wellKnownUrl,
     method: "GET",
@@ -89,8 +97,11 @@ async function fetchConfig(baseUrl: string, depth = 0): Promise<Nip96ResolvedCon
       });
     }
     const apiUrl = resolveAbsolute(normalizedBase, apiUrlRaw);
-    const downloadUrl = resolveAbsolute(apiUrl, typeof data.download_url === "string" ? data.download_url.trim() : "");
-    return { apiUrl, downloadUrl, raw: data as Record<string, any> };
+    const downloadUrl = resolveAbsolute(
+      apiUrl,
+      typeof data.download_url === "string" ? data.download_url.trim() : "",
+    );
+    return { apiUrl, downloadUrl, raw: data };
   }
   throw new BloomHttpError(`Invalid response from ${wellKnownUrl}`, {
     request: { url: wellKnownUrl, method: "GET" },
@@ -128,7 +139,9 @@ function tagsToMap(tags: string[][] = []) {
   return map;
 }
 
-async function ensureUploadFile(source: Awaited<ReturnType<typeof resolveUploadSource>>): Promise<File> {
+async function ensureUploadFile(
+  source: Awaited<ReturnType<typeof resolveUploadSource>>,
+): Promise<File> {
   if (source.originalFile instanceof File) {
     return source.originalFile;
   }
@@ -148,7 +161,8 @@ function extractNip94Event(entry: Nip96ListItem | undefined): Nip94Event | null 
   if (Array.isArray((entry as Nip94Event).tags)) {
     return entry as Nip94Event;
   }
-  const candidate = (entry as { nip94_event?: Nip94Event; event?: Nip94Event; nip94?: Nip94Event }).nip94_event ??
+  const candidate =
+    (entry as { nip94_event?: Nip94Event; event?: Nip94Event; nip94?: Nip94Event }).nip94_event ??
     (entry as { event?: Nip94Event }).event ??
     (entry as { nip94?: Nip94Event }).nip94;
   if (candidate && Array.isArray(candidate.tags)) {
@@ -157,7 +171,12 @@ function extractNip94Event(entry: Nip96ListItem | undefined): Nip94Event | null 
   return null;
 }
 
-function nip94ToBlob(config: Nip96ResolvedConfig, serverUrl: string, event: Nip94Event, requiresAuth: boolean): BlossomBlob | null {
+function nip94ToBlob(
+  config: Nip96ResolvedConfig,
+  serverUrl: string,
+  event: Nip94Event,
+  requiresAuth: boolean,
+): BlossomBlob | null {
   const tags = tagsToMap(event.tags);
   const ox = tags.get("ox") || tags.get("x");
   if (!ox) return null;
@@ -191,7 +210,9 @@ function nip94ToBlob(config: Nip96ResolvedConfig, serverUrl: string, event: Nip9
 
 export async function listNip96Files(
   serverUrl: string,
-  options: { requiresAuth: boolean; signTemplate?: SignTemplate; page?: number; count?: number } = { requiresAuth: true }
+  options: { requiresAuth: boolean; signTemplate?: SignTemplate; page?: number; count?: number } = {
+    requiresAuth: true,
+  },
 ): Promise<BlossomBlob[]> {
   const config = await getNip96Config(serverUrl);
   const page = options.page ?? 0;
@@ -243,7 +264,7 @@ export async function uploadBlobToNip96(
   file: UploadSource,
   signTemplate: SignTemplate | undefined,
   requiresAuth: boolean,
-  onProgress?: (event: AxiosProgressEvent) => void
+  onProgress?: (event: AxiosProgressEvent) => void,
 ): Promise<BlossomBlob> {
   const config = await getNip96Config(serverUrl);
   const headers: Record<string, string> = { Accept: "application/json" };
@@ -314,7 +335,7 @@ export async function deleteNip96File(
   serverUrl: string,
   hash: string,
   signTemplate: SignTemplate | undefined,
-  requiresAuth: boolean
+  requiresAuth: boolean,
 ): Promise<Nip96DeleteResponse | undefined> {
   const config = await getNip96Config(serverUrl);
   const targetUrl = `${ensureTrailingSlash(config.apiUrl)}${hash}`;

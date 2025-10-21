@@ -88,7 +88,7 @@ export const usePreferredRelays = () => {
         return [];
       }
     },
-    [ndk, prepareRelaySet, pubkey]
+    [ndk, prepareRelaySet, pubkey],
   );
 
   const refresh = useCallback(async () => {
@@ -125,7 +125,8 @@ export const usePreferredRelays = () => {
 
   useEffect(() => {
     if (!ndk) return;
-    const preferredUrls = relayPolicies.length > 0 ? relayPolicies.map(policy => policy.url) : undefined;
+    const preferredUrls =
+      relayPolicies.length > 0 ? relayPolicies.map(policy => policy.url) : undefined;
     const unique = collectRelayTargets(preferredUrls, DEFAULT_PUBLIC_RELAYS);
     ndk.explicitRelayUrls = unique;
 
@@ -169,9 +170,7 @@ export const usePreferredRelays = () => {
   }, [ndk]);
 
   const preferredRelays = useMemo(() => {
-    return relayPolicies
-      .filter(policy => policy.read || policy.write)
-      .map(policy => policy.url);
+    return relayPolicies.filter(policy => policy.read || policy.write).map(policy => policy.url);
   }, [relayPolicies]);
 
   const effectiveRelays = useMemo(() => {

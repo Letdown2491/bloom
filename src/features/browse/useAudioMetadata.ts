@@ -20,7 +20,8 @@ export const useAudioMetadataMap = (blobs: BlossomBlob[]) => {
   const map = useMemo(() => {
     const lookup = new Map<string, BlobAudioMetadata>();
     blobs.forEach(blob => {
-      const metadata = getStoredAudioMetadata(blob.serverUrl, blob.sha256) ?? deriveMetadataFromPrivateBlob(blob);
+      const metadata =
+        getStoredAudioMetadata(blob.serverUrl, blob.sha256) ?? deriveMetadataFromPrivateBlob(blob);
       if (metadata) {
         lookup.set(blob.sha256, metadata);
       }
@@ -36,7 +37,8 @@ const deriveMetadataFromPrivateBlob = (blob: BlossomBlob): BlobAudioMetadata | u
   if (!audio || typeof audio !== "object") return undefined;
   const normalized: BlobAudioMetadata = {};
   if (typeof audio.title === "string" && audio.title.trim()) normalized.title = audio.title.trim();
-  if (typeof audio.artist === "string" && audio.artist.trim()) normalized.artist = audio.artist.trim();
+  if (typeof audio.artist === "string" && audio.artist.trim())
+    normalized.artist = audio.artist.trim();
   if (typeof audio.album === "string" && audio.album.trim()) normalized.album = audio.album.trim();
   if (typeof audio.genre === "string" && audio.genre.trim()) normalized.genre = audio.genre.trim();
   if (typeof audio.trackNumber === "number" && Number.isFinite(audio.trackNumber)) {

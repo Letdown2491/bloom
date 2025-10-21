@@ -9,7 +9,11 @@ export const canonicalizeSatelliteApiBase = (rawUrl: string): string => {
     const parsed = new URL(trimmed);
     const host = parsed.host.toLowerCase();
 
-    if (host === "cdn.satellite.earth" || host === "satellite.earth" || host === "www.satellite.earth") {
+    if (
+      host === "cdn.satellite.earth" ||
+      host === "satellite.earth" ||
+      host === "www.satellite.earth"
+    ) {
       return `https://${SATELLITE_API_HOST}${SATELLITE_API_BASE_PATH}`;
     }
 
@@ -27,7 +31,10 @@ export const canonicalizeSatelliteApiBase = (rawUrl: string): string => {
 
     return trimmed.replace(/\/$/, "");
   } catch {
-    if (/^https?:\/\/cdn\.satellite\.earth/i.test(trimmed) || /^https?:\/\/(www\.)?satellite\.earth\/?$/i.test(trimmed)) {
+    if (
+      /^https?:\/\/cdn\.satellite\.earth/i.test(trimmed) ||
+      /^https?:\/\/(www\.)?satellite\.earth\/?$/i.test(trimmed)
+    ) {
       return `https://${SATELLITE_API_HOST}${SATELLITE_API_BASE_PATH}`;
     }
     return trimmed.replace(/\/$/, "");

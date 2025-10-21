@@ -138,7 +138,7 @@ export const FolderShareDialog: React.FC<FolderShareDialogProps> = ({
         onStatus("Unable to copy to clipboard.", "error", 2500);
       }
     },
-    [onStatus]
+    [onStatus],
   );
 
   const phaseRows = useMemo(() => {
@@ -156,7 +156,7 @@ export const FolderShareDialog: React.FC<FolderShareDialogProps> = ({
 
   const allPhasesReady = useMemo(
     () => phaseRows.length > 0 && phaseRows.every(row => row.phase.status === "ready"),
-    [phaseRows]
+    [phaseRows],
   );
   const [detailsExpanded, setDetailsExpanded] = useState(() => !allPhasesReady);
   const previousReadyRef = useRef(allPhasesReady);
@@ -183,14 +183,17 @@ export const FolderShareDialog: React.FC<FolderShareDialogProps> = ({
     return "All configured relays confirmed this share. Anyone with the link can view the folder immediately.";
   }, [phaseRows]);
 
-  const overlayClass = "fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 backdrop-blur-sm p-4";
+  const overlayClass =
+    "fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 backdrop-blur-sm p-4";
   const containerClass = isLightTheme
     ? "w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-6 text-slate-800 shadow-xl"
     : "w-full max-w-lg rounded-2xl border border-slate-800 bg-slate-900/90 p-6 text-slate-100 shadow-xl";
   const headingClass = isLightTheme
     ? "flex items-center gap-2 text-lg font-semibold text-slate-900"
     : "flex items-center gap-2 text-lg font-semibold text-slate-100";
-  const folderInfoTextClass = isLightTheme ? "mt-2 text-sm text-slate-600" : "mt-2 text-sm text-slate-300";
+  const folderInfoTextClass = isLightTheme
+    ? "mt-2 text-sm text-slate-600"
+    : "mt-2 text-sm text-slate-300";
   const folderPathTextClass = isLightTheme ? "text-xs text-slate-500" : "text-xs text-slate-500";
   const sectionLabelClass = isLightTheme
     ? "text-xs font-semibold uppercase tracking-wide text-slate-500"
@@ -210,8 +213,12 @@ export const FolderShareDialog: React.FC<FolderShareDialogProps> = ({
   const phaseLabelClass = isLightTheme
     ? "text-xs font-semibold uppercase tracking-wide text-slate-600"
     : "text-xs font-semibold uppercase tracking-wide text-slate-400";
-  const phaseCountClass = isLightTheme ? "ml-2 text-xs font-normal text-slate-500" : "ml-2 text-xs font-normal text-slate-400";
-  const phaseDetailTextClass = isLightTheme ? "mt-1 text-xs text-slate-500" : "mt-1 text-xs text-slate-500";
+  const phaseCountClass = isLightTheme
+    ? "ml-2 text-xs font-normal text-slate-500"
+    : "ml-2 text-xs font-normal text-slate-400";
+  const phaseDetailTextClass = isLightTheme
+    ? "mt-1 text-xs text-slate-500"
+    : "mt-1 text-xs text-slate-500";
   const retryButtonClass = isLightTheme
     ? "rounded-lg border border-emerald-500/70 px-2 py-1 text-xs font-semibold text-emerald-600 transition hover:bg-emerald-50 hover:text-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-white"
     : "rounded-lg border border-emerald-500/60 px-2 py-1 text-xs font-semibold text-emerald-200 transition hover:border-emerald-400 hover:text-emerald-100 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-slate-900";
@@ -284,7 +291,11 @@ export const FolderShareDialog: React.FC<FolderShareDialogProps> = ({
                 type="button"
                 onClick={() => {
                   if (typeof window !== "undefined") {
-                    window.open(`https://nostr.band/?q=${encodeURIComponent(naddr)}`, "_blank", "noopener");
+                    window.open(
+                      `https://nostr.band/?q=${encodeURIComponent(naddr)}`,
+                      "_blank",
+                      "noopener",
+                    );
                   }
                 }}
                 className={previewButtonClass}
@@ -304,7 +315,8 @@ export const FolderShareDialog: React.FC<FolderShareDialogProps> = ({
                     const countLabel = formatPhaseCount(row.phase);
                     const firstFailure = row.phase.failed[0];
                     const failureHint =
-                      (row.phase.status === "partial" || row.phase.status === "error") && row.phase.failed.length > 0
+                      (row.phase.status === "partial" || row.phase.status === "error") &&
+                      row.phase.failed.length > 0
                         ? row.phase.failed.length === 1 && firstFailure
                           ? `Waiting on ${formatRelayLabel(firstFailure.url)}`
                           : row.phase.failed.length > 1 && firstFailure
@@ -328,7 +340,9 @@ export const FolderShareDialog: React.FC<FolderShareDialogProps> = ({
                           <p className={phaseLabelClass}>{row.label}</p>
                           <p className={`mt-1 text-sm font-medium ${statusClass}`}>
                             {statusLabel}
-                            {countLabel ? <span className={phaseCountClass}>{countLabel}</span> : null}
+                            {countLabel ? (
+                              <span className={phaseCountClass}>{countLabel}</span>
+                            ) : null}
                           </p>
                           {detailText ? <p className={phaseDetailTextClass}>{detailText}</p> : null}
                         </div>
@@ -367,11 +381,7 @@ export const FolderShareDialog: React.FC<FolderShareDialogProps> = ({
           <p className={phaseMessageClass}>{phaseMessage}</p>
         </div>
         <div className="mt-6 flex justify-end">
-          <button
-            type="button"
-            className={closeButtonClass}
-            onClick={onClose}
-          >
+          <button type="button" className={closeButtonClass} onClick={onClose}>
             Close
           </button>
         </div>

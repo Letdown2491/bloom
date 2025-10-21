@@ -3,7 +3,15 @@ import { useNdk, type RelayHealth } from "../../app/context/NdkContext";
 import { usePreferredRelays, type RelayPolicy } from "../../app/hooks/usePreferredRelays";
 import { normalizeRelayOrigin, sanitizeRelayUrl } from "../utils/relays";
 import type { EventTemplate } from "../api/blossomClient";
-import { SaveIcon, TrashIcon, CancelIcon, EditIcon, RelayIcon, RefreshIcon, PlusIcon } from "./icons";
+import {
+  SaveIcon,
+  TrashIcon,
+  CancelIcon,
+  EditIcon,
+  RelayIcon,
+  RefreshIcon,
+  PlusIcon,
+} from "./icons";
 import { loadNdkModule } from "../api/ndkModule";
 import type { RelayPreparationResult } from "../api/ndkRelayManager";
 import type { StatusMessageTone } from "../types/status";
@@ -40,7 +48,6 @@ const NOT_CONNECTED_STATUS_STYLE = {
   text: "text-slate-400",
 };
 
-
 const createDraftId = () => `relay-${Math.random().toString(36).slice(2)}-${Date.now()}`;
 
 type RelayDraft = {
@@ -65,7 +72,9 @@ const normalizePolicies = (policies: RelayPolicy[]) =>
       read: Boolean(policy.read),
       write: Boolean(policy.write),
     }))
-    .filter((policy): policy is { url: string; read: boolean; write: boolean } => Boolean(policy.url))
+    .filter((policy): policy is { url: string; read: boolean; write: boolean } =>
+      Boolean(policy.url),
+    )
     .map(policy => ({
       url: policy.url,
       read: policy.read,
@@ -152,7 +161,11 @@ type RelayListProps = {
   onProvideActions?: (actions: React.ReactNode | null) => void;
 };
 
-const RelayList: React.FC<RelayListProps> = ({ showStatusMessage, compact = false, onProvideActions }) => {
+const RelayList: React.FC<RelayListProps> = ({
+  showStatusMessage,
+  compact = false,
+  onProvideActions,
+}) => {
   const { preferences } = useUserPreferences();
   const isLightTheme = preferences.theme === "light";
   const { relayPolicies, loading, refresh } = usePreferredRelays();
@@ -198,40 +211,34 @@ const RelayList: React.FC<RelayListProps> = ({ showStatusMessage, compact = fals
 
   const canEdit = Boolean(signer && ndk);
 
-  const setDraftField = useCallback(
-    (id: string, patch: Partial<RelayDraft>) => {
-      setDrafts(prev => prev.map(item => (item.id === id ? { ...item, ...patch } : item)));
-    },
-    []
-  );
+  const setDraftField = useCallback((id: string, patch: Partial<RelayDraft>) => {
+    setDrafts(prev => prev.map(item => (item.id === id ? { ...item, ...patch } : item)));
+  }, []);
 
-  const schedulePendingSaveAttempt = useCallback(
-    (backoffUntil?: number) => {
-      if (retryPendingSaveTimeout.current) {
-        clearTimeout(retryPendingSaveTimeout.current);
-        retryPendingSaveTimeout.current = null;
-      }
+  const schedulePendingSaveAttempt = useCallback((backoffUntil?: number) => {
+    if (retryPendingSaveTimeout.current) {
+      clearTimeout(retryPendingSaveTimeout.current);
+      retryPendingSaveTimeout.current = null;
+    }
 
-      if (backoffUntil === undefined) {
-        setPendingSaveVersion(prev => prev + 1);
-        return;
-      }
+    if (backoffUntil === undefined) {
+      setPendingSaveVersion(prev => prev + 1);
+      return;
+    }
 
-      const delay = Math.max(0, backoffUntil - Date.now());
-      retryPendingSaveTimeout.current = setTimeout(() => {
-        retryPendingSaveTimeout.current = null;
-        setPendingSaveVersion(prev => prev + 1);
-      }, delay);
-    },
-    []
-  );
+    const delay = Math.max(0, backoffUntil - Date.now());
+    retryPendingSaveTimeout.current = setTimeout(() => {
+      retryPendingSaveTimeout.current = null;
+      setPendingSaveVersion(prev => prev + 1);
+    }, delay);
+  }, []);
 
   const queuePendingSave = useCallback(
     (payload: PendingRelaySave) => {
       pendingSaveRef.current = payload;
       schedulePendingSaveAttempt(payload.backoffUntil);
     },
-    [schedulePendingSaveAttempt]
+    [schedulePendingSaveAttempt],
   );
 
   const attemptSave = useCallback(
@@ -249,8 +256,8 @@ const RelayList: React.FC<RelayListProps> = ({ showStatusMessage, compact = fals
           new Set(
             policies
               .map(policy => sanitizeRelayUrl(policy.url))
-              .filter((url): url is string => Boolean(url))
-          )
+              .filter((url): url is string => Boolean(url)),
+          ),
         );
         let preparation: RelayPreparationResult | null = null;
         if (candidateUrls.length > 0) {
@@ -283,7 +290,7 @@ const RelayList: React.FC<RelayListProps> = ({ showStatusMessage, compact = fals
         setSaving(false);
       }
     },
-    [ndk, prepareRelaySet, queuePendingSave, refresh, showStatusMessage, signer]
+    [ndk, prepareRelaySet, queuePendingSave, refresh, showStatusMessage, signer],
   );
 
   const flushPendingSave = useCallback(() => {
@@ -321,7 +328,10 @@ const RelayList: React.FC<RelayListProps> = ({ showStatusMessage, compact = fals
 
       const normalizedPolicies = normalizeDrafts(nextDrafts);
       if (nextDrafts.length > 0 && normalizedPolicies.length === 0) {
-        showStatusMessage("Relay changes could not be saved because the remaining entries are invalid.", "error");
+        showStatusMessage(
+          "Relay changes could not be saved because the remaining entries are invalid.",
+          "error",
+        );
         return false;
       }
 
@@ -342,7 +352,7 @@ const RelayList: React.FC<RelayListProps> = ({ showStatusMessage, compact = fals
       void attemptSave(normalizedPolicies, successMessage);
       return true;
     },
-    [attemptSave, ndk, queuePendingSave, relayPolicies, saving, showStatusMessage, signer]
+    [attemptSave, ndk, queuePendingSave, relayPolicies, saving, showStatusMessage, signer],
   );
 
   const handleAddRelay = useCallback(() => {
@@ -386,7 +396,7 @@ const RelayList: React.FC<RelayListProps> = ({ showStatusMessage, compact = fals
 
       setDrafts(nextDrafts);
     },
-    [confirm, drafts, editingId, persistRelayPolicies]
+    [confirm, drafts, editingId, persistRelayPolicies],
   );
 
   const beginEdit = (id: string) => {
@@ -450,20 +460,28 @@ const RelayList: React.FC<RelayListProps> = ({ showStatusMessage, compact = fals
       await refresh();
       showStatusMessage("Requested latest relay information.", "info");
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to refresh relay information.";
+      const message =
+        error instanceof Error ? error.message : "Failed to refresh relay information.";
       showStatusMessage(message, "error");
     } finally {
       setRefreshingStatus(false);
       startRefreshCooldown();
     }
-  }, [loading, refresh, refreshCooldownActive, refreshingStatus, showStatusMessage, startRefreshCooldown]);
+  }, [
+    loading,
+    refresh,
+    refreshCooldownActive,
+    refreshingStatus,
+    showStatusMessage,
+    startRefreshCooldown,
+  ]);
 
   const refreshDisabled = refreshingStatus || loading || refreshCooldownActive;
   const refreshTitle = refreshingStatus
     ? "Refreshing relay information…"
     : refreshCooldownActive
-    ? "Please wait a moment before refreshing again."
-    : undefined;
+      ? "Please wait a moment before refreshing again."
+      : undefined;
 
   const controls = useMemo(
     () => (
@@ -490,7 +508,15 @@ const RelayList: React.FC<RelayListProps> = ({ showStatusMessage, compact = fals
         </button>
       </>
     ),
-    [canEdit, handleAddRelay, handleRefreshStatus, refreshDisabled, refreshTitle, refreshingStatus, saving]
+    [
+      canEdit,
+      handleAddRelay,
+      handleRefreshStatus,
+      refreshDisabled,
+      refreshTitle,
+      refreshingStatus,
+      saving,
+    ],
   );
 
   useEffect(() => {
@@ -515,25 +541,36 @@ const RelayList: React.FC<RelayListProps> = ({ showStatusMessage, compact = fals
       ) : null}
 
       {!canEdit && (
-        <div className="mb-3 rounded-xl border border-slate-700 bg-slate-900/80 px-3 py-2 text-xs text-slate-300" role="alert">
+        <div
+          className="mb-3 rounded-xl border border-slate-700 bg-slate-900/80 px-3 py-2 text-xs text-slate-300"
+          role="alert"
+        >
           Connect your signer to publish relay preferences.
         </div>
       )}
 
       {loading && drafts.length === 0 ? (
-        <div className={loadingMessageClass}>
-          Loading relay preferences…
-        </div>
+        <div className={loadingMessageClass}>Loading relay preferences…</div>
       ) : (
         <div className="overflow-x-auto">
           <table className="min-w-full table-fixed text-sm text-slate-300">
             <thead className="text-[11px] uppercase tracking-wide text-slate-300">
               <tr>
-                <th scope="col" className="py-2 px-3 text-left font-semibold">Relay</th>
-                <th scope="col" className="w-48 py-2 px-3 text-left font-semibold">Status</th>
-                <th scope="col" className="w-24 py-2 px-3 text-center font-semibold">Read</th>
-                <th scope="col" className="w-24 py-2 px-3 text-center font-semibold">Write</th>
-                <th scope="col" className="w-20 py-2 px-3 text-center font-semibold">Actions</th>
+                <th scope="col" className="py-2 px-3 text-left font-semibold">
+                  Relay
+                </th>
+                <th scope="col" className="w-48 py-2 px-3 text-left font-semibold">
+                  Status
+                </th>
+                <th scope="col" className="w-24 py-2 px-3 text-center font-semibold">
+                  Read
+                </th>
+                <th scope="col" className="w-24 py-2 px-3 text-center font-semibold">
+                  Write
+                </th>
+                <th scope="col" className="w-20 py-2 px-3 text-center font-semibold">
+                  Actions
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -546,11 +583,15 @@ const RelayList: React.FC<RelayListProps> = ({ showStatusMessage, compact = fals
               ) : (
                 drafts.map(draft => {
                   const sanitized = sanitizeRelayUrl(draft.url);
-                  const normalized = sanitized ? normalizeRelayOrigin(sanitized) ?? sanitized : null;
+                  const normalized = sanitized
+                    ? (normalizeRelayOrigin(sanitized) ?? sanitized)
+                    : null;
                   const health = normalized ? healthMap.get(normalized) : undefined;
                   const baseStyle = health ? statusStyles[health.status] : UNKNOWN_STATUS_STYLE;
                   const style =
-                    health && health.status === "error" && (!health.lastError || health.lastError === "Not connected")
+                    health &&
+                    health.status === "error" &&
+                    (!health.lastError || health.lastError === "Not connected")
                       ? NOT_CONNECTED_STATUS_STYLE
                       : baseStyle;
                   const statusMessage =
@@ -560,7 +601,10 @@ const RelayList: React.FC<RelayListProps> = ({ showStatusMessage, compact = fals
                         : "Connect your signer to refresh status."
                       : null;
                   const statusMessageClass =
-                    health && health.status === "error" && health.lastError && health.lastError !== "Not connected"
+                    health &&
+                    health.status === "error" &&
+                    health.lastError &&
+                    health.lastError !== "Not connected"
                       ? "text-[11px] text-red-300"
                       : "text-[11px] text-slate-400";
                   const validationMessage = validationErrors.get(draft.id) ?? null;
@@ -575,9 +619,13 @@ const RelayList: React.FC<RelayListProps> = ({ showStatusMessage, compact = fals
                             <input
                               type="text"
                               value={draft.url}
-                              onChange={event => setDraftField(draft.id, { url: event.target.value })}
+                              onChange={event =>
+                                setDraftField(draft.id, { url: event.target.value })
+                              }
                               className={`w-full rounded-lg px-3 py-2 text-sm text-slate-200 focus:border-emerald-500 focus:outline-none bg-slate-900 ${
-                                validationMessage ? "border border-red-700" : "border border-slate-700"
+                                validationMessage
+                                  ? "border border-red-700"
+                                  : "border border-slate-700"
                               }`}
                               placeholder="wss://relay.example.com"
                               autoComplete="off"
@@ -603,14 +651,18 @@ const RelayList: React.FC<RelayListProps> = ({ showStatusMessage, compact = fals
                           <input
                             type="checkbox"
                             checked={draft.read}
-                            onChange={event => setDraftField(draft.id, { read: event.target.checked })}
+                            onChange={event =>
+                              setDraftField(draft.id, { read: event.target.checked })
+                            }
                           />
                         </td>
                         <td className="py-3 px-3 text-center">
                           <input
                             type="checkbox"
                             checked={draft.write}
-                            onChange={event => setDraftField(draft.id, { write: event.target.checked })}
+                            onChange={event =>
+                              setDraftField(draft.id, { write: event.target.checked })
+                            }
                           />
                         </td>
                         <td className="py-3 px-3 text-center">

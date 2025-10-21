@@ -74,7 +74,7 @@ export const useFolderManifest = (): FolderManifestApi => {
       if (!stored) return null;
       return stored.map(entry => cloneBlob(entry));
     },
-    [views]
+    [views],
   );
 
   const saveView = useCallback(
@@ -89,9 +89,14 @@ export const useFolderManifest = (): FolderManifestApi => {
         return next;
       });
       if (disabled) return;
-      void writeManifestView(currentPubkey, scopeKey, parentPath, cloned as unknown as Record<string, unknown>[]);
+      void writeManifestView(
+        currentPubkey,
+        scopeKey,
+        parentPath,
+        cloned as unknown as Record<string, unknown>[],
+      );
     },
-    [disabled]
+    [disabled],
   );
 
   const clear = useCallback(() => {
@@ -111,6 +116,6 @@ export const useFolderManifest = (): FolderManifestApi => {
       saveView,
       clear,
     }),
-    [clear, disabled, getView, ready, saveView]
+    [clear, disabled, getView, ready, saveView],
   );
 };

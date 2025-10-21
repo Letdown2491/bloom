@@ -6,7 +6,11 @@ import type { StatusMessageTone } from "../../shared/types/status";
 import type { TabId } from "../../shared/types/tabs";
 import type { TransferState } from "./ui/UploadPanel";
 import type { DefaultSortOption } from "../../app/context/UserPreferencesContext";
-import { BrowseTabContainer, type BrowseActiveListState, type BrowseNavigationState } from "./BrowseTabContainer";
+import {
+  BrowseTabContainer,
+  type BrowseActiveListState,
+  type BrowseNavigationState,
+} from "./BrowseTabContainer";
 import type { FilterMode } from "../../shared/types/filter";
 import { useBrowseControls } from "../browse/useBrowseControls";
 import { BrowseControls } from "../browse/BrowseTab";
@@ -15,11 +19,11 @@ import { useIsCompactScreen } from "../../shared/hooks/useIsCompactScreen";
 import type { ShareFolderRequest } from "../../shared/types/shareFolder";
 
 const UploadPanelLazy = React.lazy(() =>
-  import("./ui/UploadPanel").then(module => ({ default: module.UploadPanel }))
+  import("./ui/UploadPanel").then(module => ({ default: module.UploadPanel })),
 );
 
 const TransferTabLazy = React.lazy(() =>
-  import("./TransferTabContainer").then(module => ({ default: module.TransferTabContainer }))
+  import("./TransferTabContainer").then(module => ({ default: module.TransferTabContainer })),
 );
 
 type WorkspaceProps = {

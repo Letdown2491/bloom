@@ -307,7 +307,9 @@ const populatePreviewMeta = (record: PreviewMetaRecord) => {
     const size = typeof value.size === "number" && Number.isFinite(value.size) ? value.size : 0;
     if (size <= 0) return;
     const updatedAt =
-      typeof value.updatedAt === "number" && Number.isFinite(value.updatedAt) ? value.updatedAt : Date.now();
+      typeof value.updatedAt === "number" && Number.isFinite(value.updatedAt)
+        ? value.updatedAt
+        : Date.now();
     const lastAccessed =
       typeof value.lastAccessed === "number" && Number.isFinite(value.lastAccessed)
         ? value.lastAccessed
@@ -512,7 +514,7 @@ export const clearPreviewInlineStorage = async (): Promise<ClearPreviewInlineRes
             failures += 1;
             previewStorageDisabled = true;
           }
-        })
+        }),
       );
     } catch (error) {
       previewStorageDisabled = true;

@@ -20,7 +20,7 @@ import { useNdk, useCurrentPubkey } from "../../app/context/NdkContext";
 import type { SignTemplate } from "../../shared/api/blossomClient";
 
 const TransferContentLazy = React.lazy(() =>
-  import("../transfer/TransferContent").then(module => ({ default: module.TransferContent }))
+  import("../transfer/TransferContent").then(module => ({ default: module.TransferContent })),
 );
 
 export type SyncStatus = { state: "idle" | "syncing" | "synced" | "error"; progress: number };
@@ -45,7 +45,11 @@ type SelectedBlobItem = {
   server: ManagedServer;
 };
 
-type TransferFeedbackTone = "text-slate-400" | "text-emerald-300" | "text-amber-300" | "text-red-400";
+type TransferFeedbackTone =
+  | "text-slate-400"
+  | "text-emerald-300"
+  | "text-amber-300"
+  | "text-red-400";
 
 export const TransferTabContainer: React.FC<TransferTabContainerProps> = ({
   active,
@@ -108,11 +112,14 @@ export const TransferTabContainer: React.FC<TransferTabContainerProps> = ({
     return map;
   }, [snapshots, selectedBlobs, selectedServer]);
 
-  const selectedBlobItems = useMemo(() => Array.from(selectedBlobSources.values()), [selectedBlobSources]);
+  const selectedBlobItems = useMemo(
+    () => Array.from(selectedBlobSources.values()),
+    [selectedBlobSources],
+  );
 
   const selectedBlobTotalSize = useMemo(
     () => selectedBlobItems.reduce((total, item) => total + (item.blob.size || 0), 0),
-    [selectedBlobItems]
+    [selectedBlobItems],
   );
 
   const sourceServerUrls = useMemo(() => {
@@ -130,7 +137,11 @@ export const TransferTabContainer: React.FC<TransferTabContainerProps> = ({
     if (!transferFeedback) return "text-slate-400";
     const normalized = transferFeedback.toLowerCase();
     if (normalized.includes("issue") || normalized.includes("try again")) return "text-amber-300";
-    if (normalized.includes("failed") || normalized.includes("unable") || normalized.includes("error")) {
+    if (
+      normalized.includes("failed") ||
+      normalized.includes("unable") ||
+      normalized.includes("error")
+    ) {
       return "text-red-400";
     }
     return "text-emerald-300";
@@ -140,7 +151,8 @@ export const TransferTabContainer: React.FC<TransferTabContainerProps> = ({
 
   const syncEnabledUrlSet = useMemo(() => new Set(syncEnabledServerUrls), [syncEnabledServerUrls]);
   const autoSyncedSet = useMemo(() => new Set(autoSyncedServers), [autoSyncedServers]);
-  const syncAutoReady = syncEnabledServerUrls.length >= 2 && syncEnabledServerUrls.every(url => autoSyncedSet.has(url));
+  const syncAutoReady =
+    syncEnabledServerUrls.length >= 2 && syncEnabledServerUrls.every(url => autoSyncedSet.has(url));
 
   const allLinkedServersSynced = useMemo(() => {
     if (syncEnabledServerUrls.length < 2) return true;
@@ -148,7 +160,7 @@ export const TransferTabContainer: React.FC<TransferTabContainerProps> = ({
     for (const entry of Object.values(distribution)) {
       const presentCount = entry.servers.reduce(
         (acc, url) => acc + (syncEnabledUrlSet.has(url) ? 1 : 0),
-        0
+        0,
       );
       if (presentCount > 0 && presentCount < syncEnabledUrlSet.size) {
         return false;
@@ -219,7 +231,9 @@ export const TransferTabContainer: React.FC<TransferTabContainerProps> = ({
   }, [active, servers, selectedServer, sourceServerUrls]);
 
   useEffect(() => {
-    const activeTransfers = syncTransfers.filter(item => item.status === "uploading" || item.status === "success");
+    const activeTransfers = syncTransfers.filter(
+      item => item.status === "uploading" || item.status === "success",
+    );
     const uploading = syncTransfers.some(item => item.status === "uploading");
     if (uploading && activeTransfers.length > 0) {
       const totals = activeTransfers.reduce(
@@ -231,7 +245,7 @@ export const TransferTabContainer: React.FC<TransferTabContainerProps> = ({
             total: acc.total + total,
           };
         },
-        { transferred: 0, total: 0 }
+        { transferred: 0, total: 0 },
       );
       const progress = totals.total > 0 ? totals.transferred / totals.total : 0;
       setSyncStatus({ state: "syncing", progress });
@@ -288,7 +302,8 @@ export const TransferTabContainer: React.FC<TransferTabContainerProps> = ({
           if (targetNeedsSigner && !signer) continue;
           if (targetNeedsSigner && !signEventTemplate) continue;
 
-          if (target.type !== "blossom" && target.type !== "nip96" && target.type !== "satellite") continue;
+          if (target.type !== "blossom" && target.type !== "nip96" && target.type !== "satellite")
+            continue;
 
           const transferId = `sync-${target.url}-${sha}`;
           const fileName = sourceBlob.name || sha;
@@ -334,8 +349,8 @@ export const TransferTabContainer: React.FC<TransferTabContainerProps> = ({
                         transferred: loaded,
                         total,
                       }
-                    : item
-                )
+                    : item,
+                ),
               );
             };
 
@@ -343,24 +358,26 @@ export const TransferTabContainer: React.FC<TransferTabContainerProps> = ({
               const streamSource = createBlobStreamSource(
                 sourceBlob,
                 sourceSnapshot.server,
-                signEventTemplate
+                signEventTemplate,
               );
               if (!streamSource) {
                 nextSyncAttemptRef.current.set(key, Date.now() + 30 * 60 * 1000);
                 throw new Error("Unable to fetch blob content for sync");
               }
-              const fallbackTotal = streamSource.size && streamSource.size > 0 ? streamSource.size : totalSize;
+              const fallbackTotal =
+                streamSource.size && streamSource.size > 0 ? streamSource.size : totalSize;
               await uploadBlobToServer(
                 target.url,
                 streamSource,
                 targetRequiresAuth ? signEventTemplate : undefined,
                 targetRequiresAuth,
                 progress => {
-                  const totalProgress = progress.total && progress.total > 0 ? progress.total : fallbackTotal;
+                  const totalProgress =
+                    progress.total && progress.total > 0 ? progress.total : fallbackTotal;
                   const loadedRaw = typeof progress.loaded === "number" ? progress.loaded : 0;
                   const loaded = Math.min(totalProgress, loadedRaw);
                   finalizeProgress(loaded, totalProgress);
-                }
+                },
               );
               return fallbackTotal;
             };
@@ -373,7 +390,7 @@ export const TransferTabContainer: React.FC<TransferTabContainerProps> = ({
                     sourceBlob.url,
                     targetRequiresAuth ? signEventTemplate : undefined,
                     targetRequiresAuth,
-                    sourceBlob.sha256
+                    sourceBlob.sha256,
                   );
                   completed = true;
                 } catch (error) {
@@ -398,7 +415,7 @@ export const TransferTabContainer: React.FC<TransferTabContainerProps> = ({
               const streamSource = createBlobStreamSource(
                 sourceBlob,
                 sourceSnapshot.server,
-                signEventTemplate
+                signEventTemplate,
               );
               if (!streamSource) {
                 nextSyncAttemptRef.current.set(key, Date.now() + 15 * 60 * 1000);
@@ -410,19 +427,21 @@ export const TransferTabContainer: React.FC<TransferTabContainerProps> = ({
                 targetRequiresAuth ? signEventTemplate : undefined,
                 targetRequiresAuth,
                 progress => {
-                  const fallbackTotal = streamSource.size && streamSource.size > 0 ? streamSource.size : totalSize;
-                  const totalProgress = progress.total && progress.total > 0 ? progress.total : fallbackTotal;
+                  const fallbackTotal =
+                    streamSource.size && streamSource.size > 0 ? streamSource.size : totalSize;
+                  const totalProgress =
+                    progress.total && progress.total > 0 ? progress.total : fallbackTotal;
                   const loadedRaw = typeof progress.loaded === "number" ? progress.loaded : 0;
                   const loaded = Math.min(totalProgress, loadedRaw);
                   finalizeProgress(loaded, totalProgress);
-                }
+                },
               );
               completed = true;
             } else if (target.type === "satellite") {
               const streamSource = createBlobStreamSource(
                 sourceBlob,
                 sourceSnapshot.server,
-                signEventTemplate
+                signEventTemplate,
               );
               if (!streamSource) {
                 nextSyncAttemptRef.current.set(key, Date.now() + 15 * 60 * 1000);
@@ -435,13 +454,15 @@ export const TransferTabContainer: React.FC<TransferTabContainerProps> = ({
                 targetRequiresAuth ? signEventTemplate : undefined,
                 targetRequiresAuth,
                 progress => {
-                  const fallbackTotal = streamSource.size && streamSource.size > 0 ? streamSource.size : totalSize;
-                  const totalProgress = progress.total && progress.total > 0 ? progress.total : fallbackTotal;
+                  const fallbackTotal =
+                    streamSource.size && streamSource.size > 0 ? streamSource.size : totalSize;
+                  const totalProgress =
+                    progress.total && progress.total > 0 ? progress.total : fallbackTotal;
                   const loadedRaw = typeof progress.loaded === "number" ? progress.loaded : 0;
                   const loaded = Math.min(totalProgress, loadedRaw);
                   finalizeProgress(loaded, totalProgress);
                 },
-                { label: satelliteLabel }
+                { label: satelliteLabel },
               );
               completed = true;
             } else {
@@ -462,11 +483,13 @@ export const TransferTabContainer: React.FC<TransferTabContainerProps> = ({
                       total: item.total || totalSize,
                       status: "success",
                     }
-                  : item
-              )
+                  : item,
+              ),
             );
             if (!cancelled && pubkey) {
-              queryClient.invalidateQueries({ queryKey: ["server-blobs", target.url, pubkey, target.type] });
+              queryClient.invalidateQueries({
+                queryKey: ["server-blobs", target.url, pubkey, target.type],
+              });
             }
           } catch (error) {
             console.error("Auto-sync failed", error);
@@ -477,12 +500,14 @@ export const TransferTabContainer: React.FC<TransferTabContainerProps> = ({
               error instanceof BloomHttpError
                 ? error.cause
                 : error instanceof Error && "cause" in error
-                ? (error as Error & { cause?: unknown }).cause
-                : undefined;
+                  ? (error as Error & { cause?: unknown }).cause
+                  : undefined;
             const isNetworkError =
               error instanceof TypeError ||
               cause instanceof TypeError ||
-              (cause && typeof cause === "object" && (cause as { name?: string }).name === "TypeError") ||
+              (cause &&
+                typeof cause === "object" &&
+                (cause as { name?: string }).name === "TypeError") ||
               errorMessage.toLowerCase().includes("unable to fetch blob content for sync");
             if (isNetworkError) {
               const alreadyBlocked = blockedSyncTargetsRef.current.has(target.url);
@@ -490,7 +515,11 @@ export const TransferTabContainer: React.FC<TransferTabContainerProps> = ({
               unsupportedMirrorTargetsRef.current.add(target.url);
               nextSyncAttemptRef.current.set(key, Date.now() + 30 * 60 * 1000);
               if (!alreadyBlocked) {
-                showStatusMessage("Sync blocked: remote server disallows cross-origin requests.", "error", 6000);
+                showStatusMessage(
+                  "Sync blocked: remote server disallows cross-origin requests.",
+                  "error",
+                  6000,
+                );
               }
             } else if (statusCode === 404 || statusCode === 405) {
               unsupportedMirrorTargetsRef.current.add(target.url);
@@ -505,10 +534,10 @@ export const TransferTabContainer: React.FC<TransferTabContainerProps> = ({
             const syncErrorMessage = isNetworkError
               ? "Sync unsupported: remote server blocks cross-origin requests"
               : statusCode === 404 || statusCode === 405
-              ? "Sync unsupported: target blocks mirroring"
-              : statusCode === 401
-              ? "Sync auth failed"
-              : errorMessage || "Sync failed";
+                ? "Sync unsupported: target blocks mirroring"
+                : statusCode === 401
+                  ? "Sync auth failed"
+                  : errorMessage || "Sync failed";
             setSyncTransfers(prev =>
               prev.map(item =>
                 item.id === transferId
@@ -517,8 +546,8 @@ export const TransferTabContainer: React.FC<TransferTabContainerProps> = ({
                       status: "error",
                       message: syncErrorMessage,
                     }
-                  : item
-              )
+                  : item,
+              ),
             );
             if (blockedSyncTargetsRef.current.has(target.url)) {
               skipRemainingForTarget = true;
@@ -553,10 +582,11 @@ export const TransferTabContainer: React.FC<TransferTabContainerProps> = ({
     (
       sourceBlob: BlossomBlob,
       sourceServer: ManagedServer,
-      template: SignTemplate | undefined
+      template: SignTemplate | undefined,
     ): UploadStreamSource | null => {
       if (!sourceBlob.url) return null;
-      const sourceRequiresAuth = sourceServer.type === "satellite" ? false : Boolean(sourceServer.requiresAuth);
+      const sourceRequiresAuth =
+        sourceServer.type === "satellite" ? false : Boolean(sourceServer.requiresAuth);
       if (sourceRequiresAuth && !template) return null;
 
       const inferExtensionFromType = (type?: string) => {
@@ -676,13 +706,15 @@ export const TransferTabContainer: React.FC<TransferTabContainerProps> = ({
         },
       };
     },
-    [signEventTemplate]
+    [signEventTemplate],
   );
 
   const toggleTransferTarget = (url: string) => {
     if (servers.length <= 1) return;
     if (servers.length === 2 && selectedServer && url === selectedServer) return;
-    setTransferTargets(prev => (prev.includes(url) ? prev.filter(item => item !== url) : [...prev, url]));
+    setTransferTargets(prev =>
+      prev.includes(url) ? prev.filter(item => item !== url) : [...prev, url],
+    );
   };
 
   const handleStartTransfer = useCallback(async () => {
@@ -699,7 +731,9 @@ export const TransferTabContainer: React.FC<TransferTabContainerProps> = ({
       return;
     }
     if (
-      selectedBlobItems.some(item => item.server.type !== "satellite" && item.server.requiresAuth) &&
+      selectedBlobItems.some(
+        item => item.server.type !== "satellite" && item.server.requiresAuth,
+      ) &&
       !signEventTemplate
     ) {
       setTransferFeedback("Connect your signer to read from the selected servers.");
@@ -710,7 +744,9 @@ export const TransferTabContainer: React.FC<TransferTabContainerProps> = ({
       return;
     }
     if (missingSourceCount > 0) {
-      setTransferFeedback("Bloom couldn't load details for every selected file. Refresh and try again.");
+      setTransferFeedback(
+        "Bloom couldn't load details for every selected file. Refresh and try again.",
+      );
       return;
     }
 
@@ -774,7 +810,7 @@ export const TransferTabContainer: React.FC<TransferTabContainerProps> = ({
                     blob.url,
                     targetRequiresAuth ? signEventTemplate : undefined,
                     targetRequiresAuth,
-                    blob.sha256
+                    blob.sha256,
                   );
                   completed = true;
                 } catch (error) {
@@ -796,17 +832,19 @@ export const TransferTabContainer: React.FC<TransferTabContainerProps> = ({
                 const streamSource = createBlobStreamSource(blob, sourceServer, signEventTemplate);
                 if (!streamSource) {
                   throw new Error(
-                    `Unable to fetch ${fileName} from ${serverNameByUrl.get(sourceServer.url) || sourceServer.url}`
+                    `Unable to fetch ${fileName} from ${serverNameByUrl.get(sourceServer.url) || sourceServer.url}`,
                   );
                 }
-                const fallbackTotal = streamSource.size && streamSource.size > 0 ? streamSource.size : totalSize;
+                const fallbackTotal =
+                  streamSource.size && streamSource.size > 0 ? streamSource.size : totalSize;
                 await uploadBlobToServer(
                   target.url,
                   streamSource,
                   targetRequiresAuth ? signEventTemplate : undefined,
                   targetRequiresAuth,
                   progress => {
-                    const totalProgress = progress.total && progress.total > 0 ? progress.total : fallbackTotal;
+                    const totalProgress =
+                      progress.total && progress.total > 0 ? progress.total : fallbackTotal;
                     const loadedRaw = typeof progress.loaded === "number" ? progress.loaded : 0;
                     const loaded = Math.min(totalProgress, loadedRaw);
                     setManualTransfers(prev =>
@@ -817,10 +855,10 @@ export const TransferTabContainer: React.FC<TransferTabContainerProps> = ({
                               transferred: loaded,
                               total: totalProgress,
                             }
-                          : item
-                      )
+                          : item,
+                      ),
                     );
-                  }
+                  },
                 );
                 completed = true;
               }
@@ -828,7 +866,7 @@ export const TransferTabContainer: React.FC<TransferTabContainerProps> = ({
               const streamSource = createBlobStreamSource(blob, sourceServer, signEventTemplate);
               if (!streamSource) {
                 throw new Error(
-                  `Unable to fetch ${fileName} from ${serverNameByUrl.get(sourceServer.url) || sourceServer.url}`
+                  `Unable to fetch ${fileName} from ${serverNameByUrl.get(sourceServer.url) || sourceServer.url}`,
                 );
               }
               await uploadBlobToNip96(
@@ -837,8 +875,10 @@ export const TransferTabContainer: React.FC<TransferTabContainerProps> = ({
                 targetRequiresAuth ? signEventTemplate : undefined,
                 targetRequiresAuth,
                 progress => {
-                  const fallbackTotal = streamSource.size && streamSource.size > 0 ? streamSource.size : totalSize;
-                  const totalProgress = progress.total && progress.total > 0 ? progress.total : fallbackTotal;
+                  const fallbackTotal =
+                    streamSource.size && streamSource.size > 0 ? streamSource.size : totalSize;
+                  const totalProgress =
+                    progress.total && progress.total > 0 ? progress.total : fallbackTotal;
                   const loadedRaw = typeof progress.loaded === "number" ? progress.loaded : 0;
                   const loaded = Math.min(totalProgress, loadedRaw);
                   setManualTransfers(prev =>
@@ -849,17 +889,17 @@ export const TransferTabContainer: React.FC<TransferTabContainerProps> = ({
                             transferred: loaded,
                             total: totalProgress,
                           }
-                        : item
-                    )
+                        : item,
+                    ),
                   );
-                }
+                },
               );
               completed = true;
             } else if (target.type === "satellite") {
               const streamSource = createBlobStreamSource(blob, sourceServer, signEventTemplate);
               if (!streamSource) {
                 throw new Error(
-                  `Unable to fetch ${fileName} from ${serverNameByUrl.get(sourceServer.url) || sourceServer.url}`
+                  `Unable to fetch ${fileName} from ${serverNameByUrl.get(sourceServer.url) || sourceServer.url}`,
                 );
               }
               const satelliteLabel = getBlobMetadataName(blob) ?? fileName;
@@ -869,8 +909,10 @@ export const TransferTabContainer: React.FC<TransferTabContainerProps> = ({
                 targetRequiresAuth ? signEventTemplate : undefined,
                 targetRequiresAuth,
                 progress => {
-                  const fallbackTotal = streamSource.size && streamSource.size > 0 ? streamSource.size : totalSize;
-                  const totalProgress = progress.total && progress.total > 0 ? progress.total : fallbackTotal;
+                  const fallbackTotal =
+                    streamSource.size && streamSource.size > 0 ? streamSource.size : totalSize;
+                  const totalProgress =
+                    progress.total && progress.total > 0 ? progress.total : fallbackTotal;
                   const loadedRaw = typeof progress.loaded === "number" ? progress.loaded : 0;
                   const loaded = Math.min(totalProgress, loadedRaw);
                   setManualTransfers(prev =>
@@ -881,11 +923,11 @@ export const TransferTabContainer: React.FC<TransferTabContainerProps> = ({
                             transferred: loaded,
                             total: totalProgress,
                           }
-                        : item
-                    )
+                        : item,
+                    ),
                   );
                 },
-                { label: satelliteLabel }
+                { label: satelliteLabel },
               );
               completed = true;
             } else {
@@ -905,11 +947,13 @@ export const TransferTabContainer: React.FC<TransferTabContainerProps> = ({
                       total: item.total || totalSize,
                       status: "success",
                     }
-                  : item
-              )
+                  : item,
+              ),
             );
             if (pubkey) {
-              await queryClient.invalidateQueries({ queryKey: ["server-blobs", target.url, pubkey, target.type] });
+              await queryClient.invalidateQueries({
+                queryKey: ["server-blobs", target.url, pubkey, target.type],
+              });
             }
           } catch (error) {
             encounteredError = true;
@@ -930,8 +974,8 @@ export const TransferTabContainer: React.FC<TransferTabContainerProps> = ({
                       status: "error",
                       message: message || "Transfer failed",
                     }
-                  : item
-              )
+                  : item,
+              ),
             );
           }
         }

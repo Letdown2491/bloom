@@ -25,7 +25,10 @@ const aliasFilterForAuthor = (pubkey: string) => ({
   authors: [pubkey],
 });
 
-const applyAliasFromEvent = (event: NDKEvent, queryClient: ReturnType<typeof useQueryClient> | null) => {
+const applyAliasFromEvent = (
+  event: NDKEvent,
+  queryClient: ReturnType<typeof useQueryClient> | null,
+) => {
   const parsed = parseNip94Event(event);
   if (!parsed) return;
   const alias = normalizeAliasValue(parsed.name);
@@ -71,14 +74,11 @@ export const useAliasSync = (relayUrls: string[], enabled = true) => {
     let activeSubscription: NDKSubscription | null = null;
 
     const run = async () => {
-      const module = await getModule();
+      await getModule();
       if (disposed) return;
 
       const relayKey = normalizedRelays.slice().sort().join("|");
       const effectKey = `${pubkey}|${relayKey}`;
-      // NOTE: Not using relaySet to avoid NDK filter merging bugs with empty relay sets
-      // Instead, we subscribe to all connected relays which is more reliable
-      const relaySet: InstanceType<typeof module.NDKRelaySet> | undefined = undefined;
 
       const handleEvent = (event: NDKEvent) => {
         if (disposed) return;
@@ -87,13 +87,9 @@ export const useAliasSync = (relayUrls: string[], enabled = true) => {
 
       if (lastKeyRef.current !== effectKey) {
         try {
-          // Only pass relaySet to fetchEvents if we actually have one
-          const fetchOpts = relaySet
-            ? { closeOnEose: true }
-            : { closeOnEose: true };
-          const events = relaySet
-            ? await ndk.fetchEvents(aliasFilterForAuthor(pubkey), fetchOpts, relaySet)
-            : await ndk.fetchEvents(aliasFilterForAuthor(pubkey), fetchOpts);
+          const events = await ndk.fetchEvents(aliasFilterForAuthor(pubkey), {
+            closeOnEose: true,
+          });
           if (!disposed) {
             events.forEach((event: NDKEvent) => handleEvent(event));
           }
@@ -105,11 +101,7 @@ export const useAliasSync = (relayUrls: string[], enabled = true) => {
 
       subscriptionRef.current?.stop();
       const filter = aliasFilterForAuthor(pubkey);
-      // relaySet will be undefined if there are no valid relays, which tells NDK to use all connected relays
-      const subscriptionOpts = relaySet
-        ? { closeOnEose: false, relaySet }
-        : { closeOnEose: false };
-      const subscription = ndk.subscribe(filter, subscriptionOpts);
+      const subscription = ndk.subscribe(filter, { closeOnEose: false });
       subscription.on("event", handleEvent);
       activeSubscription = subscription;
       subscriptionRef.current = subscription;

@@ -78,7 +78,8 @@ const describeUpdatedAt = (timestamp?: number) => {
   };
 };
 
-const isImageMime = (mime?: string | null) => (mime ? mime.toLowerCase().startsWith("image/") : false);
+const isImageMime = (mime?: string | null) =>
+  mime ? mime.toLowerCase().startsWith("image/") : false;
 
 const buildUrlFromHint = (hint: FolderFileHint | null | undefined, sha: string) => {
   if (!hint) return undefined;
@@ -95,7 +96,7 @@ const buildUrlFromHint = (hint: FolderFileHint | null | undefined, sha: string) 
 const mergeMetadataWithHint = (
   sha: string,
   nip94: Nip94ParsedEvent | null | undefined,
-  hint: FolderFileHint | null | undefined
+  hint: FolderFileHint | null | undefined,
 ): Nip94ParsedEvent | null => {
   if (!nip94 && !hint) return null;
   const base: Nip94ParsedEvent = nip94 ? { ...nip94 } : { sha256: sha, name: hint?.name ?? null };
@@ -150,7 +151,9 @@ export const PublicFolderPage: React.FC<PublicFolderPageProps> = ({ naddr }) => 
           relayHints = normalizedRelays.length > 0 ? normalizedRelays : undefined;
           if (normalizedRelays.length > 0) {
             try {
-              relayPreparation = await prepareRelaySet(normalizedRelays, { waitForConnection: true });
+              relayPreparation = await prepareRelaySet(normalizedRelays, {
+                waitForConnection: true,
+              });
             } catch (error) {
               console.warn("Unable to prepare relays for shared link", normalizedRelays, error);
             }
@@ -238,11 +241,13 @@ export const PublicFolderPage: React.FC<PublicFolderPageProps> = ({ naddr }) => 
   const shareLink = useMemo(() => {
     if (state.status !== "ready") return null;
     const origin =
-      typeof window !== "undefined" && window.location?.origin ? window.location.origin : "https://bloomapp.me";
+      typeof window !== "undefined" && window.location?.origin
+        ? window.location.origin
+        : "https://bloomapp.me";
     const encodedNaddr = encodeFolderNaddr(
       state.record,
       state.address.pubkey,
-      state.address.relays
+      state.address.relays,
     );
     const encoded = encodeURIComponent(encodedNaddr ?? sanitizedNaddr);
     return `${origin}/folders/${encoded}`;
@@ -288,7 +293,9 @@ export const PublicFolderPage: React.FC<PublicFolderPageProps> = ({ naddr }) => 
         <div className="rounded-2xl border border-slate-800/80 bg-slate-900/70 p-5 shadow-sm sm:p-6">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div>
-              <h1 className="text-xl font-semibold text-slate-100 sm:text-2xl">{record.name || "Shared Folder"}</h1>
+              <h1 className="text-xl font-semibold text-slate-100 sm:text-2xl">
+                {record.name || "Shared Folder"}
+              </h1>
               <p className="mt-1 text-sm text-slate-400">
                 Shared by{" "}
                 {ownerLabel ? (
@@ -304,7 +311,8 @@ export const PublicFolderPage: React.FC<PublicFolderPageProps> = ({ naddr }) => 
                 </p>
               ) : null}
               <p className="mt-3 text-sm text-slate-300">
-                This view is read-only. Content is fetched from Nostr relays each time you load the page.
+                This view is read-only. Content is fetched from Nostr relays each time you load the
+                page.
               </p>
             </div>
             <div className="flex flex-col items-start gap-2 sm:w-52 sm:items-end">
@@ -333,7 +341,8 @@ export const PublicFolderPage: React.FC<PublicFolderPageProps> = ({ naddr }) => 
         <div className="space-y-4">
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-semibold text-slate-200">
-              Folder Contents<span className="ml-2 text-sm font-normal text-slate-500">({items.length})</span>
+              Folder Contents
+              <span className="ml-2 text-sm font-normal text-slate-500">({items.length})</span>
             </h2>
           </div>
           {items.length === 0 ? (
@@ -346,7 +355,10 @@ export const PublicFolderPage: React.FC<PublicFolderPageProps> = ({ naddr }) => 
                 const meta = item.metadata;
                 const label = meta?.name?.trim() || item.sha256;
                 const sizeLabel = meta?.size ? prettyBytes(meta.size) : null;
-                const hasImagePreview = Boolean(meta?.url) && (isImageMime(meta?.mimeType) || /\.(png|jpe?g|gif|webp|avif)$/i.test(meta?.url ?? ""));
+                const hasImagePreview =
+                  Boolean(meta?.url) &&
+                  (isImageMime(meta?.mimeType) ||
+                    /\.(png|jpe?g|gif|webp|avif)$/i.test(meta?.url ?? ""));
                 return (
                   <li
                     key={item.sha256}
@@ -374,7 +386,9 @@ export const PublicFolderPage: React.FC<PublicFolderPageProps> = ({ naddr }) => 
                           <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-slate-400">
                             {meta?.mimeType ? <span>{meta.mimeType}</span> : null}
                             {sizeLabel ? <span>{sizeLabel}</span> : null}
-                            {meta?.createdAt ? <span>Shared {prettyDate(meta.createdAt)}</span> : null}
+                            {meta?.createdAt ? (
+                              <span>Shared {prettyDate(meta.createdAt)}</span>
+                            ) : null}
                           </div>
                         </div>
                         <div className="flex items-center gap-2 sm:flex-col sm:items-end sm:gap-2">
@@ -388,7 +402,9 @@ export const PublicFolderPage: React.FC<PublicFolderPageProps> = ({ naddr }) => 
                               <span>Download</span>
                             </a>
                           ) : (
-                            <span className="text-xs text-slate-500">{item.requiresAuth ? "Protected file" : "URL unavailable"}</span>
+                            <span className="text-xs text-slate-500">
+                              {item.requiresAuth ? "Protected file" : "URL unavailable"}
+                            </span>
                           )}
                         </div>
                       </div>

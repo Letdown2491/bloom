@@ -1,7 +1,13 @@
 import type { BlossomBlob } from "../../shared/api/blossomClient";
 import type { Track } from "../../app/context/AudioContext";
 import { getBlobMetadataName, type BlobAudioMetadata } from "../../shared/utils/blobMetadataStore";
-import { isDocumentBlob, isImageBlob, isMusicBlob, isPdfBlob, isVideoBlob } from "../../shared/utils/blobClassification";
+import {
+  isDocumentBlob,
+  isImageBlob,
+  isMusicBlob,
+  isPdfBlob,
+  isVideoBlob,
+} from "../../shared/utils/blobClassification";
 import type { FilterMode } from "../../shared/types/filter";
 
 const deriveTrackTitle = (blob: BlossomBlob) => {
@@ -13,7 +19,7 @@ const deriveTrackTitle = (blob: BlossomBlob) => {
 export const createAudioTrack = (
   blob: BlossomBlob,
   metadata: BlobAudioMetadata | null | undefined,
-  overrideUrl?: string
+  overrideUrl?: string,
 ): Track | null => {
   const sourceUrl = overrideUrl ?? blob.url;
   if (!sourceUrl) return null;

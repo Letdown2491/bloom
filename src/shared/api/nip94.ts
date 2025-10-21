@@ -36,7 +36,12 @@ const normalizeAlias = (alias?: string | null) => {
   return trimmed.length > 0 ? trimmed : "";
 };
 
-export const buildNip94EventTemplate = ({ blob, alias, blurhash, extraTags }: Nip94EventOptions): EventTemplate => {
+export const buildNip94EventTemplate = ({
+  blob,
+  alias,
+  blurhash,
+  extraTags,
+}: Nip94EventOptions): EventTemplate => {
   const resolvedName = normalizeAlias(alias);
   const fallbackName = typeof alias === "undefined" ? blob.name?.trim() || undefined : undefined;
   const content = resolvedName !== undefined ? resolvedName : fallbackName;
@@ -67,7 +72,12 @@ export const buildNip94EventTemplate = ({ blob, alias, blurhash, extraTags }: Ni
 
   if (Array.isArray(extraTags)) {
     extraTags.forEach(tag => {
-      if (Array.isArray(tag) && tag.length >= 2 && typeof tag[0] === "string" && typeof tag[1] === "string") {
+      if (
+        Array.isArray(tag) &&
+        tag.length >= 2 &&
+        typeof tag[0] === "string" &&
+        typeof tag[1] === "string"
+      ) {
         tags.push(tag);
       }
     });
@@ -91,7 +101,9 @@ const getTagValue = (tags: string[][], key: string) => {
   return undefined;
 };
 
-export const parseNip94Event = (event: { tags?: string[][]; content?: string; created_at?: number } | null | undefined): Nip94ParsedEvent | null => {
+export const parseNip94Event = (
+  event: { tags?: string[][]; content?: string; created_at?: number } | null | undefined,
+): Nip94ParsedEvent | null => {
   if (!event?.tags) return null;
   const { tags } = event;
   const hash = getTagValue(tags, "x") || getTagValue(tags, "ox");

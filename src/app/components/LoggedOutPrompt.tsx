@@ -14,7 +14,13 @@ export const LoggedOutPrompt: React.FC<LoggedOutPromptProps> = ({
   return (
     <div className="flex flex-1 items-center justify-center p-6">
       <div className="flex w-full max-w-md flex-col items-center gap-4 rounded-2xl border border-slate-800 bg-slate-900/70 p-8 text-center shadow-xl">
-        <img src="/bloom.webp" alt="Bloom logo" width={128} height={128} className="w-24 rounded-xl md:w-32" />
+        <img
+          src="/bloom.webp"
+          alt="Bloom logo"
+          width={128}
+          height={128}
+          className="w-24 rounded-xl md:w-32"
+        />
         <div className="space-y-2">
           <h2 className="text-lg font-semibold text-slate-100">Welcome to Bloom</h2>
           <p className="text-left text-sm text-slate-300">
@@ -36,7 +42,8 @@ export const LoggedOutPrompt: React.FC<LoggedOutPromptProps> = ({
             >
               NIP-96
             </a>
-            -compatible servers. All your media stays decentralized, secure, and instantly accessible.
+            -compatible servers. All your media stays decentralized, secure, and instantly
+            accessible.
           </p>
         </div>
         <div className="flex w-full flex-col gap-2">
@@ -74,4 +81,3 @@ export const LoggedOutPrompt: React.FC<LoggedOutPromptProps> = ({
     </div>
   );
 };
-

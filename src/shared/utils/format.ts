@@ -87,7 +87,7 @@ export const formatRelativeTime = (timestampMs: number, options?: { now?: number
 
 export const describeExpiration = (
   expiresAt: number | null | undefined,
-  options?: { now?: number; soonThresholdSeconds?: number }
+  options?: { now?: number; soonThresholdSeconds?: number },
 ): ExpirationDescription => {
   const nowSeconds = options?.now ?? Math.floor(Date.now() / 1000);
   const soonThreshold = options?.soonThresholdSeconds ?? 24 * 60 * 60;

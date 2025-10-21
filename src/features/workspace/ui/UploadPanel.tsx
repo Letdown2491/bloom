@@ -7,6 +7,9 @@ import { uploadBlobToServer, type BlossomBlob } from "../../../shared/api/blosso
 import { uploadBlobToNip96 } from "../../../shared/api/nip96Client";
 import { uploadBlobToSatellite } from "../../../shared/api/satelliteClient";
 import { prettyBytes } from "../../../shared/utils/format";
+import type * as AudioMetadataModule from "../../../shared/utils/audioMetadata";
+import type * as ImageUtilsModule from "../../../shared/utils/image";
+import type * as BlurhashModule from "../../../shared/utils/blurhash";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   rememberBlobMetadata,
@@ -23,7 +26,14 @@ import { encryptFileForPrivateUpload } from "../../../shared/domain/privateEncry
 import { usePrivateLibrary } from "../../../app/context/PrivateLibraryContext";
 import type { PrivateListEntry } from "../../../shared/domain/privateList";
 import { useFolderLists } from "../../../app/context/FolderListContext";
-import { FolderIcon, LockIcon, WarningIcon, UploadIcon, EditIcon, TrashIcon } from "../../../shared/ui/icons";
+import {
+  FolderIcon,
+  LockIcon,
+  WarningIcon,
+  UploadIcon,
+  EditIcon,
+  TrashIcon,
+} from "../../../shared/ui/icons";
 import { useUserPreferences } from "../../../app/context/UserPreferencesContext";
 import { publishNip94Metadata } from "../../../shared/api/nip94Publisher";
 import { usePreferredRelays } from "../../../app/hooks/usePreferredRelays";
@@ -36,29 +46,31 @@ const RESIZE_OPTIONS = [
   { id: 3, label: "Small (720px)", size: 720 },
 ];
 
-let audioMetadataModule: Promise<typeof import("../../../shared/utils/audioMetadata")> | null = null;
+let audioMetadataModule: Promise<typeof AudioMetadataModule> | null = null;
 
 const loadAudioMetadataModule = () => {
   if (!audioMetadataModule) {
-    audioMetadataModule = import("../../../shared/utils/audioMetadata");
+    audioMetadataModule = import("../../../shared/utils/audioMetadata") as Promise<
+      typeof AudioMetadataModule
+    >;
   }
   return audioMetadataModule;
 };
 
-let imageUtilsModule: Promise<typeof import("../../../shared/utils/image")> | null = null;
+let imageUtilsModule: Promise<typeof ImageUtilsModule> | null = null;
 
 const loadImageUtilsModule = () => {
   if (!imageUtilsModule) {
-    imageUtilsModule = import("../../../shared/utils/image");
+    imageUtilsModule = import("../../../shared/utils/image") as Promise<typeof ImageUtilsModule>;
   }
   return imageUtilsModule;
 };
 
-let blurhashModule: Promise<typeof import("../../../shared/utils/blurhash")> | null = null;
+let blurhashModule: Promise<typeof BlurhashModule> | null = null;
 
 const loadBlurhashModule = () => {
   if (!blurhashModule) {
-    blurhashModule = import("../../../shared/utils/blurhash");
+    blurhashModule = import("../../../shared/utils/blurhash") as Promise<typeof BlurhashModule>;
   }
   return blurhashModule;
 };
@@ -134,7 +146,9 @@ const ENTRY_STATUS_HEADING: Record<UploadEntryStatus, string> = {
 type UploadPhase = "idle" | "uploading" | "completed" | "attention";
 
 const resetEntryProgress = (entry: UploadEntry): UploadEntry => {
-  const serverStatuses = Object.keys(entry.serverStatuses).reduce<Record<string, UploadEntryStatus>>((acc, key) => {
+  const serverStatuses = Object.keys(entry.serverStatuses).reduce<
+    Record<string, UploadEntryStatus>
+  >((acc, key) => {
     acc[key] = "idle";
     return acc;
   }, {});
@@ -220,7 +234,8 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
   const dropZoneDescriptionId = useId();
   const queryClient = useQueryClient();
   const { signEventTemplate, ndk, signer, user } = useNdk();
-  const { upsertEntries: upsertPrivateEntries, entries: privateLibraryEntries } = usePrivateLibrary();
+  const { upsertEntries: upsertPrivateEntries, entries: privateLibraryEntries } =
+    usePrivateLibrary();
   const pubkey = useCurrentPubkey();
   const { folders, addBlobToFolder, resolveFolderPath } = useFolderLists();
   const normalizedFolderSuggestion = useMemo(() => {
@@ -234,7 +249,7 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
 
   const transferMap = useMemo(
     () => new Map([...syncTransfers, ...transfers].map(item => [item.id, item])),
-    [syncTransfers, transfers]
+    [syncTransfers, transfers],
   );
 
   const entryStatusBadgeMap = isLightTheme ? ENTRY_STATUS_BADGE_LIGHT : ENTRY_STATUS_BADGE_DARK;
@@ -246,25 +261,28 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
         if (!server) return false;
         return Boolean(server.requiresAuth);
       }),
-    [selectedServers, serverMap]
+    [selectedServers, serverMap],
   );
 
   const activeSigner = ndk?.signer ?? signer ?? null;
   const signerMissing = requiresAuthSelected && !activeSigner;
   const folderNamesInvalid = useMemo(
     () => entries.some(entry => containsReservedFolderSegment(entry.metadata.folder)),
-    [entries]
+    [entries],
   );
   const canUpload = !signerMissing && !folderNamesInvalid;
   const hasPendingUploads = useMemo(
     () =>
       entries.some(entry =>
-        selectedServers.some(serverUrl => entry.serverStatuses[serverUrl] !== "success")
+        selectedServers.some(serverUrl => entry.serverStatuses[serverUrl] !== "success"),
       ),
-    [entries, selectedServers]
+    [entries, selectedServers],
   );
   const hasImageEntries = useMemo(() => entries.some(entry => entry.kind === "image"), [entries]);
-  const hasCompletedEntries = useMemo(() => entries.some(entry => entry.status === "success"), [entries]);
+  const hasCompletedEntries = useMemo(
+    () => entries.some(entry => entry.status === "success"),
+    [entries],
+  );
   const entryCounts = useMemo(() => {
     let pending = 0;
     let completed = 0;
@@ -284,7 +302,8 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
   const uploadPhase = useMemo<UploadPhase>(() => {
     if (entries.some(entry => entry.status === "uploading")) return "uploading";
     if (busy) return "uploading";
-    if (entries.length > 0 && entries.every(entry => entry.status === "success")) return "completed";
+    if (entries.length > 0 && entries.every(entry => entry.status === "success"))
+      return "completed";
     if (entries.some(entry => entry.status === "error")) return "attention";
     return "idle";
   }, [busy, entries]);
@@ -337,7 +356,7 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
   }, [filteredEntries]);
   const allMetadataExpanded = useMemo(
     () => entries.length > 0 && entries.every(entry => entry.showMetadata),
-    [entries]
+    [entries],
   );
   const uploadSummary = useMemo(() => {
     if (entries.length === 0) return null;
@@ -381,13 +400,20 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
     };
   }, [entries]);
 
-  const completedEntries = useMemo(() => entries.filter(entry => entry.status === "success"), [entries]);
+  const completedEntries = useMemo(
+    () => entries.filter(entry => entry.status === "success"),
+    [entries],
+  );
   const completedTotalBytes = useMemo(
     () => completedEntries.reduce((acc, entry) => acc + entry.file.size, 0),
-    [completedEntries]
+    [completedEntries],
   );
 
-  const [bulkFolderSelector, setBulkFolderSelector] = useState<{ value: string; isPrivate: boolean; error: string | null } | null>(null);
+  const [bulkFolderSelector, setBulkFolderSelector] = useState<{
+    value: string;
+    isPrivate: boolean;
+    error: string | null;
+  } | null>(null);
 
   const formatFolderLabel = useCallback((value: string | null) => {
     if (!value) return "Home";
@@ -415,7 +441,9 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
         paths.add(canonical);
       }
     });
-    const sorted = Array.from(paths).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+    const sorted = Array.from(paths).sort((a, b) =>
+      a.localeCompare(b, undefined, { sensitivity: "base" }),
+    );
     return [
       { value: null, label: "Home" },
       ...sorted.map(path => ({ value: path, label: formatFolderLabel(path) })),
@@ -430,7 +458,9 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
         paths.add(raw.trim());
       }
     });
-    const sorted = Array.from(paths).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+    const sorted = Array.from(paths).sort((a, b) =>
+      a.localeCompare(b, undefined, { sensitivity: "base" }),
+    );
     return [
       { value: null, label: "Private" },
       ...sorted.map(path => ({ value: path, label: formatPrivateFolderLabel(path) })),
@@ -440,7 +470,8 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
   const handleOpenBulkFolderSelector = useCallback(() => {
     if (!entries.length || busy) return;
     const isPrivateBatch = entries.every(entry => entry.isPrivate);
-    const firstFolder = entries.find(entry => entry.metadata.folder?.trim())?.metadata.folder.trim() ?? "";
+    const firstFolder =
+      entries.find(entry => entry.metadata.folder?.trim())?.metadata.folder.trim() ?? "";
     setBulkFolderSelector({ value: firstFolder, isPrivate: isPrivateBatch, error: null });
   }, [busy, entries]);
 
@@ -453,14 +484,18 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
     const raw = bulkFolderSelector.value ?? "";
     const trimmed = raw.trim();
     if (trimmed && containsReservedFolderSegment(trimmed)) {
-      setBulkFolderSelector(prev => (prev ? { ...prev, error: 'Folder names cannot include the word "private".' } : prev));
+      setBulkFolderSelector(prev =>
+        prev ? { ...prev, error: 'Folder names cannot include the word "private".' } : prev,
+      );
       return;
     }
     let nextFolder = trimmed;
     if (trimmed) {
       const normalized = normalizeFolderPathInput(trimmed);
       if (normalized === null) {
-        setBulkFolderSelector(prev => (prev ? { ...prev, error: 'Folder names cannot include the word "private".' } : prev));
+        setBulkFolderSelector(prev =>
+          prev ? { ...prev, error: 'Folder names cannot include the word "private".' } : prev,
+        );
         return;
       }
       nextFolder = normalized ?? trimmed;
@@ -468,13 +503,19 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
     setEntries(prev =>
       prev.map(entry => {
         if (entry.metadata.kind === "audio") {
-          return resetEntryProgress({ ...entry, metadata: { ...entry.metadata, folder: nextFolder } });
+          return resetEntryProgress({
+            ...entry,
+            metadata: { ...entry.metadata, folder: nextFolder },
+          });
         }
         if (entry.metadata.kind === "generic") {
-          return resetEntryProgress({ ...entry, metadata: { ...entry.metadata, folder: nextFolder } });
+          return resetEntryProgress({
+            ...entry,
+            metadata: { ...entry.metadata, folder: nextFolder },
+          });
         }
         return entry;
-      })
+      }),
     );
     setBulkFolderSelector(null);
   }, [bulkFolderSelector, setEntries]);
@@ -520,37 +561,45 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
   }, [servers, selectedServerUrl]);
 
   const toggleServer = (url: string) => {
-    setSelectedServers(prev => (prev.includes(url) ? prev.filter(item => item !== url) : [...prev, url]));
+    setSelectedServers(prev =>
+      prev.includes(url) ? prev.filter(item => item !== url) : [...prev, url],
+    );
   };
 
-  const setEntryServerStatus = useCallback((id: string, serverUrl: string, status: UploadEntryStatus) => {
-    setEntries(prev =>
-      prev.map(entry =>
-        entry.id === id
-          ? {
-              ...entry,
-              serverStatuses: {
-                ...entry.serverStatuses,
-                [serverUrl]: status,
-              },
-            }
-          : entry
-      )
-    );
-  }, []);
+  const setEntryServerStatus = useCallback(
+    (id: string, serverUrl: string, status: UploadEntryStatus) => {
+      setEntries(prev =>
+        prev.map(entry =>
+          entry.id === id
+            ? {
+                ...entry,
+                serverStatuses: {
+                  ...entry.serverStatuses,
+                  [serverUrl]: status,
+                },
+              }
+            : entry,
+        ),
+      );
+    },
+    [],
+  );
 
-  const removeEntry = useCallback((id: string) => {
-    setEntries(prev => {
-      const target = prev.find(entry => entry.id === id);
-      if (!target) return prev;
-      setFeedback({
-        id: Date.now(),
-        message: `Removed ${target.file.name} from the queue.`,
+  const removeEntry = useCallback(
+    (id: string) => {
+      setEntries(prev => {
+        const target = prev.find(entry => entry.id === id);
+        if (!target) return prev;
+        setFeedback({
+          id: Date.now(),
+          message: `Removed ${target.file.name} from the queue.`,
+        });
+        return prev.filter(entry => entry.id !== id);
       });
-      return prev.filter(entry => entry.id !== id);
-    });
-    setTransfers(prev => prev.filter(item => !item.id.endsWith(`-${id}`)));
-  }, [setFeedback]);
+      setTransfers(prev => prev.filter(item => !item.id.endsWith(`-${id}`)));
+    },
+    [setFeedback],
+  );
 
   const clearCompletedEntries = useCallback(() => {
     setEntries(prev => {
@@ -560,7 +609,7 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
       }
       const suffixes = completedEntries.map(entry => `-${entry.id}`);
       setTransfers(current =>
-        current.filter(item => !suffixes.some(suffix => item.id.endsWith(suffix)))
+        current.filter(item => !suffixes.some(suffix => item.id.endsWith(suffix))),
       );
       setFeedback({
         id: Date.now(),
@@ -646,7 +695,7 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
         handlePickFiles();
       }
     },
-    [handlePickFiles]
+    [handlePickFiles],
   );
 
   const hasFiles = useCallback((event: React.DragEvent<HTMLDivElement>) => {
@@ -667,7 +716,7 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
       if (!hasFiles(event)) return;
       setIsDragActive(true);
     },
-    [hasFiles]
+    [hasFiles],
   );
 
   const handleDragOver = useCallback(
@@ -676,16 +725,16 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
       event.stopPropagation();
       if (!hasFiles(event)) {
         if (event.dataTransfer) {
-        event.dataTransfer.dropEffect = "none";
+          event.dataTransfer.dropEffect = "none";
+        }
+        return;
       }
-      return;
-    }
-    if (event.dataTransfer) {
-      event.dataTransfer.dropEffect = "copy";
-    }
-    setIsDragActive(true);
-  },
-    [hasFiles]
+      if (event.dataTransfer) {
+        event.dataTransfer.dropEffect = "copy";
+      }
+      setIsDragActive(true);
+    },
+    [hasFiles],
   );
 
   const handleDragLeave = useCallback((event: React.DragEvent<HTMLDivElement>) => {
@@ -714,22 +763,28 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
         fileInputRef.current.value = "";
       }
     },
-    [handleFilesSelected, hasFiles]
+    [handleFilesSelected, hasFiles],
   );
 
   const toggleMetadataVisibility = (id: string) => {
-    setEntries(prev => prev.map(entry => (entry.id === id ? { ...entry, showMetadata: !entry.showMetadata } : entry)));
+    setEntries(prev =>
+      prev.map(entry =>
+        entry.id === id ? { ...entry, showMetadata: !entry.showMetadata } : entry,
+      ),
+    );
   };
 
   const setAllMetadataVisibility = (visible: boolean) => {
     setEntries(prev =>
-      prev.map(entry => (entry.showMetadata === visible ? entry : { ...entry, showMetadata: visible }))
+      prev.map(entry =>
+        entry.showMetadata === visible ? entry : { ...entry, showMetadata: visible },
+      ),
     );
   };
 
   const updateEntryMetadata = (
     id: string,
-    updater: (metadata: UploadMetadataFormState) => UploadMetadataFormState
+    updater: (metadata: UploadMetadataFormState) => UploadMetadataFormState,
   ) => {
     setEntries(prev =>
       prev.map(entry => {
@@ -737,7 +792,7 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
         const nextMetadata = updater(entry.metadata);
         if (nextMetadata === entry.metadata) return entry;
         return resetEntryProgress({ ...entry, metadata: nextMetadata });
-      })
+      }),
     );
   };
 
@@ -757,7 +812,9 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
 
   const setEntryPrivacy = (id: string, value: boolean) => {
     setEntries(prev =>
-      prev.map(entry => (entry.id === id ? resetEntryProgress({ ...entry, isPrivate: value }) : entry))
+      prev.map(entry =>
+        entry.id === id ? resetEntryProgress({ ...entry, isPrivate: value }) : entry,
+      ),
     );
   };
 
@@ -770,7 +827,7 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
       alias?: string | null;
       extraTags?: string[][];
       folderPath?: string | null | undefined;
-    } = {}
+    } = {},
   ) => {
     if (!ndk || !activeSigner) return;
     try {
@@ -811,7 +868,9 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
     const targetEntries = entries
       .filter(entry => (entryIdFilter ? entryIdFilter.has(entry.id) : true))
       .map(entry => {
-        const pendingServers = selectedServers.filter(serverUrl => entry.serverStatuses[serverUrl] !== "success");
+        const pendingServers = selectedServers.filter(
+          serverUrl => entry.serverStatuses[serverUrl] !== "success",
+        );
         if (pendingServers.length === 0) return null;
         return { entry, servers: pendingServers };
       })
@@ -820,12 +879,17 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
     if (targetEntries.length === 0) {
       setFeedback({
         id: Date.now(),
-        message: entryIds && entryIds.length === 1 ? "Nothing left to upload for that file." : "All files are already uploaded.",
+        message:
+          entryIds && entryIds.length === 1
+            ? "Nothing left to upload for that file."
+            : "All files are already uploaded.",
       });
       return;
     }
 
-    const targetEntryMap = new Map(targetEntries.map(item => [item.entry.id, item.servers] as const));
+    const targetEntryMap = new Map(
+      targetEntries.map(item => [item.entry.id, item.servers] as const),
+    );
 
     setEntries(prev =>
       prev.map(entry => {
@@ -840,12 +904,18 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
           status: "uploading",
           serverStatuses: nextServerStatuses,
         };
-      })
+      }),
     );
 
     setBusy(true);
     const limit = pLimit(2);
-    const preparedUploads: { entry: UploadEntry; file: File; buffer: ArrayBuffer; privateInfo?: PrivatePreparedInfo; servers: string[] }[] = [];
+    const preparedUploads: {
+      entry: UploadEntry;
+      file: File;
+      buffer: ArrayBuffer;
+      privateInfo?: PrivatePreparedInfo;
+      servers: string[];
+    }[] = [];
 
     type ImageUtils = Awaited<ReturnType<typeof loadImageUtilsModule>>;
     let imageUtils: ImageUtils | null = null;
@@ -880,14 +950,23 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
           servers: new Set<string>(),
           folderPath: normalizeFolderPathInput(entry.metadata.folder) ?? null,
         };
-        preparedUploads.push({ entry, file: encrypted.file, buffer: encrypted.buffer, privateInfo, servers });
+        preparedUploads.push({
+          entry,
+          file: encrypted.file,
+          buffer: encrypted.buffer,
+          privateInfo,
+          servers,
+        });
       } else {
         const buffer = await processed.arrayBuffer();
         preparedUploads.push({ entry, file: processed, buffer, servers });
       }
     }
 
-    const blurhashCache = new Map<string, { hash: string; width: number; height: number } | undefined>();
+    const blurhashCache = new Map<
+      string,
+      { hash: string; width: number; height: number } | undefined
+    >();
     const pendingPrivateUpdates = new Map<string, PrivateListEntry>();
     const pendingFolderUpdates = new Map<string, string>();
 
@@ -908,7 +987,7 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
       file: File,
       buffer: ArrayBuffer,
       serverUrl: string,
-      privateInfo?: PrivatePreparedInfo
+      privateInfo?: PrivatePreparedInfo,
     ) => {
       const server = serverMap.get(serverUrl);
       if (!server) return;
@@ -952,14 +1031,14 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
         const handleProgress = (progress: AxiosProgressEvent) => {
           setTransfers(prev =>
             prev.map(item =>
-                  item.id === transferKey
-                    ? {
-                        ...item,
-                        transferred: progress.loaded,
-                        total: progress.total || serverFile.size,
-                      }
-                    : item
-            )
+              item.id === transferKey
+                ? {
+                    ...item,
+                    transferred: progress.loaded,
+                    total: progress.total || serverFile.size,
+                  }
+                : item,
+            ),
           );
         };
 
@@ -970,22 +1049,22 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
             serverFile,
             requiresAuthForServer ? signEventTemplate : undefined,
             requiresAuthForServer,
-            handleProgress
+            handleProgress,
           );
         } else if (server.type === "satellite") {
           const satelliteLabel =
             entry.metadata.kind === "audio"
               ? entry.metadata.alias || entry.metadata.title || entry.file.name
               : entry.metadata.kind === "generic"
-              ? entry.metadata.alias || entry.file.name
-              : entry.file.name;
+                ? entry.metadata.alias || entry.file.name
+                : entry.file.name;
           uploaded = await uploadBlobToSatellite(
             server.url,
             serverFile,
             requiresAuthForServer ? signEventTemplate : undefined,
             requiresAuthForServer,
             handleProgress,
-            { label: satelliteLabel }
+            { label: satelliteLabel },
           );
         } else {
           uploaded = await uploadBlobToServer(
@@ -993,7 +1072,7 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
             serverFile,
             requiresAuthForServer ? signEventTemplate : undefined,
             requiresAuthForServer,
-            handleProgress
+            handleProgress,
           );
         }
         const blob: BlossomBlob = {
@@ -1004,8 +1083,7 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
 
         const normalizedFolder = normalizeFolderPathInput(entry.metadata.folder);
         const folderPathValue = normalizedFolder ? resolveFolderPath(normalizedFolder) : null;
-        const folderForEvent =
-          normalizedFolder === undefined ? undefined : folderPathValue;
+        const folderForEvent = normalizedFolder === undefined ? undefined : folderPathValue;
         if (normalizedFolder !== undefined) {
           blob.folderPath = folderPathValue;
         }
@@ -1024,7 +1102,7 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
             entry.extractedAudioMetadata ?? null,
             blob,
             entry.file.name,
-            overrides
+            overrides,
           );
           aliasForEvent = audioDetails.alias ?? undefined;
           extraTags = audioDetails.tags;
@@ -1083,20 +1161,27 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
           pendingFolderUpdates.set(blob.sha256, folderPathValue);
         }
         if (pubkey) {
-          queryClient.setQueryData<BlossomBlob[]>(["server-blobs", server.url, pubkey, server.type], prev => {
-            if (!prev) return [blob];
-            const index = prev.findIndex(item => item.sha256 === blob.sha256);
-            if (index >= 0) {
-              const next = [...prev];
-              next[index] = { ...prev[index], ...blob };
-              return next;
-            }
-            return [...prev, blob];
-          });
+          queryClient.setQueryData<BlossomBlob[]>(
+            ["server-blobs", server.url, pubkey, server.type],
+            prev => {
+              if (!prev) return [blob];
+              const index = prev.findIndex(item => item.sha256 === blob.sha256);
+              if (index >= 0) {
+                const next = [...prev];
+                next[index] = { ...prev[index], ...blob };
+                return next;
+              }
+              return [...prev, blob];
+            },
+          );
         }
         setEntryServerStatus(entry.id, serverUrl, "success");
         setTransfers(prev =>
-          prev.map(item => (item.id === transferKey ? { ...item, transferred: item.total, status: "success" } : item))
+          prev.map(item =>
+            item.id === transferKey
+              ? { ...item, transferred: item.total, status: "success" }
+              : item,
+          ),
         );
         if (!isPrivate) {
           await publishMetadata(blob, {
@@ -1126,21 +1211,24 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
             updatedAt: blob.uploaded ?? Math.floor(Date.now() / 1000),
           });
         }
-        queryClient.invalidateQueries({ queryKey: ["server-blobs", server.url, pubkey, server.type] });
-      } catch (err: any) {
+        queryClient.invalidateQueries({
+          queryKey: ["server-blobs", server.url, pubkey, server.type],
+        });
+      } catch (err: unknown) {
         encounteredError = true;
         entryHadError.set(entry.id, true);
         setEntryServerStatus(entry.id, serverUrl, "error");
+        const errorMessage = err instanceof Error ? err.message : "Upload failed";
         setTransfers(prev =>
           prev.map(item =>
             item.id === transferKey
               ? {
                   ...item,
                   status: "error",
-                  message: err?.message || "Upload failed",
+                  message: errorMessage,
                 }
-              : item
-          )
+              : item,
+          ),
         );
       }
     };
@@ -1151,8 +1239,8 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
           for (const serverUrl of servers) {
             await limit(() => performUpload(entry, file, buffer, serverUrl, privateInfo));
           }
-        })()
-      )
+        })(),
+      ),
     );
 
     if (pendingFolderUpdates.size > 0) {
@@ -1182,7 +1270,7 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
           ...entry,
           status: hadError ? "error" : "success",
         };
-      })
+      }),
     );
 
     setBusy(false);
@@ -1203,7 +1291,7 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
             status: "idle",
             serverStatuses: nextServerStatuses,
           };
-        })
+        }),
       );
       setTransfers(prev => prev.filter(item => !item.id.endsWith(`-${id}`)));
       setFeedback({
@@ -1212,15 +1300,18 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
       });
       void handleUpload([id]);
     },
-    [handleUpload, selectedServers, setFeedback, setTransfers]
+    [handleUpload, selectedServers, setFeedback, setTransfers],
   );
-
 
   return (
     <section className="relative rounded-2xl border border-slate-800 bg-slate-900/70 p-4 space-y-4">
       <header>
         <h2 className="text-lg font-semibold text-slate-100">Upload Files</h2>
-        <p className="text-xs text-slate-400">After adding a file for upload, you will be able to edit metadata before publishing to your selected server. Bloom will automatically post metadata for music files with embedded ID3 tags.</p>
+        <p className="text-xs text-slate-400">
+          After adding a file for upload, you will be able to edit metadata before publishing to
+          your selected server. Bloom will automatically post metadata for music files with embedded
+          ID3 tags.
+        </p>
       </header>
       <div className="space-y-3">
         {uploadPhase === "uploading" ? (
@@ -1235,30 +1326,38 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
               <div className="flex flex-col gap-1">
                 <span className="text-sm font-semibold">Uploading files</span>
                 <span className="text-xs opacity-80">
-                  {targetServerNames ? `Sending to ${targetServerNames}.` : "Sending to your selected servers."}
+                  {targetServerNames
+                    ? `Sending to ${targetServerNames}.`
+                    : "Sending to your selected servers."}
                 </span>
               </div>
               <span
                 className={`rounded-full px-3 py-1 text-xs font-semibold ${
-                  isLightTheme ? "bg-emerald-200 text-emerald-700" : "bg-emerald-500/30 text-emerald-100"
+                  isLightTheme
+                    ? "bg-emerald-200 text-emerald-700"
+                    : "bg-emerald-500/30 text-emerald-100"
                 }`}
               >
                 {uploadCompletionPercent}% complete
               </span>
             </div>
-            <p className={`mt-2 text-xs ${isLightTheme ? "text-emerald-700/80" : "text-emerald-100/80"}`}>
+            <p
+              className={`mt-2 text-xs ${isLightTheme ? "text-emerald-700/80" : "text-emerald-100/80"}`}
+            >
               Setup controls are hidden while uploads finish. Track progress below.
             </p>
           </div>
         ) : null}
         {uploadPhase === "completed" && completedEntries.length > 0 ? (
-          <div className={`rounded-xl border px-4 py-4 ${isLightTheme ? "border-emerald-200 text-emerald-700" : "border-emerald-500/40 text-emerald-100"}`}>
+          <div
+            className={`rounded-xl border px-4 py-4 ${isLightTheme ? "border-emerald-200 text-emerald-700" : "border-emerald-500/40 text-emerald-100"}`}
+          >
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="flex flex-col gap-1">
                 <span className="text-sm font-semibold">Uploads complete</span>
                 <span className="text-xs opacity-80">
                   {`Uploaded ${completedEntries.length} ${completedEntries.length === 1 ? "file" : "files"} (${prettyBytes(
-                    completedTotalBytes
+                    completedTotalBytes,
                   )})${targetServerNames ? ` to ${targetServerNames}` : ""}.`}
                 </span>
               </div>
@@ -1270,11 +1369,15 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
                 Start new upload
               </button>
             </div>
-            <p className={`mt-2 text-xs ${isLightTheme ? "text-emerald-700/80" : "text-emerald-100/80"}`}>
+            <p
+              className={`mt-2 text-xs ${isLightTheme ? "text-emerald-700/80" : "text-emerald-100/80"}`}
+            >
               You can keep this summary for reference or reset to prepare a new batch.
             </p>
             <div className="mt-4 space-y-2">
-              <span className={`text-[11px] font-semibold uppercase tracking-wide ${isLightTheme ? "text-emerald-700/80" : "text-emerald-100/80"}`}>
+              <span
+                className={`text-[11px] font-semibold uppercase tracking-wide ${isLightTheme ? "text-emerald-700/80" : "text-emerald-100/80"}`}
+              >
                 Uploaded files
               </span>
               <ul className="space-y-2 text-xs">
@@ -1282,7 +1385,9 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
                   <li
                     key={entry.id}
                     className={`flex items-center justify-between rounded-lg border px-3 py-2 ${
-                      isLightTheme ? "border-emerald-200/70 bg-white/70 text-emerald-700" : "border-emerald-500/30 bg-emerald-500/10 text-emerald-100"
+                      isLightTheme
+                        ? "border-emerald-200/70 bg-white/70 text-emerald-700"
+                        : "border-emerald-500/30 bg-emerald-500/10 text-emerald-100"
                     }`}
                   >
                     <span className="font-medium">{entry.file.name}</span>
@@ -1292,10 +1397,15 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
                   </li>
                 ))}
               </ul>
-              <div className={isLightTheme ? "text-xs text-emerald-700/70" : "text-xs text-emerald-100/70"}>
-                Uploaded {completedEntries.length} {completedEntries.length === 1 ? "file" : "files"} (
-                {prettyBytes(completedTotalBytes)}
-                ){targetServerNames ? ` to ${targetServerNames}.` : "."}
+              <div
+                className={
+                  isLightTheme ? "text-xs text-emerald-700/70" : "text-xs text-emerald-100/70"
+                }
+              >
+                Uploaded {completedEntries.length}{" "}
+                {completedEntries.length === 1 ? "file" : "files"} (
+                {prettyBytes(completedTotalBytes)})
+                {targetServerNames ? ` to ${targetServerNames}.` : "."}
               </div>
             </div>
           </div>
@@ -1309,7 +1419,9 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
             }`}
           >
             <span className="text-sm font-semibold">Uploads need attention</span>
-            <p className={`mt-1 text-xs ${isLightTheme ? "text-amber-700/80" : "text-amber-100/80"}`}>
+            <p
+              className={`mt-1 text-xs ${isLightTheme ? "text-amber-700/80" : "text-amber-100/80"}`}
+            >
               Review the items below to retry the failed uploads.
             </p>
           </div>
@@ -1317,72 +1429,81 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
         {showSetupContent ? (
           <>
             <div className="space-y-2">
-          <span className="text-sm text-slate-300">Upload to</span>
-          <div className="flex flex-wrap gap-3">
-            {servers.map(server => (
-              <label key={server.url} className={`px-3 py-2 rounded-xl border text-sm cursor-pointer ${
-                selectedServers.includes(server.url)
-                  ? "border-emerald-500 bg-emerald-500/10"
-                  : "border-slate-800 bg-slate-900/60"
-              }`}>
+              <span className="text-sm text-slate-300">Upload to</span>
+              <div className="flex flex-wrap gap-3">
+                {servers.map(server => (
+                  <label
+                    key={server.url}
+                    className={`px-3 py-2 rounded-xl border text-sm cursor-pointer ${
+                      selectedServers.includes(server.url)
+                        ? "border-emerald-500 bg-emerald-500/10"
+                        : "border-slate-800 bg-slate-900/60"
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      className="mr-2"
+                      checked={selectedServers.includes(server.url)}
+                      onChange={() => toggleServer(server.url)}
+                    />
+                    {server.name}
+                  </label>
+                ))}
+                {servers.length === 0 && (
+                  <span className="text-xs text-slate-400">Add a server first.</span>
+                )}
+              </div>
+            </div>
+            <div className="space-y-2">
+              <span className="text-sm text-slate-300">Files</span>
+              <div
+                role="button"
+                tabIndex={0}
+                aria-describedby={dropZoneDescriptionId}
+                onClick={handlePickFiles}
+                onKeyDown={handleDropZoneKeyDown}
+                onDragEnter={handleDragEnter}
+                onDragOver={handleDragOver}
+                onDragLeave={handleDragLeave}
+                onDrop={handleDrop}
+                className={`relative flex min-h-[32px] w-full flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed px-6 py-4 text-center transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 ${
+                  isDragActive
+                    ? "border-emerald-400 bg-emerald-500/10"
+                    : entries.length
+                      ? "border-emerald-500/40 bg-slate-900/60"
+                      : "border-slate-700 bg-slate-900/60"
+                } cursor-pointer hover:border-emerald-400 ${busy ? "opacity-60" : ""}`}
+              >
+                <UploadIcon size={32} className="text-emerald-300" aria-hidden="true" />
+                <div className="text-sm font-semibold text-slate-100">
+                  {isDragActive ? "Release to add files" : "Drag and drop files here"}
+                </div>
+                <div id={dropZoneDescriptionId} className="text-xs text-slate-400">
+                  {busy
+                    ? "Uploads are in progress. Finish before adding more files."
+                    : "Or click to browse your device"}
+                </div>
                 <input
-                  type="checkbox"
-                  className="mr-2"
-                  checked={selectedServers.includes(server.url)}
-                  onChange={() => toggleServer(server.url)}
+                  id="upload-panel-input"
+                  type="file"
+                  multiple
+                  ref={fileInputRef}
+                  onChange={e => {
+                    setIsDragActive(false);
+                    void handleFilesSelected(e.target.files);
+                  }}
+                  className="sr-only"
+                  tabIndex={-1}
                 />
-                {server.name}
-              </label>
-            ))}
-            {servers.length === 0 && <span className="text-xs text-slate-400">Add a server first.</span>}
-          </div>
-        </div>
-        <div className="space-y-2">
-          <span className="text-sm text-slate-300">Files</span>
-          <div
-            role="button"
-            tabIndex={0}
-            aria-describedby={dropZoneDescriptionId}
-            onClick={handlePickFiles}
-            onKeyDown={handleDropZoneKeyDown}
-            onDragEnter={handleDragEnter}
-            onDragOver={handleDragOver}
-            onDragLeave={handleDragLeave}
-            onDrop={handleDrop}
-            className={`relative flex min-h-[32px] w-full flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed px-6 py-4 text-center transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 ${
-              isDragActive
-                ? "border-emerald-400 bg-emerald-500/10"
-                : entries.length
-                ? "border-emerald-500/40 bg-slate-900/60"
-                : "border-slate-700 bg-slate-900/60"
-            } cursor-pointer hover:border-emerald-400 ${busy ? "opacity-60" : ""}`}
-          >
-            <UploadIcon size={32} className="text-emerald-300" aria-hidden="true" />
-            <div className="text-sm font-semibold text-slate-100">
-              {isDragActive ? "Release to add files" : "Drag and drop files here"}
-            </div>
-            <div id={dropZoneDescriptionId} className="text-xs text-slate-400">
-              {busy ? "Uploads are in progress. Finish before adding more files." : "Or click to browse your device"}
-            </div>
-            <input
-              id="upload-panel-input"
-              type="file"
-              multiple
-              ref={fileInputRef}
-              onChange={e => {
-                setIsDragActive(false);
-                void handleFilesSelected(e.target.files);
-              }}
-              className="sr-only"
-              tabIndex={-1}
-            />
-          </div>
+              </div>
             </div>
             {signerMissing && (
               <div className="text-xs text-red-400">Connect your NIP-07 signer to upload.</div>
             )}
             {folderNamesInvalid && (
-              <div className="text-xs text-red-400">Folder names cannot include the word "private".</div>
+              <div className="text-xs text-red-400">
+                Folder names cannot include the word "private".
+              </div>
             )}
           </>
         ) : null}
@@ -1400,8 +1521,13 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
                 {prettyBytes(uploadSummary.totalBytes)}
               </span>
               {uploadSummary.privateCount > 0 ? (
-                <span className={`inline-flex items-center gap-1 text-xs ${isLightTheme ? "text-slate-500" : "text-slate-400"}`}>
-                  <LockIcon size={14} className={isLightTheme ? "text-emerald-600" : "text-emerald-300"} />
+                <span
+                  className={`inline-flex items-center gap-1 text-xs ${isLightTheme ? "text-slate-500" : "text-slate-400"}`}
+                >
+                  <LockIcon
+                    size={14}
+                    className={isLightTheme ? "text-emerald-600" : "text-emerald-300"}
+                  />
                   <span>
                     {uploadSummary.privateCount}{" "}
                     {uploadSummary.privateCount === 1 ? "private file" : "private files"}
@@ -1410,7 +1536,9 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
               ) : null}
             </div>
             {(uploadSummary.folderGroups.length > 0 || uploadSummary.noFolderCount > 0) && (
-              <div className={`flex flex-col gap-1 text-xs ${isLightTheme ? "text-slate-500" : "text-slate-400"}`}>
+              <div
+                className={`flex flex-col gap-1 text-xs ${isLightTheme ? "text-slate-500" : "text-slate-400"}`}
+              >
                 {uploadSummary.folderGroups.map(group => (
                   <span
                     key={group.key}
@@ -1436,13 +1564,21 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
                   </span>
                 ))}
                 {uploadSummary.noFolderCount > 0 ? (
-                  <span className={`inline-flex items-center gap-2 ${isLightTheme ? "text-slate-500" : "text-slate-400"}`}>
-                    <FolderIcon size={14} className={isLightTheme ? "text-slate-500" : "text-slate-400"} />
-                    <span className={`font-medium ${isLightTheme ? "text-slate-700" : "text-slate-300"}`}>
+                  <span
+                    className={`inline-flex items-center gap-2 ${isLightTheme ? "text-slate-500" : "text-slate-400"}`}
+                  >
+                    <FolderIcon
+                      size={14}
+                      className={isLightTheme ? "text-slate-500" : "text-slate-400"}
+                    />
+                    <span
+                      className={`font-medium ${isLightTheme ? "text-slate-700" : "text-slate-300"}`}
+                    >
                       No folder selected
                     </span>
                     <span>
-                      · {uploadSummary.noFolderCount} {uploadSummary.noFolderCount === 1 ? "file" : "files"}
+                      · {uploadSummary.noFolderCount}{" "}
+                      {uploadSummary.noFolderCount === 1 ? "file" : "files"}
                     </span>
                   </span>
                 ) : null}
@@ -1458,7 +1594,8 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
                   Queue {entryCounts.total}
                 </span>
                 <span className="text-slate-400">
-                  {entryCounts.pending} pending · {entryCounts.completed} done · {entryCounts.errors} errors
+                  {entryCounts.pending} pending · {entryCounts.completed} done ·{" "}
+                  {entryCounts.errors} errors
                 </span>
               </div>
               <div className="flex flex-wrap items-center gap-2 text-xs">
@@ -1512,8 +1649,8 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
                             prev.map(entry =>
                               entry.isPrivate === shouldSetPrivate
                                 ? entry
-                                : resetEntryProgress({ ...entry, isPrivate: shouldSetPrivate })
-                            )
+                                : resetEntryProgress({ ...entry, isPrivate: shouldSetPrivate }),
+                            ),
                           );
                         }}
                         disabled={busy}
@@ -1559,13 +1696,19 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
                   <UploadFolderSelect
                     value={bulkFolderSelector.value}
                     onChange={handleBulkFolderValueChange}
-                    options={bulkFolderSelector.isPrivate ? privateFolderOptions : publicFolderOptions}
+                    options={
+                      bulkFolderSelector.isPrivate ? privateFolderOptions : publicFolderOptions
+                    }
                     invalid={Boolean(bulkFolderSelector.error)}
                     customDefaultPath={
                       bulkFolderSelector.value?.trim() ||
-                      (bulkFolderSelector.isPrivate ? DEFAULT_PRIVATE_FOLDER_PATH : DEFAULT_PUBLIC_FOLDER_PATH)
+                      (bulkFolderSelector.isPrivate
+                        ? DEFAULT_PRIVATE_FOLDER_PATH
+                        : DEFAULT_PUBLIC_FOLDER_PATH)
                     }
-                    placeholder={bulkFolderSelector.isPrivate ? "e.g. Trips/2024" : "e.g. Pictures/2024"}
+                    placeholder={
+                      bulkFolderSelector.isPrivate ? "e.g. Trips/2024" : "e.g. Pictures/2024"
+                    }
                   />
                 </div>
                 <div className="flex items-center gap-2">
@@ -1591,7 +1734,9 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
                   </button>
                 </div>
                 {bulkFolderSelector.error ? (
-                  <span className={isLightTheme ? "text-red-500" : "text-red-400"}>{bulkFolderSelector.error}</span>
+                  <span className={isLightTheme ? "text-red-500" : "text-red-400"}>
+                    {bulkFolderSelector.error}
+                  </span>
                 ) : (
                   <span className="text-slate-500">
                     {bulkFolderSelector.isPrivate
@@ -1619,7 +1764,7 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
                           className="text-xs font-semibold uppercase tracking-wide text-slate-400"
                         >
                           {ENTRY_STATUS_HEADING[entry.status]}
-                        </div>
+                        </div>,
                       );
                       lastStatus = entry.status;
                     }
@@ -1632,7 +1777,9 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
                       folderInputValue && normalizedFolderPreview
                         ? normalizedFolderPreview
                         : folderInputValue;
-                    const showFolderWarning = Boolean(folderInputValue && (!normalizedFolderPreview || folderInvalid));
+                    const showFolderWarning = Boolean(
+                      folderInputValue && (!normalizedFolderPreview || folderInvalid),
+                    );
                     const showStatusIcons = showFolderWarning || entry.isPrivate;
                     const entryStatusBadge = entryStatusBadgeMap[entry.status];
                     const entryStatusLabel = ENTRY_STATUS_LABEL[entry.status];
@@ -1648,7 +1795,12 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
                         const transferKey = `${serverUrl}-${entry.id}`;
                         const transfer = transferMap.get(transferKey);
                         const percent =
-                          transfer && transfer.total ? Math.min(100, Math.round((transfer.transferred / transfer.total) * 100)) : 0;
+                          transfer && transfer.total
+                            ? Math.min(
+                                100,
+                                Math.round((transfer.transferred / transfer.total) * 100),
+                              )
+                            : 0;
                         acc.push({ serverUrl, serverName, status, transfer, percent });
                         return acc;
                       },
@@ -1658,7 +1810,7 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
                         status: UploadEntryStatus;
                         transfer?: TransferState;
                         percent: number;
-                      }[]
+                      }[],
                     );
                     elements.push(
                       <div
@@ -1675,8 +1827,14 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
                           }`}
                         >
                           <div>
-                            <div className={`font-medium ${isLightTheme ? "text-slate-900" : "text-slate-100"}`}>{file.name}</div>
-                            <div className={`text-xs ${isLightTheme ? "text-slate-500" : "text-slate-400"}`}>
+                            <div
+                              className={`font-medium ${isLightTheme ? "text-slate-900" : "text-slate-100"}`}
+                            >
+                              {file.name}
+                            </div>
+                            <div
+                              className={`text-xs ${isLightTheme ? "text-slate-500" : "text-slate-400"}`}
+                            >
                               {typeLabel} • {prettyBytes(file.size)}
                               {file.type ? ` • ${file.type}` : ""}
                             </div>
@@ -1688,13 +1846,17 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
                                       ? "text-amber-600"
                                       : "text-amber-300"
                                     : isLightTheme
-                                    ? "text-emerald-600"
-                                    : "text-emerald-300"
+                                      ? "text-emerald-600"
+                                      : "text-emerald-300"
                                 }`}
                               >
-                                {folderInvalid || !normalizedFolderPreview ? "Invalid folder path" : "Uploading to"}{" "}
+                                {folderInvalid || !normalizedFolderPreview
+                                  ? "Invalid folder path"
+                                  : "Uploading to"}{" "}
                                 <span className="font-medium">
-                                  {folderInvalid || !normalizedFolderPreview ? folderInputValue : effectiveFolderLabel}
+                                  {folderInvalid || !normalizedFolderPreview
+                                    ? folderInputValue
+                                    : effectiveFolderLabel}
                                 </span>
                               </div>
                             ) : null}
@@ -1705,7 +1867,9 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
                                 isLightTheme ? "text-slate-500" : "text-slate-400"
                               }`}
                             >
-                              <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-semibold ${entryStatusBadge}`}>
+                              <span
+                                className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-semibold ${entryStatusBadge}`}
+                              >
                                 {entryStatusLabel}
                               </span>
                               {showStatusIcons ? (
@@ -1716,7 +1880,11 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
                                         isLightTheme ? "text-amber-500" : "text-amber-300"
                                       }`}
                                     >
-                                      <WarningIcon size={16} aria-hidden="true" title="Folder path needs attention" />
+                                      <WarningIcon
+                                        size={16}
+                                        aria-hidden="true"
+                                        title="Folder path needs attention"
+                                      />
                                       <span className="sr-only">Folder path needs attention</span>
                                     </span>
                                   ) : null}
@@ -1726,7 +1894,11 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
                                         isLightTheme ? "text-emerald-600" : "text-emerald-300"
                                       }`}
                                     >
-                                      <LockIcon size={16} aria-hidden="true" title="Private upload" />
+                                      <LockIcon
+                                        size={16}
+                                        aria-hidden="true"
+                                        title="Private upload"
+                                      />
                                       <span className="sr-only">Private upload</span>
                                     </span>
                                   ) : null}
@@ -1746,7 +1918,9 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
                                   title={showMetadata ? "Hide metadata" : "Edit metadata"}
                                 >
                                   <EditIcon size={16} aria-hidden="true" />
-                                  <span className="sr-only">{showMetadata ? "Hide metadata" : "Edit metadata"}</span>
+                                  <span className="sr-only">
+                                    {showMetadata ? "Hide metadata" : "Edit metadata"}
+                                  </span>
                                 </button>
                                 {entry.status === "error" ? (
                                   <button
@@ -1794,8 +1968,8 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
                                 detail.status === "error"
                                   ? "bg-red-500"
                                   : detail.status === "success"
-                                  ? "bg-emerald-500"
-                                  : "bg-emerald-400/70";
+                                    ? "bg-emerald-500"
+                                    : "bg-emerald-400/70";
                               const progressWidth =
                                 detail.status === "success" || detail.status === "error"
                                   ? 100
@@ -1803,16 +1977,22 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
                               return (
                                 <div key={`${entry.id}-${detail.serverUrl}`} className="space-y-1">
                                   <div className="flex items-center justify-between">
-                                    <span className={`font-medium ${isLightTheme ? "text-slate-700" : "text-slate-200"}`}>
+                                    <span
+                                      className={`font-medium ${isLightTheme ? "text-slate-700" : "text-slate-200"}`}
+                                    >
                                       {detail.serverName}
                                     </span>
                                     <span
                                       className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                                        isLightTheme ? "bg-slate-200 text-slate-700" : "bg-slate-800 text-slate-200"
+                                        isLightTheme
+                                          ? "bg-slate-200 text-slate-700"
+                                          : "bg-slate-800 text-slate-200"
                                       }`}
                                     >
                                       {ENTRY_STATUS_LABEL[detail.status]}
-                                      {detail.status === "uploading" ? ` · ${detail.percent}%` : null}
+                                      {detail.status === "uploading"
+                                        ? ` · ${detail.percent}%`
+                                        : null}
                                     </span>
                                   </div>
                                   <div
@@ -1820,10 +2000,15 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
                                       isLightTheme ? "bg-slate-200" : "bg-slate-800"
                                     }`}
                                   >
-                                    <div className={`h-full ${indicatorClass}`} style={{ width: `${progressWidth}%` }} />
+                                    <div
+                                      className={`h-full ${indicatorClass}`}
+                                      style={{ width: `${progressWidth}%` }}
+                                    />
                                   </div>
                                   {detail.transfer && detail.transfer.status === "error" ? (
-                                    <div className={`text-[11px] ${isLightTheme ? "text-red-500" : "text-red-300"}`}>
+                                    <div
+                                      className={`text-[11px] ${isLightTheme ? "text-red-500" : "text-red-300"}`}
+                                    >
                                       {detail.transfer.message || "Upload failed"}
                                     </div>
                                   ) : null}
@@ -1834,7 +2019,9 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
                         ) : null}
                         <div
                           className={`rounded-xl border px-4 py-3 ${
-                            isLightTheme ? "border-slate-200 bg-slate-50" : "border-slate-700 bg-slate-900/80"
+                            isLightTheme
+                              ? "border-slate-200 bg-slate-50"
+                              : "border-slate-700 bg-slate-900/80"
                           }`}
                         >
                           <label
@@ -1854,12 +2041,16 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
                               disabled={isEntryUploading || readOnlyMode}
                             />
                             <span className="flex flex-col gap-1 text-left">
-                              <span className={`font-medium ${isLightTheme ? "text-slate-900" : "text-slate-100"}`}>
+                              <span
+                                className={`font-medium ${isLightTheme ? "text-slate-900" : "text-slate-100"}`}
+                              >
                                 Private upload
                               </span>
-                              <span className={`text-xs leading-relaxed ${isLightTheme ? "text-slate-500" : "text-slate-400"}`}>
-                                Encrypts the file on your device. Private files cannot be shared publicly as they require your
-                                private key to decrypt.
+                              <span
+                                className={`text-xs leading-relaxed ${isLightTheme ? "text-slate-500" : "text-slate-400"}`}
+                              >
+                                Encrypts the file on your device. Private files cannot be shared
+                                publicly as they require your private key to decrypt.
                               </span>
                             </span>
                           </label>
@@ -1870,7 +2061,9 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
                               <AudioMetadataForm
                                 metadata={metadata}
                                 onChange={changes => updateAudioMetadata(entry.id, changes)}
-                                folderOptions={entry.isPrivate ? privateFolderOptions : publicFolderOptions}
+                                folderOptions={
+                                  entry.isPrivate ? privateFolderOptions : publicFolderOptions
+                                }
                                 isPrivate={entry.isPrivate}
                                 disabled={isEntryUploading || readOnlyMode}
                               />
@@ -1878,22 +2071,31 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
                               <GenericMetadataForm
                                 metadata={metadata}
                                 onChange={changes => updateGenericMetadata(entry.id, changes)}
-                                folderOptions={entry.isPrivate ? privateFolderOptions : publicFolderOptions}
+                                folderOptions={
+                                  entry.isPrivate ? privateFolderOptions : publicFolderOptions
+                                }
                                 isPrivate={entry.isPrivate}
                                 disabled={isEntryUploading || readOnlyMode}
                               />
                             )}
                           </div>
                         ) : !readOnlyMode && metadata.kind === "audio" ? (
-                          <div className={`text-xs ${isLightTheme ? "text-slate-500" : "text-slate-400"}`}>
-                            Metadata detected{entry.extractedAudioMetadata ? " from the file." : "."} Click "Edit metadata" to review.
+                          <div
+                            className={`text-xs ${isLightTheme ? "text-slate-500" : "text-slate-400"}`}
+                          >
+                            Metadata detected
+                            {entry.extractedAudioMetadata ? " from the file." : "."} Click "Edit
+                            metadata" to review.
                           </div>
                         ) : !readOnlyMode ? (
-                          <div className={`text-xs ${isLightTheme ? "text-slate-500" : "text-slate-400"}`}>
-                            Click "Edit metadata" to override the display name, upload location, and other file specific metadata.
+                          <div
+                            className={`text-xs ${isLightTheme ? "text-slate-500" : "text-slate-400"}`}
+                          >
+                            Click "Edit metadata" to override the display name, upload location, and
+                            other file specific metadata.
                           </div>
                         ) : null}
-                      </div>
+                      </div>,
                     );
                   }
                   return elements;
@@ -1905,12 +2107,20 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
         {showSetupContent && entries.length > 0 && hasImageEntries && (
           <div className="flex flex-wrap gap-4 text-sm text-slate-300">
             <label className="flex items-center gap-2">
-              <input type="checkbox" checked={cleanMetadata} onChange={e => setCleanMetadata(e.target.checked)} />
+              <input
+                type="checkbox"
+                checked={cleanMetadata}
+                onChange={e => setCleanMetadata(e.target.checked)}
+              />
               Remove EXIF metadata from images
             </label>
             <label className="flex items-center gap-2">
               <span>Resize:</span>
-              <select value={resizeOption} onChange={e => setResizeOption(Number(e.target.value))} className="bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-sm">
+              <select
+                value={resizeOption}
+                onChange={e => setResizeOption(Number(e.target.value))}
+                className="bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-sm"
+              >
                 {RESIZE_OPTIONS.map(opt => (
                   <option key={opt.id} value={opt.id}>
                     {opt.label}
@@ -1924,7 +2134,13 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
           <div className="flex justify-end gap-3">
             <button
               onClick={() => handleUpload()}
-              disabled={!entries.length || !selectedServers.length || busy || !canUpload || !hasPendingUploads}
+              disabled={
+                !entries.length ||
+                !selectedServers.length ||
+                busy ||
+                !canUpload ||
+                !hasPendingUploads
+              }
               title="Upload selected files"
               className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-40"
             >
@@ -2006,19 +2222,25 @@ const UploadFolderSelect: React.FC<UploadFolderSelectProps> = ({
         id: option.value === null ? HOME_FOLDER_OPTION_VALUE : option.value,
         label: option.label,
       })),
-    [options]
+    [options],
   );
 
-  const optionIds = useMemo(() => new Set(normalizedOptions.map(option => option.id)), [normalizedOptions]);
+  const optionIds = useMemo(
+    () => new Set(normalizedOptions.map(option => option.id)),
+    [normalizedOptions],
+  );
 
-  const selectValue = normalizedValue === ""
-    ? HOME_FOLDER_OPTION_VALUE
-    : optionIds.has(normalizedValue)
-      ? normalizedValue
-      : CUSTOM_FOLDER_OPTION_VALUE;
+  const selectValue =
+    normalizedValue === ""
+      ? HOME_FOLDER_OPTION_VALUE
+      : optionIds.has(normalizedValue)
+        ? normalizedValue
+        : CUSTOM_FOLDER_OPTION_VALUE;
 
   const [customValue, setCustomValue] = useState(() =>
-    selectValue === CUSTOM_FOLDER_OPTION_VALUE ? normalizedValue || customDefaultPath : customDefaultPath
+    selectValue === CUSTOM_FOLDER_OPTION_VALUE
+      ? normalizedValue || customDefaultPath
+      : customDefaultPath,
   );
 
   React.useEffect(() => {
@@ -2034,7 +2256,8 @@ const UploadFolderSelect: React.FC<UploadFolderSelectProps> = ({
       return;
     }
     if (next === CUSTOM_FOLDER_OPTION_VALUE) {
-      const fallback = normalizedValue && !optionIds.has(normalizedValue) ? normalizedValue : customDefaultPath;
+      const fallback =
+        normalizedValue && !optionIds.has(normalizedValue) ? normalizedValue : customDefaultPath;
       setCustomValue(fallback);
       onChange(fallback);
       return;
@@ -2080,9 +2303,17 @@ const UploadFolderSelect: React.FC<UploadFolderSelectProps> = ({
   );
 };
 
-const GenericMetadataForm: React.FC<GenericMetadataFormProps> = ({ metadata, onChange, folderOptions, isPrivate, disabled = false }) => {
+const GenericMetadataForm: React.FC<GenericMetadataFormProps> = ({
+  metadata,
+  onChange,
+  folderOptions,
+  isPrivate,
+  disabled = false,
+}) => {
   const folderInvalid = containsReservedFolderSegment(metadata.folder);
-  const customDefaultPath = metadata.folder?.trim() || (isPrivate ? DEFAULT_PRIVATE_FOLDER_PATH : DEFAULT_PUBLIC_FOLDER_PATH);
+  const customDefaultPath =
+    metadata.folder?.trim() ||
+    (isPrivate ? DEFAULT_PRIVATE_FOLDER_PATH : DEFAULT_PUBLIC_FOLDER_PATH);
 
   return (
     <div className="space-y-2">
@@ -2108,10 +2339,14 @@ const GenericMetadataForm: React.FC<GenericMetadataFormProps> = ({ metadata, onC
           disabled={disabled}
         />
         {folderInvalid && (
-          <p className="mt-1 text-xs text-red-400">Folder names cannot include the word "private".</p>
+          <p className="mt-1 text-xs text-red-400">
+            Folder names cannot include the word "private".
+          </p>
         )}
       </div>
-      <p className="text-xs text-slate-500">The display name will be included in the metadata event.</p>
+      <p className="text-xs text-slate-500">
+        The display name will be included in the metadata event.
+      </p>
     </div>
   );
 };
@@ -2124,9 +2359,17 @@ type AudioMetadataFormProps = {
   disabled?: boolean;
 };
 
-const AudioMetadataForm: React.FC<AudioMetadataFormProps> = ({ metadata, onChange, folderOptions, isPrivate, disabled = false }) => {
+const AudioMetadataForm: React.FC<AudioMetadataFormProps> = ({
+  metadata,
+  onChange,
+  folderOptions,
+  isPrivate,
+  disabled = false,
+}) => {
   const folderInvalid = containsReservedFolderSegment(metadata.folder);
-  const customDefaultPath = metadata.folder?.trim() || (isPrivate ? DEFAULT_PRIVATE_FOLDER_PATH : DEFAULT_PUBLIC_FOLDER_PATH);
+  const customDefaultPath =
+    metadata.folder?.trim() ||
+    (isPrivate ? DEFAULT_PRIVATE_FOLDER_PATH : DEFAULT_PUBLIC_FOLDER_PATH);
 
   return (
     <div className="space-y-3">
@@ -2153,7 +2396,9 @@ const AudioMetadataForm: React.FC<AudioMetadataFormProps> = ({ metadata, onChang
             disabled={disabled}
           />
           {folderInvalid && (
-            <p className="mt-1 text-xs text-red-400">Folder names cannot include the word "private".</p>
+            <p className="mt-1 text-xs text-red-400">
+              Folder names cannot include the word "private".
+            </p>
           )}
         </div>
       </div>
@@ -2260,7 +2505,9 @@ const AudioMetadataForm: React.FC<AudioMetadataFormProps> = ({ metadata, onChang
           />
         </label>
       </div>
-      <p className="text-xs text-slate-500">These details will be published with the upload and saved locally.</p>
+      <p className="text-xs text-slate-500">
+        These details will be published with the upload and saved locally.
+      </p>
     </div>
   );
 };
@@ -2275,7 +2522,7 @@ const buildAudioEventDetails = (
   metadata: ExtractedAudioMetadata | null,
   blob: BlossomBlob,
   fallbackFileName: string,
-  overrides?: AudioMetadataOverrides
+  overrides?: AudioMetadataOverrides,
 ): AudioEventDetails => {
   const fallback = blob.name || fallbackFileName;
   const resolvedTitleSource = overrides?.title ?? metadata?.title;
@@ -2284,7 +2531,9 @@ const buildAudioEventDetails = (
   const album = sanitizePart(overrides?.album ?? metadata?.album);
   const trackNumber = normalizePositiveInteger(overrides?.trackNumber ?? metadata?.trackNumber);
   const trackTotal = normalizePositiveInteger(overrides?.trackTotal ?? metadata?.trackTotal);
-  const durationSeconds = normalizePositiveInteger(overrides?.durationSeconds ?? metadata?.durationSeconds);
+  const durationSeconds = normalizePositiveInteger(
+    overrides?.durationSeconds ?? metadata?.durationSeconds,
+  );
   const genre = sanitizePart(overrides?.genre ?? metadata?.genre);
   const year = normalizePositiveInteger(overrides?.year ?? metadata?.year);
   const coverUrl = sanitizeCoverUrl(overrides?.coverUrl);
@@ -2354,7 +2603,18 @@ const normalizePositiveInteger = (value: number | undefined | null): number | un
   return rounded > 0 ? rounded : undefined;
 };
 
-const AUDIO_EXTENSIONS = [".mp3", ".aac", ".m4a", ".flac", ".wav", ".ogg", ".opus", ".oga", ".alac", ".aiff"];
+const AUDIO_EXTENSIONS = [
+  ".mp3",
+  ".aac",
+  ".m4a",
+  ".flac",
+  ".wav",
+  ".ogg",
+  ".opus",
+  ".oga",
+  ".alac",
+  ".aiff",
+];
 const IMAGE_EXTENSIONS = [".png", ".jpg", ".jpeg", ".webp", ".gif", ".avif", ".bmp", ".tiff"];
 
 const detectEntryKind = (file: File): UploadEntryKind => {
@@ -2376,7 +2636,10 @@ const createUploadEntryId = () => {
 
 const stripExtension = (fileName: string) => fileName.replace(/\.[^/.]+$/, "");
 
-const createGenericMetadataFormState = (file: File, initialFolder?: string): GenericMetadataFormState => {
+const createGenericMetadataFormState = (
+  file: File,
+  initialFolder?: string,
+): GenericMetadataFormState => {
   const withoutExt = stripExtension(file.name);
   const alias = sanitizePart(withoutExt) ?? sanitizePart(file.name) ?? "Untitled";
   return {
@@ -2389,7 +2652,7 @@ const createGenericMetadataFormState = (file: File, initialFolder?: string): Gen
 const createAudioMetadataFormState = (
   file: File,
   extracted: ExtractedAudioMetadata | null | undefined,
-  initialFolder?: string
+  initialFolder?: string,
 ): AudioMetadataFormState => {
   const fallbackAlias = stripExtension(file.name);
   const title = deriveTitle(extracted?.title, fallbackAlias);

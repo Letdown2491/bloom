@@ -37,7 +37,11 @@ const AppTopBarComponent: React.FC<AppTopBarProps> = ({
   return (
     <header className="flex flex-wrap items-center gap-4">
       <div className="flex items-center gap-3">
-        <img src="/bloom.webp" alt="Bloom logo" className="h-6 w-6 rounded-md object-cover md:h-10 md:w-10 md:rounded-xl" />
+        <img
+          src="/bloom.webp"
+          alt="Bloom logo"
+          className="h-6 w-6 rounded-md object-cover md:h-10 md:w-10 md:rounded-xl"
+        />
         <div>
           <h1 className="text-2xl font-semibold">Bloom</h1>
           <p className="hidden md:block text-xs text-slate-400">
@@ -57,7 +61,12 @@ const AppTopBarComponent: React.FC<AppTopBarProps> = ({
               disabled={showAuthPrompt}
             >
               {avatarUrl ? (
-                <img src={avatarUrl} alt="User avatar" className="block h-full w-full object-cover" onError={onAvatarError} />
+                <img
+                  src={avatarUrl}
+                  alt="User avatar"
+                  className="block h-full w-full object-cover"
+                  onError={onAvatarError}
+                />
               ) : (
                 <span className="font-semibold">{userInitials}</span>
               )}

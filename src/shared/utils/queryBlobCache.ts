@@ -7,7 +7,7 @@ type CachedBlobUpdater = (blob: BlossomBlob, queryKey: QueryKey) => BlossomBlob 
 export const updateCachedBlobEntries = (
   queryClient: QueryClient | null | undefined,
   sha256: string,
-  updater: CachedBlobUpdater
+  updater: CachedBlobUpdater,
 ) => {
   if (!queryClient) return;
   if (!sha256) return;
@@ -32,7 +32,9 @@ export const updateCachedBlobEntries = (
 
 export const reconcileBlobWithStoredMetadata = (
   queryClient: QueryClient | null | undefined,
-  sha256: string
+  sha256: string,
 ) => {
-  updateCachedBlobEntries(queryClient, sha256, blob => mergeBlobWithStoredMetadata(blob.serverUrl, blob));
+  updateCachedBlobEntries(queryClient, sha256, blob =>
+    mergeBlobWithStoredMetadata(blob.serverUrl, blob),
+  );
 };

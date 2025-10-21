@@ -73,9 +73,7 @@ const parsePositiveIntegerString = (value: string) => {
 };
 
 const normalizeRelays = (relays: readonly (string | null | undefined)[]) =>
-  relays
-    .map(url => url?.trim())
-    .filter((url): url is string => Boolean(url && url.length > 0));
+  relays.map(url => url?.trim()).filter((url): url is string => Boolean(url && url.length > 0));
 
 type PrivateLinkDetails = {
   alias: string | null;
@@ -99,7 +97,8 @@ const extractPrivateLinkDetails = (blob: BlossomBlob): PrivateLinkDetails => {
   return {
     alias: typeof aliasRaw === "string" && aliasRaw.trim().length > 0 ? aliasRaw.trim() : null,
     url: typeof urlRaw === "string" && urlRaw.trim().length > 0 ? urlRaw.trim() : null,
-    expiresAt: typeof expiresAtRaw === "number" && Number.isFinite(expiresAtRaw) ? expiresAtRaw : null,
+    expiresAt:
+      typeof expiresAtRaw === "number" && Number.isFinite(expiresAtRaw) ? expiresAtRaw : null,
   };
 };
 
@@ -112,16 +111,19 @@ export type RenameDialogProps = {
   onStatus: (message: string, tone?: StatusMessageTone, duration?: number) => void;
 };
 
-export const RenameDialog: React.FC<RenameDialogProps> = ({ blob, ndk, signer, relays, onClose, onStatus }) => {
+export const RenameDialog: React.FC<RenameDialogProps> = ({
+  blob,
+  ndk,
+  signer,
+  relays,
+  onClose,
+  onStatus,
+}) => {
   const { entries: privateLibraryEntries, entriesBySha, upsertEntries } = usePrivateLibrary();
   const privateEntry = entriesBySha.get(blob.sha256) ?? null;
   const isPrivate = Boolean(privateEntry);
-  const {
-    folders,
-    resolveFolderPath,
-    getFoldersForBlob,
-    setBlobFolderMembership,
-  } = useFolderLists();
+  const { folders, resolveFolderPath, getFoldersForBlob, setBlobFolderMembership } =
+    useFolderLists();
   const formatFolderLabel = useCallback((value: string | null) => {
     if (!value) return "Home";
     const segments = value.split("/").filter(Boolean);
@@ -136,16 +138,14 @@ export const RenameDialog: React.FC<RenameDialogProps> = ({ blob, ndk, signer, r
     return `Private / ${segments.join(" / ")}`;
   }, []);
 
-  const storedAudio = useMemo(
-    () => {
-      const stored =
-        getStoredAudioMetadata(blob.serverUrl, blob.sha256) ?? getStoredAudioMetadata(undefined, blob.sha256);
-      if (stored) return stored;
-      const privateAudio = blob.privateData?.metadata?.audio ?? undefined;
-      return privateAudio ? { ...privateAudio } : undefined;
-    },
-    [blob]
-  );
+  const storedAudio = useMemo(() => {
+    const stored =
+      getStoredAudioMetadata(blob.serverUrl, blob.sha256) ??
+      getStoredAudioMetadata(undefined, blob.sha256);
+    if (stored) return stored;
+    const privateAudio = blob.privateData?.metadata?.audio ?? undefined;
+    return privateAudio ? { ...privateAudio } : undefined;
+  }, [blob]);
 
   const [alias, setAlias] = useState("");
   const [audioFields, setAudioFields] = useState<EditDialogAudioFields>(() => emptyAudioFields());
@@ -155,7 +155,7 @@ export const RenameDialog: React.FC<RenameDialogProps> = ({ blob, ndk, signer, r
   const [folder, setFolder] = useState("");
   const [currentFolderPath, setCurrentFolderPath] = useState<string | null>(null);
   const [privateLinkDetails, setPrivateLinkDetails] = useState<PrivateLinkDetails>(() =>
-    extractPrivateLinkDetails(blob)
+    extractPrivateLinkDetails(blob),
   );
   const [privateLinkError, setPrivateLinkError] = useState<string | null>(null);
 
@@ -168,7 +168,9 @@ export const RenameDialog: React.FC<RenameDialogProps> = ({ blob, ndk, signer, r
       });
       const currentNormalized = normalizeFolderPathInput(folder || undefined);
       if (currentNormalized) paths.add(currentNormalized);
-      const sorted = Array.from(paths).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+      const sorted = Array.from(paths).sort((a, b) =>
+        a.localeCompare(b, undefined, { sensitivity: "base" }),
+      );
       return [
         { value: null, label: formatPrivateFolderLabel(null) },
         ...sorted.map(path => ({ value: path, label: formatPrivateFolderLabel(path) })),
@@ -190,12 +192,22 @@ export const RenameDialog: React.FC<RenameDialogProps> = ({ blob, ndk, signer, r
       return resolveFolderPath(normalized);
     })();
     if (currentNormalized) paths.add(currentNormalized);
-    const sorted = Array.from(paths).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+    const sorted = Array.from(paths).sort((a, b) =>
+      a.localeCompare(b, undefined, { sensitivity: "base" }),
+    );
     return [
       { value: null, label: formatFolderLabel(null) },
       ...sorted.map(path => ({ value: path, label: formatFolderLabel(path) })),
     ];
-  }, [folder, folders, formatFolderLabel, formatPrivateFolderLabel, isPrivate, privateLibraryEntries, resolveFolderPath]);
+  }, [
+    folder,
+    folders,
+    formatFolderLabel,
+    formatPrivateFolderLabel,
+    isPrivate,
+    privateLibraryEntries,
+    resolveFolderPath,
+  ]);
 
   const folderPlaceholder = isPrivate ? "e.g. Trips/2024" : "e.g. Pictures/2024";
   const folderCustomDefaultPath =
@@ -216,24 +228,33 @@ export const RenameDialog: React.FC<RenameDialogProps> = ({ blob, ndk, signer, r
       nextFields.coverUrl = storedAudio?.coverUrl || "";
       nextFields.trackNumber = storedAudio?.trackNumber ? String(storedAudio.trackNumber) : "";
       nextFields.trackTotal = storedAudio?.trackTotal ? String(storedAudio.trackTotal) : "";
-      nextFields.durationSeconds = storedAudio?.durationSeconds ? String(storedAudio.durationSeconds) : "";
+      nextFields.durationSeconds = storedAudio?.durationSeconds
+        ? String(storedAudio.durationSeconds)
+        : "";
       nextFields.genre = storedAudio?.genre || "";
       nextFields.year = storedAudio?.year ? String(storedAudio.year) : "";
       setAudioFields(nextFields);
-      setAlias(computeMusicAlias(nextFields.title, nextFields.artist) || (nextFields.title || nextFields.artist || ""));
+      setAlias(
+        computeMusicAlias(nextFields.title, nextFields.artist) ||
+          nextFields.title ||
+          nextFields.artist ||
+          "",
+      );
     } else {
       setAudioFields(emptyAudioFields());
       setAlias(getBlobMetadataName(blob) ?? "");
     }
 
     const membershipPaths = getFoldersForBlob(blob.sha256);
-   const membershipFolder = membershipPaths[0] ?? null;
-   const fallbackFolderPath =
-     membershipFolder ??
-     normalizeFolderPathInput(blob.folderPath ?? privateEntry?.metadata?.folderPath ?? undefined) ??
-     null;
-   setCurrentFolderPath(membershipFolder);
-   setFolder(fallbackFolderPath ?? "");
+    const membershipFolder = membershipPaths[0] ?? null;
+    const fallbackFolderPath =
+      membershipFolder ??
+      normalizeFolderPathInput(
+        blob.folderPath ?? privateEntry?.metadata?.folderPath ?? undefined,
+      ) ??
+      null;
+    setCurrentFolderPath(membershipFolder);
+    setFolder(fallbackFolderPath ?? "");
     setPrivateLinkDetails(extractPrivateLinkDetails(blob));
     setPrivateLinkError(null);
   }, [blob, getFoldersForBlob, privateEntry, storedAudio]);
@@ -244,7 +265,7 @@ export const RenameDialog: React.FC<RenameDialogProps> = ({ blob, ndk, signer, r
       setAlias(next);
       if (error) setError(null);
     },
-    [error, isMusic]
+    [error, isMusic],
   );
 
   const handleAudioFieldChange = useCallback(
@@ -259,7 +280,7 @@ export const RenameDialog: React.FC<RenameDialogProps> = ({ blob, ndk, signer, r
       });
       if (error) setError(null);
     },
-    [error]
+    [error],
   );
 
   const handleCancel = useCallback(() => {
@@ -272,7 +293,7 @@ export const RenameDialog: React.FC<RenameDialogProps> = ({ blob, ndk, signer, r
       setFolder(next);
       if (error) setError(null);
     },
-    [error]
+    [error],
   );
 
   const privateLinkEnabled = Boolean(privateLinkDetails.alias);
@@ -304,7 +325,7 @@ export const RenameDialog: React.FC<RenameDialogProps> = ({ blob, ndk, signer, r
     if (busy) return;
 
     if (containsReservedFolderSegment(folder)) {
-      setError("Folder names cannot include the word \"private\".");
+      setError('Folder names cannot include the word "private".');
       return;
     }
 
@@ -318,7 +339,8 @@ export const RenameDialog: React.FC<RenameDialogProps> = ({ blob, ndk, signer, r
     const existingStoredAudio =
       getStoredAudioMetadata(blob.serverUrl, blob.sha256) ??
       getStoredAudioMetadata(undefined, blob.sha256) ??
-      (blob.privateData?.metadata?.audio ?? undefined);
+      blob.privateData?.metadata?.audio ??
+      undefined;
     const treatAsMusic = isMusic && (isMusicBlob(blob) || Boolean(existingStoredAudio));
 
     let aliasForEvent: string | null = null;
@@ -467,7 +489,9 @@ export const RenameDialog: React.FC<RenameDialogProps> = ({ blob, ndk, signer, r
         }
         const existingMeta = privateEntry.metadata ?? {};
         const serverForMetadata = blob.serverUrl ?? privateEntry.servers?.[0];
-        const nextAudioMetadata = treatAsMusic ? audioMetadata ?? null : existingMeta.audio ?? null;
+        const nextAudioMetadata = treatAsMusic
+          ? (audioMetadata ?? null)
+          : (existingMeta.audio ?? null);
         const updatedEntry: PrivateListEntry = {
           sha256: privateEntry.sha256,
           encryption: privateEntry.encryption,
@@ -513,7 +537,8 @@ export const RenameDialog: React.FC<RenameDialogProps> = ({ blob, ndk, signer, r
         aliasEventTimestamp = publishResult.createdAt;
         applyAliasUpdate(undefined, blob.sha256, aliasForStore, aliasEventTimestamp);
         if (treatAsMusic) {
-          const updatedAt = typeof aliasEventTimestamp === "number" ? aliasEventTimestamp * 1000 : undefined;
+          const updatedAt =
+            typeof aliasEventTimestamp === "number" ? aliasEventTimestamp * 1000 : undefined;
           rememberAudioMetadata(blob.serverUrl, blob.sha256, audioMetadata ?? null, {
             updatedAt,
           });
@@ -582,7 +607,9 @@ export const RenameDialog: React.FC<RenameDialogProps> = ({ blob, ndk, signer, r
           : undefined
       }
       onRevokePrivateLink={
-        privateLinkDetails.alias && privateLinkServiceConfigured ? handleRevokePrivateLink : undefined
+        privateLinkDetails.alias && privateLinkServiceConfigured
+          ? handleRevokePrivateLink
+          : undefined
       }
       revokingPrivateLink={revokingPrivateLink}
       revokePrivateLinkError={privateLinkError}

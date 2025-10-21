@@ -104,7 +104,10 @@ const extractShas = (event: RawNdkEvent) => {
 
 const parseVisibility = (event: RawNdkEvent): FolderListVisibility => {
   const tag = event.tags.find(
-    entry => Array.isArray(entry) && entry[0] === VISIBILITY_TAG_NAMESPACE && entry[1] === VISIBILITY_TAG_KEY
+    entry =>
+      Array.isArray(entry) &&
+      entry[0] === VISIBILITY_TAG_NAMESPACE &&
+      entry[1] === VISIBILITY_TAG_KEY,
   );
   const value = typeof tag?.[2] === "string" ? tag[2].toLowerCase() : null;
   return value === "public" ? "public" : "private";
@@ -112,7 +115,10 @@ const parseVisibility = (event: RawNdkEvent): FolderListVisibility => {
 
 const parseSharePolicy = (event: RawNdkEvent): FolderSharePolicy | null => {
   const tag = event.tags.find(
-    entry => Array.isArray(entry) && entry[0] === VISIBILITY_TAG_NAMESPACE && entry[1] === SHARE_POLICY_TAG_KEY
+    entry =>
+      Array.isArray(entry) &&
+      entry[0] === VISIBILITY_TAG_NAMESPACE &&
+      entry[1] === SHARE_POLICY_TAG_KEY,
   );
   if (!tag) return null;
   const raw = typeof tag[2] === "string" ? tag[2].toLowerCase() : null;
@@ -131,9 +137,10 @@ export const parseFolderEvent = (event: RawNdkEvent): FolderListRecord | null =>
   if (path === null) return null;
   const nameTag = event.tags.find(tag => Array.isArray(tag) && tag[0] === "name");
   const contentName = typeof event.content === "string" ? event.content.trim() : "";
-  const name = typeof nameTag?.[1] === "string" && nameTag[1].trim().length > 0
-    ? nameTag[1].trim()
-    : contentName || deriveNameFromPath(path);
+  const name =
+    typeof nameTag?.[1] === "string" && nameTag[1].trim().length > 0
+      ? nameTag[1].trim()
+      : contentName || deriveNameFromPath(path);
   const fileHints: Record<string, FolderFileHint> = {};
   event.tags.forEach(tag => {
     if (!Array.isArray(tag) || tag.length < 3) return;
@@ -196,7 +203,10 @@ export const parseFolderEvent = (event: RawNdkEvent): FolderListRecord | null =>
   };
 };
 
-export const loadFolderLists = async (ndk: NdkInstance | null, pubkey: string | null | undefined) => {
+export const loadFolderLists = async (
+  ndk: NdkInstance | null,
+  pubkey: string | null | undefined,
+) => {
   if (!ndk || !pubkey) return [] as FolderListRecord[];
   const eventsSet = (await ndk.fetchEvents({
     kinds: [FOLDER_LIST_KIND],
@@ -216,7 +226,11 @@ export const loadFolderLists = async (ndk: NdkInstance | null, pubkey: string | 
 export const buildFolderEventTemplate = (
   record: FolderListRecord,
   pubkey: string,
-  options?: { createdAt?: number; fileHints?: Iterable<FolderFileHint>; sharePolicy?: FolderSharePolicy | null }
+  options?: {
+    createdAt?: number;
+    fileHints?: Iterable<FolderFileHint>;
+    sharePolicy?: FolderSharePolicy | null;
+  },
 ) => {
   const normalizedPath = normalizeFolderPathInput(record.path) ?? "";
   const identifier = encodeIdentifier(normalizedPath);
@@ -229,8 +243,8 @@ export const buildFolderEventTemplate = (
     new Set(
       (record.shas || [])
         .map(sha => (typeof sha === "string" ? sha.trim() : ""))
-        .filter(sha => sha.length > 0)
-    )
+        .filter(sha => sha.length > 0),
+    ),
   );
   const tags: string[][] = [
     ["d", identifier],
@@ -262,7 +276,10 @@ export const buildFolderEventTemplate = (
           requiresAuth: typeof hint.requiresAuth === "boolean" ? hint.requiresAuth : undefined,
           serverType: hint.serverType ?? undefined,
           mimeType: hint.mimeType ?? undefined,
-          size: typeof hint.size === "number" && Number.isFinite(hint.size) ? Math.trunc(hint.size) : undefined,
+          size:
+            typeof hint.size === "number" && Number.isFinite(hint.size)
+              ? Math.trunc(hint.size)
+              : undefined,
           name: hint.name ?? undefined,
           privateLinkAlias: hint.privateLinkAlias ?? undefined,
         });
@@ -287,7 +304,7 @@ const buildFolderEvent = async (
   ndk: NdkInstance,
   signer: NdkSignerInstance,
   user: NdkUserInstance,
-  record: FolderListRecord
+  record: FolderListRecord,
 ) => {
   if (!ndk) throw new Error("NDK unavailable");
   if (!signer) throw new Error("Connect your signer to update folders.");
@@ -310,7 +327,7 @@ export const publishFolderList = async (
   ndk: NdkInstance,
   signer: NdkSignerInstance,
   user: NdkUserInstance,
-  record: FolderListRecord
+  record: FolderListRecord,
 ): Promise<FolderListRecord> => {
   if (!ndk) {
     throw new Error("NDK unavailable");
@@ -335,7 +352,8 @@ export const publishFolderList = async (
   };
 };
 
-export const normalizeFolderPath = (value: string | null | undefined) => normalizeFolderPathInput(value) ?? "";
+export const normalizeFolderPath = (value: string | null | undefined) =>
+  normalizeFolderPathInput(value) ?? "";
 
 export const buildDefaultFolderRecord = (
   path: string,
@@ -346,10 +364,12 @@ export const buildDefaultFolderRecord = (
     pubkey?: string;
     fileHints?: Record<string, FolderFileHint>;
     sharePolicy?: FolderSharePolicy | null;
-  }
+  },
 ): FolderListRecord => {
   const normalized = normalizeFolderPath(path);
-  const shas = Array.from(new Set(options?.shas ?? [])).filter(sha => typeof sha === "string" && sha.length > 0);
+  const shas = Array.from(new Set(options?.shas ?? [])).filter(
+    sha => typeof sha === "string" && sha.length > 0,
+  );
   const name = options?.name?.trim() || deriveNameFromPath(normalized);
   const visibility = options?.visibility ?? "private";
   return {
@@ -367,7 +387,7 @@ export const buildDefaultFolderRecord = (
 export const removeShaFromRecord = (record: FolderListRecord, sha: string): FolderListRecord => {
   const nextHints = record.fileHints
     ? Object.fromEntries(
-        Object.entries(record.fileHints).filter(([key]) => key !== sha.toLowerCase())
+        Object.entries(record.fileHints).filter(([key]) => key !== sha.toLowerCase()),
       )
     : undefined;
   return {
@@ -395,7 +415,7 @@ export const FOLDER_LIST_CONSTANTS = {
 export const encodeFolderNaddr = (
   record: FolderListRecord,
   ownerPubkey?: string | null,
-  relays?: readonly string[] | null
+  relays?: readonly string[] | null,
 ) => {
   const pubkey = ownerPubkey ?? record.pubkey;
   if (!pubkey) return null;
@@ -433,7 +453,9 @@ export const decodeFolderNaddr = (value: string): FolderListAddress | null => {
   try {
     const decoded = nip19.decode(value);
     if (decoded.type !== "naddr") return null;
-    const data = decoded.data as { identifier?: string; pubkey?: string; kind?: number; relays?: string[] } | undefined;
+    const data = decoded.data as
+      | { identifier?: string; pubkey?: string; kind?: number; relays?: string[] }
+      | undefined;
     const identifier = typeof data?.identifier === "string" ? data.identifier : null;
     const pubkey = typeof data?.pubkey === "string" ? data.pubkey : null;
     const kind = typeof data?.kind === "number" ? data.kind : null;
@@ -460,7 +482,7 @@ export const fetchFolderRecordByAddress = async (
   ndk: NdkInstance | null,
   address: FolderListAddress,
   relayUrls?: readonly string[],
-  options?: FetchFolderRecordOptions
+  options?: FetchFolderRecordOptions,
 ): Promise<FolderListRecord | null> => {
   if (!ndk) return null;
   const filters = [
@@ -487,7 +509,11 @@ export const fetchFolderRecordByAddress = async (
   let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
   let eventsSet: Set<RawNdkEvent> = new Set();
   try {
-    const fetchPromise = ndk.fetchEvents(filters, { closeOnEose: true, groupable: false }, relaySet);
+    const fetchPromise = ndk.fetchEvents(
+      filters,
+      { closeOnEose: true, groupable: false },
+      relaySet,
+    );
     if (timeoutMs > 0) {
       eventsSet = (await Promise.race([
         fetchPromise.finally(() => {

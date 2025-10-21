@@ -1,13 +1,13 @@
 import { v2 as nip44v2 } from "nostr-tools/nip44";
 import { encrypt as nip04Encrypt, decrypt as nip04Decrypt } from "nostr-tools/nip04";
-import {
+import type {
   Nip46CodecConfig,
-  Nip46CodecError,
   Nip46EncryptionAlgorithm,
   Nip46EncryptionContext,
   Nip46EncryptFn,
   Nip46DecryptFn,
 } from "./types";
+import { Nip46CodecError } from "./types";
 
 const HEX_REGEX = /^[0-9a-f]+$/i;
 
@@ -19,7 +19,10 @@ const bytesToHex = (bytes: Uint8Array) =>
 const normalizeHexKey = (hex: string, label: string): string => {
   const trimmed = hex.trim().toLowerCase().replace(/^0x/, "");
   if (trimmed.startsWith("npub")) {
-    throw new Nip46CodecError("NIP46_ENCODE_ERROR", `${label} must be in hex format, received npub`);
+    throw new Nip46CodecError(
+      "NIP46_ENCODE_ERROR",
+      `${label} must be in hex format, received npub`,
+    );
   }
   if (!HEX_REGEX.test(trimmed)) {
     throw new Nip46CodecError("NIP46_ENCODE_ERROR", `${label} must be hex-encoded`);
@@ -30,14 +33,14 @@ const normalizeHexKey = (hex: string, label: string): string => {
     if (prefix !== "02" && prefix !== "03") {
       throw new Nip46CodecError(
         "NIP46_ENCODE_ERROR",
-        `${label} has invalid compressed key prefix: expected 02 or 03, got ${prefix}`
+        `${label} has invalid compressed key prefix: expected 02 or 03, got ${prefix}`,
       );
     }
     const uncompressed = trimmed.slice(2);
     if (uncompressed.length !== 64) {
       throw new Nip46CodecError(
         "NIP46_ENCODE_ERROR",
-        `${label} has invalid length after removing compression prefix`
+        `${label} has invalid length after removing compression prefix`,
       );
     }
     return uncompressed;
@@ -45,7 +48,7 @@ const normalizeHexKey = (hex: string, label: string): string => {
   if (trimmed.length !== 64) {
     throw new Nip46CodecError(
       "NIP46_ENCODE_ERROR",
-      `${label} must be 32-byte hex (64 chars), received length ${trimmed.length}`
+      `${label} must be 32-byte hex (64 chars), received length ${trimmed.length}`,
     );
   }
   return trimmed;
@@ -56,7 +59,11 @@ const deriveConversationKey = (context: Nip46EncryptionContext): Uint8Array => {
   try {
     return nip44v2.utils.getConversationKey(context.localPrivateKey, remote);
   } catch (error) {
-    throw new Nip46CodecError("NIP46_ENCODE_ERROR", "Failed to derive NIP-44 conversation key", error);
+    throw new Nip46CodecError(
+      "NIP46_ENCODE_ERROR",
+      "Failed to derive NIP-44 conversation key",
+      error,
+    );
   }
 };
 
@@ -98,7 +105,9 @@ const createNip04Decrypt: Nip46DecryptFn = async (ciphertext, context) => {
   }
 };
 
-export const getCodecConfigForAlgorithm = (algorithm: Nip46EncryptionAlgorithm): Nip46CodecConfig => {
+export const getCodecConfigForAlgorithm = (
+  algorithm: Nip46EncryptionAlgorithm,
+): Nip46CodecConfig => {
   if (algorithm === "nip44") {
     return {
       encrypt: createNip44Encrypt,

@@ -71,28 +71,30 @@ const WorkspaceToolbarComponent: React.FC<WorkspaceToolbarProps> = ({
   const hasBreadcrumbs = Boolean(browseNavigationState?.segments.length);
   const showBreadcrumbs = !isCompactScreen && hasBreadcrumbs;
   const searchButtonStateClass =
-    showAuthPrompt || !settingsReady || keepSearchExpanded ? GROUP_BUTTON_DISABLED : GROUP_BUTTON_DEFAULT;
+    showAuthPrompt || !settingsReady || keepSearchExpanded
+      ? GROUP_BUTTON_DISABLED
+      : GROUP_BUTTON_DEFAULT;
   const browseControlsSegments = browseHeaderControls
     ? React.Children.toArray(browseHeaderControls)
     : activeTab === "browse"
-    ? [
-        <span
-          key="placeholder-1"
-          className={`${GROUP_BUTTON_BASE} ${GROUP_BUTTON_DEFAULT} w-11 justify-center pointer-events-none select-none`}
-          aria-hidden="true"
-        />,
-        <span
-          key="placeholder-2"
-          className={`${GROUP_BUTTON_BASE} ${GROUP_BUTTON_DEFAULT} w-11 justify-center pointer-events-none select-none`}
-          aria-hidden="true"
-        />,
-        <span
-          key="placeholder-3"
-          className={`${GROUP_BUTTON_BASE} ${GROUP_BUTTON_DEFAULT} w-11 justify-center pointer-events-none select-none`}
-          aria-hidden="true"
-        />,
-      ]
-    : [];
+      ? [
+          <span
+            key="placeholder-1"
+            className={`${GROUP_BUTTON_BASE} ${GROUP_BUTTON_DEFAULT} w-11 justify-center pointer-events-none select-none`}
+            aria-hidden="true"
+          />,
+          <span
+            key="placeholder-2"
+            className={`${GROUP_BUTTON_BASE} ${GROUP_BUTTON_DEFAULT} w-11 justify-center pointer-events-none select-none`}
+            aria-hidden="true"
+          />,
+          <span
+            key="placeholder-3"
+            className={`${GROUP_BUTTON_BASE} ${GROUP_BUTTON_DEFAULT} w-11 justify-center pointer-events-none select-none`}
+            aria-hidden="true"
+          />,
+        ]
+      : [];
   const navButtonSegments = navTabs.map(item => {
     const isUploadTab = item.id === "upload";
     const isTransferView = activeTab === "transfer";
@@ -114,7 +116,9 @@ const WorkspaceToolbarComponent: React.FC<WorkspaceToolbarProps> = ({
         <IconComponent size={16} />
         <span
           className={
-            hideLabelOnMobile ? "hidden whitespace-nowrap text-sm font-medium sm:inline" : "whitespace-nowrap text-sm font-medium"
+            hideLabelOnMobile
+              ? "hidden whitespace-nowrap text-sm font-medium sm:inline"
+              : "whitespace-nowrap text-sm font-medium"
           }
         >
           {label}
@@ -178,19 +182,21 @@ const WorkspaceToolbarComponent: React.FC<WorkspaceToolbarProps> = ({
           >
             {browseNavigationState.segments.map((segment, index) => (
               <React.Fragment key={segment.id}>
-                {index > 0 && <ChevronRightIcon size={14} className="text-slate-600 flex-shrink-0" />}
+                {index > 0 && (
+                  <ChevronRightIcon size={14} className="text-slate-600 flex-shrink-0" />
+                )}
                 <button
                   type="button"
                   onClick={segment.onNavigate}
                   disabled={showAuthPrompt || !settingsReady}
                   className="max-w-[10rem] truncate rounded-lg border border-slate-800 bg-slate-900/70 px-2 py-1 text-left transition hover:border-slate-700 disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                    <span className="flex items-center gap-1">
-                      <span className="truncate">{segment.label}</span>
-                      {segment.visibility === "public" ? (
-                        <ShareIcon size={12} className="shrink-0 text-slate-200" aria-hidden="true" />
-                      ) : null}
-                    </span>
+                  <span className="flex items-center gap-1">
+                    <span className="truncate">{segment.label}</span>
+                    {segment.visibility === "public" ? (
+                      <ShareIcon size={12} className="shrink-0 text-slate-200" aria-hidden="true" />
+                    ) : null}
+                  </span>
                 </button>
               </React.Fragment>
             ))}

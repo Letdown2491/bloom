@@ -20,7 +20,7 @@ const EXPIRATION_PRESETS: Array<{ key: ExpirationOptionPreset; label: string; se
 const formatDateTimeLocal = (date: Date): string => {
   const pad = (value: number) => String(value).padStart(2, "0");
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(
-    date.getMinutes()
+    date.getMinutes(),
   )}`;
 };
 
@@ -28,7 +28,7 @@ const MAX_CUSTOM_EXPIRATION_SECONDS = 365 * 24 * 60 * 60; // 1 year
 
 const evaluateExpiration = (
   option: ExpirationOption,
-  customValue: string
+  customValue: string,
 ): { value: number | null; error: string | null } => {
   const nowSeconds = Math.floor(Date.now() / 1000);
   if (option === "never") {
@@ -63,10 +63,16 @@ type PrivateLinkPanelProps = {
   tone?: "light" | "dark";
 };
 
-export const PrivateLinkPanel: React.FC<PrivateLinkPanelProps> = ({ payload, onShareComplete, className, links, tone }) => {
-
+export const PrivateLinkPanel: React.FC<PrivateLinkPanelProps> = ({
+  payload,
+  onShareComplete,
+  className,
+  links,
+  tone,
+}) => {
   const fallbackLinks = usePrivateLinks({ enabled: !links });
-  const { error, create, creating, serviceConfigured, serviceHost, generateAlias } = links ?? fallbackLinks;
+  const { error, create, creating, serviceConfigured, serviceHost, generateAlias } =
+    links ?? fallbackLinks;
   const resolvedTone = tone ?? (className && className.includes("bg-white") ? "light" : "dark");
 
   const initialAliasRef = useRef<string>();
@@ -83,14 +89,17 @@ export const PrivateLinkPanel: React.FC<PrivateLinkPanelProps> = ({ payload, onS
   const [localMessage, setLocalMessage] = useState<string | null>(null);
   const [expirationOption, setExpirationOption] = useState<ExpirationOption>("never");
   const [customExpiration, setCustomExpiration] = useState(() =>
-    formatDateTimeLocal(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000))
+    formatDateTimeLocal(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)),
   );
   const [customExpirationError, setCustomExpirationError] = useState<string | null>(null);
 
-  const resolvedTimeZone = useMemo(() => Intl.DateTimeFormat().resolvedOptions().timeZone ?? "local time", []);
+  const resolvedTimeZone = useMemo(
+    () => Intl.DateTimeFormat().resolvedOptions().timeZone ?? "local time",
+    [],
+  );
   const expirationResult = useMemo(
     () => evaluateExpiration(expirationOption, customExpiration),
-    [expirationOption, customExpiration]
+    [expirationOption, customExpiration],
   );
   const previewExpiresAt =
     expirationOption === "custom" && expirationResult.error ? null : expirationResult.value;
@@ -135,12 +144,20 @@ export const PrivateLinkPanel: React.FC<PrivateLinkPanelProps> = ({ payload, onS
     setLocalMessage(null);
     if (!serviceConfigured) {
       setLocalError("Private link service is not configured.");
-      onShareComplete?.({ mode: "private-link", success: false, message: "Private link service unavailable." });
+      onShareComplete?.({
+        mode: "private-link",
+        success: false,
+        message: "Private link service unavailable.",
+      });
       return;
     }
     if (!payload.url) {
       setLocalError("Selected file does not have a Blossom URL.");
-      onShareComplete?.({ mode: "private-link", success: false, message: "File does not have a Blossom URL." });
+      onShareComplete?.({
+        mode: "private-link",
+        success: false,
+        message: "File does not have a Blossom URL.",
+      });
       return;
     }
     const trimmedAlias = alias.trim().toLowerCase();
@@ -169,7 +186,13 @@ export const PrivateLinkPanel: React.FC<PrivateLinkPanelProps> = ({ payload, onS
       setLinkCreated(true);
       const nextAlias = generateAlias(22);
       setAlias(nextAlias);
-      onShareComplete?.({ mode: "private-link", success: true, message: "Private link ready", alias: record.alias, link });
+      onShareComplete?.({
+        mode: "private-link",
+        success: true,
+        message: "Private link ready",
+        alias: record.alias,
+        link,
+      });
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to create private link.";
       setLocalError(message);
@@ -180,31 +203,48 @@ export const PrivateLinkPanel: React.FC<PrivateLinkPanelProps> = ({ payload, onS
   const busy = creating;
 
   const defaultContainerClass = "rounded-2xl border border-slate-800 bg-slate-950/70 p-5";
-  const headingClass = resolvedTone === "light" ? "text-lg font-semibold text-slate-900" : "text-lg font-semibold text-slate-100";
-  const descriptionClass = resolvedTone === "light" ? "text-sm text-slate-600" : "text-sm text-slate-400";
-  const labelClass = resolvedTone === "light" ? "text-xs font-semibold uppercase tracking-wide text-slate-600" : "text-xs font-semibold uppercase tracking-wide text-slate-400";
-  const inputClass = resolvedTone === "light"
-    ? "rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
-    : "rounded-xl border border-slate-800 bg-slate-950/80 px-3 py-2 text-sm text-slate-100 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500";
-  const secondaryButtonClass = resolvedTone === "light"
-    ? "rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-700 transition hover:border-slate-400 hover:text-slate-900"
-    : "rounded-xl border border-slate-700 px-3 py-2 text-sm text-slate-200 transition hover:border-slate-600 hover:text-white";
-  const chipActiveClass = resolvedTone === "light"
-    ? "border-emerald-500 bg-emerald-500/10 text-emerald-600"
-    : "border-emerald-400 bg-emerald-500/10 text-emerald-200";
-  const chipInactiveClass = resolvedTone === "light"
-    ? "border-slate-300 text-slate-600 hover:border-slate-400 hover:text-slate-900"
-    : "border-slate-700 text-slate-300 hover:border-slate-600 hover:text-slate-100";
-  const mutedTextClass = resolvedTone === "light" ? "text-xs text-slate-500" : "text-xs text-slate-500";
-  const targetValueClass = resolvedTone === "light" ? "font-mono text-slate-700" : "font-mono text-slate-300";
-  const errorBoxClass = resolvedTone === "light"
-    ? "mt-4 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-700"
-    : "mt-4 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-200";
-  const successBoxClass = resolvedTone === "light"
-    ? "mt-4 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-700"
-    : "mt-4 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-200";
+  const headingClass =
+    resolvedTone === "light"
+      ? "text-lg font-semibold text-slate-900"
+      : "text-lg font-semibold text-slate-100";
+  const descriptionClass =
+    resolvedTone === "light" ? "text-sm text-slate-600" : "text-sm text-slate-400";
+  const labelClass =
+    resolvedTone === "light"
+      ? "text-xs font-semibold uppercase tracking-wide text-slate-600"
+      : "text-xs font-semibold uppercase tracking-wide text-slate-400";
+  const inputClass =
+    resolvedTone === "light"
+      ? "rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+      : "rounded-xl border border-slate-800 bg-slate-950/80 px-3 py-2 text-sm text-slate-100 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500";
+  const secondaryButtonClass =
+    resolvedTone === "light"
+      ? "rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-700 transition hover:border-slate-400 hover:text-slate-900"
+      : "rounded-xl border border-slate-700 px-3 py-2 text-sm text-slate-200 transition hover:border-slate-600 hover:text-white";
+  const chipActiveClass =
+    resolvedTone === "light"
+      ? "border-emerald-500 bg-emerald-500/10 text-emerald-600"
+      : "border-emerald-400 bg-emerald-500/10 text-emerald-200";
+  const chipInactiveClass =
+    resolvedTone === "light"
+      ? "border-slate-300 text-slate-600 hover:border-slate-400 hover:text-slate-900"
+      : "border-slate-700 text-slate-300 hover:border-slate-600 hover:text-slate-100";
+  const mutedTextClass =
+    resolvedTone === "light" ? "text-xs text-slate-500" : "text-xs text-slate-500";
+  const targetValueClass =
+    resolvedTone === "light" ? "font-mono text-slate-700" : "font-mono text-slate-300";
+  const errorBoxClass =
+    resolvedTone === "light"
+      ? "mt-4 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-700"
+      : "mt-4 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-200";
+  const successBoxClass =
+    resolvedTone === "light"
+      ? "mt-4 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-700"
+      : "mt-4 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-200";
   const sectionClass = className ?? defaultContainerClass;
-  const wrapperClass = className ? "flex h-full flex-col gap-6" : "flex h-full flex-col gap-6 overflow-y-auto pr-1";
+  const wrapperClass = className
+    ? "flex h-full flex-col gap-6"
+    : "flex h-full flex-col gap-6 overflow-y-auto pr-1";
 
   return (
     <div className={wrapperClass}>
@@ -212,7 +252,10 @@ export const PrivateLinkPanel: React.FC<PrivateLinkPanelProps> = ({ payload, onS
         <header className="mb-4 space-y-2">
           <h2 className={headingClass}>Create Private Link</h2>
           <p className={descriptionClass}>
-            Generate a shareable link served via <span className="font-mono text-emerald-500">{serviceHost}</span>. Recipients only see this proxy link. Masking the link allows you to stop sharing the file without ever revealing the origin URL.
+            Generate a shareable link served via{" "}
+            <span className="font-mono text-emerald-500">{serviceHost}</span>. Recipients only see
+            this proxy link. Masking the link allows you to stop sharing the file without ever
+            revealing the origin URL.
           </p>
         </header>
         <form className="space-y-4" onSubmit={handleCreate}>
@@ -245,7 +288,8 @@ export const PrivateLinkPanel: React.FC<PrivateLinkPanelProps> = ({ payload, onS
               </button>
             </div>
             <p className={mutedTextClass}>
-              {linkCreated ? "Your private link is" : "The final link will be"} <span className="font-mono text-emerald-300">{shareUrl}</span>.
+              {linkCreated ? "Your private link is" : "The final link will be"}{" "}
+              <span className="font-mono text-emerald-300">{shareUrl}</span>.
             </p>
           </div>
 
@@ -344,15 +388,9 @@ export const PrivateLinkPanel: React.FC<PrivateLinkPanelProps> = ({ payload, onS
           </div>
         </form>
         {(localError || error) && (
-          <div className={errorBoxClass}>
-            {localError || (error ? error.message : "")}
-          </div>
+          <div className={errorBoxClass}>{localError || (error ? error.message : "")}</div>
         )}
-        {localMessage && (
-          <div className={successBoxClass}>
-            {localMessage}
-          </div>
-        )}
+        {localMessage && <div className={successBoxClass}>{localMessage}</div>}
       </section>
     </div>
   );

@@ -97,8 +97,7 @@ export const publishNip94Metadata = async ({
     });
   }
 
-  const aliasForTemplate =
-    typeof alias === "string" ? alias : alias === null ? "" : undefined;
+  const aliasForTemplate = typeof alias === "string" ? alias : alias === null ? "" : undefined;
 
   const template = buildNip94EventTemplate({
     blob,

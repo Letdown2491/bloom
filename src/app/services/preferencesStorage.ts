@@ -31,13 +31,8 @@ const isFilterMode = (value: unknown): value is FilterMode =>
   value === "pdfs" ||
   value === "videos";
 
-const isSortOption = (
-  value: unknown
-): value is UserPreferences["defaultSortOption"] =>
-  value === "name" ||
-  value === "servers" ||
-  value === "updated" ||
-  value === "size";
+const isSortOption = (value: unknown): value is UserPreferences["defaultSortOption"] =>
+  value === "name" || value === "servers" || value === "updated" || value === "size";
 
 const isSortDirection = (value: unknown): value is UserPreferences["sortDirection"] =>
   value === "ascending" || value === "descending";
@@ -56,16 +51,29 @@ export const loadStoredPreferences = (): UserPreferences => {
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     if (!raw) return DEFAULT_PREFERENCES;
-    const parsed = JSON.parse(raw) as (Partial<UserPreferences> & { showPreviews?: boolean }) | null;
+    const parsed = JSON.parse(raw) as
+      | (Partial<UserPreferences> & { showPreviews?: boolean })
+      | null;
     const defaultViewMode = isViewMode(parsed?.defaultViewMode) ? parsed!.defaultViewMode : "list";
-    const defaultFilterMode = isFilterMode(parsed?.defaultFilterMode) ? parsed!.defaultFilterMode : "all";
-    const defaultSortOption = isSortOption(parsed?.defaultSortOption) ? parsed!.defaultSortOption : "updated";
-    const sortDirection = isSortDirection(parsed?.sortDirection) ? parsed!.sortDirection : "descending";
-    const legacyShowPreviews = typeof parsed?.showPreviews === "boolean" ? parsed.showPreviews : undefined;
+    const defaultFilterMode = isFilterMode(parsed?.defaultFilterMode)
+      ? parsed!.defaultFilterMode
+      : "all";
+    const defaultSortOption = isSortOption(parsed?.defaultSortOption)
+      ? parsed!.defaultSortOption
+      : "updated";
+    const sortDirection = isSortDirection(parsed?.sortDirection)
+      ? parsed!.sortDirection
+      : "descending";
+    const legacyShowPreviews =
+      typeof parsed?.showPreviews === "boolean" ? parsed.showPreviews : undefined;
     const showGridPreviews =
-      typeof parsed?.showGridPreviews === "boolean" ? parsed.showGridPreviews : legacyShowPreviews ?? true;
+      typeof parsed?.showGridPreviews === "boolean"
+        ? parsed.showGridPreviews
+        : (legacyShowPreviews ?? true);
     const showListPreviews =
-      typeof parsed?.showListPreviews === "boolean" ? parsed.showListPreviews : legacyShowPreviews ?? true;
+      typeof parsed?.showListPreviews === "boolean"
+        ? parsed.showListPreviews
+        : (legacyShowPreviews ?? true);
     const keepSearchExpanded =
       typeof parsed?.keepSearchExpanded === "boolean" ? parsed.keepSearchExpanded : false;
     const defaultServerUrl =

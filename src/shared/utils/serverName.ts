@@ -1,9 +1,4 @@
-const IGNORED_SUBDOMAIN_PREFIXES = new Set([
-  "www",
-  "cdn",
-  "relay",
-  "blossom",
-]);
+const IGNORED_SUBDOMAIN_PREFIXES = new Set(["www", "cdn", "relay", "blossom"]);
 
 const GENERIC_TLDS = new Set([
   "com",
@@ -66,7 +61,10 @@ export const deriveServerNameFromUrl = (rawUrl: string): string => {
     return "";
   }
 
-  const originalSegments = hostname.split(".").filter(Boolean).map(segment => segment.toLowerCase());
+  const originalSegments = hostname
+    .split(".")
+    .filter(Boolean)
+    .map(segment => segment.toLowerCase());
   if (!originalSegments.length) {
     return hostname;
   }
@@ -97,9 +95,7 @@ export const deriveServerNameFromUrl = (rawUrl: string): string => {
     coreSegments = [...segments];
   }
 
-  const words = coreSegments
-    .flatMap(segment => segment.split(/[-_]/g))
-    .filter(Boolean);
+  const words = coreSegments.flatMap(segment => segment.split(/[-_]/g)).filter(Boolean);
 
   if (!words.length) {
     return hostname;

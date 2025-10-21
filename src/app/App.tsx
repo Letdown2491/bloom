@@ -5,10 +5,15 @@ import { useNdk, useCurrentPubkey } from "./context/NdkContext";
 import { useNip46 } from "./context/Nip46Context";
 import { useFolderLists } from "./context/FolderListContext";
 import { useAudio } from "./context/AudioContext";
-import { useUserPreferences, type DefaultSortOption, type SortDirection } from "./context/UserPreferencesContext";
+import {
+  useUserPreferences,
+  type DefaultSortOption,
+  type SortDirection,
+} from "./context/UserPreferencesContext";
 import { useDialog } from "./context/DialogContext";
 import { useSyncPipeline } from "./context/SyncPipelineContext";
-import { useServers, ManagedServer, sortServersByName } from "./hooks/useServers";
+import type { ManagedServer } from "./hooks/useServers";
+import { useServers, sortServersByName } from "./hooks/useServers";
 import { usePreferredRelays } from "./hooks/usePreferredRelays";
 import { useAliasSync } from "./hooks/useAliasSync";
 import { useIsCompactScreen } from "../shared/hooks/useIsCompactScreen";
@@ -17,29 +22,37 @@ import { useSelection } from "../features/selection/SelectionContext";
 import { LoggedOutPrompt } from "./components/LoggedOutPrompt";
 import { MainNavigation, type NavigationTab } from "./components/MainNavigation";
 import { deriveServerNameFromUrl } from "../shared/utils/serverName";
-import { collectRelayTargets, DEFAULT_PUBLIC_RELAYS, normalizeRelayUrls, sanitizeRelayUrl } from "../shared/utils/relays";
+import {
+  collectRelayTargets,
+  DEFAULT_PUBLIC_RELAYS,
+  normalizeRelayUrls,
+  sanitizeRelayUrl,
+} from "../shared/utils/relays";
 import { buildNip94EventTemplate } from "../shared/api/nip94";
-import { ShareFolderRequest, type ShareFolderItem } from "../shared/types/shareFolder";
+import type { ShareFolderRequest } from "../shared/types/shareFolder";
+import { type ShareFolderItem } from "../shared/types/shareFolder";
 import { usePrivateLinks } from "../features/privateLinks/hooks/usePrivateLinks";
 import type { PrivateLinkRecord } from "../shared/domain/privateLinks";
-import { buildItemsFromRecord, buildShareableItemHints, buildShareItemsFromRequest, filterItemsByPolicy } from "../shared/domain/folderShareHelpers";
+import {
+  buildItemsFromRecord,
+  buildShareableItemHints,
+  buildShareItemsFromRequest,
+  filterItemsByPolicy,
+} from "../shared/domain/folderShareHelpers";
 
 import type { ShareCompletion, SharePayload, ShareMode } from "../features/share/ui/ShareComposer";
 import type { BlossomBlob } from "../shared/api/blossomClient";
 import type { StatusMessageTone } from "../shared/types/status";
 import type { TabId } from "../shared/types/tabs";
 import type { SyncStateSnapshot } from "../features/workspace/TransferTabContainer";
-import type { BrowseActiveListState, BrowseNavigationState } from "../features/workspace/BrowseTabContainer";
+import type {
+  BrowseActiveListState,
+  BrowseNavigationState,
+} from "../features/workspace/BrowseTabContainer";
 import type { FilterMode } from "../shared/types/filter";
 import type { ProfileMetadataPayload } from "../features/profile/ProfilePanel";
 
-import {
-  TransferIcon,
-  UploadIcon,
-  SettingsIcon,
-  EditIcon,
-  LogoutIcon,
-} from "../shared/ui/icons";
+import { TransferIcon, UploadIcon, SettingsIcon, EditIcon, LogoutIcon } from "../shared/ui/icons";
 import { FolderShareDialog } from "../features/share/ui/FolderShareDialog";
 import { FolderShareRelayPrompt } from "../features/share/ui/FolderShareRelayPrompt";
 import { FolderSharePolicyPrompt } from "../features/share/ui/FolderSharePolicyPrompt";
@@ -60,15 +73,17 @@ import type {
 } from "../features/share/ui/folderShareStatus";
 
 const ConnectSignerDialogLazy = React.lazy(() =>
-  import("../features/nip46/ConnectSignerDialog").then(module => ({ default: module.ConnectSignerDialog }))
+  import("../features/nip46/ConnectSignerDialog").then(module => ({
+    default: module.ConnectSignerDialog,
+  })),
 );
 
 const RenameDialogLazy = React.lazy(() =>
-  import("../features/rename/RenameDialog").then(module => ({ default: module.RenameDialog }))
+  import("../features/rename/RenameDialog").then(module => ({ default: module.RenameDialog })),
 );
 
 const AudioPlayerCardLazy = React.lazy(() =>
-  import("../features/browse/BrowseTab").then(module => ({ default: module.AudioPlayerCard }))
+  import("../features/browse/BrowseTab").then(module => ({ default: module.AudioPlayerCard })),
 );
 
 const NAV_TABS: NavigationTab[] = [{ id: "upload" as const, label: "Upload", icon: UploadIcon }];
@@ -103,7 +118,8 @@ const validateManagedServers = (servers: ManagedServer[]): string | null => {
   for (const server of servers) {
     const trimmedUrl = (server.url || "").trim();
     if (!trimmedUrl) return "Enter a server URL for every entry.";
-    if (!/^https?:\/\//i.test(trimmedUrl)) return "Server URLs must start with http:// or https://.";
+    if (!/^https?:\/\//i.test(trimmedUrl))
+      return "Server URLs must start with http:// or https://.";
     const normalizedUrl = trimmedUrl.replace(/\/$/, "").toLowerCase();
     if (seen.has(normalizedUrl)) return "Server URLs must be unique.";
     seen.add(normalizedUrl);
@@ -185,7 +201,8 @@ export default function App() {
     setSyncEnabled,
     syncState,
   } = useUserPreferences();
-  const { statusMessage: pipelineStatusMessage, statusTone: pipelineStatusTone } = useSyncPipeline();
+  const { statusMessage: pipelineStatusMessage, statusTone: pipelineStatusTone } =
+    useSyncPipeline();
   const { confirm } = useDialog();
   const { effectiveRelays, relayPolicies } = usePreferredRelays();
   useAliasSync(effectiveRelays, Boolean(pubkey));
@@ -193,11 +210,11 @@ export default function App() {
 
   const preferredWriteRelays = useMemo(
     () => relayPolicies.filter(policy => policy.write).map(policy => policy.url),
-    [relayPolicies]
+    [relayPolicies],
   );
   const shareRelayCandidates = useMemo(
     () => (preferredWriteRelays.length > 0 ? preferredWriteRelays : effectiveRelays),
-    [effectiveRelays, preferredWriteRelays]
+    [effectiveRelays, preferredWriteRelays],
   );
 
   const keepSearchExpanded = preferences.keepSearchExpanded;
@@ -212,15 +229,20 @@ export default function App() {
   const [tab, setTab] = useState<TabId>("browse");
   const [browseHeaderControls, setBrowseHeaderControls] = useState<React.ReactNode | null>(null);
   const [homeNavigationKey, setHomeNavigationKey] = useState(0);
-  const [browseNavigationState, setBrowseNavigationState] = useState<BrowseNavigationState | null>(null);
+  const [browseNavigationState, setBrowseNavigationState] = useState<BrowseNavigationState | null>(
+    null,
+  );
   const [browseActiveList, setBrowseActiveList] = useState<BrowseActiveListState | null>(null);
   const browseRestoreCounterRef = useRef(0);
-  const [pendingBrowseRestore, setPendingBrowseRestore] = useState<
-    { state: BrowseActiveListState | null; key: number } | null
-  >(null);
-  const [uploadReturnTarget, setUploadReturnTarget] = useState<
-    { tab: TabId; browseActiveList: BrowseActiveListState | null; selectedServer: string | null } | null
-  >(null);
+  const [pendingBrowseRestore, setPendingBrowseRestore] = useState<{
+    state: BrowseActiveListState | null;
+    key: number;
+  } | null>(null);
+  const [uploadReturnTarget, setUploadReturnTarget] = useState<{
+    tab: TabId;
+    browseActiveList: BrowseActiveListState | null;
+    selectedServer: string | null;
+  } | null>(null);
   const uploadFolderSuggestion = useMemo(() => {
     const activeList = uploadReturnTarget?.browseActiveList;
     if (activeList && activeList.type === "folder") {
@@ -250,13 +272,24 @@ export default function App() {
     isLoading: privateLinksLoading,
     isFetching: privateLinksFetching,
   } = usePrivateLinks({ enabled: Boolean(user && signer) });
-  const privateLinkHost = useMemo(() => privateLinkServiceHost.replace(/\/+$/, ""), [privateLinkServiceHost]);
+  const privateLinkHost = useMemo(
+    () => privateLinkServiceHost.replace(/\/+$/, ""),
+    [privateLinkServiceHost],
+  );
   const [folderShareBusyPath, setFolderShareBusyPath] = useState<string | null>(null);
-  const [folderSharePolicyPrompt, setFolderSharePolicyPrompt] = useState<FolderSharePolicyPromptState | null>(null);
-  const [folderShareRelayPrompt, setFolderShareRelayPrompt] = useState<FolderShareRelayPromptState | null>(null);
+  const [folderSharePolicyPrompt, setFolderSharePolicyPrompt] =
+    useState<FolderSharePolicyPromptState | null>(null);
+  const [folderShareRelayPrompt, setFolderShareRelayPrompt] =
+    useState<FolderShareRelayPromptState | null>(null);
   const [folderShareDialog, setFolderShareDialog] = useState<FolderShareDialogState | null>(null);
 
-  const { enabled: syncEnabled, loading: syncLoading, error: syncError, pending: syncPending, lastSyncedAt: syncLastSyncedAt } = syncState;
+  const {
+    enabled: syncEnabled,
+    loading: syncLoading,
+    error: syncError,
+    pending: syncPending,
+    lastSyncedAt: syncLastSyncedAt,
+  } = syncState;
 
   const handleFilterModeChange = useCallback((_mode: FilterMode) => {
     void _mode;
@@ -285,7 +318,7 @@ export default function App() {
       }
       setTab(nextTab);
     },
-    [tab, browseActiveList, selectedServer]
+    [tab, browseActiveList, selectedServer],
   );
 
   const [statusMetrics, setStatusMetrics] = useState<StatusMetrics>({ count: 0, size: 0 });
@@ -323,7 +356,7 @@ export default function App() {
 
   const syncEnabledServerUrls = useMemo(
     () => localServers.filter(server => server.sync).map(server => server.url),
-    [localServers]
+    [localServers],
   );
 
   const serverValidationError = useMemo(() => validateManagedServers(localServers), [localServers]);
@@ -339,7 +372,9 @@ export default function App() {
   const syncButtonDisabled =
     syncEnabledServerUrls.length < 2 ||
     syncBusy ||
-    (syncSnapshot.syncAutoReady && syncSnapshot.allLinkedServersSynced && syncStatus.state !== "error");
+    (syncSnapshot.syncAutoReady &&
+      syncSnapshot.allLinkedServersSynced &&
+      syncStatus.state !== "error");
 
   useEffect(() => {
     setLocalServers(servers);
@@ -350,7 +385,10 @@ export default function App() {
       if (prev && servers.some(server => server.url === prev)) {
         return prev;
       }
-      if (preferences.defaultServerUrl && servers.some(server => server.url === preferences.defaultServerUrl)) {
+      if (
+        preferences.defaultServerUrl &&
+        servers.some(server => server.url === preferences.defaultServerUrl)
+      ) {
         return preferences.defaultServerUrl;
       }
       return servers[0]?.url ?? null;
@@ -450,7 +488,6 @@ export default function App() {
     element.removeAttribute("inert");
   }, [showAuthPrompt]);
 
-
   useEffect(() => {
     if (typeof window === "undefined") return;
     const params = new URLSearchParams(window.location.search);
@@ -518,7 +555,7 @@ export default function App() {
         }, duration);
       }
     },
-    []
+    [],
   );
 
   const ensureFolderListOnRelays = useCallback(
@@ -530,7 +567,7 @@ export default function App() {
         allowedShas?: ReadonlySet<string> | null;
         sharePolicy?: FolderSharePolicy | null;
         items?: ShareFolderItem[] | null;
-      }
+      },
     ): Promise<{ record: FolderListRecord; summary: PublishOperationSummary }> => {
       const sanitizedRelays = collectRelayTargets(relayUrls, DEFAULT_PUBLIC_RELAYS);
       const baseSummary: PublishOperationSummary = {
@@ -570,7 +607,11 @@ export default function App() {
 
       const allowedInput = options?.allowedShas;
       const allowedSet = allowedInput
-        ? new Set(Array.from(allowedInput).map(value => value.toLowerCase()).filter(value => value.length === 64))
+        ? new Set(
+            Array.from(allowedInput)
+              .map(value => value.toLowerCase())
+              .filter(value => value.length === 64),
+          )
         : null;
       const isAllowedSha = (sha: string) => {
         if (!allowedSet) return true;
@@ -586,7 +627,9 @@ export default function App() {
           ? options.items
           : Array.isArray(blobs)
             ? blobs
-                .filter((blob): blob is BlossomBlob => Boolean(blob && typeof blob.sha256 === "string"))
+                .filter((blob): blob is BlossomBlob =>
+                  Boolean(blob && typeof blob.sha256 === "string"),
+                )
                 .map(blob => ({
                   blob,
                   privateLinkAlias: null,
@@ -656,7 +699,9 @@ export default function App() {
           summary.failed = sanitizedRelays
             .filter(url => !successUrls.has(url))
             .map(url => ({ url, message: "No acknowledgement" }));
-          summary.error = summary.failed.length ? "Some relays did not acknowledge the folder list." : undefined;
+          summary.error = summary.failed.length
+            ? "Some relays did not acknowledge the folder list."
+            : undefined;
         } catch (publishError) {
           const successUrls = new Set<string>();
           const failedMap = new Map<string, string | undefined>();
@@ -666,12 +711,14 @@ export default function App() {
             "publishedToRelays" in publishError &&
             publishError.publishedToRelays instanceof Set
           ) {
-            (publishError.publishedToRelays as Set<InstanceType<typeof module.NDKRelay>>).forEach(relay => {
-              const normalized = sanitizeRelayUrl(relay.url);
-              if (normalized) {
-                successUrls.add(normalized);
-              }
-            });
+            (publishError.publishedToRelays as Set<InstanceType<typeof module.NDKRelay>>).forEach(
+              relay => {
+                const normalized = sanitizeRelayUrl(relay.url);
+                if (normalized) {
+                  successUrls.add(normalized);
+                }
+              },
+            );
           }
           if (
             publishError &&
@@ -685,14 +732,16 @@ export default function App() {
                 if (normalized) {
                   failedMap.set(normalized, err instanceof Error ? err.message : String(err));
                 }
-              }
+              },
             );
           }
           summary.succeeded = successUrls.size;
           const failedUrls = sanitizedRelays.filter(url => !successUrls.has(url));
           summary.failed = failedUrls.map(url => ({
             url,
-            message: failedMap.get(url) ?? (publishError instanceof Error ? publishError.message : "Publish failed"),
+            message:
+              failedMap.get(url) ??
+              (publishError instanceof Error ? publishError.message : "Publish failed"),
           }));
           summary.error =
             summary.failed.length > 0
@@ -718,14 +767,14 @@ export default function App() {
 
       return { record: shareRecord, summary };
     },
-    [getModule, ndk, prepareRelaySet, signer, user]
+    [getModule, ndk, prepareRelaySet, signer, user],
   );
 
   const ensureFolderMetadataOnRelays = useCallback(
     async (
       record: FolderListRecord,
       relayUrls: readonly string[],
-      blobs?: BlossomBlob[]
+      blobs?: BlossomBlob[],
     ): Promise<PublishOperationSummary> => {
       const sanitizedRelays = collectRelayTargets(relayUrls, DEFAULT_PUBLIC_RELAYS);
       const summary: PublishOperationSummary = {
@@ -748,7 +797,9 @@ export default function App() {
         return summary;
       }
       const module = await getModule();
-      const shas = Array.from(new Set(record.shas.map(sha => sha?.toLowerCase()).filter(Boolean) as string[]));
+      const shas = Array.from(
+        new Set(record.shas.map(sha => sha?.toLowerCase()).filter(Boolean) as string[]),
+      );
       if (!shas.length) {
         summary.succeeded = sanitizedRelays.length;
         return summary;
@@ -761,7 +812,9 @@ export default function App() {
         }
       });
 
-      let fetchedEvents: Set<any> = new Set();
+      type NdkEventInstance = InstanceType<typeof module.NDKEvent>;
+
+      let fetchedEvents: Set<NdkEventInstance> = new Set<NdkEventInstance>();
       let metadataFetchTimedOut = false;
       let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
       try {
@@ -771,8 +824,8 @@ export default function App() {
             { kinds: [1063], "#ox": shas, limit: shas.length },
           ],
           { closeOnEose: true, groupable: false },
-          relaySet
-        );
+          relaySet,
+        ) as Promise<Set<NdkEventInstance>>;
         fetchedEvents = (await Promise.race([
           metadataFetch.finally(() => {
             if (timeoutHandle) {
@@ -780,14 +833,14 @@ export default function App() {
               timeoutHandle = null;
             }
           }),
-          new Promise<Set<any>>(resolve => {
+          new Promise<Set<NdkEventInstance>>(resolve => {
             timeoutHandle = setTimeout(() => {
               metadataFetchTimedOut = true;
               timeoutHandle = null;
-              resolve(new Set());
+              resolve(new Set<NdkEventInstance>());
             }, FOLDER_METADATA_FETCH_TIMEOUT_MS);
           }),
-        ])) as Set<any>;
+        ])) as Set<NdkEventInstance>;
       } catch (error) {
         console.warn("Unable to fetch existing file metadata for share", error);
       } finally {
@@ -798,24 +851,24 @@ export default function App() {
       }
       if (metadataFetchTimedOut) {
         console.warn(
-          `Timed out after ${FOLDER_METADATA_FETCH_TIMEOUT_MS}ms while fetching metadata events for shared items`
+          `Timed out after ${FOLDER_METADATA_FETCH_TIMEOUT_MS}ms while fetching metadata events for shared items`,
         );
       }
 
       const found = new Set<string>();
       const eventsToPublish: InstanceType<typeof module.NDKEvent>[] = [];
 
-      fetchedEvents.forEach(raw => {
-        if (!raw || !Array.isArray(raw.tags)) return;
-        const shaTag = raw.tags.find((tag: unknown) =>
-          Array.isArray(tag) && (tag[0] === "x" || tag[0] === "ox") && typeof tag[1] === "string"
+      fetchedEvents.forEach(eventInstance => {
+        if (!eventInstance || !Array.isArray(eventInstance.tags)) return;
+        const shaTag = eventInstance.tags.find(
+          (tag: unknown) =>
+            Array.isArray(tag) && (tag[0] === "x" || tag[0] === "ox") && typeof tag[1] === "string",
         ) as string[] | undefined;
         if (!shaTag || typeof shaTag[1] !== "string") return;
         const sha = shaTag[1].toLowerCase();
         if (!shas.includes(sha)) return;
         found.add(sha);
-        const event = new module.NDKEvent(ndk, raw);
-        eventsToPublish.push(event);
+        eventsToPublish.push(eventInstance);
       });
 
       const missing = shas.filter(sha => !found.has(sha));
@@ -867,13 +920,15 @@ export default function App() {
             "publishedToRelays" in publishError &&
             publishError.publishedToRelays instanceof Set
           ) {
-            (publishError.publishedToRelays as Set<InstanceType<typeof module.NDKRelay>>).forEach(relay => {
-              const normalized = sanitizeRelayUrl(relay.url);
-              if (normalized) {
-                successUrls.add(normalized);
-                trackSuccess(normalized);
-              }
-            });
+            (publishError.publishedToRelays as Set<InstanceType<typeof module.NDKRelay>>).forEach(
+              relay => {
+                const normalized = sanitizeRelayUrl(relay.url);
+                if (normalized) {
+                  successUrls.add(normalized);
+                  trackSuccess(normalized);
+                }
+              },
+            );
           }
           if (
             publishError &&
@@ -881,15 +936,19 @@ export default function App() {
             "errors" in publishError &&
             publishError.errors instanceof Map
           ) {
-            (publishError.errors as Map<InstanceType<typeof module.NDKRelay>, Error>).forEach((err, relayInstance) => {
-              const normalized = sanitizeRelayUrl(relayInstance.url);
-              if (normalized) {
-                failureMap.set(normalized, err instanceof Error ? err.message : String(err));
-              }
-            });
+            (publishError.errors as Map<InstanceType<typeof module.NDKRelay>, Error>).forEach(
+              (err, relayInstance) => {
+                const normalized = sanitizeRelayUrl(relayInstance.url);
+                if (normalized) {
+                  failureMap.set(normalized, err instanceof Error ? err.message : String(err));
+                }
+              },
+            );
           }
           const fallbackMessage =
-            publishError instanceof Error ? publishError.message : "Failed to publish metadata event";
+            publishError instanceof Error
+              ? publishError.message
+              : "Failed to publish metadata event";
           sanitizedRelays.forEach(url => {
             if (successUrls.has(url)) return;
             trackFailure(url, failureMap.get(url) ?? fallbackMessage);
@@ -899,7 +958,7 @@ export default function App() {
       }
 
       const succeededRelays = sanitizedRelays.filter(
-        url => !relayFailures.has(url) && (relaySuccesses.get(url) ?? 0) >= eventsToPublish.length
+        url => !relayFailures.has(url) && (relaySuccesses.get(url) ?? 0) >= eventsToPublish.length,
       );
       summary.succeeded = succeededRelays.length;
       summary.failed = sanitizedRelays
@@ -912,12 +971,15 @@ export default function App() {
         summary.failed.length > 0 ? "Some relays did not receive file metadata." : undefined;
 
       if (shas.some(sha => !found.has(sha))) {
-        console.warn("Some shared items are missing metadata events", shas.filter(sha => !found.has(sha)));
+        console.warn(
+          "Some shared items are missing metadata events",
+          shas.filter(sha => !found.has(sha)),
+        );
       }
 
       return summary;
     },
-    [getModule, ndk, prepareRelaySet, signer]
+    [getModule, ndk, prepareRelaySet, signer],
   );
 
   useEffect(() => {
@@ -939,14 +1001,15 @@ export default function App() {
     const folderRecords = Array.from(foldersByPath.values());
     folderRecords.forEach(record => {
       if (!record || record.visibility !== "public") return;
-      const policy: FolderSharePolicy = record.sharePolicy === "private-only" || record.sharePolicy === "public-only"
-        ? record.sharePolicy
-        : "all";
+      const policy: FolderSharePolicy =
+        record.sharePolicy === "private-only" || record.sharePolicy === "public-only"
+          ? record.sharePolicy
+          : "all";
       const allItems = buildItemsFromRecord(record, activeLinks, privateLinkHost);
       const filteredItems = filterItemsByPolicy(allItems, policy);
       const desiredShaSet = new Set(filteredItems.map(item => item.blob.sha256.toLowerCase()));
       const currentShaSet = new Set(
-        (record.shas ?? []).map(sha => (typeof sha === "string" ? sha.toLowerCase() : String(sha)))
+        (record.shas ?? []).map(sha => (typeof sha === "string" ? sha.toLowerCase() : String(sha))),
       );
 
       let needsRepublish = false;
@@ -1003,11 +1066,21 @@ export default function App() {
             sharePolicy: policy,
             items: filteredItems,
           });
-          if (result.summary.failed.length && result.summary.failed.length === result.summary.total) {
-            console.warn("Auto-republish failed for shared folder", record.path || record.identifier);
+          if (
+            result.summary.failed.length &&
+            result.summary.failed.length === result.summary.total
+          ) {
+            console.warn(
+              "Auto-republish failed for shared folder",
+              record.path || record.identifier,
+            );
           }
         } catch (error) {
-          console.warn("Auto-republish encountered an error for shared folder", record.path || record.identifier, error);
+          console.warn(
+            "Auto-republish encountered an error for shared folder",
+            record.path || record.identifier,
+            error,
+          );
         } finally {
           autoRepublishInFlightRef.current.delete(pathKey);
         }
@@ -1029,7 +1102,13 @@ export default function App() {
   ]);
 
   const shareFolderWithRelays = useCallback(
-    async ({ record, normalizedPath, relayHints, items, sharePolicy }: ShareFolderExecutionRequest) => {
+    async ({
+      record,
+      normalizedPath,
+      relayHints,
+      items,
+      sharePolicy,
+    }: ShareFolderExecutionRequest) => {
       const sanitizedHints = collectRelayTargets(relayHints, shareRelayCandidates);
       if (!sanitizedHints.length) {
         showStatusMessage("Select at least one relay before sharing.", "error", 4000);
@@ -1064,11 +1143,16 @@ export default function App() {
         }
         showStatusMessage("Folder is now public.", "success", 2500);
 
-        const listPublish = await ensureFolderListOnRelays(nextRecord, sanitizedHints, filteredBlobs, {
-          allowedShas: allowedShaSet,
-          sharePolicy,
-          items,
-        });
+        const listPublish = await ensureFolderListOnRelays(
+          nextRecord,
+          sanitizedHints,
+          filteredBlobs,
+          {
+            allowedShas: allowedShaSet,
+            sharePolicy,
+            items,
+          },
+        );
         const shareRecord = listPublish.record;
         const ownerPubkey = shareRecord.pubkey ?? user?.pubkey ?? null;
         const naddr = encodeFolderNaddr(shareRecord, ownerPubkey, sanitizedHints);
@@ -1077,7 +1161,9 @@ export default function App() {
           return;
         }
         const origin =
-          typeof window !== "undefined" && window.location?.origin ? window.location.origin : "https://bloomapp.me";
+          typeof window !== "undefined" && window.location?.origin
+            ? window.location.origin
+            : "https://bloomapp.me";
         const shareUrl = `${origin}/folders/${encodeURIComponent(naddr)}`;
 
         setFolderShareDialog({
@@ -1108,7 +1194,7 @@ export default function App() {
           showStatusMessage(
             "Share link ready. Some relays still need attention—retry from the share dialog.",
             "success",
-            4500
+            4500,
           );
         } else {
           showStatusMessage("Share link ready.", "success", 2000);
@@ -1116,7 +1202,11 @@ export default function App() {
 
         void (async () => {
           try {
-            const metadataSummary = await ensureFolderMetadataOnRelays(shareRecord, sanitizedHints, filteredBlobs);
+            const metadataSummary = await ensureFolderMetadataOnRelays(
+              shareRecord,
+              sanitizedHints,
+              filteredBlobs,
+            );
             setFolderShareDialog(current => {
               if (!current || current.record.path !== shareRecord.path) return current;
               const relayUniverse =
@@ -1124,13 +1214,12 @@ export default function App() {
                   ? normalizeRelayUrls(current.relayHints)
                   : sanitizedHints;
               const baseTotal = relayUniverse.length;
-              const listPhase: PublishPhaseState =
-                current.phases?.list ?? {
-                  status: "ready",
-                  total: baseTotal,
-                  succeeded: baseTotal,
-                  failed: [],
-                };
+              const listPhase: PublishPhaseState = current.phases?.list ?? {
+                status: "ready",
+                total: baseTotal,
+                succeeded: baseTotal,
+                failed: [],
+              };
               const remainingFailures = metadataSummary.failed;
               return {
                 ...current,
@@ -1151,7 +1240,7 @@ export default function App() {
               showStatusMessage(
                 "Some relays did not receive file details. Retry from the share dialog.",
                 "warning",
-                6000
+                6000,
               );
             }
           } catch (metadataError) {
@@ -1163,21 +1252,20 @@ export default function App() {
                   ? normalizeRelayUrls(current.relayHints)
                   : sanitizedHints;
               const baseTotal = relayUniverse.length;
-              const nextPhases =
-                current.phases ?? {
-                  list: {
-                    status: "ready",
-                    total: baseTotal,
-                    succeeded: baseTotal,
-                    failed: [],
-                  },
-                  metadata: {
-                    status: "publishing",
-                    total: baseTotal,
-                    succeeded: 0,
-                    failed: [],
-                  },
-                };
+              const nextPhases = current.phases ?? {
+                list: {
+                  status: "ready",
+                  total: baseTotal,
+                  succeeded: baseTotal,
+                  failed: [],
+                },
+                metadata: {
+                  status: "publishing",
+                  total: baseTotal,
+                  succeeded: 0,
+                  failed: [],
+                },
+              };
               return {
                 ...current,
                 relayHints: relayUniverse,
@@ -1188,7 +1276,10 @@ export default function App() {
                     total: baseTotal,
                     succeeded: nextPhases.metadata.succeeded ?? 0,
                     failed: nextPhases.metadata.failed ?? [],
-                    message: metadataError instanceof Error ? metadataError.message : "Failed to publish metadata",
+                    message:
+                      metadataError instanceof Error
+                        ? metadataError.message
+                        : "Failed to publish metadata",
                   },
                 },
               };
@@ -1196,7 +1287,7 @@ export default function App() {
             showStatusMessage(
               "Some file details are still publishing. Previews may take a bit longer to appear.",
               "warning",
-              5000
+              5000,
             );
           }
         })();
@@ -1215,7 +1306,7 @@ export default function App() {
       ensureFolderListOnRelays,
       ensureFolderMetadataOnRelays,
       user?.pubkey,
-    ]
+    ],
   );
 
   const handleShareFolder = useCallback(
@@ -1316,7 +1407,7 @@ export default function App() {
       user?.pubkey,
       privateLinkRecords,
       privateLinkHost,
-    ]
+    ],
   );
 
   const handleCancelSharePolicyPrompt = useCallback(() => {
@@ -1341,7 +1432,7 @@ export default function App() {
         sharePolicy: policy,
       });
     },
-    [folderSharePolicyPrompt]
+    [folderSharePolicyPrompt],
   );
 
   const handleRetryFolderList = useCallback(async () => {
@@ -1377,7 +1468,9 @@ export default function App() {
         status: "publishing",
         total: baseTotal,
         succeeded: succeededBefore,
-        failed: existingList?.failed ? [...existingList.failed] : relayTargets.map(url => ({ url })),
+        failed: existingList?.failed
+          ? [...existingList.failed]
+          : relayTargets.map(url => ({ url })),
       };
       const nextMetadata: PublishPhaseState = existingMetadata
         ? { ...existingMetadata }
@@ -1396,7 +1489,9 @@ export default function App() {
         shareItems && shareItems.length > 0
           ? shareItems
           : (shareBlobs ?? [])
-              .filter((blob): blob is BlossomBlob => Boolean(blob && typeof blob.sha256 === "string"))
+              .filter((blob): blob is BlossomBlob =>
+                Boolean(blob && typeof blob.sha256 === "string"),
+              )
               .map(blob => ({
                 blob,
                 privateLinkAlias: null,
@@ -1457,7 +1552,11 @@ export default function App() {
       if (result.summary.failed.length === 0) {
         showStatusMessage("Folder list republished to all relays.", "success", 3000);
       } else {
-        showStatusMessage("Retry completed, but some relays still need attention.", "warning", 5000);
+        showStatusMessage(
+          "Retry completed, but some relays still need attention.",
+          "warning",
+          5000,
+        );
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to republish folder list.";
@@ -1528,8 +1627,12 @@ export default function App() {
       const nextMetadata: PublishPhaseState = {
         status: "publishing",
         total: baseTotal,
-        succeeded: currentMetadata ? Math.min(currentMetadata.succeeded, baseTotal) : Math.max(0, baseTotal - relayTargets.length),
-        failed: currentMetadata?.failed ? [...currentMetadata.failed] : relayTargets.map(url => ({ url })),
+        succeeded: currentMetadata
+          ? Math.min(currentMetadata.succeeded, baseTotal)
+          : Math.max(0, baseTotal - relayTargets.length),
+        failed: currentMetadata?.failed
+          ? [...currentMetadata.failed]
+          : relayTargets.map(url => ({ url })),
       };
       return {
         ...current,
@@ -1541,7 +1644,11 @@ export default function App() {
       };
     });
     try {
-      const summary = await ensureFolderMetadataOnRelays(record, relayTargets, shareBlobs ?? undefined);
+      const summary = await ensureFolderMetadataOnRelays(
+        record,
+        relayTargets,
+        shareBlobs ?? undefined,
+      );
       setFolderShareDialog(current => {
         if (!current || current.record.path !== record.path) return current;
         const relayUniverse =
@@ -1573,7 +1680,11 @@ export default function App() {
       if (summary.failed.length === 0) {
         showStatusMessage("File details republished to all relays.", "success", 3000);
       } else {
-        showStatusMessage("Some relays still need file details. Retry again if needed.", "warning", 5000);
+        showStatusMessage(
+          "Some relays still need file details. Retry again if needed.",
+          "warning",
+          5000,
+        );
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : "Failed to republish metadata.";
@@ -1628,7 +1739,7 @@ export default function App() {
       setFolderShareRelayPrompt(null);
       await shareFolderWithRelays(payload);
     },
-    [folderShareRelayPrompt, shareFolderWithRelays, showStatusMessage]
+    [folderShareRelayPrompt, shareFolderWithRelays, showStatusMessage],
   );
 
   const handleCancelShareRelayPrompt = useCallback(() => {
@@ -1662,16 +1773,23 @@ export default function App() {
       setFolderShareBusyPath(normalizedPath);
       try {
         await setFolderVisibility(normalizedPath, "private");
-        showStatusMessage("Folder is now private. Shared links will stop working soon.", "success", 4000);
-        setFolderShareDialog(current => (current && current.record.path === normalizedPath ? null : current));
+        showStatusMessage(
+          "Folder is now private. Shared links will stop working soon.",
+          "success",
+          4000,
+        );
+        setFolderShareDialog(current =>
+          current && current.record.path === normalizedPath ? null : current,
+        );
       } catch (error) {
-        const message = error instanceof Error ? error.message : "Failed to update folder visibility.";
+        const message =
+          error instanceof Error ? error.message : "Failed to update folder visibility.";
         showStatusMessage(message, "error", 5000);
       } finally {
         setFolderShareBusyPath(null);
       }
     },
-    [resolveFolderPath, foldersByPath, folderShareBusyPath, setFolderVisibility, showStatusMessage]
+    [resolveFolderPath, foldersByPath, folderShareBusyPath, setFolderVisibility, showStatusMessage],
   );
 
   const handleCloseFolderShareDialog = useCallback(() => {
@@ -1679,7 +1797,10 @@ export default function App() {
   }, []);
 
   const handleProfileUpdated = useCallback((metadata: ProfileMetadataPayload) => {
-    const nextAvatarUrl = typeof metadata.picture === "string" && metadata.picture.trim() ? metadata.picture.trim() : null;
+    const nextAvatarUrl =
+      typeof metadata.picture === "string" && metadata.picture.trim()
+        ? metadata.picture.trim()
+        : null;
     setAvatarUrl(nextAvatarUrl);
   }, []);
 
@@ -1692,8 +1813,9 @@ export default function App() {
   }, [nip46Snapshot.sessions]);
 
   const hasConnectableRemoteSignerSession = useMemo(
-    () => nip46Snapshot.sessions.some(session => session.status !== "revoked" && !session.lastError),
-    [nip46Snapshot.sessions]
+    () =>
+      nip46Snapshot.sessions.some(session => session.status !== "revoked" && !session.lastError),
+    [nip46Snapshot.sessions],
   );
 
   const isRemoteSignerAdopted = Boolean(signer);
@@ -1733,7 +1855,6 @@ export default function App() {
     nip46TransportReady,
     showStatusMessage,
   ]);
-
 
   useEffect(() => {
     if (!isRemoteSignerAdopted) return;
@@ -1836,14 +1957,14 @@ export default function App() {
         setSelectedServer(url);
       }
     },
-    [setDefaultServerUrl]
+    [setDefaultServerUrl],
   );
 
   const handleSetDefaultViewMode = useCallback(
     (mode: "grid" | "list") => {
       setDefaultViewMode(mode);
     },
-    [setDefaultViewMode]
+    [setDefaultViewMode],
   );
 
   const handleSetDefaultFilterMode = useCallback(
@@ -1851,7 +1972,7 @@ export default function App() {
       if (preferences.defaultFilterMode === mode) return;
       setDefaultFilterMode(mode);
     },
-    [preferences.defaultFilterMode, setDefaultFilterMode]
+    [preferences.defaultFilterMode, setDefaultFilterMode],
   );
 
   const handleSetDefaultSortOption = useCallback(
@@ -1859,7 +1980,7 @@ export default function App() {
       if (preferences.defaultSortOption === option) return;
       setDefaultSortOption(option);
     },
-    [preferences.defaultSortOption, setDefaultSortOption]
+    [preferences.defaultSortOption, setDefaultSortOption],
   );
 
   const handleSetSortDirection = useCallback(
@@ -1867,35 +1988,35 @@ export default function App() {
       if (preferences.sortDirection === direction) return;
       setSortDirection(direction);
     },
-    [preferences.sortDirection, setSortDirection]
+    [preferences.sortDirection, setSortDirection],
   );
 
   const handleSetShowPreviewsInGrid = useCallback(
     (value: boolean) => {
       setShowGridPreviews(value);
     },
-    [setShowGridPreviews]
+    [setShowGridPreviews],
   );
 
   const handleSetShowPreviewsInList = useCallback(
     (value: boolean) => {
       setShowListPreviews(value);
     },
-    [setShowListPreviews]
+    [setShowListPreviews],
   );
 
   const handleSetKeepSearchExpanded = useCallback(
     (value: boolean) => {
       setKeepSearchExpanded(value);
     },
-    [setKeepSearchExpanded]
+    [setKeepSearchExpanded],
   );
 
   const handleSetTheme = useCallback(
     (nextTheme: "dark" | "light") => {
       setTheme(nextTheme);
     },
-    [setTheme]
+    [setTheme],
   );
 
   const handleToggleSearch = useCallback(() => {
@@ -1931,7 +2052,7 @@ export default function App() {
         setSearchQuery("");
       }
     },
-    [keepSearchExpanded]
+    [keepSearchExpanded],
   );
 
   const handleInsertSearchToken = useCallback(
@@ -1961,7 +2082,7 @@ export default function App() {
         });
       }
     },
-    [searchInputRef]
+    [searchInputRef],
   );
 
   useEffect(() => {
@@ -1997,31 +2118,28 @@ export default function App() {
     }
   }, [isSearchOpen, keepSearchExpanded, tab]);
 
-  const schedulePendingSaveAttempt = useCallback(
-    (backoffUntil?: number) => {
-      if (retryPendingSaveTimeout.current) {
-        clearTimeout(retryPendingSaveTimeout.current);
-        retryPendingSaveTimeout.current = null;
-      }
+  const schedulePendingSaveAttempt = useCallback((backoffUntil?: number) => {
+    if (retryPendingSaveTimeout.current) {
+      clearTimeout(retryPendingSaveTimeout.current);
+      retryPendingSaveTimeout.current = null;
+    }
 
+    setPendingSaveVersion(prev => prev + 1);
+
+    if (backoffUntil === undefined) return;
+    const delay = Math.max(0, backoffUntil - Date.now());
+    retryPendingSaveTimeout.current = setTimeout(() => {
+      retryPendingSaveTimeout.current = null;
       setPendingSaveVersion(prev => prev + 1);
-
-      if (backoffUntil === undefined) return;
-      const delay = Math.max(0, backoffUntil - Date.now());
-      retryPendingSaveTimeout.current = setTimeout(() => {
-        retryPendingSaveTimeout.current = null;
-        setPendingSaveVersion(prev => prev + 1);
-      }, delay);
-    },
-    []
-  );
+    }, delay);
+  }, []);
 
   const queuePendingSave = useCallback(
     (payload: PendingSave) => {
       pendingSaveRef.current = payload;
       schedulePendingSaveAttempt(payload.backoffUntil);
     },
-    [schedulePendingSaveAttempt]
+    [schedulePendingSaveAttempt],
   );
 
   const attemptSave = useCallback(
@@ -2036,7 +2154,7 @@ export default function App() {
         showStatusMessage(message, "error", 3000);
       }
     },
-    [queuePendingSave, saveServers, showStatusMessage]
+    [queuePendingSave, saveServers, showStatusMessage],
   );
 
   const flushPendingSave = useCallback(() => {
@@ -2081,7 +2199,7 @@ export default function App() {
       void attemptSave(normalized, successMessage);
       return true;
     },
-    [attemptSave, queuePendingSave, saving, showStatusMessage, signer]
+    [attemptSave, queuePendingSave, saving, showStatusMessage, signer],
   );
 
   const handleAddServer = (server: ManagedServer) => {
@@ -2182,7 +2300,7 @@ export default function App() {
         setSelectedServer(null);
       }
     },
-    [confirm, localServers, persistServers, selectedServer, setSelectedServer]
+    [confirm, localServers, persistServers, selectedServer, setSelectedServer],
   );
 
   const handleShareBlob = useCallback(
@@ -2191,7 +2309,7 @@ export default function App() {
       const targetTab: TabId = options?.mode === "private-link" ? "share-private" : "share";
       selectTab(targetTab);
     },
-    [openShareForPayload, selectTab]
+    [openShareForPayload, selectTab],
   );
 
   const handleShareComplete = useCallback(
@@ -2211,15 +2329,21 @@ export default function App() {
         if (result.failures && result.failures > 0) {
           message += ` ${result.failures} relay${result.failures === 1 ? "" : "s"} reported errors.`;
         }
-        showStatusMessage(message, result.failures && result.failures > 0 ? "info" : "success", 5000);
+        showStatusMessage(
+          message,
+          result.failures && result.failures > 0 ? "info" : "success",
+          5000,
+        );
         selectTab("browse");
       } else {
         const dmLabel = isPrivateDm ? "private DM" : "DM";
-        const message = result.message || (label ? `Failed to send ${dmLabel} to ${label}.` : `Failed to send ${dmLabel}.`);
+        const message =
+          result.message ||
+          (label ? `Failed to send ${dmLabel} to ${label}.` : `Failed to send ${dmLabel}.`);
         showStatusMessage(message, "error", 6000);
       }
     },
-    [completeShareInternal, selectTab, showStatusMessage]
+    [completeShareInternal, selectTab, showStatusMessage],
   );
 
   const handleUploadCompleted = (success: boolean) => {
@@ -2253,7 +2377,10 @@ export default function App() {
     selectTab("browse");
   };
 
-  const toneClassByKey: Record<"muted" | "syncing" | "success" | "warning" | "info" | "error", string> = {
+  const toneClassByKey: Record<
+    "muted" | "syncing" | "success" | "warning" | "info" | "error",
+    string
+  > = {
     muted: "text-slate-500",
     syncing: "text-emerald-300",
     success: "text-emerald-200",
@@ -2280,11 +2407,16 @@ export default function App() {
       return { text: "All servers synced", tone: "success" as const };
     }
     return { text: "Servers not in sync", tone: "warning" as const };
-  }, [syncEnabledServerUrls.length, syncStatus, syncSnapshot.allLinkedServersSynced, syncSnapshot.syncAutoReady]);
+  }, [
+    syncEnabledServerUrls.length,
+    syncStatus,
+    syncSnapshot.allLinkedServersSynced,
+    syncSnapshot.syncAutoReady,
+  ]);
 
   const derivedStatusMessage = statusMessage
     ? statusMessage
-    : pipelineStatusMessage ?? (syncLoading ? "Syncing settings" : null);
+    : (pipelineStatusMessage ?? (syncLoading ? "Syncing settings" : null));
   const centerMessage = derivedStatusMessage ?? syncSummary.text;
   const centerTone = (() => {
     if (statusMessage) {
@@ -2306,7 +2438,8 @@ export default function App() {
 
   const statusCount = statusMetrics.count;
   const statusSize = statusMetrics.size;
-  const showStatusTotals = tab === "browse" || tab === "upload" || tab === "share" || tab === "transfer";
+  const showStatusTotals =
+    tab === "browse" || tab === "upload" || tab === "share" || tab === "transfer";
   const hideServerSelectorTabs: TabId[] = ["profile", "relays", "servers", "settings"];
   const showServerSelector = !hideServerSelectorTabs.includes(tab);
   const showGithubLink = hideServerSelectorTabs.includes(tab);
@@ -2342,12 +2475,13 @@ export default function App() {
     setIsUserMenuOpen(false);
   }, [selectTab]);
 
-  const userMenuLinks = useMemo(() =>
-    [
-      { label: "Edit Profile", icon: EditIcon, handler: handleSelectProfile },
-      { label: "Settings", icon: SettingsIcon, handler: handleSelectSettings },
-    ].sort((a, b) => a.label.localeCompare(b.label)),
-  [handleSelectProfile, handleSelectSettings]
+  const userMenuLinks = useMemo(
+    () =>
+      [
+        { label: "Edit Profile", icon: EditIcon, handler: handleSelectProfile },
+        { label: "Settings", icon: SettingsIcon, handler: handleSelectSettings },
+      ].sort((a, b) => a.label.localeCompare(b.label)),
+    [handleSelectProfile, handleSelectSettings],
   );
 
   const handleDisconnectClick = useCallback(() => {
@@ -2361,7 +2495,9 @@ export default function App() {
   const shellClass = showAuthPrompt
     ? `${shellBaseClass} ${isLightTheme ? "bg-slate-900/70" : "bg-slate-900/70"}`
     : `${shellBaseClass} ${
-        isLightTheme ? "bg-white surface-sheet shadow-panel noise-layer" : "bg-slate-900 surface-sheet shadow-panel noise-layer"
+        isLightTheme
+          ? "bg-white surface-sheet shadow-panel noise-layer"
+          : "bg-slate-900 surface-sheet shadow-panel noise-layer"
       }`;
   const userMenuButtonClass = isLightTheme
     ? "relative flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 bg-white/90 p-0 text-xs text-slate-700 transition hover:border-blue-400 hover:text-blue-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/70 focus-visible:ring-offset-2 focus-visible:ring-offset-white"
@@ -2412,7 +2548,9 @@ export default function App() {
                       onError={() => setAvatarUrl(null)}
                     />
                   ) : (
-                    <span className="flex h-full w-full items-center justify-center font-semibold">{userInitials}</span>
+                    <span className="flex h-full w-full items-center justify-center font-semibold">
+                      {userInitials}
+                    </span>
                   )}
                   <span
                     className={`pointer-events-none absolute -bottom-1.5 -right-1.5 z-10 flex h-5 w-5 items-center justify-center rounded-full border shadow-toolbar ${

@@ -7,7 +7,7 @@ export function useInViewport<T extends Element>(options?: IntersectionObserverI
 
   const thresholdKey = Array.isArray(options?.threshold)
     ? options?.threshold.join(",")
-    : options?.threshold ?? 0;
+    : (options?.threshold ?? 0);
 
   const cleanupObserver = useCallback(() => {
     observerRef.current?.disconnect();

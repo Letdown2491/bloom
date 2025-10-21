@@ -88,7 +88,7 @@ const dedupeRelayEntries = (entries: RelayHealth[], maxCount: number) => {
 export const buildRelayHealthSnapshot = (
   entries: RelayHealth[],
   previous: Map<string, PersistableRelayHealth>,
-  limit: number
+  limit: number,
 ): RelayPersistenceSnapshot => {
   const nowMs = Date.now();
   const nowSeconds = Math.trunc(nowMs / 1000);
@@ -101,7 +101,9 @@ export const buildRelayHealthSnapshot = (
     if (!normalizedUrl) return;
 
     const lastEventMs =
-      typeof entry.lastEventAt === "number" && Number.isFinite(entry.lastEventAt) ? entry.lastEventAt : null;
+      typeof entry.lastEventAt === "number" && Number.isFinite(entry.lastEventAt)
+        ? entry.lastEventAt
+        : null;
     const previousEntry = previous.get(normalizedUrl);
     const previousFreshMs =
       typeof previousEntry?.updatedAt === "number" && Number.isFinite(previousEntry.updatedAt)
@@ -122,11 +124,11 @@ export const buildRelayHealthSnapshot = (
     const previousUpdatedAt =
       typeof previousEntry?.updatedAt === "number" && Number.isFinite(previousEntry.updatedAt)
         ? previousEntry.updatedAt
-        : lastEventSeconds ?? null;
+        : (lastEventSeconds ?? null);
 
     const updatedAt =
       prevSameStatus && prevSameError && prevSameEvent
-        ? previousUpdatedAt ?? nowSeconds
+        ? (previousUpdatedAt ?? nowSeconds)
         : nowSeconds;
 
     const normalized: PersistableRelayHealth = {
@@ -156,10 +158,12 @@ export const buildRelayHealthSnapshot = (
 
 const isQuotaExceededError = (error: unknown) =>
   error instanceof DOMException &&
-  (error.name === "QuotaExceededError" || error.code === 22 || error.name === "NS_ERROR_DOM_QUOTA_REACHED");
+  (error.name === "QuotaExceededError" ||
+    error.code === 22 ||
+    error.name === "NS_ERROR_DOM_QUOTA_REACHED");
 
 export const persistRelayHealthSnapshot = (
-  snapshot: RelayPersistenceSnapshot
+  snapshot: RelayPersistenceSnapshot,
 ): RelayPersistenceResult | null => {
   if (typeof window === "undefined" || relayHealthStorageState.blocked) return null;
   try {
@@ -245,7 +249,8 @@ export const seedRelayHealth = (seed?: RelayHealth[], fallbackRelays: readonly s
   const addEntry = (entry: RelayHealth) => {
     const normalizedUrl = normalizeRelayUrl(entry.url);
     if (!normalizedUrl) return;
-    if (entry.status !== "connecting" && entry.status !== "connected" && entry.status !== "error") return;
+    if (entry.status !== "connecting" && entry.status !== "connected" && entry.status !== "error")
+      return;
     map.set(normalizedUrl, {
       url: normalizedUrl,
       status: entry.status,

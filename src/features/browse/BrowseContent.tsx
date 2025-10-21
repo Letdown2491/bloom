@@ -37,7 +37,9 @@ export type BrowseContentProps = {
   onOpenList?: (blob: BlossomBlob) => void;
   defaultSortOption: DefaultSortOption;
   sortDirection: SortDirection;
-  resolvePrivateLink?: (blob: BlossomBlob) => { url: string; alias?: string | null; expiresAt?: number | null } | null;
+  resolvePrivateLink?: (
+    blob: BlossomBlob,
+  ) => { url: string; alias?: string | null; expiresAt?: number | null } | null;
   privateLinkServiceConfigured: boolean;
 };
 
@@ -83,11 +85,11 @@ export const BrowseContent: React.FC<BrowseContentProps> = ({
     | "onSelectMany"
     | "onDelete"
     | "onCopy"
-  | "onShare"
-  | "onRename"
+    | "onShare"
+    | "onRename"
     | "onMove"
     | "onPlay"
-  | "resolvePrivateLink"
+    | "resolvePrivateLink"
     | "onShareFolder"
     | "currentTrackUrl"
     | "currentTrackStatus"
@@ -130,7 +132,9 @@ export const BrowseContent: React.FC<BrowseContentProps> = ({
 
   if (browsingAllServers) {
     return (
-      <div className={`flex flex-1 min-h-0 flex-col overflow-hidden ${viewMode === "grid" ? "pr-1" : ""}`}>
+      <div
+        className={`flex flex-1 min-h-0 flex-col overflow-hidden ${viewMode === "grid" ? "pr-1" : ""}`}
+      >
         {renderBlobList({
           blobs: aggregatedBlobs,
           signTemplate,
@@ -154,7 +158,9 @@ export const BrowseContent: React.FC<BrowseContentProps> = ({
   const effectiveBlobs = currentVisibleBlobs ?? currentSnapshot.blobs;
 
   return (
-    <div className={`flex flex-1 min-h-0 flex-col overflow-hidden ${viewMode === "grid" ? "pr-1" : ""}`}>
+    <div
+      className={`flex flex-1 min-h-0 flex-col overflow-hidden ${viewMode === "grid" ? "pr-1" : ""}`}
+    >
       {renderBlobList({
         blobs: effectiveBlobs,
         baseUrl: currentSnapshot.server.url,

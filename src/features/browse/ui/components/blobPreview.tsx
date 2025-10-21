@@ -1,7 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { decode } from "blurhash";
 import { prettyBytes, prettyDate } from "../../../../shared/utils/format";
-import { buildAuthorizationHeader, type BlossomBlob, type SignTemplate } from "../../../../shared/api/blossomClient";
+import {
+  buildAuthorizationHeader,
+  type BlossomBlob,
+  type SignTemplate,
+} from "../../../../shared/api/blossomClient";
 import { buildNip98AuthHeader } from "../../../../shared/api/nip98";
 import { decryptPrivateBlob } from "../../../../shared/domain/privateEncryption";
 import { cachePreviewBlob, getCachedPreviewBlob } from "../../../../shared/utils/blobPreviewCache";
@@ -31,8 +35,8 @@ const MUSIC_EXTENSION_REGEX =
 
 const ADDITIONAL_AUDIO_MIME_TYPES = new Set(
   ["application/ogg", "application/x-ogg", "application/flac", "application/x-flac"].map(value =>
-    value.toLowerCase()
-  )
+    value.toLowerCase(),
+  ),
 );
 
 const LIST_WORD_REGEX = /(?:^|[+./-])list(?:$|[+./-])/;
@@ -44,7 +48,10 @@ const isDirectoryLikeMime = (value?: string | null) => {
   if (normalized === "application/x-directory" || normalized === "inode/directory") return true;
   if (normalized.startsWith("application/")) {
     if (normalized.includes("directory") || normalized.includes("folder")) return true;
-    if (LIST_WORD_REGEX.test(normalized) && (normalized.includes("nostr") || normalized.includes("bloom"))) {
+    if (
+      LIST_WORD_REGEX.test(normalized) &&
+      (normalized.includes("nostr") || normalized.includes("bloom"))
+    ) {
       return true;
     }
   }
@@ -59,7 +66,6 @@ export const isListLikeBlob = (blob: BlossomBlob) => {
   return false;
 };
 
-
 export const PreviewDialog: React.FC<{
   target: PreviewTarget;
   onClose: () => void;
@@ -67,8 +73,10 @@ export const PreviewDialog: React.FC<{
   onCopy: (blob: BlossomBlob) => void;
   onBlobVisible: (sha: string) => void;
 }> = ({ target, onClose, onDetect, onCopy, onBlobVisible }) => {
-  const { blob, displayName, previewUrl, requiresAuth, signTemplate, serverType, disablePreview } = target;
-  const derivedKind: FileKind = (target.kind as FileKind | undefined) ?? decideFileKind(blob, undefined);
+  const { blob, displayName, previewUrl, requiresAuth, signTemplate, serverType, disablePreview } =
+    target;
+  const derivedKind: FileKind =
+    (target.kind as FileKind | undefined) ?? decideFileKind(blob, undefined);
   const blurhash = extractBlurhash(blob);
   const sizeLabel = typeof blob.size === "number" ? prettyBytes(blob.size) : null;
   const updatedLabel = typeof blob.uploaded === "number" ? prettyDate(blob.uploaded) : null;
@@ -103,7 +111,9 @@ export const PreviewDialog: React.FC<{
   const containerClass = isLightTheme
     ? `${containerBaseClass} bg-white text-slate-700`
     : `${containerBaseClass} bg-slate-900 text-slate-100`;
-  const headingClass = isLightTheme ? "text-lg font-semibold text-slate-900" : "text-lg font-semibold text-slate-100";
+  const headingClass = isLightTheme
+    ? "text-lg font-semibold text-slate-900"
+    : "text-lg font-semibold text-slate-100";
   const metaContainerClass = isLightTheme
     ? "mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-600"
     : "mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-400";
@@ -121,7 +131,9 @@ export const PreviewDialog: React.FC<{
   const footerContainerClass = isLightTheme
     ? "flex flex-wrap gap-4 border-t border-slate-200 px-6 pt-4 text-[11px] text-slate-500"
     : "flex flex-wrap gap-4 border-t border-slate-800/80 px-6 pt-4 text-[11px] text-slate-400";
-  const hashLabelClass = isLightTheme ? "font-mono break-all text-slate-600" : "font-mono break-all text-slate-400";
+  const hashLabelClass = isLightTheme
+    ? "font-mono break-all text-slate-600"
+    : "font-mono break-all text-slate-400";
   const directUrlLabelClass = isLightTheme ? "text-slate-600" : "text-slate-300";
   const copyButtonClass = isLightTheme
     ? "flex max-w-full items-center gap-1 rounded px-1 text-left text-[11px] text-emerald-600 underline decoration-dotted underline-offset-2 hover:text-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-400 focus:ring-offset-2 focus:ring-offset-white"
@@ -130,11 +142,7 @@ export const PreviewDialog: React.FC<{
   return (
     <section className="flex h-full w-full flex-1 min-h-0 flex-col overflow-hidden">
       <div className="flex flex-1 min-h-0 flex-col overflow-hidden">
-        <div
-          role="region"
-          aria-label={`Preview ${displayName}`}
-          className={containerClass}
-        >
+        <div role="region" aria-label={`Preview ${displayName}`} className={containerClass}>
           <button
             type="button"
             className={closeButtonClass}
@@ -181,7 +189,11 @@ export const PreviewDialog: React.FC<{
                 <BlobPreview
                   sha={blob.sha256}
                   url={previewUrl}
-                  name={(blob.__bloomFolderPlaceholder || isListLikeBlob(blob) ? blob.name : getBlobMetadataName(blob)) ?? blob.sha256}
+                  name={
+                    (blob.__bloomFolderPlaceholder || isListLikeBlob(blob)
+                      ? blob.name
+                      : getBlobMetadataName(blob)) ?? blob.sha256
+                  }
                   type={blob.type}
                   serverUrl={target.baseUrl ?? blob.serverUrl}
                   requiresAuth={requiresAuth}
@@ -213,7 +225,9 @@ export const PreviewDialog: React.FC<{
                 >
                   <span className={directUrlLabelClass}>Direct URL:</span>
                   <span className="truncate font-mono">{blob.url}</span>
-                  <span className="mt-[1px] text-current"><CopyIcon size={12} /></span>
+                  <span className="mt-[1px] text-current">
+                    <CopyIcon size={12} />
+                  </span>
                 </button>
               )}
             </div>
@@ -223,7 +237,6 @@ export const PreviewDialog: React.FC<{
     </section>
   );
 };
-
 
 export const BlobPreview: React.FC<{
   sha: string;
@@ -269,14 +282,18 @@ export const BlobPreview: React.FC<{
   const [src, setSrc] = useState<string | null>(initialCachedSrc);
   const [failed, setFailed] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [previewType, setPreviewType] = useState<"image" | "video" | "text" | "pdf" | "doc" | "unknown">(() => {
+  const [previewType, setPreviewType] = useState<
+    "image" | "video" | "text" | "pdf" | "doc" | "unknown"
+  >(() => {
     if (isPreviewableTextType({ mime: effectiveType, name: effectiveName, url })) return "text";
     if (isPdfType(effectiveType, effectiveName || url)) return "pdf";
     if (isDocType(effectiveType, effectiveName || url)) return "doc";
     return inferKind(effectiveType, effectiveName || url) ?? "unknown";
   });
   const [isReady, setIsReady] = useState(Boolean(initialCachedSrc));
-  const [textPreview, setTextPreview] = useState<{ content: string; truncated: boolean } | null>(null);
+  const [textPreview, setTextPreview] = useState<{ content: string; truncated: boolean } | null>(
+    null,
+  );
   const objectUrlRef = useRef<string | null>(initialCachedSrc ?? null);
   const lastLoadedKeyRef = useRef<string | null>(initialCachedSrc ? previewKey : null);
   const lastFailureKeyRef = useRef<string | null>(null);
@@ -290,7 +307,12 @@ export const BlobPreview: React.FC<{
   }, [onDetect]);
 
   const fallbackIconKind = useMemo<FileKind>(() => {
-    if (previewType === "image" || previewType === "video" || previewType === "pdf" || previewType === "doc") {
+    if (
+      previewType === "image" ||
+      previewType === "video" ||
+      previewType === "pdf" ||
+      previewType === "doc"
+    ) {
       return previewType;
     }
     if (isMusicType(effectiveType, effectiveName, url)) return "music";
@@ -332,7 +354,7 @@ export const BlobPreview: React.FC<{
 
   const metaSuggestsText = useMemo(
     () => isPreviewableTextType({ mime: effectiveType, name: effectiveName, url }),
-    [effectiveType, effectiveName, url]
+    [effectiveType, effectiveName, url],
   );
 
   useEffect(() => {
@@ -466,7 +488,9 @@ export const BlobPreview: React.FC<{
           return;
         }
         const allowPersistentCache = !isPrivate && !metaSuggestsText;
-        const cachedBlob = allowPersistentCache ? await getCachedPreviewBlob(cacheServerHint, sha) : null;
+        const cachedBlob = allowPersistentCache
+          ? await getCachedPreviewBlob(cacheServerHint, sha)
+          : null;
         if (cancelled) return;
         if (cachedBlob) {
           assignObjectUrl(cachedBlob);
@@ -665,7 +689,9 @@ export const BlobPreview: React.FC<{
   const classNames = `relative flex h-full w-full items-center justify-center overflow-hidden ${baseBackgroundClass} ${
     className ?? ""
   }`;
-  const textPreviewWrapperClass = isLightTheme ? "px-4 py-3 text-xs text-slate-700" : "px-4 py-3 text-xs text-slate-200";
+  const textPreviewWrapperClass = isLightTheme
+    ? "px-4 py-3 text-xs text-slate-700"
+    : "px-4 py-3 text-xs text-slate-200";
   const textPreviewPreClass = isLightTheme
     ? "line-clamp-6 whitespace-pre-wrap break-words text-[11px] leading-snug text-slate-800"
     : "line-clamp-6 whitespace-pre-wrap break-words text-[11px] leading-snug";
@@ -776,42 +802,74 @@ export const BlobPreview: React.FC<{
         return {
           background: gradient(
             "bg-gradient-to-br from-emerald-100 via-white to-slate-100",
-            "bg-gradient-to-br from-emerald-900/70 via-slate-900 to-slate-950"
+            "bg-gradient-to-br from-emerald-900/70 via-slate-900 to-slate-950",
           ),
-          icon: <MusicIcon size={baseSize} className={iconColor("text-emerald-600", "text-emerald-200")} aria-hidden="true" />,
+          icon: (
+            <MusicIcon
+              size={baseSize}
+              className={iconColor("text-emerald-600", "text-emerald-200")}
+              aria-hidden="true"
+            />
+          ),
         };
       case "video":
         return {
           background: gradient(
             "bg-gradient-to-br from-sky-100 via-white to-slate-100",
-            "bg-gradient-to-br from-sky-900/70 via-slate-900 to-slate-950"
+            "bg-gradient-to-br from-sky-900/70 via-slate-900 to-slate-950",
           ),
-          icon: <VideoIcon size={baseSize} className={iconColor("text-sky-600", "text-sky-200")} aria-hidden="true" />,
+          icon: (
+            <VideoIcon
+              size={baseSize}
+              className={iconColor("text-sky-600", "text-sky-200")}
+              aria-hidden="true"
+            />
+          ),
         };
       case "pdf":
         return {
           background: gradient(
             "bg-gradient-to-br from-red-100 via-white to-slate-100",
-            "bg-gradient-to-br from-red-900/70 via-slate-900 to-slate-950"
+            "bg-gradient-to-br from-red-900/70 via-slate-900 to-slate-950",
           ),
-          icon: <FileTypeIcon kind="pdf" size={baseSize} className={iconColor("text-red-500", "text-red-200")} aria-hidden="true" />,
+          icon: (
+            <FileTypeIcon
+              kind="pdf"
+              size={baseSize}
+              className={iconColor("text-red-500", "text-red-200")}
+              aria-hidden="true"
+            />
+          ),
         };
       case "folder":
         return {
           background: gradient(
             "bg-gradient-to-br from-amber-100 via-white to-slate-100",
-            "bg-gradient-to-br from-amber-900/70 via-slate-900 to-slate-950"
+            "bg-gradient-to-br from-amber-900/70 via-slate-900 to-slate-950",
           ),
-          icon: <FileTypeIcon kind="folder" size={baseSize} className={iconColor("text-amber-600", "text-amber-200")} aria-hidden="true" />,
+          icon: (
+            <FileTypeIcon
+              kind="folder"
+              size={baseSize}
+              className={iconColor("text-amber-600", "text-amber-200")}
+              aria-hidden="true"
+            />
+          ),
         };
       case "doc":
       case "document":
         return {
           background: gradient(
             "bg-gradient-to-br from-purple-100 via-white to-slate-100",
-            "bg-gradient-to-br from-purple-900/70 via-slate-900 to-slate-950"
+            "bg-gradient-to-br from-purple-900/70 via-slate-900 to-slate-950",
           ),
-          icon: <DocumentIcon size={baseSize} className={iconColor("text-purple-600", "text-purple-200")} aria-hidden="true" />,
+          icon: (
+            <DocumentIcon
+              size={baseSize}
+              className={iconColor("text-purple-600", "text-purple-200")}
+              aria-hidden="true"
+            />
+          ),
         };
       default:
         return {
@@ -828,16 +886,16 @@ export const BlobPreview: React.FC<{
     }
   }, [fallbackIconKind, fallbackIconSize, variant, isLightTheme]);
 
-  const showBlurhashPlaceholder = Boolean(blurhashPlaceholder && !textPreview && !showMedia && !isStaticPreview);
+  const showBlurhashPlaceholder = Boolean(
+    blurhashPlaceholder && !textPreview && !showMedia && !isStaticPreview,
+  );
   const showLoadingOverlay = showLoading && !showBlurhashPlaceholder;
   const showUnavailableOverlay = showUnavailable && !showBlurhashPlaceholder;
 
   return (
     <div ref={observeTarget} className={classNames}>
       {showBlurhashPlaceholder ? (
-        <div className="absolute inset-0">
-          {blurhashPlaceholder}
-        </div>
+        <div className="absolute inset-0">{blurhashPlaceholder}</div>
       ) : null}
       {content}
       {showLoadingOverlay && <div className={loadingOverlayClass}>Loading preview…</div>}
@@ -853,7 +911,6 @@ export const BlobPreview: React.FC<{
     </div>
   );
 };
-
 
 export function buildPreviewUrl(blob: BlossomBlob, baseUrl?: string | null) {
   if (blob.url) return blob.url;
@@ -908,7 +965,8 @@ export function decideFileKind(blob: BlossomBlob, detected?: "image" | "video"):
 function inferKind(type?: string, ref?: string | null): "image" | "video" | undefined {
   const mime = type?.toLowerCase() ?? "";
   const name = ref?.toLowerCase() ?? "";
-  if (mime.startsWith("image/") || /\.(png|jpe?g|gif|webp|bmp|svg|heic)$/.test(name)) return "image";
+  if (mime.startsWith("image/") || /\.(png|jpe?g|gif|webp|bmp|svg|heic)$/.test(name))
+    return "image";
   if (mime.startsWith("video/") || /\.(mp4|mov|webm|mkv|avi|hevc)$/.test(name)) return "video";
   return undefined;
 }
@@ -974,7 +1032,7 @@ const TEXT_PREVIEW_MIME_ALLOWLIST = new Set(
     "application/json",
     "application/xml",
     "text/xml",
-  ].map(value => value.toLowerCase())
+  ].map(value => value.toLowerCase()),
 );
 
 const TEXT_PREVIEW_EXTENSION_ALLOWLIST = new Set([
@@ -1064,7 +1122,9 @@ export const AudioCoverImage: React.FC<{
       return url;
     }
   }, [coverEncryption, preferredSize, requiresAuth, url]);
-  const [src, setSrc] = useState<string | null>(requiresAuth || coverEncryption ? null : optimizedUrl);
+  const [src, setSrc] = useState<string | null>(
+    requiresAuth || coverEncryption ? null : optimizedUrl,
+  );
   const [usedOptimized, setUsedOptimized] = useState(() => optimizedUrl !== url);
   const objectUrlRef = useRef<string | null>(null);
 
@@ -1152,7 +1212,8 @@ export const AudioCoverImage: React.FC<{
               originalType: coverMetadata?.type,
               originalSize: coverMetadata?.size,
             });
-            const mimeType = coverMetadata?.type || response.headers.get("content-type") || "image/jpeg";
+            const mimeType =
+              coverMetadata?.type || response.headers.get("content-type") || "image/jpeg";
             imageBlob = new Blob([decryptedBuffer], { type: mimeType });
           } catch (error) {
             if (!cancelled) {
@@ -1226,7 +1287,7 @@ const scheduleIdle = (work: () => void): IdleCancel => {
   }
 
   const win = window as typeof window & {
-    requestIdleCallback?: (callback: (...args: any[]) => void, options?: { timeout?: number }) => number;
+    requestIdleCallback?: (callback: IdleRequestCallback, options?: IdleRequestOptions) => number;
     cancelIdleCallback?: (handle: number) => void;
   };
 
@@ -1269,7 +1330,10 @@ const decodeBlurhashToDataUrl = (hash: string, width?: number, height?: number):
       decodeWidth = Math.min(maxSize, Math.max(8, Math.round(baseSize * aspectRatio)));
       decodeHeight = Math.max(8, Math.round(decodeWidth / aspectRatio));
     } else if (aspectRatio > 0 && aspectRatio < 1) {
-      decodeHeight = Math.min(maxSize, Math.max(8, Math.round(baseSize / Math.max(aspectRatio, 0.01))));
+      decodeHeight = Math.min(
+        maxSize,
+        Math.max(8, Math.round(baseSize / Math.max(aspectRatio, 0.01))),
+      );
       decodeWidth = Math.max(8, Math.round(decodeHeight * aspectRatio));
     }
     decodeWidth = Math.max(4, Math.min(maxSize, decodeWidth));
@@ -1298,7 +1362,9 @@ type BlurhashThumbnailProps = {
 
 export function BlurhashThumbnail({ hash, width, height, alt }: BlurhashThumbnailProps) {
   const cacheKey = useMemo(() => buildBlurhashCacheKey(hash, width, height), [hash, width, height]);
-  const [dataUrl, setDataUrl] = useState<string | null>(() => blurhashDataUrlCache.get(cacheKey) ?? null);
+  const [dataUrl, setDataUrl] = useState<string | null>(
+    () => blurhashDataUrlCache.get(cacheKey) ?? null,
+  );
 
   useEffect(() => {
     const cached = blurhashDataUrlCache.get(cacheKey);
@@ -1328,7 +1394,15 @@ export function BlurhashThumbnail({ hash, width, height, alt }: BlurhashThumbnai
     return <div className="h-full w-full bg-slate-900/70" />;
   }
 
-  return <img src={dataUrl} alt={alt} className="h-full w-full object-cover" loading="lazy" draggable={false} />;
+  return (
+    <img
+      src={dataUrl}
+      alt={alt}
+      className="h-full w-full object-cover"
+      loading="lazy"
+      draggable={false}
+    />
+  );
 }
 
 type TextPreviewMeta = {
@@ -1351,7 +1425,8 @@ function isPreviewableTextType(meta: TextPreviewMeta): boolean {
 }
 
 async function buildTextPreview(blob: Blob): Promise<{ content: string; truncated: boolean }> {
-  const limitedBlob = blob.size > TEXT_PREVIEW_MAX_BYTES ? blob.slice(0, TEXT_PREVIEW_MAX_BYTES) : blob;
+  const limitedBlob =
+    blob.size > TEXT_PREVIEW_MAX_BYTES ? blob.slice(0, TEXT_PREVIEW_MAX_BYTES) : blob;
   const raw = await limitedBlob.text();
   let truncated = blob.size > TEXT_PREVIEW_MAX_BYTES;
 

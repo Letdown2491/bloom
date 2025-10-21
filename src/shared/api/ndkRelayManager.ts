@@ -47,21 +47,21 @@ export type RelayPreparationResult = {
 export interface RelayConnectionManager {
   prepareRelaySet: (
     relayUrls: readonly string[],
-    options?: RelayPreparationOptions
+    options?: RelayPreparationOptions,
   ) => Promise<RelayPreparationResult>;
   ensureRelays: (
     relayUrls: readonly string[],
-    options?: RelayPreparationOptions
+    options?: RelayPreparationOptions,
   ) => Promise<RelayPreparationResult>;
   getCachedRelaySet: (
-    relayUrls: readonly string[]
+    relayUrls: readonly string[],
   ) => InstanceType<NdkModule["NDKRelaySet"]> | null;
   handlePoolEvent: (relay: NDKRelay, status: RelayStatus) => void;
 }
 
 export const createRelayConnectionManager = (
   ndk: NDK,
-  getRuntime: () => Promise<NdkModule>
+  getRuntime: () => Promise<NdkModule>,
 ): RelayConnectionManager => {
   const stateMap = new Map<string, RelayState>();
   const relaySetCache = new Map<string, InstanceType<NdkModule["NDKRelaySet"]>>();
@@ -87,7 +87,7 @@ export const createRelayConnectionManager = (
   const connectRelay = async (
     relay: NDKRelay,
     runtime: NdkModule,
-    options?: RelayPreparationOptions
+    options?: RelayPreparationOptions,
   ): Promise<boolean> => {
     const normalizedUrl = normalizeRelayKey(relay.url);
     if (!normalizedUrl) return false;
@@ -140,7 +140,10 @@ export const createRelayConnectionManager = (
       };
       const onReady = () => finish(true);
       const onDisconnect = () => finish(false);
-      timer = setTimeout(() => finish(isConnectedStatus(relay.status as NDKRelayStatus, runtime)), timeoutMs);
+      timer = setTimeout(
+        () => finish(isConnectedStatus(relay.status as NDKRelayStatus, runtime)),
+        timeoutMs,
+      );
       relay.once("ready", onReady);
       relay.once("connect", onReady);
       relay.once("disconnect", onDisconnect);
@@ -167,7 +170,7 @@ export const createRelayConnectionManager = (
   const ensureRelay = async (
     url: string,
     runtime: NdkModule,
-    options?: RelayPreparationOptions
+    options?: RelayPreparationOptions,
   ): Promise<boolean> => {
     const pool = ndk.pool;
     if (!pool) return false;
@@ -188,14 +191,12 @@ export const createRelayConnectionManager = (
 
   const prepare = async (
     inputUrls: readonly string[],
-    options?: RelayPreparationOptions
+    options?: RelayPreparationOptions,
   ): Promise<RelayPreparationResult> => {
     if (!Array.isArray(inputUrls) || inputUrls.length === 0) {
       return { relaySet: null, connected: [], pending: [] };
     }
-    const sanitized = inputUrls
-      .map(normalizeRelayKey)
-      .filter((url): url is string => Boolean(url));
+    const sanitized = inputUrls.map(normalizeRelayKey).filter((url): url is string => Boolean(url));
     if (!sanitized.length) {
       return { relaySet: null, connected: [], pending: [] };
     }
@@ -207,7 +208,7 @@ export const createRelayConnectionManager = (
       unique.map(async url => {
         const connected = await ensureRelay(url, runtime, options);
         return { url, connected };
-      })
+      }),
     );
 
     const connected = results.filter(result => result.connected).map(result => result.url);

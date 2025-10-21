@@ -75,7 +75,10 @@ export const buildShareItemsFromRequest = (request: ShareFolderRequest): ShareFo
   return [];
 };
 
-export const filterItemsByPolicy = (items: ShareFolderItem[], policy: FolderSharePolicy): ShareFolderItem[] => {
+export const filterItemsByPolicy = (
+  items: ShareFolderItem[],
+  policy: FolderSharePolicy,
+): ShareFolderItem[] => {
   return items.filter(item => {
     const hasPrivate = Boolean(item.privateLinkUrl);
     const hasPublic = Boolean(resolvePublicBlobUrl(item.blob));
@@ -88,7 +91,7 @@ export const filterItemsByPolicy = (items: ShareFolderItem[], policy: FolderShar
 export const buildItemsFromRecord = (
   record: FolderListRecord,
   activeLinks: Map<string, PrivateLinkRecord>,
-  privateLinkHost: string
+  privateLinkHost: string,
 ): ShareFolderItem[] => {
   const normalizedHost = privateLinkHost ? privateLinkHost.replace(/\/+$/, "") : "";
   const items: ShareFolderItem[] = [];
@@ -103,16 +106,17 @@ export const buildItemsFromRecord = (
     const aliasRecord = activeLinks.get(normalizedSha) ?? null;
     const alias = aliasRecord?.alias ?? null;
     const hasHost = normalizedHost.length > 0;
-    const isPrivateUrl = Boolean(hasHost && hint?.privateLinkAlias && hintUrl && hintUrl.startsWith(normalizedHost));
+    const isPrivateUrl = Boolean(
+      hasHost && hint?.privateLinkAlias && hintUrl && hintUrl.startsWith(normalizedHost),
+    );
     const derivedPublicUrl =
-      !isPrivateUrl && hintUrl
-        ? hintUrl
-        : serverUrl
-          ? `${serverUrl}/${normalizedSha}`
-          : undefined;
-    const sizeValue = typeof hint?.size === "number" && Number.isFinite(hint.size) ? hint.size : undefined;
+      !isPrivateUrl && hintUrl ? hintUrl : serverUrl ? `${serverUrl}/${normalizedSha}` : undefined;
+    const sizeValue =
+      typeof hint?.size === "number" && Number.isFinite(hint.size) ? hint.size : undefined;
     const normalizedServerType =
-      hint?.serverType === "blossom" || hint?.serverType === "nip96" || hint?.serverType === "satellite"
+      hint?.serverType === "blossom" ||
+      hint?.serverType === "nip96" ||
+      hint?.serverType === "satellite"
         ? hint.serverType
         : undefined;
     const blob: BlossomBlob = {
@@ -121,7 +125,9 @@ export const buildItemsFromRecord = (
     if (derivedPublicUrl) blob.url = derivedPublicUrl;
     const effectiveServer =
       serverUrl ??
-      (derivedPublicUrl ? deriveServerUrlFromLink(derivedPublicUrl, normalizedSha) ?? undefined : undefined);
+      (derivedPublicUrl
+        ? (deriveServerUrlFromLink(derivedPublicUrl, normalizedSha) ?? undefined)
+        : undefined);
     if (effectiveServer) blob.serverUrl = effectiveServer;
     if (typeof requiresAuth === "boolean") blob.requiresAuth = requiresAuth;
     if (normalizedServerType) blob.serverType = normalizedServerType;
@@ -156,7 +162,7 @@ export const buildShareableItemHints = ({
   });
 
   const shas = Array.from(
-    new Set(filteredItems.map(item => (item.blob.sha256 as string).toLowerCase()))
+    new Set(filteredItems.map(item => (item.blob.sha256 as string).toLowerCase())),
   ).sort((a, b) => a.localeCompare(b));
 
   const baseHints = record.fileHints ?? {};
@@ -229,7 +235,7 @@ export const buildShareableItemHints = ({
       if (hint.name) return true;
       if (hint.privateLinkAlias) return true;
       return false;
-    })
+    }),
   );
 
   return { shas, hints, filteredItems };

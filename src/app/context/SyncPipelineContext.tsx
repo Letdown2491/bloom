@@ -246,7 +246,7 @@ export const SyncPipelineProvider: React.FC<{ children: React.ReactNode }> = ({ 
       allowRelayRefresh,
       markServerStageComplete,
       markRelayStageComplete,
-    ]
+    ],
   );
 
   return <SyncPipelineContext.Provider value={value}>{children}</SyncPipelineContext.Provider>;

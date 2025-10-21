@@ -1,4 +1,5 @@
-import axios, { AxiosError } from "axios";
+import type { AxiosError } from "axios";
+import axios from "axios";
 
 export type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD" | "OPTIONS";
 
@@ -27,15 +28,18 @@ export class BloomHttpError extends Error {
   source?: string;
   cause?: unknown;
 
-  constructor(message: string, options: {
-    status?: number;
-    code?: string;
-    data?: unknown;
-    request?: { url: string; method: HttpMethod };
-    retryable?: boolean;
-    source?: string;
-    cause?: unknown;
-  } = {}) {
+  constructor(
+    message: string,
+    options: {
+      status?: number;
+      code?: string;
+      data?: unknown;
+      request?: { url: string; method: HttpMethod };
+      retryable?: boolean;
+      source?: string;
+      cause?: unknown;
+    } = {},
+  ) {
     super(message);
     this.name = "BloomHttpError";
     this.status = options.status;
@@ -54,7 +58,8 @@ const DEFAULT_RETRYABLE_STATUS = new Set([408, 409, 425, 429, 500, 502, 503, 504
 
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-const isRetryableStatus = (status?: number) => (status ? DEFAULT_RETRYABLE_STATUS.has(status) : false);
+const isRetryableStatus = (status?: number) =>
+  status ? DEFAULT_RETRYABLE_STATUS.has(status) : false;
 
 const extractMessage = (payload: unknown): string | undefined => {
   if (!payload) return undefined;
@@ -70,7 +75,7 @@ const extractMessage = (payload: unknown): string | undefined => {
 
 const buildHttpErrorFromResponse = async (
   response: Response,
-  options: { request: { url: string; method: HttpMethod }; source?: string }
+  options: { request: { url: string; method: HttpMethod }; source?: string },
 ): Promise<BloomHttpError> => {
   let data: unknown;
   try {
@@ -98,7 +103,10 @@ const buildHttpErrorFromResponse = async (
   });
 };
 
-const normalizeError = (error: unknown, context: { request: { url: string; method: HttpMethod }; source?: string }) => {
+const normalizeError = (
+  error: unknown,
+  context: { request: { url: string; method: HttpMethod }; source?: string },
+) => {
   if (error instanceof BloomHttpError) {
     return error;
   }
@@ -190,7 +198,7 @@ export const httpRequest = async (options: HttpRequestOptions): Promise<Response
 };
 
 export const requestJson = async <T = unknown>(
-  options: HttpRequestOptions & { parse?: (value: unknown) => T; fallbackValue?: T }
+  options: HttpRequestOptions & { parse?: (value: unknown) => T; fallbackValue?: T },
 ): Promise<T> => {
   const response = await httpRequest({
     ...options,
@@ -234,7 +242,7 @@ export const fromAxiosError = (
     source?: string;
     fallbackMessage?: string;
     retryable?: boolean;
-  }
+  },
 ): BloomHttpError => {
   if (error instanceof BloomHttpError) return error;
 

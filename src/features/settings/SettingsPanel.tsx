@@ -109,7 +109,7 @@ const buildShareLink = (
   record: FolderListRecord,
   fallbackPubkey: string | null,
   relays: readonly string[],
-  origin: string
+  origin: string,
 ): { naddr: string; url: string } | null => {
   const ownerPubkey = record.pubkey ?? fallbackPubkey;
   if (!ownerPubkey) return null;
@@ -122,7 +122,6 @@ const buildShareLink = (
     url: `${trimmedOrigin}/folders/${encodeURIComponent(naddr)}`,
   };
 };
-
 
 const getProgressBarClass = (percent: number, theme: "dark" | "light"): string => {
   if (percent >= 80) return "bg-red-400";
@@ -208,8 +207,7 @@ const SegmentedControl: React.FC<SegmentedControlProps> = ({
 }) => {
   const isLightTheme = theme === "light";
   const containerClass =
-    className ??
-    (variant === "compact" ? "flex flex-wrap gap-2" : "grid gap-2 sm:grid-cols-2");
+    className ?? (variant === "compact" ? "flex flex-wrap gap-2" : "grid gap-2 sm:grid-cols-2");
 
   const baseButtonClass =
     variant === "compact"
@@ -238,13 +236,14 @@ const SegmentedControl: React.FC<SegmentedControlProps> = ({
         : isLightTheme
           ? "border-blue-700 bg-blue-700 text-white hover:border-blue-600 hover:bg-blue-600"
           : "border-emerald-500 bg-emerald-500/10 text-emerald-200 hover:border-emerald-400/80 hover:bg-emerald-500/20";
-  const inactiveClass = variant === "compact"
-    ? isLightTheme
-      ? "border-slate-300 text-slate-600 hover:border-blue-400 hover:text-blue-600"
-      : "border-slate-600/70 text-slate-200 hover:border-slate-400"
-    : isLightTheme
-      ? "border-slate-300 text-slate-600 hover:border-blue-400 hover:text-blue-600"
-      : "border-slate-500/60 text-slate-200 hover:border-slate-400";
+  const inactiveClass =
+    variant === "compact"
+      ? isLightTheme
+        ? "border-slate-300 text-slate-600 hover:border-blue-400 hover:text-blue-600"
+        : "border-slate-600/70 text-slate-200 hover:border-slate-400"
+      : isLightTheme
+        ? "border-slate-300 text-slate-600 hover:border-blue-400 hover:text-blue-600"
+        : "border-slate-500/60 text-slate-200 hover:border-slate-400";
   const disabledClass =
     variant === "compact"
       ? "cursor-not-allowed border-slate-700/60 text-slate-500 opacity-60"
@@ -287,9 +286,10 @@ const SegmentedControl: React.FC<SegmentedControlProps> = ({
             ? "text-slate-600"
             : "text-slate-200";
         const labelClassName = `transition-colors ${isActive ? activeLabelColor : inactiveLabelColor}`;
-        const activeStyle = isBlueHighlight && isActive
-          ? { backgroundColor: "#2563EB", borderColor: "transparent", color: "#FFFFFF" }
-          : undefined;
+        const activeStyle =
+          isBlueHighlight && isActive
+            ? { backgroundColor: "#2563EB", borderColor: "transparent", color: "#FFFFFF" }
+            : undefined;
         return (
           <button
             key={option.id}
@@ -438,7 +438,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const currentPubkey = useCurrentPubkey();
   const shareRelayHints = React.useMemo(
     () => normalizeRelayUrls(effectiveRelays.length > 0 ? effectiveRelays : DEFAULT_PUBLIC_RELAYS),
-    [effectiveRelays]
+    [effectiveRelays],
   );
   const shareOrigin = React.useMemo(() => {
     if (typeof window !== "undefined" && window.location?.origin) {
@@ -473,15 +473,14 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   } = useIndexedDbStorageSummary();
   const indexedDbCacheBuckets = React.useMemo(
     () => indexedDbMeasurement?.cacheDb?.buckets ?? [],
-    [indexedDbMeasurement]
+    [indexedDbMeasurement],
   );
   const indexedDbCacheTotalBytes = indexedDbMeasurement?.cacheDb?.totalBytes ?? 0;
   const indexedDbManifestStats = indexedDbMeasurement?.manifest ?? null;
   const indexedDbMeasuredAt = indexedDbMeasurement?.measuredAt ?? null;
   const indexedDbBucketSummaries = React.useMemo(
-    () =>
-      indexedDbCacheBuckets.filter(bucket => bucket.approxBytes > 0 || bucket.entryCount > 0),
-    [indexedDbCacheBuckets]
+    () => indexedDbCacheBuckets.filter(bucket => bucket.approxBytes > 0 || bucket.entryCount > 0),
+    [indexedDbCacheBuckets],
   );
   const indexedDbManifestUpdatedAt = indexedDbManifestStats?.lastUpdatedAt ?? null;
   const indexedDbManifestLastUpdated = React.useMemo(() => {
@@ -493,14 +492,23 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
 
   const [clearingLocalStorage, setClearingLocalStorage] = React.useState(false);
   const [clearingCacheStorage, setClearingCacheStorage] = React.useState(false);
-  const [storageFeedback, setStorageFeedback] = React.useState<{ text: string; tone: "success" | "warning" | "error" } | null>(null);
+  const [storageFeedback, setStorageFeedback] = React.useState<{
+    text: string;
+    tone: "success" | "warning" | "error";
+  } | null>(null);
 
   const storageWarnMarkerPercent = React.useMemo(() => {
     if (storageCriticalThreshold <= 0) return 1;
     return Math.max(0, Math.min(1, storageWarnThreshold / storageCriticalThreshold));
   }, [storageWarnThreshold, storageCriticalThreshold]);
-  const storageProgressWidth = React.useMemo(() => Math.max(0, Math.min(100, storageUsagePercent * 100)), [storageUsagePercent]);
-  const storageBarClass = React.useMemo(() => getProgressBarClass(storageProgressWidth, theme), [storageProgressWidth, theme]);
+  const storageProgressWidth = React.useMemo(
+    () => Math.max(0, Math.min(100, storageUsagePercent * 100)),
+    [storageUsagePercent],
+  );
+  const storageBarClass = React.useMemo(
+    () => getProgressBarClass(storageProgressWidth, theme),
+    [storageProgressWidth, theme],
+  );
   const cacheUsageDisplay = React.useMemo(() => {
     if (cacheEstimate && cacheEstimate.totalBytes != null) {
       return formatBytes(cacheEstimate.totalBytes);
@@ -512,8 +520,11 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   }, [approximateCacheBytes, cacheEstimate]);
   const cacheEntriesCount = cacheEstimate?.entryCount ?? null;
   const cacheUsageBytes = React.useMemo(
-    () => (cacheEstimate && cacheEstimate.totalBytes != null ? cacheEstimate.totalBytes : approximateCacheBytes ?? 0),
-    [cacheEstimate, approximateCacheBytes]
+    () =>
+      cacheEstimate && cacheEstimate.totalBytes != null
+        ? cacheEstimate.totalBytes
+        : (approximateCacheBytes ?? 0),
+    [cacheEstimate, approximateCacheBytes],
   );
   const cacheCapacityBytes = React.useMemo(() => {
     if (originQuotaBytes && originQuotaBytes > 0) {
@@ -679,10 +690,20 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
     const ids = [defaultServerDescriptionId, defaultServerHelperId];
     if (missingDefaultMessageVisible) ids.push(missingDefaultId);
     return ids.join(" ");
-  }, [defaultServerDescriptionId, defaultServerHelperId, missingDefaultMessageVisible, missingDefaultId]);
+  }, [
+    defaultServerDescriptionId,
+    defaultServerHelperId,
+    missingDefaultMessageVisible,
+    missingDefaultId,
+  ]);
 
-  const normalizedDefaultFilterMode = defaultFilterMode === "pdfs" ? "documents" : defaultFilterMode;
-  const filterSegmentOptions: SegmentedOption[] = FILTER_OPTIONS.map(option => ({ id: option.id, label: option.label, Icon: option.Icon }));
+  const normalizedDefaultFilterMode =
+    defaultFilterMode === "pdfs" ? "documents" : defaultFilterMode;
+  const filterSegmentOptions: SegmentedOption[] = FILTER_OPTIONS.map(option => ({
+    id: option.id,
+    label: option.label,
+    Icon: option.Icon,
+  }));
   const sortSegmentOptions: SegmentedOption[] = SORT_OPTIONS.map(option => ({
     id: option.id,
     label: option.label,
@@ -729,12 +750,14 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
     (message: string, tone?: StatusMessageTone, duration?: number) => {
       showStatusMessage?.(message, tone, duration);
     },
-    [showStatusMessage]
+    [showStatusMessage],
   );
 
   const sections = React.useMemo(() => {
     const shareableFolders = folders
-      .filter(record => record.path && record.path.trim().length > 0 && !isPrivateFolderName(record.name))
+      .filter(
+        record => record.path && record.path.trim().length > 0 && !isPrivateFolderName(record.name),
+      )
       .map(record => {
         const normalizedPath = record.path ?? "";
         const segments = normalizedPath.split("/").filter(Boolean);
@@ -742,168 +765,185 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
         const parentPath = depth > 0 ? segments.slice(0, -1).join("/") : "";
         return { record, depth, parentPath };
       })
-      .sort((a, b) => (a.record.path || "").localeCompare(b.record.path || "", undefined, { sensitivity: "base" }));
+      .sort((a, b) =>
+        (a.record.path || "").localeCompare(b.record.path || "", undefined, {
+          sensitivity: "base",
+        }),
+      );
 
     const folderSharingCards = [
-      (
-        <SettingCard key="folder-sharing">
-          {shareableFolders.length === 0 ? (
-            <p className="text-sm text-slate-400">Create a folder with files in the library view to enable public sharing.</p>
-          ) : (
-            <div className="space-y-2">
-              {shareableFolders.map(({ record, depth }) => {
-                const pathLabel = `/${record.path}`;
-                const isPublic = record.visibility === "public";
-                const isBusy = folderShareBusyPath === record.path;
-                const sanitizedIdSource = record.path || record.name || "folder";
-                const folderLabelId = `folder-sharing-${sanitizedIdSource.replace(/[^a-zA-Z0-9_-]/g, "-").toLowerCase()}`;
-                const guideDepth = Math.max(depth - 1, 0);
-                const indentGuideClass = isLightTheme ? "flex shrink-0 text-slate-300" : "flex shrink-0 text-slate-100";
-                const indentGuides =
-                  guideDepth > 0 ? (
-                    <div className={indentGuideClass} aria-hidden="true">
-                      {Array.from({ length: guideDepth }).map((_, levelIndex) => {
-                        const isLast = levelIndex === guideDepth - 1;
-                        return (
-                          <div key={`${record.path}-guide-${levelIndex}`} className="relative h-full w-6">
-                            <div
-                              className="absolute left-1/2 border-l border-current"
-                              style={{ top: 0, bottom: isLast ? "50%" : 0 }}
-                            />
-                            {isLast ? (
-                              <div
-                                className="absolute left-1/2 right-0 border-t border-current"
-                                style={{ top: "50%" }}
-                              />
-                            ) : null}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  ) : null;
-                const visibilityValue = isPublic ? "public" : "private";
-                const shareRequest = { path: record.path, scope: "aggregated" as const, serverUrl: null };
-                const shareLink = isPublic ? buildShareLink(record, currentPubkey, shareRelayHints, shareOrigin) : null;
-                const shareUrl = shareLink?.url ?? null;
-                const handleCopyLink = async () => {
-                  if (isBusy) return;
-                  if (!shareUrl) {
-                    onShareFolder(shareRequest);
-                    return;
-                  }
-                  if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
-                    try {
-                      await navigator.clipboard.writeText(shareUrl);
-                      showStatusMessage?.("Share link copied to clipboard.", "success", 2500);
-                      return;
-                    } catch {
-                      // fall through
-                    }
-                  }
-                  showStatusMessage?.("Copy unavailable. Opening share dialog to manage the link.", "warning", 4000);
-                  onShareFolder(shareRequest);
-                };
-                const containerClass = `${
-                  isLightTheme
-                    ? "flex flex-1 flex-col gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
-                    : "flex flex-1 flex-col gap-3 rounded-xl border border-slate-800 bg-slate-950/70 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
-                } ${isBusy ? "opacity-80" : ""}`;
-                const shareButtonBaseClass = isLightTheme
-                  ? "group inline-flex items-center gap-2 rounded-md px-1.5 py-1 text-sm font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/70 focus-visible:ring-offset-2 focus-visible:ring-offset-white"
-                  : "group inline-flex items-center gap-2 rounded-md px-1.5 py-1 text-sm font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-900";
-                const shareButtonClass = `${shareButtonBaseClass} ${
-                  isBusy
-                    ? isLightTheme ? "cursor-not-allowed text-slate-400" : "cursor-not-allowed text-slate-500"
-                    : isLightTheme ? "text-slate-700 hover:text-blue-600" : "text-slate-100 hover:text-emerald-100"
-                }`;
-                const folderLabelClass = isLightTheme ? "flex items-center gap-2 text-sm font-medium text-slate-700" : "flex items-center gap-2 text-sm font-medium text-slate-100";
-                const folderIconBaseClass = isLightTheme ? "text-slate-600" : "text-slate-100";
-                const folderIconHoverClass = isLightTheme ? "group-hover:text-blue-600" : "group-hover:text-emerald-200";
-                const folderIconClass = `${folderIconBaseClass}${isPublic ? ` transition ${folderIconHoverClass}` : ""}`;
-                const shareIconClass = isPublic
-                  ? `${isLightTheme ? "text-slate-500" : "text-slate-100"} transition ${isLightTheme ? "group-hover:text-blue-600" : "group-hover:text-emerald-200"}`
-                  : isLightTheme
-                    ? "text-slate-500"
-                    : "text-slate-100";
-                const pathLabelClass = `break-all text-xs ${isLightTheme ? "text-slate-500" : "text-slate-400"}`;
-                const labelContent = (
-                  <>
-                    <FolderIcon
-                      size={16}
-                      aria-hidden="true"
-                      className={folderIconClass}
-                    />
-                    <span className="flex min-w-0 items-center gap-1">
-                      <span id={folderLabelId} className="truncate">
-                        {record.name || pathLabel}
-                      </span>
-                      {isPublic ? (
-                        <ShareIcon
-                          size={14}
-                          className={shareIconClass}
-                          aria-hidden="true"
-                        />
-                      ) : null}
-                    </span>
-                  </>
-                );
-                return (
-                  <div key={record.path} className="flex items-stretch">
-                    {indentGuides}
-                    <div
-                      className={containerClass}
-                    >
-                      <div className="min-w-0 flex-1 space-y-2">
-                        {isPublic ? (
-                          <button
-                            type="button"
-                            onClick={handleCopyLink}
-                            disabled={isBusy}
-                            title="Copy share link"
-                            className={shareButtonClass}
-                          >
-                            {labelContent}
-                          </button>
-                        ) : (
+      <SettingCard key="folder-sharing">
+        {shareableFolders.length === 0 ? (
+          <p className="text-sm text-slate-400">
+            Create a folder with files in the library view to enable public sharing.
+          </p>
+        ) : (
+          <div className="space-y-2">
+            {shareableFolders.map(({ record, depth }) => {
+              const pathLabel = `/${record.path}`;
+              const isPublic = record.visibility === "public";
+              const isBusy = folderShareBusyPath === record.path;
+              const sanitizedIdSource = record.path || record.name || "folder";
+              const folderLabelId = `folder-sharing-${sanitizedIdSource.replace(/[^a-zA-Z0-9_-]/g, "-").toLowerCase()}`;
+              const guideDepth = Math.max(depth - 1, 0);
+              const indentGuideClass = isLightTheme
+                ? "flex shrink-0 text-slate-300"
+                : "flex shrink-0 text-slate-100";
+              const indentGuides =
+                guideDepth > 0 ? (
+                  <div className={indentGuideClass} aria-hidden="true">
+                    {Array.from({ length: guideDepth }).map((_, levelIndex) => {
+                      const isLast = levelIndex === guideDepth - 1;
+                      return (
+                        <div
+                          key={`${record.path}-guide-${levelIndex}`}
+                          className="relative h-full w-6"
+                        >
                           <div
-                          className={
-                              folderLabelClass +
-                              (isLightTheme ? " hover:text-blue-600" : " hover:text-emerald-100")
-                            }
-                          >
-                            {labelContent}
-                          </div>
-                        )}
-                        <p className={pathLabelClass}>{pathLabel}</p>
-                      </div>
-                      <div className="flex w-full flex-wrap items-center justify-end gap-2 sm:w-auto sm:flex-none">
-                        <SegmentedControl
-                          options={VISIBILITY_OPTIONS}
-                          value={visibilityValue}
-                          onChange={nextValue => {
-                            if (nextValue === visibilityValue || isBusy) return;
-                            if (nextValue === "public") {
-                              onShareFolder(shareRequest);
-                            } else {
-                              onUnshareFolder(shareRequest);
-                            }
-                          }}
-                          labelledBy={folderLabelId}
-                          variant="compact"
-                          className="flex flex-wrap justify-end gap-2"
+                            className="absolute left-1/2 border-l border-current"
+                            style={{ top: 0, bottom: isLast ? "50%" : 0 }}
+                          />
+                          {isLast ? (
+                            <div
+                              className="absolute left-1/2 right-0 border-t border-current"
+                              style={{ top: "50%" }}
+                            />
+                          ) : null}
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : null;
+              const visibilityValue = isPublic ? "public" : "private";
+              const shareRequest = {
+                path: record.path,
+                scope: "aggregated" as const,
+                serverUrl: null,
+              };
+              const shareLink = isPublic
+                ? buildShareLink(record, currentPubkey, shareRelayHints, shareOrigin)
+                : null;
+              const shareUrl = shareLink?.url ?? null;
+              const handleCopyLink = async () => {
+                if (isBusy) return;
+                if (!shareUrl) {
+                  onShareFolder(shareRequest);
+                  return;
+                }
+                if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+                  try {
+                    await navigator.clipboard.writeText(shareUrl);
+                    showStatusMessage?.("Share link copied to clipboard.", "success", 2500);
+                    return;
+                  } catch {
+                    // fall through
+                  }
+                }
+                showStatusMessage?.(
+                  "Copy unavailable. Opening share dialog to manage the link.",
+                  "warning",
+                  4000,
+                );
+                onShareFolder(shareRequest);
+              };
+              const containerClass = `${
+                isLightTheme
+                  ? "flex flex-1 flex-col gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
+                  : "flex flex-1 flex-col gap-3 rounded-xl border border-slate-800 bg-slate-950/70 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
+              } ${isBusy ? "opacity-80" : ""}`;
+              const shareButtonBaseClass = isLightTheme
+                ? "group inline-flex items-center gap-2 rounded-md px-1.5 py-1 text-sm font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/70 focus-visible:ring-offset-2 focus-visible:ring-offset-white"
+                : "group inline-flex items-center gap-2 rounded-md px-1.5 py-1 text-sm font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-900";
+              const shareButtonClass = `${shareButtonBaseClass} ${
+                isBusy
+                  ? isLightTheme
+                    ? "cursor-not-allowed text-slate-400"
+                    : "cursor-not-allowed text-slate-500"
+                  : isLightTheme
+                    ? "text-slate-700 hover:text-blue-600"
+                    : "text-slate-100 hover:text-emerald-100"
+              }`;
+              const folderLabelClass = isLightTheme
+                ? "flex items-center gap-2 text-sm font-medium text-slate-700"
+                : "flex items-center gap-2 text-sm font-medium text-slate-100";
+              const folderIconBaseClass = isLightTheme ? "text-slate-600" : "text-slate-100";
+              const folderIconHoverClass = isLightTheme
+                ? "group-hover:text-blue-600"
+                : "group-hover:text-emerald-200";
+              const folderIconClass = `${folderIconBaseClass}${isPublic ? ` transition ${folderIconHoverClass}` : ""}`;
+              const shareIconClass = isPublic
+                ? `${isLightTheme ? "text-slate-500" : "text-slate-100"} transition ${isLightTheme ? "group-hover:text-blue-600" : "group-hover:text-emerald-200"}`
+                : isLightTheme
+                  ? "text-slate-500"
+                  : "text-slate-100";
+              const pathLabelClass = `break-all text-xs ${isLightTheme ? "text-slate-500" : "text-slate-400"}`;
+              const labelContent = (
+                <>
+                  <FolderIcon size={16} aria-hidden="true" className={folderIconClass} />
+                  <span className="flex min-w-0 items-center gap-1">
+                    <span id={folderLabelId} className="truncate">
+                      {record.name || pathLabel}
+                    </span>
+                    {isPublic ? (
+                      <ShareIcon size={14} className={shareIconClass} aria-hidden="true" />
+                    ) : null}
+                  </span>
+                </>
+              );
+              return (
+                <div key={record.path} className="flex items-stretch">
+                  {indentGuides}
+                  <div className={containerClass}>
+                    <div className="min-w-0 flex-1 space-y-2">
+                      {isPublic ? (
+                        <button
+                          type="button"
+                          onClick={handleCopyLink}
                           disabled={isBusy}
-                          theme={theme}
-                          highlightTone={segmentedHighlightTone}
-                        />
-                      </div>
+                          title="Copy share link"
+                          className={shareButtonClass}
+                        >
+                          {labelContent}
+                        </button>
+                      ) : (
+                        <div
+                          className={
+                            folderLabelClass +
+                            (isLightTheme ? " hover:text-blue-600" : " hover:text-emerald-100")
+                          }
+                        >
+                          {labelContent}
+                        </div>
+                      )}
+                      <p className={pathLabelClass}>{pathLabel}</p>
+                    </div>
+                    <div className="flex w-full flex-wrap items-center justify-end gap-2 sm:w-auto sm:flex-none">
+                      <SegmentedControl
+                        options={VISIBILITY_OPTIONS}
+                        value={visibilityValue}
+                        onChange={nextValue => {
+                          if (nextValue === visibilityValue || isBusy) return;
+                          if (nextValue === "public") {
+                            onShareFolder(shareRequest);
+                          } else {
+                            onUnshareFolder(shareRequest);
+                          }
+                        }}
+                        labelledBy={folderLabelId}
+                        variant="compact"
+                        className="flex flex-wrap justify-end gap-2"
+                        disabled={isBusy}
+                        theme={theme}
+                        highlightTone={segmentedHighlightTone}
+                      />
                     </div>
                   </div>
-                );
-              })}
-            </div>
-          )}
-        </SettingCard>
-      ),
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </SettingCard>,
     ];
 
     const baseSections = [
@@ -913,7 +953,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
         description: "Keep Bloom connected and choose your default server.",
         icon: SyncIndicatorIcon,
         cards: [
-        (
           <SettingCard
             key="sync"
             headingId={syncHeadingId}
@@ -942,8 +981,14 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                   <SyncIndicatorIcon size={18} />
                 </div>
                 <div>
-                  <p className="text-sm font-medium text-slate-100">{syncEnabled ? "Sync enabled" : "Sync disabled"}</p>
-                  <p className="text-xs text-slate-400">{syncEnabled ? "Preferences publish automatically." : "Bloom keeps settings local."}</p>
+                  <p className="text-sm font-medium text-slate-100">
+                    {syncEnabled ? "Sync enabled" : "Sync disabled"}
+                  </p>
+                  <p className="text-xs text-slate-400">
+                    {syncEnabled
+                      ? "Preferences publish automatically."
+                      : "Bloom keeps settings local."}
+                  </p>
                 </div>
               </div>
               <SwitchControl
@@ -957,17 +1002,20 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
               />
             </div>
             <div className="mt-3 flex items-center gap-2 text-xs text-slate-400">
-              {syncLoading ? <RefreshIcon size={14} className="animate-spin text-slate-300" aria-hidden /> : null}
+              {syncLoading ? (
+                <RefreshIcon size={14} className="animate-spin text-slate-300" aria-hidden />
+              ) : null}
               <span className={syncStatusClass}>Saved {lastSyncStatus.text}</span>
             </div>
             {syncError ? (
-              <p className="mt-3 rounded-lg border border-red-500/30 bg-red-500/5 px-3 py-2 text-xs text-red-300" role="alert">
+              <p
+                className="mt-3 rounded-lg border border-red-500/30 bg-red-500/5 px-3 py-2 text-xs text-red-300"
+                role="alert"
+              >
                 {syncError}
               </p>
             ) : null}
-          </SettingCard>
-        ),
-        (
+          </SettingCard>,
           <SettingCard
             key="default-server"
             headingId={defaultServerHeadingId}
@@ -1004,14 +1052,13 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 </p>
                 {missingDefaultMessageVisible ? (
                   <p id={missingDefaultId} className="text-xs text-amber-300">
-                    Bloom can’t reach this server right now. We’ll keep the saved URL until you remove it.
+                    Bloom can’t reach this server right now. We’ll keep the saved URL until you
+                    remove it.
                   </p>
                 ) : null}
               </div>
             </div>
-          </SettingCard>
-        ),
-        (
+          </SettingCard>,
           <SettingCard
             key="theme"
             headingId={appearanceHeadingId}
@@ -1023,14 +1070,20 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
               <div className="flex items-center gap-3">
                 <div
                   className={`flex h-10 w-10 items-center justify-center rounded-xl text-lg ${
-                    theme === "dark" ? "bg-slate-900 text-emerald-200" : "bg-amber-100 text-amber-500"
+                    theme === "dark"
+                      ? "bg-slate-900 text-emerald-200"
+                      : "bg-amber-100 text-amber-500"
                   }`}
                 >
                   {theme === "dark" ? "🌙" : "☀️"}
                 </div>
                 <div>
-                  <p className="text-sm font-medium text-slate-100">{theme === "dark" ? "Dark mode" : "Light mode"}</p>
-                  <p className="text-xs text-slate-400">Light mode brightens surfaces for well-lit environments.</p>
+                  <p className="text-sm font-medium text-slate-100">
+                    {theme === "dark" ? "Dark mode" : "Light mode"}
+                  </p>
+                  <p className="text-xs text-slate-400">
+                    Light mode brightens surfaces for well-lit environments.
+                  </p>
                 </div>
               </div>
               <SwitchControl
@@ -1040,8 +1093,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 theme={theme}
               />
             </div>
-          </SettingCard>
-        ),
+          </SettingCard>,
         ],
       },
       {
@@ -1051,26 +1103,25 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
         icon: SettingsIcon,
         cards: [
           !isSmallScreen && (
-          <SettingCard
-            key="layout"
-            headingId={viewHeadingId}
-            descriptionId={viewDescriptionId}
-            title="Default layout"
-            description="Decide whether Bloom opens the library in grid or list view."
-          >
-            <SegmentedControl
-              options={VIEW_MODE_OPTIONS}
-              value={defaultViewMode}
-              onChange={id => onSetDefaultViewMode(id as "grid" | "list")}
-              labelledBy={viewHeadingId}
-              describedBy={viewDescriptionId}
-              variant="compact"
-              theme={theme}
-              highlightTone={segmentedHighlightTone}
-            />
-          </SettingCard>
-        ),
-        (
+            <SettingCard
+              key="layout"
+              headingId={viewHeadingId}
+              descriptionId={viewDescriptionId}
+              title="Default layout"
+              description="Decide whether Bloom opens the library in grid or list view."
+            >
+              <SegmentedControl
+                options={VIEW_MODE_OPTIONS}
+                value={defaultViewMode}
+                onChange={id => onSetDefaultViewMode(id as "grid" | "list")}
+                labelledBy={viewHeadingId}
+                describedBy={viewDescriptionId}
+                variant="compact"
+                theme={theme}
+                highlightTone={segmentedHighlightTone}
+              />
+            </SettingCard>
+          ),
           <SettingCard
             key="filter"
             headingId={filterHeadingId}
@@ -1088,9 +1139,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
               theme={theme}
               highlightTone={segmentedHighlightTone}
             />
-          </SettingCard>
-        ),
-        (
+          </SettingCard>,
           <SettingCard
             key="sorting"
             headingId={sortHeadingId}
@@ -1108,9 +1157,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
               theme={theme}
               highlightTone={segmentedHighlightTone}
             />
-          </SettingCard>
-        ),
-        (
+          </SettingCard>,
           <SettingCard
             key="sorting-direction"
             headingId={sortDirectionHeadingId}
@@ -1128,20 +1175,18 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
               theme={theme}
               highlightTone={segmentedHighlightTone}
             />
-          </SettingCard>
-        ),
-      ],
-    },
+          </SettingCard>,
+        ],
+      },
       {
         id: "previews",
         label: "Previews & Search",
         description: "Control thumbnails and search behaviour to match your workflow.",
         icon: SearchIcon,
         cards: [
-          (
-            <SettingCard
-              key="icons-preview"
-              headingId={`${iconsPreviewHeadingId}-card`}
+          <SettingCard
+            key="icons-preview"
+            headingId={`${iconsPreviewHeadingId}-card`}
             descriptionId={iconsPreviewDescriptionId}
             title="Icons view thumbnails"
             description="Show artwork thumbnails while browsing in the grid layout."
@@ -1170,43 +1215,41 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 theme={theme}
               />
             </div>
-          </SettingCard>
-        ),
+          </SettingCard>,
           !isSmallScreen && (
-          <SettingCard
-            key="list-preview"
-            headingId={`${listPreviewHeadingId}-card`}
-            descriptionId={listPreviewDescriptionId}
-            title="List view thumbnails"
-            description="Display artwork next to items in the list layout."
-          >
-            <div className="flex items-center justify-between gap-3">
-              <div className="flex items-center gap-3">
-                <div
-                  className={`flex h-10 w-10 items-center justify-center rounded-xl ${
-                    showListPreviews
-                      ? theme === "light"
-                        ? "bg-blue-700 text-white"
-                        : "bg-emerald-500/20 text-emerald-300"
-                      : "bg-slate-800 text-slate-300"
-                  }`}
-                >
-                  <ListIcon size={18} />
+            <SettingCard
+              key="list-preview"
+              headingId={`${listPreviewHeadingId}-card`}
+              descriptionId={listPreviewDescriptionId}
+              title="List view thumbnails"
+              description="Display artwork next to items in the list layout."
+            >
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div
+                    className={`flex h-10 w-10 items-center justify-center rounded-xl ${
+                      showListPreviews
+                        ? theme === "light"
+                          ? "bg-blue-700 text-white"
+                          : "bg-emerald-500/20 text-emerald-300"
+                        : "bg-slate-800 text-slate-300"
+                    }`}
+                  >
+                    <ListIcon size={18} />
+                  </div>
+                  <p className="text-xs text-slate-400">
+                    {showListPreviews ? "Thumbnails appear in lists." : "Lists stay compact."}
+                  </p>
                 </div>
-                <p className="text-xs text-slate-400">
-                  {showListPreviews ? "Thumbnails appear in lists." : "Lists stay compact."}
-                </p>
+                <SwitchControl
+                  checked={showListPreviews}
+                  onToggle={value => onSetShowListPreviews(value)}
+                  label="Toggle list view previews"
+                  theme={theme}
+                />
               </div>
-              <SwitchControl
-                checked={showListPreviews}
-                onToggle={value => onSetShowListPreviews(value)}
-                label="Toggle list view previews"
-                theme={theme}
-              />
-            </div>
-          </SettingCard>
-        ),
-        (
+            </SettingCard>
+          ),
           <SettingCard
             key="search"
             headingId={searchHeadingId}
@@ -1238,17 +1281,15 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 theme={theme}
               />
             </div>
-          </SettingCard>
-        ),
-      ],
-    },
+          </SettingCard>,
+        ],
+      },
       {
         id: "storage",
         label: "Storage Settings",
         description: "Review how Bloom uses browser storage.",
         icon: DownloadIcon,
         cards: [
-        (
           <div key="storage-widgets" className="grid gap-4 lg:grid-cols-2">
             <SettingCard
               key="storage-local"
@@ -1257,7 +1298,10 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
               description="Bloom keeps lightweight settings and preferences here so the app remembers your choices."
             >
               {!isStorageSupported ? (
-                <p className="text-xs text-slate-500">Local storage is unavailable in this environment, so Bloom keeps settings in memory only.</p>
+                <p className="text-xs text-slate-500">
+                  Local storage is unavailable in this environment, so Bloom keeps settings in
+                  memory only.
+                </p>
               ) : (
                 <>
                   <div className="space-y-2">
@@ -1288,7 +1332,8 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                     <div className="flex justify-between">
                       <dt>Usage</dt>
                       <dd className="text-slate-200">
-                        {formatBytes(storageSnapshot.totalBytes)} of {formatBytes(storageCriticalThreshold)}
+                        {formatBytes(storageSnapshot.totalBytes)} of{" "}
+                        {formatBytes(storageCriticalThreshold)}
                       </dd>
                     </div>
                     <div className="flex justify-between">
@@ -1355,7 +1400,10 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                       }`}
                       role="presentation"
                     >
-                      <div className={`h-full ${cacheBarClass}`} style={{ width: `${Math.max(2, cacheProgressWidth).toFixed(1)}%` }} />
+                      <div
+                        className={`h-full ${cacheBarClass}`}
+                        style={{ width: `${Math.max(2, cacheProgressWidth).toFixed(1)}%` }}
+                      />
                     </div>
                     <div className="flex justify-between text-[11px] text-slate-500">
                       <span>0MB</span>
@@ -1415,12 +1463,13 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                   </div>
                 </>
               ) : (
-                <p className="text-xs text-slate-500">Cache Storage is unavailable, so Bloom skips storing preview thumbnails on this device.</p>
+                <p className="text-xs text-slate-500">
+                  Cache Storage is unavailable, so Bloom skips storing preview thumbnails on this
+                  device.
+                </p>
               )}
             </SettingCard>
-          </div>
-        ),
-        (
+          </div>,
           <SettingCard
             key="storage-indexeddb"
             headingId={indexedDbHeadingId}
@@ -1429,7 +1478,8 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
           >
             {!indexedDbSupported ? (
               <p className="text-xs text-slate-500">
-                IndexedDB is unavailable, so Bloom keeps previews and metadata only for the current session.
+                IndexedDB is unavailable, so Bloom keeps previews and metadata only for the current
+                session.
               </p>
             ) : (
               <>
@@ -1460,7 +1510,9 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 <dl className="mt-3 grid gap-3 text-xs text-slate-400 md:grid-cols-2">
                   <div
                     className={`rounded-xl border p-3 ${
-                      theme === "light" ? "border-slate-200 bg-white shadow-sm" : "border-slate-700/70 bg-slate-900/20"
+                      theme === "light"
+                        ? "border-slate-200 bg-white shadow-sm"
+                        : "border-slate-700/70 bg-slate-900/20"
                     }`}
                   >
                     <div className="flex items-center justify-between text-slate-300">
@@ -1474,7 +1526,9 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                         {indexedDbBucketSummaries.map(bucket => (
                           <div key={bucket.id} className="flex justify-between">
                             <span>{bucket.label}</span>
-                            <span className="text-slate-300">{formatBytes(bucket.approxBytes)}</span>
+                            <span className="text-slate-300">
+                              {formatBytes(bucket.approxBytes)}
+                            </span>
                           </div>
                         ))}
                       </div>
@@ -1484,7 +1538,9 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                   </div>
                   <div
                     className={`rounded-xl border p-3 ${
-                      theme === "light" ? "border-slate-200 bg-white shadow-sm" : "border-slate-700/70 bg-slate-900/20"
+                      theme === "light"
+                        ? "border-slate-200 bg-white shadow-sm"
+                        : "border-slate-700/70 bg-slate-900/20"
                     }`}
                   >
                     <div className="flex items-center justify-between text-slate-300">
@@ -1568,36 +1624,41 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 </div>
               </>
             )}
-          </SettingCard>
-        ),
-        (
+          </SettingCard>,
           <div key="storage-note" className="text-xs text-slate-400">
-            Bloom keeps preferences, relay health snapshots, preview thumbnails, and recent share targets locally so everything loads instantly, and clearing storage resets these caches but never touches files stored on your servers.
-          </div>
-        ),
-        storageFeedback ? (
-          <p key="storage-feedback" className={`text-xs ${STORAGE_FEEDBACK_CLASS_BY_TONE[storageFeedback.tone]}`} id={storageFeedbackId}>
-            {storageFeedback.text}
-          </p>
-        ) : null,
-      ],
-    },
+            Bloom keeps preferences, relay health snapshots, preview thumbnails, and recent share
+            targets locally so everything loads instantly, and clearing storage resets these caches
+            but never touches files stored on your servers.
+          </div>,
+          storageFeedback ? (
+            <p
+              key="storage-feedback"
+              className={`text-xs ${STORAGE_FEEDBACK_CLASS_BY_TONE[storageFeedback.tone]}`}
+              id={storageFeedbackId}
+            >
+              {storageFeedback.text}
+            </p>
+          ) : null,
+        ],
+      },
       {
         id: "relays",
         label: "Relay Settings",
         description: "Manage which relays Bloom connects to and publishes through.",
         icon: RelayIcon,
         cards: [
-        (
           <React.Suspense
             key="relays-panel"
             fallback={<div className="text-sm text-slate-400">Loading relays…</div>}
           >
-            <RelayListLazy showStatusMessage={relayStatusHandler} compact onProvideActions={setRelayActions} />
-          </React.Suspense>
-        ),
-      ],
-    },
+            <RelayListLazy
+              showStatusMessage={relayStatusHandler}
+              compact
+              onProvideActions={setRelayActions}
+            />
+          </React.Suspense>,
+        ],
+      },
       {
         id: "servers",
         label: "Server Settings",
@@ -1696,8 +1757,8 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
     onSetShowIconsPreviews,
     listPreviewHeadingId,
     listPreviewDescriptionId,
-  showListPreviews,
-  onSetShowListPreviews,
+    showListPreviews,
+    onSetShowListPreviews,
     searchHeadingId,
     searchDescriptionId,
     keepSearchExpanded,
@@ -1783,7 +1844,9 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const inactiveNavIconClass = isLightTheme
     ? "text-slate-500 transition-colors group-hover:text-blue-700"
     : "text-slate-400 transition-colors group-hover:text-emerald-200";
-  const activeNavIconClass = isLightTheme ? "text-white transition-colors" : "text-emerald-300 transition-colors";
+  const activeNavIconClass = isLightTheme
+    ? "text-white transition-colors"
+    : "text-emerald-300 transition-colors";
   const dropdownItemBaseClass =
     "group flex items-center gap-2 rounded-lg px-3 py-2 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2";
   const dropdownInactiveClass = isLightTheme
@@ -1795,7 +1858,9 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const dropdownInactiveIconClass = isLightTheme
     ? "text-slate-500 transition-colors group-hover:text-blue-700"
     : "text-slate-400 transition-colors group-hover:text-emerald-200";
-  const dropdownActiveIconClass = isLightTheme ? "text-white transition-colors" : "text-emerald-300 transition-colors";
+  const dropdownActiveIconClass = isLightTheme
+    ? "text-white transition-colors"
+    : "text-emerald-300 transition-colors";
   const isNarrowScreen = useIsCompactScreen(1024);
   const [navMenuOpen, setNavMenuOpen] = React.useState(false);
   const navMenuRef = React.useRef<HTMLDivElement | null>(null);
@@ -1830,19 +1895,16 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
     }
   }, [isNarrowScreen]);
 
-  const handleSectionNavigate = React.useCallback(
-    (sectionId: string) => {
-      setActiveSectionId(sectionId);
-      if (typeof document !== "undefined") {
-        const element = document.getElementById(sectionId);
-        if (element) {
-          element.scrollIntoView({ behavior: "smooth", block: "start" });
-        }
+  const handleSectionNavigate = React.useCallback((sectionId: string) => {
+    setActiveSectionId(sectionId);
+    if (typeof document !== "undefined") {
+      const element = document.getElementById(sectionId);
+      if (element) {
+        element.scrollIntoView({ behavior: "smooth", block: "start" });
       }
-      setNavMenuOpen(false);
-    },
-    []
-  );
+    }
+    setNavMenuOpen(false);
+  }, []);
   const handleOpenSubmitIssue = React.useCallback(() => {
     if (typeof window === "undefined") return;
     window.open("https://github.com/Letdown2491/bloom/issues", "_blank", "noopener,noreferrer");
@@ -1870,11 +1932,15 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
           >
             <span className="flex items-center gap-2">
               {(() => {
-                const activeSection = sections.find(section => section.id === activeSectionId) ?? sections[0];
+                const activeSection =
+                  sections.find(section => section.id === activeSectionId) ?? sections[0];
                 const Icon = activeSection?.icon ?? SettingsIcon;
                 return <Icon size={16} aria-hidden="true" />;
               })()}
-              <span>{sections.find(section => section.id === activeSectionId)?.label ?? "Select section"}</span>
+              <span>
+                {sections.find(section => section.id === activeSectionId)?.label ??
+                  "Select section"}
+              </span>
             </span>
             <span className="text-slate-500">
               <DoubleChevronDownIcon size={14} aria-hidden="true" />
@@ -1886,40 +1952,46 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
               role="listbox"
               className="absolute inset-x-0 top-full z-30 mt-2 max-h-80 overflow-auto rounded-xl border border-slate-800 bg-slate-900/95 p-2 shadow-lg backdrop-blur"
             >
-          <ul className="flex flex-col gap-1 text-sm">
+              <ul className="flex flex-col gap-1 text-sm">
                 {sections.map(section => {
                   const Icon = section.icon;
                   const isActive = section.id === activeSectionId;
                   return (
                     <li key={section.id}>
-                    <a
-                      href={`#${section.id}`}
-                      onClick={event => {
-                        event.preventDefault();
-                        handleSectionNavigate(section.id);
-                      }}
-                      className={`${dropdownItemBaseClass} ${
-                        isActive ? dropdownActiveClass : dropdownInactiveClass
-                      }`}
-                      style={
-                        isActive && isLightTheme
-                          ? { backgroundColor: "#2563eb", color: "#ffffff" }
-                          : undefined
-                      }
-                    >
-                      <Icon
-                        size={16}
-                        aria-hidden="true"
-                        className={isActive ? dropdownActiveIconClass : dropdownInactiveIconClass}
-                        style={isActive && isLightTheme ? { color: "#ffffff" } : undefined}
-                      />
-                      <span
-                        className={isActive ? (isLightTheme ? "font-medium text-white" : "font-medium text-emerald-200") : "font-medium"}
-                        style={isActive && isLightTheme ? { color: "#ffffff" } : undefined}
+                      <a
+                        href={`#${section.id}`}
+                        onClick={event => {
+                          event.preventDefault();
+                          handleSectionNavigate(section.id);
+                        }}
+                        className={`${dropdownItemBaseClass} ${
+                          isActive ? dropdownActiveClass : dropdownInactiveClass
+                        }`}
+                        style={
+                          isActive && isLightTheme
+                            ? { backgroundColor: "#2563eb", color: "#ffffff" }
+                            : undefined
+                        }
                       >
-                        {section.label}
-                      </span>
-                    </a>
+                        <Icon
+                          size={16}
+                          aria-hidden="true"
+                          className={isActive ? dropdownActiveIconClass : dropdownInactiveIconClass}
+                          style={isActive && isLightTheme ? { color: "#ffffff" } : undefined}
+                        />
+                        <span
+                          className={
+                            isActive
+                              ? isLightTheme
+                                ? "font-medium text-white"
+                                : "font-medium text-emerald-200"
+                              : "font-medium"
+                          }
+                          style={isActive && isLightTheme ? { color: "#ffffff" } : undefined}
+                        >
+                          {section.label}
+                        </span>
+                      </a>
                     </li>
                   );
                 })}
@@ -1978,7 +2050,13 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                       style={isActive && isLightTheme ? { color: "#ffffff" } : undefined}
                     />
                     <span
-                      className={isActive ? (isLightTheme ? "font-medium text-white" : "font-medium text-emerald-200") : "font-medium"}
+                      className={
+                        isActive
+                          ? isLightTheme
+                            ? "font-medium text-white"
+                            : "font-medium text-emerald-200"
+                          : "font-medium"
+                      }
                       style={isActive && isLightTheme ? { color: "#ffffff" } : undefined}
                     >
                       {section.label}
@@ -1995,7 +2073,11 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
               >
                 <GithubIcon
                   size={16}
-                  className={isLightTheme ? "text-slate-500 transition-colors group-hover:text-blue-700" : "text-slate-400 transition-colors group-hover:text-emerald-200"}
+                  className={
+                    isLightTheme
+                      ? "text-slate-500 transition-colors group-hover:text-blue-700"
+                      : "text-slate-400 transition-colors group-hover:text-emerald-200"
+                  }
                 />
                 <span className="font-medium">Submit Issue</span>
               </button>
@@ -2008,7 +2090,11 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
               >
                 <LightningIcon
                   size={16}
-                  className={isLightTheme ? "text-slate-500 transition-colors group-hover:text-blue-700" : "text-slate-400 transition-colors group-hover:text-emerald-200"}
+                  className={
+                    isLightTheme
+                      ? "text-slate-500 transition-colors group-hover:text-blue-700"
+                      : "text-slate-400 transition-colors group-hover:text-emerald-200"
+                  }
                 />
                 <span className="font-medium">Support Bloom</span>
               </button>
@@ -2033,7 +2119,9 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                         : section.id === "relays"
                           ? relayActions
                           : null;
-                    return actions ? <div className="flex flex-wrap items-center gap-2">{actions}</div> : null;
+                    return actions ? (
+                      <div className="flex flex-wrap items-center gap-2">{actions}</div>
+                    ) : null;
                   })()}
                 </div>
                 <div className="space-y-4">

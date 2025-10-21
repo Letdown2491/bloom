@@ -167,7 +167,10 @@ async function computeBlobSha256Hex(blob: Blob): Promise<string> {
 async function createAuthEvent(signTemplate: SignTemplate, kind: AuthKind, data?: AuthData) {
   const expiration = Math.floor(Date.now() / 1000) + (data?.expiresInSeconds ?? 300);
   const authAction = kind === "mirror" ? "upload" : kind;
-  const tags: string[][] = [["t", authAction], ["expiration", String(expiration)]];
+  const tags: string[][] = [
+    ["t", authAction],
+    ["expiration", String(expiration)],
+  ];
   if (data?.serverUrl) {
     const normalized = data.serverUrl.replace(/\/$/, "");
     tags.push(["server", normalized]);
@@ -185,10 +188,12 @@ async function createAuthEvent(signTemplate: SignTemplate, kind: AuthKind, data?
         typeof data?.sizeOverride === "number"
           ? data.sizeOverride
           : typeof data?.fileSize === "number"
-          ? data.fileSize
-          : data?.file?.size;
+            ? data.fileSize
+            : data?.file?.size;
       const normalizedSize =
-        typeof rawSize === "number" && Number.isFinite(rawSize) ? Math.max(0, Math.round(rawSize)) : undefined;
+        typeof rawSize === "number" && Number.isFinite(rawSize)
+          ? Math.max(0, Math.round(rawSize))
+          : undefined;
       if (typeof normalizedSize === "number") {
         tags.push(["size", String(normalizedSize)]);
       }
@@ -202,7 +207,9 @@ async function createAuthEvent(signTemplate: SignTemplate, kind: AuthKind, data?
     tags.push(["source", data.sourceUrl]);
     tags.push(["url", data.sourceUrl]);
   }
-  const shouldIncludeHash = Boolean(data?.hash) && (kind === "delete" || kind === "get" || kind === "upload" || kind === "mirror");
+  const shouldIncludeHash =
+    Boolean(data?.hash) &&
+    (kind === "delete" || kind === "get" || kind === "upload" || kind === "mirror");
   if (shouldIncludeHash && data?.hash) {
     tags.push(["x", data.hash]);
   }
@@ -258,7 +265,11 @@ const resolveCacheTtl = (data?: AuthData) => {
   return Math.max(AUTH_CACHE_MIN_TTL_MS, Math.min(ttlMs, AUTH_CACHE_MAX_TTL_MS));
 };
 
-export async function buildAuthorizationHeader(signTemplate: SignTemplate, kind: AuthKind, data?: AuthData) {
+export async function buildAuthorizationHeader(
+  signTemplate: SignTemplate,
+  kind: AuthKind,
+  data?: AuthData,
+) {
   const cacheKey = buildAuthCacheKey(kind, data);
   const ttlMs = cacheKey ? resolveCacheTtl(data) : null;
 
@@ -340,16 +351,17 @@ export async function resolveUploadSource(file: UploadSource): Promise<ResolvedU
 export async function listUserBlobs(
   serverUrl: string,
   pubkey: string,
-  options?: { requiresAuth?: boolean; signTemplate?: SignTemplate }
+  options?: { requiresAuth?: boolean; signTemplate?: SignTemplate },
 ): Promise<BlossomBlob[]> {
   const path = `/list/${pubkey}`;
   const url = new URL(path, serverUrl).toString();
   const headers: Record<string, string> = {};
   if (options?.requiresAuth) {
-    if (!options.signTemplate) throw new BloomHttpError("Server requires auth. Connect your signer first.", {
-      request: { url, method: "GET" },
-      source: "blossom",
-    });
+    if (!options.signTemplate)
+      throw new BloomHttpError("Server requires auth. Connect your signer first.", {
+        request: { url, method: "GET" },
+        source: "blossom",
+      });
     headers.Authorization = await buildAuthorizationHeader(options.signTemplate, "list", {
       serverUrl,
       urlPath: path,
@@ -384,7 +396,7 @@ export async function listUserBlobs(
   })();
 
   return rawItems.map(item => {
-    const rawSize = (item as any)?.size;
+    const rawSize = item.size;
     const size = rawSize === undefined || rawSize === null ? undefined : Number(rawSize);
     return {
       ...item,
@@ -417,7 +429,7 @@ export async function uploadBlobToServer(
   signTemplate: SignTemplate | undefined,
   requiresAuth: boolean,
   onProgress?: (event: AxiosProgressEvent) => void,
-  options?: UploadOptions
+  options?: UploadOptions,
 ): Promise<BlossomBlob> {
   const url = new URL(`/upload`, serverUrl).toString();
   const normalizedServer = serverUrl.replace(/\/$/, "");
@@ -460,21 +472,36 @@ export async function uploadBlobToServer(
         },
       });
 
-      const data = response.data || {};
-      const rawSize = (data as any)?.size;
+      const data = (response.data || {}) as Partial<BlossomBlob> & { size?: unknown };
+      const rawSize = data.size;
       const size = rawSize === undefined || rawSize === null ? undefined : Number(rawSize);
+      const responseSha = typeof data.sha256 === "string" ? data.sha256.toLowerCase() : null;
+      const sha256 = responseSha ?? fileSha256Hex;
+      if (!sha256) {
+        throw new BloomHttpError("Blossom upload response missing blob hash", {
+          request: { url, method: "PUT" },
+          source: "blossom",
+          data,
+        });
+      }
       return {
         ...data,
+        sha256,
         size: Number.isFinite(size) ? size : uploadFile.size,
-        url: data.url || `${normalizedServer}/${data.sha256}`,
+        url: data.url || `${normalizedServer}/${sha256}`,
         serverUrl: normalizedServer,
         requiresAuth: Boolean(requiresAuth),
         serverType: "blossom",
       } as BlossomBlob;
     } catch (error) {
       if (axios.isAxiosError(error)) {
-        const serverMessage = (error.response?.data as { message?: string } | undefined)?.message || error.message;
-        if (requiresAuth && !skipSizeTag && (serverMessage || "").toLowerCase().includes("size tag")) {
+        const serverMessage =
+          (error.response?.data as { message?: string } | undefined)?.message || error.message;
+        if (
+          requiresAuth &&
+          !skipSizeTag &&
+          (serverMessage || "").toLowerCase().includes("size tag")
+        ) {
           return attempt(true);
         }
         if (error.response?.status === 413) {
@@ -484,7 +511,7 @@ export async function uploadBlobToServer(
               status: 413,
               request: { url, method: "PUT" },
               source: "blossom",
-            }
+            },
           );
         }
         throw fromAxiosError(error, { url, method: "PUT", source: "blossom" });
@@ -501,7 +528,7 @@ export async function deleteUserBlob(
   serverUrl: string,
   hash: string,
   signTemplate: SignTemplate | undefined,
-  requiresAuth: boolean
+  requiresAuth: boolean,
 ) {
   const url = new URL(`/${hash}`, serverUrl).toString();
   const headers: Record<string, string> = {};
@@ -541,11 +568,11 @@ export async function mirrorBlobToServer(
   sourceUrl: string,
   signTemplate: SignTemplate | undefined,
   requiresAuth: boolean,
-  sourceSha256?: string
+  sourceSha256?: string,
 ): Promise<BlossomBlob> {
   const url = new URL(`/mirror`, serverUrl).toString();
   const headers: Record<string, string> = { "content-type": "application/json" };
-  let body: any = JSON.stringify({ url: sourceUrl });
+  let body: string | undefined = JSON.stringify({ url: sourceUrl });
   const resolvedSha256 = sourceSha256?.toLowerCase() ?? extractSha256FromUrl(sourceUrl);
   if (resolvedSha256) {
     headers["X-SHA-256"] = resolvedSha256;
@@ -564,7 +591,7 @@ export async function mirrorBlobToServer(
     headers.Authorization = encodeAuthHeader(authEvent);
     body = JSON.stringify({ url: sourceUrl, event: authEvent });
   }
-  const data = await requestJson<any>({
+  const data = await requestJson<Partial<BlossomBlob> & { size?: unknown }>({
     url,
     method: "PUT",
     headers,
@@ -572,14 +599,24 @@ export async function mirrorBlobToServer(
     source: "blossom",
   });
   const normalizedServer = serverUrl.replace(/\/$/, "");
-  const rawSize = (data as any)?.size;
+  const rawSize = data.size;
   const size = rawSize === undefined || rawSize === null ? undefined : Number(rawSize);
+  const responseSha = typeof data.sha256 === "string" ? data.sha256.toLowerCase() : null;
+  const sha256 = responseSha ?? resolvedSha256 ?? null;
+  if (!sha256) {
+    throw new BloomHttpError("Blossom mirror response missing blob hash", {
+      request: { url, method: "PUT" },
+      source: "blossom",
+      data,
+    });
+  }
   return {
     ...data,
+    sha256,
     size: Number.isFinite(size) ? size : undefined,
-    url: data.url || `${normalizedServer}/${data.sha256}`,
+    url: data.url || `${normalizedServer}/${sha256}`,
     serverUrl: normalizedServer,
     requiresAuth: Boolean(requiresAuth),
     serverType: "blossom",
-  };
+  } as BlossomBlob;
 }

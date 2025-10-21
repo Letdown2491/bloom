@@ -20,11 +20,25 @@ import { deleteUserBlob, buildAuthorizationHeader } from "../../shared/api/bloss
 import { deleteNip96File } from "../../shared/api/nip96Client";
 import { deleteSatelliteFile } from "../../shared/api/satelliteClient";
 import { useNdk, useCurrentPubkey } from "../../app/context/NdkContext";
-import { isMusicBlob, isImageBlob, isVideoBlob, isDocumentBlob, isPdfBlob } from "../../shared/utils/blobClassification";
+import {
+  isMusicBlob,
+  isImageBlob,
+  isVideoBlob,
+  isDocumentBlob,
+  isPdfBlob,
+} from "../../shared/utils/blobClassification";
 import { PRIVATE_PLACEHOLDER_SHA, PRIVATE_SERVER_NAME } from "../../shared/constants/private";
-import { applyFolderUpdate, getBlobMetadataName, normalizeFolderPathInput } from "../../shared/utils/blobMetadataStore";
+import {
+  applyFolderUpdate,
+  getBlobMetadataName,
+  normalizeFolderPathInput,
+} from "../../shared/utils/blobMetadataStore";
 import type { BlobAudioMetadata } from "../../shared/utils/blobMetadataStore";
-import { deriveNameFromPath, isPrivateFolderName, type FolderListVisibility } from "../../shared/domain/folderList";
+import {
+  deriveNameFromPath,
+  isPrivateFolderName,
+  type FolderListVisibility,
+} from "../../shared/domain/folderList";
 import { type BlobReplicaSummary } from "../browse/ui/BlobList";
 import { isListLikeBlob } from "../browse/ui/components/blobPreview";
 import type { DefaultSortOption, SortDirection } from "../../app/context/UserPreferencesContext";
@@ -51,7 +65,7 @@ type MetadataSyncContext = {
 };
 
 const BrowsePanelLazy = React.lazy(() =>
-  import("../browse/BrowseTab").then(module => ({ default: module.BrowsePanel }))
+  import("../browse/BrowseTab").then(module => ({ default: module.BrowsePanel })),
 );
 
 const normalizeServerUrl = (value: string) => value.replace(/\/+$/, "");
@@ -70,7 +84,16 @@ const normalizeMatchUrl = (value?: string | null): string | null => {
   }
 };
 
-type SearchField = "artist" | "album" | "title" | "genre" | "year" | "type" | "mime" | "server" | "folder";
+type SearchField =
+  | "artist"
+  | "album"
+  | "title"
+  | "genre"
+  | "year"
+  | "type"
+  | "mime"
+  | "server"
+  | "folder";
 
 type SearchFlag =
   | "private"
@@ -212,7 +235,7 @@ const tokenizeSearchInput = (input: string): string[] => {
 
   for (let index = 0; index < input.length; index += 1) {
     const char = input.charAt(index);
-    if (char === "\"" || char === "'") {
+    if (char === '"' || char === "'") {
       if (quote === char) {
         quote = null;
         continue;
@@ -290,19 +313,23 @@ const parseCalendarDateRange = (value: string): DateRangeFilter | null => {
 const parseRelativeOffsetSeconds = (value: string): number | null => {
   const normalized = value.trim();
   if (!normalized) return null;
-  const match = /^([+-]?\d+(?:\.\d+)?)(?:\s*(s|sec|secs|second|seconds|m|min|mins|minute|minutes|h|hr|hrs|hour|hours|d|day|days|w|wk|wks|week|weeks))?$/.exec(
-    normalized
-  );
+  const match =
+    /^([+-]?\d+(?:\.\d+)?)(?:\s*(s|sec|secs|second|seconds|m|min|mins|minute|minutes|h|hr|hrs|hour|hours|d|day|days|w|wk|wks|week|weeks))?$/.exec(
+      normalized,
+    );
   if (!match) return null;
   const magnitude = Number(match[1]);
   if (!Number.isFinite(magnitude)) return null;
   const unitRaw = match[2]?.toLowerCase() ?? "s";
-  const multiplier =
-    unitRaw.startsWith("w") ? 60 * 60 * 24 * 7 :
-    unitRaw.startsWith("d") ? 60 * 60 * 24 :
-    unitRaw.startsWith("h") ? 60 * 60 :
-    unitRaw.startsWith("m") && unitRaw !== "ms" ? 60 :
-    1;
+  const multiplier = unitRaw.startsWith("w")
+    ? 60 * 60 * 24 * 7
+    : unitRaw.startsWith("d")
+      ? 60 * 60 * 24
+      : unitRaw.startsWith("h")
+        ? 60 * 60
+        : unitRaw.startsWith("m") && unitRaw !== "ms"
+          ? 60
+          : 1;
   const seconds = magnitude * multiplier;
   if (!Number.isFinite(seconds)) return null;
   return Math.round(seconds);
@@ -362,7 +389,10 @@ const parseDateRange = (value: string): DateRangeFilter | null => {
 
   const rangeSeparator = /\.\.\.?/;
   if (rangeSeparator.test(normalized)) {
-    const parts = normalized.split(rangeSeparator).map(part => part.trim()).filter(Boolean);
+    const parts = normalized
+      .split(rangeSeparator)
+      .map(part => part.trim())
+      .filter(Boolean);
     if (parts.length !== 2) return null;
     const [startRaw, endRaw] = parts as [string, string];
     const startRange = resolveDateRangeToken(startRaw);
@@ -387,36 +417,42 @@ const parseDatePoint = (value: string): number | null => {
 const NUMBER_RANGE_SEPARATOR = /\.\.\.?/;
 
 const parseDurationValue = (value: string): number | null => {
-  const match = /^(\d+(?:\.\d+)?)(?:\s*(ms|s|sec|secs|second|seconds|m|min|mins|minute|minutes|h|hr|hrs|hour|hours))?$/i.exec(
-    value.trim()
-  );
+  const match =
+    /^(\d+(?:\.\d+)?)(?:\s*(ms|s|sec|secs|second|seconds|m|min|mins|minute|minutes|h|hr|hrs|hour|hours))?$/i.exec(
+      value.trim(),
+    );
   if (!match) return null;
   const magnitude = Number(match[1]);
   if (!Number.isFinite(magnitude)) return null;
   const unitRaw = match[2]?.toLowerCase() ?? "s";
-  const multiplier =
-    unitRaw.startsWith("h") ? 60 * 60 :
-    unitRaw.startsWith("m") && unitRaw !== "ms" ? 60 :
-    unitRaw === "ms" ? 0.001 :
-    1;
+  const multiplier = unitRaw.startsWith("h")
+    ? 60 * 60
+    : unitRaw.startsWith("m") && unitRaw !== "ms"
+      ? 60
+      : unitRaw === "ms"
+        ? 0.001
+        : 1;
   const seconds = magnitude * multiplier;
   if (!Number.isFinite(seconds)) return null;
   return seconds >= 0 ? seconds : null;
 };
 
 const parseDurationComparison = (value: string): NumberComparison | null => {
-  const match = /^(?<op>>=|<=|>|<|=)?\s*(?<number>\d+(?:\.\d+)?)(?:\s*(?<unit>ms|s|sec|secs|second|seconds|m|min|mins|minute|minutes|h|hr|hrs|hour|hours))?$/i.exec(
-    value.trim()
-  );
+  const match =
+    /^(?<op>>=|<=|>|<|=)?\s*(?<number>\d+(?:\.\d+)?)(?:\s*(?<unit>ms|s|sec|secs|second|seconds|m|min|mins|minute|minutes|h|hr|hrs|hour|hours))?$/i.exec(
+      value.trim(),
+    );
   if (!match || !match.groups) return null;
   const rawNumber = Number(match.groups.number);
   if (!Number.isFinite(rawNumber)) return null;
   const unitRaw = match.groups.unit?.toLowerCase() ?? "s";
-  const multiplier =
-    unitRaw.startsWith("h") ? 60 * 60 :
-    unitRaw.startsWith("m") && unitRaw !== "ms" ? 60 :
-    unitRaw === "ms" ? 0.001 :
-    1;
+  const multiplier = unitRaw.startsWith("h")
+    ? 60 * 60
+    : unitRaw.startsWith("m") && unitRaw !== "ms"
+      ? 60
+      : unitRaw === "ms"
+        ? 0.001
+        : 1;
   const seconds = rawNumber * multiplier;
   if (!Number.isFinite(seconds)) return null;
   return { operator: (match.groups.op as NumberComparison["operator"]) ?? ">=", value: seconds };
@@ -432,7 +468,7 @@ const parseYearComparison = (value: string): NumberComparison | null => {
 
 const appendRangeComparisons = (
   target: NumberComparison[],
-  range: { min?: number | null; max?: number | null }
+  range: { min?: number | null; max?: number | null },
 ) => {
   if (typeof range.min === "number") {
     target.push({ operator: ">=", value: range.min });
@@ -450,15 +486,16 @@ const parseSizeComparison = (value: string): SizeComparison | null => {
   const rawNumber = Number(match.groups.number);
   if (!Number.isFinite(rawNumber)) return null;
   const unit = match.groups.unit?.toLowerCase() ?? "b";
-  const multiplier = unit === "tb"
-    ? 1024 ** 4
-    : unit === "gb"
-      ? 1024 ** 3
-      : unit === "mb"
-        ? 1024 ** 2
-        : unit === "kb"
-          ? 1024
-          : 1;
+  const multiplier =
+    unit === "tb"
+      ? 1024 ** 4
+      : unit === "gb"
+        ? 1024 ** 3
+        : unit === "mb"
+          ? 1024 ** 2
+          : unit === "kb"
+            ? 1024
+            : 1;
   return {
     operator,
     value: rawNumber * multiplier,
@@ -547,9 +584,15 @@ const parseSearchQuery = (value: string): ParsedSearchQuery => {
                     typeof normalizedMax === "number" &&
                     normalizedMax < normalizedMin
                   ) {
-                    appendRangeComparisons(durationComparisons, { min: normalizedMax, max: normalizedMin });
+                    appendRangeComparisons(durationComparisons, {
+                      min: normalizedMax,
+                      max: normalizedMin,
+                    });
                   } else {
-                    appendRangeComparisons(durationComparisons, { min: normalizedMin, max: normalizedMax });
+                    appendRangeComparisons(durationComparisons, {
+                      min: normalizedMin,
+                      max: normalizedMax,
+                    });
                   }
                   return;
                 }
@@ -571,9 +614,13 @@ const parseSearchQuery = (value: string): ParsedSearchQuery => {
                 const minValue = minRaw ? Number(minRaw.trim()) : undefined;
                 const maxValue = maxRaw ? Number(maxRaw.trim()) : undefined;
                 const minResolved =
-                  typeof minValue === "number" && Number.isFinite(minValue) ? Math.floor(minValue) : undefined;
+                  typeof minValue === "number" && Number.isFinite(minValue)
+                    ? Math.floor(minValue)
+                    : undefined;
                 const maxResolved =
-                  typeof maxValue === "number" && Number.isFinite(maxValue) ? Math.floor(maxValue) : undefined;
+                  typeof maxValue === "number" && Number.isFinite(maxValue)
+                    ? Math.floor(maxValue)
+                    : undefined;
                 if ((minRaw && minResolved == null) || (maxRaw && maxResolved == null)) {
                   // fall through unless both are valid
                 } else if (
@@ -655,7 +702,9 @@ const parseSearchQuery = (value: string): ParsedSearchQuery => {
   });
 
   const hasFieldValues = Object.values(fieldTerms).some(list => (list?.length ?? 0) > 0);
-  const hasExcludedFieldValues = Object.values(excludedFieldTerms).some(list => (list?.length ?? 0) > 0);
+  const hasExcludedFieldValues = Object.values(excludedFieldTerms).some(
+    list => (list?.length ?? 0) > 0,
+  );
   const isActive =
     textTerms.length > 0 ||
     excludedTextTerms.length > 0 ||
@@ -700,7 +749,14 @@ type FolderScope = "aggregated" | "server" | "private";
 
 type MoveDialogState =
   | { kind: "blob"; blob: BlossomBlob; currentPath: string | null; isPrivate: boolean }
-  | { kind: "folder"; path: string; name: string; currentParent: string | null; scope: FolderScope; isPrivate: boolean };
+  | {
+      kind: "folder";
+      path: string;
+      name: string;
+      currentParent: string | null;
+      scope: FolderScope;
+      isPrivate: boolean;
+    };
 
 const folderPlaceholderSha = (scope: FolderScope, path: string, variant: "node" | "up") => {
   const encodedPath = encodeURIComponent(path || "__root__");
@@ -716,7 +772,14 @@ const getParentFolderPath = (path: string): string | null => {
 };
 
 const buildFolderIndex = (blobs: readonly BlossomBlob[]): Map<string, FolderNode> => {
-  const root: FolderNode = { path: "", name: "", parent: null, children: new Set(), items: [], latestUploaded: 0 };
+  const root: FolderNode = {
+    path: "",
+    name: "",
+    parent: null,
+    children: new Set(),
+    items: [],
+    latestUploaded: 0,
+  };
   const nodes = new Map<string, FolderNode>();
   nodes.set("", root);
 
@@ -785,9 +848,19 @@ const createFolderPlaceholder = (
     targetPath: string | null;
     isParent?: boolean;
     latestUploaded?: number;
-  }
+  },
 ): BlossomBlob => {
-  const { scope, path, name, serverUrl, serverType, requiresAuth, targetPath, isParent = false, latestUploaded } = options;
+  const {
+    scope,
+    path,
+    name,
+    serverUrl,
+    serverType,
+    requiresAuth,
+    targetPath,
+    isParent = false,
+    latestUploaded,
+  } = options;
   const placeholder: BlossomBlob = {
     sha256: folderPlaceholderSha(scope, path, isParent ? "up" : "node"),
     name,
@@ -810,7 +883,7 @@ const createFolderPlaceholder = (
 const buildFolderViewFromIndex = (
   index: Map<string, FolderNode>,
   allBlobs: readonly BlossomBlob[],
-  options: BuildFolderViewOptions
+  options: BuildFolderViewOptions,
 ): { list: BlossomBlob[]; parentPath: string | null } => {
   const targetPath = options.activePath;
   const node = index.get(targetPath) ?? index.get("");
@@ -932,7 +1005,12 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
     privateBlobs,
     privateEntries,
   } = useWorkspace();
-  const { selected: selectedBlobs, toggle: toggleBlob, selectMany: selectManyBlobs, clear: clearSelection } = useSelection();
+  const {
+    selected: selectedBlobs,
+    toggle: toggleBlob,
+    selectMany: selectManyBlobs,
+    clear: clearSelection,
+  } = useSelection();
   const audio = useAudio();
   const queryClient = useQueryClient();
   const { effectiveRelays } = usePreferredRelays();
@@ -942,7 +1020,10 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
     serviceConfigured: privateLinkServiceConfigured,
     serviceHost: privateLinkServiceHost,
   } = usePrivateLinks({ enabled: true });
-  const privateLinkHost = useMemo(() => privateLinkServiceHost.replace(/\/+$/, ""), [privateLinkServiceHost]);
+  const privateLinkHost = useMemo(
+    () => privateLinkServiceHost.replace(/\/+$/, ""),
+    [privateLinkServiceHost],
+  );
   const findExistingPrivateLink = useCallback(
     (blob: BlossomBlob): PrivateLinkRecord | null => {
       if (!privateLinkServiceConfigured) return null;
@@ -962,7 +1043,7 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
       }
       return null;
     },
-    [privateLinks, privateLinkServiceConfigured]
+    [privateLinks, privateLinkServiceConfigured],
   );
   const privateLinkPresence = useMemo(() => {
     if (!privateLinkServiceConfigured) return null;
@@ -988,11 +1069,11 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
       const record = findExistingPrivateLink(blob);
       if (!record) return null;
       const alias = record.alias ?? null;
-      const directUrl = alias ? `${privateLinkHost}/${alias}` : record.target?.url ?? null;
+      const directUrl = alias ? `${privateLinkHost}/${alias}` : (record.target?.url ?? null);
       if (!directUrl) return null;
       return { url: directUrl, alias, expiresAt: record.expiresAt ?? null };
     },
-    [findExistingPrivateLink, privateLinkHost, privateLinkServiceConfigured]
+    [findExistingPrivateLink, privateLinkHost, privateLinkServiceConfigured],
   );
   const pubkey = useCurrentPubkey();
   const folderManifest = useFolderManifest();
@@ -1028,7 +1109,10 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
     onRestoreActiveList?.();
   }, [restoreActiveListKey, restoreActiveList, clearSelection, onRestoreActiveList]);
 
-  const metadataSource = useMemo(() => [...aggregated.blobs, ...privateBlobs], [aggregated.blobs, privateBlobs]);
+  const metadataSource = useMemo(
+    () => [...aggregated.blobs, ...privateBlobs],
+    [aggregated.blobs, privateBlobs],
+  );
   const metadataMap = useAudioMetadataMap(metadataSource);
   const searchTokenCacheRef = useRef(new WeakMap<BlossomBlob, CachedSearchTokens>());
 
@@ -1039,19 +1123,22 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
       const isFolderPlaceholder = Boolean(blob.__bloomFolderPlaceholder);
       const isParentLink = Boolean(blob.__bloomFolderIsParentLink);
       const isFolderLike = isFolderPlaceholder || isListLikeBlob(blob);
-      const rawFolderPath = isFolderPlaceholder ? blob.__bloomFolderTargetPath ?? null : blob.folderPath ?? null;
+      const rawFolderPath = isFolderPlaceholder
+        ? (blob.__bloomFolderTargetPath ?? null)
+        : (blob.folderPath ?? null);
       const normalizedFolderPath = normalizeFolderPathInput(rawFolderPath ?? undefined);
       const canonicalFolderPath =
         typeof normalizedFolderPath === "string" ? resolveFolderPath(normalizedFolderPath) : null;
       const folderRecord =
-        canonicalFolderPath !== null ? foldersByPath.get(canonicalFolderPath) ?? null : null;
+        canonicalFolderPath !== null ? (foldersByPath.get(canonicalFolderPath) ?? null) : null;
       const membershipPaths = blob.sha256 ? getFoldersForBlob(blob.sha256) : [];
       const isSharedViaMembership = membershipPaths.some(path => {
         const record = foldersByPath.get(path);
         return record?.visibility === "public";
       });
-      const isSharedFolder =
-        Boolean(isFolderLike && !isParentLink && folderRecord && folderRecord.visibility === "public");
+      const isSharedFolder = Boolean(
+        isFolderLike && !isParentLink && folderRecord && folderRecord.visibility === "public",
+      );
       const isSharedFile =
         !isFolderLike &&
         (isSharedViaMembership ||
@@ -1063,7 +1150,7 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
         Boolean(
           privateLinkPresence &&
             ((blob.sha256 && privateLinkPresence.shaSet.has(blob.sha256.toLowerCase())) ||
-              (normalizedBlobUrl && privateLinkPresence.urlSet.has(normalizedBlobUrl)))
+              (normalizedBlobUrl && privateLinkPresence.urlSet.has(normalizedBlobUrl))),
         );
       const isPublicBlob = !blob.privateData;
       return {
@@ -1077,7 +1164,13 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
         isPublicBlob,
       };
     },
-    [foldersByPath, getFoldersForBlob, privateLinkPresence, privateLinkServiceConfigured, resolveFolderPath]
+    [
+      foldersByPath,
+      getFoldersForBlob,
+      privateLinkPresence,
+      privateLinkServiceConfigured,
+      resolveFolderPath,
+    ],
   );
   const matchesSharingFilter = useCallback(
     (blob: BlossomBlob) => {
@@ -1096,7 +1189,7 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
       }
       return true;
     },
-    [onlyPrivateLinks, resolveSharingDetails, sharingFilter]
+    [onlyPrivateLinks, resolveSharingDetails, sharingFilter],
   );
   const applyContentFilters = useCallback(
     (source: BlossomBlob[]) => {
@@ -1107,7 +1200,7 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
       }
       return typeFiltered.filter(matchesSharingFilter);
     },
-    [filterMode, matchesSharingFilter, onlyPrivateLinks, sharingFilter]
+    [filterMode, matchesSharingFilter, onlyPrivateLinks, sharingFilter],
   );
 
   const reinforceFolderAssignments = useCallback(
@@ -1135,7 +1228,9 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
         if (!membershipPaths || membershipPaths.length === 0) {
           return blob;
         }
-        const targetPath = membershipPaths.find(path => typeof path === "string" && path.trim().length > 0);
+        const targetPath = membershipPaths.find(
+          path => typeof path === "string" && path.trim().length > 0,
+        );
         if (!targetPath) {
           return blob;
         }
@@ -1155,7 +1250,7 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
       });
       return changed ? mapped : (source as BlossomBlob[]);
     },
-    [getFoldersForBlob, resolveFolderPath]
+    [getFoldersForBlob, resolveFolderPath],
   );
 
   const signaturesEqual = (prev: SearchTokenSignature, next: SearchTokenSignature) => {
@@ -1184,15 +1279,14 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
     blob: BlossomBlob,
     signature: SearchTokenSignature,
     privateMetadata: Record<string, unknown> | null,
-    audioMetadata: BlobAudioMetadata | undefined
+    audioMetadata: BlobAudioMetadata | undefined,
   ): CachedSearchTokens => {
-    const getPrivateValue = <T = unknown>(key: string): T | undefined => {
+    const getPrivateValue = <T = unknown,>(key: string): T | undefined => {
       if (!privateMetadata) return undefined;
       return (privateMetadata as Record<string, unknown>)[key] as T | undefined;
     };
-    const privateAudio = (getPrivateValue<Record<string, unknown> | null>("audio") ?? null) as
-      | Record<string, unknown>
-      | null;
+    const privateAudio = (getPrivateValue<Record<string, unknown> | null>("audio") ??
+      null) as Record<string, unknown> | null;
 
     const coerceValue = (value: unknown): string | undefined => {
       if (typeof value === "string") {
@@ -1312,7 +1406,9 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
     addTextCandidate(privateFolder);
     addTextCandidate(privateType);
 
-    const privateServers = Array.isArray((blob.privateData as { servers?: string[] } | undefined)?.servers)
+    const privateServers = Array.isArray(
+      (blob.privateData as { servers?: string[] } | undefined)?.servers,
+    )
       ? ((blob.privateData as { servers?: string[] } | undefined)?.servers as string[])
       : [];
     privateServers.forEach(server => addServerCandidate(server));
@@ -1410,13 +1506,16 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
       return undefined;
     })();
 
-    const resolvedDuration = typeof audioNumbers.durationSeconds === "number" ? audioNumbers.durationSeconds : undefined;
+    const resolvedDuration =
+      typeof audioNumbers.durationSeconds === "number" ? audioNumbers.durationSeconds : undefined;
     const resolvedYear =
       typeof audioNumbers.year === "number" && Number.isFinite(audioNumbers.year)
         ? Math.floor(audioNumbers.year)
         : undefined;
     const resolvedUploaded =
-      typeof blob.uploaded === "number" && Number.isFinite(blob.uploaded) ? blob.uploaded : undefined;
+      typeof blob.uploaded === "number" && Number.isFinite(blob.uploaded)
+        ? blob.uploaded
+        : undefined;
 
     return {
       signature,
@@ -1431,14 +1530,17 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
 
   const getSearchTokens = useCallback(
     (blob: BlossomBlob): CachedSearchTokens => {
-      const privateMetadata = (blob.privateData?.metadata ?? null) as Record<string, unknown> | null;
+      const privateMetadata = (blob.privateData?.metadata ?? null) as Record<
+        string,
+        unknown
+      > | null;
       const audioMetadata = metadataMap.get(blob.sha256);
 
       const safeNumber = (value: unknown): number | null =>
         typeof value === "number" && Number.isFinite(value) ? value : null;
       const safeString = (value: unknown): string | null =>
         typeof value === "string" ? value : null;
-      const getPrivateValue = <T = unknown>(key: string): T | undefined => {
+      const getPrivateValue = <T = unknown,>(key: string): T | undefined => {
         if (!privateMetadata) return undefined;
         return (privateMetadata as Record<string, unknown>)[key] as T | undefined;
       };
@@ -1474,7 +1576,7 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
       searchTokenCacheRef.current.set(blob, built);
       return built;
     },
-    [metadataMap]
+    [metadataMap],
   );
 
   const matchesSearch = useCallback(
@@ -1511,7 +1613,9 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
       }
 
       if (isFolderLike) {
-        const wantsFolderResults = includeFlags.some(flag => flag === "shared" || flag === "shared-folder");
+        const wantsFolderResults = includeFlags.some(
+          flag => flag === "shared" || flag === "shared-folder",
+        );
         if (!wantsFolderResults) {
           return false;
         }
@@ -1595,7 +1699,9 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
         if (typeof tokens.resolvedUploaded !== "number") {
           return false;
         }
-        const satisfiesBefore = beforeTimestamps.every(threshold => tokens.resolvedUploaded! < threshold);
+        const satisfiesBefore = beforeTimestamps.every(
+          threshold => tokens.resolvedUploaded! < threshold,
+        );
         if (!satisfiesBefore) {
           return false;
         }
@@ -1605,7 +1711,9 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
         if (typeof tokens.resolvedUploaded !== "number") {
           return false;
         }
-        const satisfiesAfter = afterTimestamps.every(threshold => tokens.resolvedUploaded! >= threshold);
+        const satisfiesAfter = afterTimestamps.every(
+          threshold => tokens.resolvedUploaded! >= threshold,
+        );
         if (!satisfiesAfter) {
           return false;
         }
@@ -1616,7 +1724,7 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
           return false;
         }
         const matchesAllRanges = onRanges.every(
-          range => tokens.resolvedUploaded! >= range.start && tokens.resolvedUploaded! < range.end
+          range => tokens.resolvedUploaded! >= range.start && tokens.resolvedUploaded! < range.end,
         );
         if (!matchesAllRanges) {
           return false;
@@ -1675,7 +1783,7 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
         }
 
         const matchedAll = values.every(value =>
-          candidates.some(candidate => candidate.includes(value))
+          candidates.some(candidate => candidate.includes(value)),
         );
         if (!matchedAll) {
           return false;
@@ -1688,7 +1796,7 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
         const candidates = tokens.fieldCandidates[field] ?? [];
         if (!candidates.length) continue;
         const hasMatch = values.some(value =>
-          candidates.some(candidate => candidate.includes(value))
+          candidates.some(candidate => candidate.includes(value)),
         );
         if (hasMatch) {
           return false;
@@ -1715,7 +1823,7 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
 
       if (excludedTextTerms.length > 0) {
         const violates = excludedTextTerms.some(term =>
-          tokens.textCandidates.some(candidate => candidate.includes(term))
+          tokens.textCandidates.some(candidate => candidate.includes(term)),
         );
         if (violates) {
           return false;
@@ -1724,14 +1832,19 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
 
       return true;
     },
-    [getSearchTokens, resolveSharingDetails, searchQuery]
+    [getSearchTokens, resolveSharingDetails, searchQuery],
   );
 
   const normalizedSelectedServer = selectedServer ? normalizeServerUrl(selectedServer) : null;
-  const normalizeMaybeServerUrl = (value?: string | null) => (value ? normalizeServerUrl(value) : null);
-  const serverByUrl = useMemo(() => new Map(servers.map(server => [normalizeServerUrl(server.url), server])), [servers]);
+  const normalizeMaybeServerUrl = (value?: string | null) =>
+    value ? normalizeServerUrl(value) : null;
+  const serverByUrl = useMemo(
+    () => new Map(servers.map(server => [normalizeServerUrl(server.url), server])),
+    [servers],
+  );
 
-  const hasActiveFilter = filterMode !== "all" || sharingFilter !== "all" || onlyPrivateLinks || isSearching;
+  const hasActiveFilter =
+    filterMode !== "all" || sharingFilter !== "all" || onlyPrivateLinks || isSearching;
   const isPrivateRootView = activeList?.type === "private";
   const isPrivateFolderView = activeList?.type === "folder" && activeList.scope === "private";
   const isPrivateView = isPrivateRootView || isPrivateFolderView;
@@ -1739,7 +1852,7 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
     activeList?.type === "private"
       ? activeList.serverUrl
       : isPrivateFolderView
-        ? activeList.serverUrl ?? null
+        ? (activeList.serverUrl ?? null)
         : null;
   const hasPrivateFiles = privateBlobs.length > 0;
   const activeFolder = activeList?.type === "folder" ? activeList : null;
@@ -1748,7 +1861,7 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
 
   const excludeListedBlobs = useCallback(
     (source: BlossomBlob[]) => source.filter(blob => !entriesBySha.has(blob.sha256)),
-    [entriesBySha]
+    [entriesBySha],
   );
 
   useEffect(() => {
@@ -1821,24 +1934,30 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
         setActiveList(null);
         return;
       }
-      if (normalizeServerUrl(selectedServer) !== (activeFolder.serverUrl ? normalizeServerUrl(activeFolder.serverUrl) : undefined)) {
+      if (
+        normalizeServerUrl(selectedServer) !==
+        (activeFolder.serverUrl ? normalizeServerUrl(activeFolder.serverUrl) : undefined)
+      ) {
         setActiveList(null);
       }
     }
   }, [activeFolder, selectedServer]);
 
-  useEffect(() => () => {
-    playbackUrlCacheRef.current.forEach(url => {
-      if (typeof url === "string" && url.startsWith("blob:")) {
-        try {
-          URL.revokeObjectURL(url);
-        } catch {
-          // ignore revoke failures
+  useEffect(
+    () => () => {
+      playbackUrlCacheRef.current.forEach(url => {
+        if (typeof url === "string" && url.startsWith("blob:")) {
+          try {
+            URL.revokeObjectURL(url);
+          } catch {
+            // ignore revoke failures
+          }
         }
-      }
-    });
-    playbackUrlCacheRef.current.clear();
-  }, []);
+      });
+      playbackUrlCacheRef.current.clear();
+    },
+    [],
+  );
 
   const privatePlaceholderBlob = useMemo(() => {
     if (!hasPrivateFiles || isPrivateView) return null;
@@ -1894,17 +2013,14 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
       onSetTab("browse");
       clearSelection();
     },
-    [clearSelection, onSetTab]
+    [clearSelection, onSetTab],
   );
 
-  const isPlaceholderSha = useCallback(
-    (sha: string) => sha === PRIVATE_PLACEHOLDER_SHA,
-    []
-  );
+  const isPlaceholderSha = useCallback((sha: string) => sha === PRIVATE_PLACEHOLDER_SHA, []);
 
   const isPlaceholderBlob = useCallback(
     (blob: BlossomBlob) => blob.sha256 === PRIVATE_PLACEHOLDER_SHA,
-    []
+    [],
   );
 
   const privateSearchMatches = useMemo(() => {
@@ -1938,7 +2054,10 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
     reinforceFolderAssignments,
   ]);
 
-  const aggregatedFolderIndex = useMemo(() => buildFolderIndex(aggregatedFilteredBlobs), [aggregatedFilteredBlobs]);
+  const aggregatedFolderIndex = useMemo(
+    () => buildFolderIndex(aggregatedFilteredBlobs),
+    [aggregatedFilteredBlobs],
+  );
 
   const aggregatedFolderPath = activeFolder?.scope === "aggregated" ? activeFolder.path : "";
 
@@ -1979,7 +2098,7 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
   }, [aggregatedParentPathKey, browsingAllServers, folderManifest, hasActiveFilter]);
   const aggregatedInitialLoading = useMemo(
     () => snapshots.some(snapshot => snapshot.isLoading && snapshot.blobs.length === 0),
-    [snapshots]
+    [snapshots],
   );
   const visibleAggregatedBlobs = useMemo(() => {
     if (
@@ -2052,7 +2171,10 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
     return filtered.filter(matchesSearch);
   }, [applyContentFilters, isSearching, matchesSearch, privateScopedBlobs]);
 
-  const privateFolderIndex = useMemo(() => buildFolderIndex(privateVisibleBlobs), [privateVisibleBlobs]);
+  const privateFolderIndex = useMemo(
+    () => buildFolderIndex(privateVisibleBlobs),
+    [privateVisibleBlobs],
+  );
 
   const visiblePrivateBlobs = useMemo(() => {
     if (!isPrivateView || hasActiveFilter) return privateVisibleBlobs;
@@ -2105,7 +2227,7 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
 
   const currentFolderIndex = useMemo(
     () => (currentFilteredBlobs ? buildFolderIndex(currentFilteredBlobs) : null),
-    [currentFilteredBlobs]
+    [currentFilteredBlobs],
   );
 
   const currentFolderPath = activeFolder?.scope === "server" ? activeFolder.path : "";
@@ -2114,7 +2236,12 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
     if (!currentFilteredBlobs) return undefined;
     const serverInfo = currentSnapshot?.server;
     if (hasActiveFilter) {
-      if (!isSearching && !currentFolderPath && privatePlaceholderBlob && hasPrivateMatchingFilter) {
+      if (
+        !isSearching &&
+        !currentFolderPath &&
+        privatePlaceholderBlob &&
+        hasPrivateMatchingFilter
+      ) {
         return [privatePlaceholderBlob, ...currentFilteredBlobs];
       }
       return currentFilteredBlobs;
@@ -2150,7 +2277,7 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
   }, [activeFolder]);
   const serverScopeKey = useMemo(
     () => (normalizedSelectedServer ? `server:${normalizedSelectedServer}` : null),
-    [normalizedSelectedServer]
+    [normalizedSelectedServer],
   );
   const privateParentPathKey = useMemo(() => {
     if (activeFolder?.scope !== "private") return "";
@@ -2202,11 +2329,12 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
         const right = existing[index];
         if (!left || !right) return false;
         if (left.sha256 !== right.sha256) return false;
-        if (Boolean(left.__bloomFolderPlaceholder) !== Boolean(right.__bloomFolderPlaceholder)) return false;
+        if (Boolean(left.__bloomFolderPlaceholder) !== Boolean(right.__bloomFolderPlaceholder))
+          return false;
       }
       return true;
     },
-    [folderManifest]
+    [folderManifest],
   );
 
   useEffect(() => {
@@ -2231,7 +2359,9 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
       return;
     }
 
-    const isAggregatedLoading = snapshots.some(snapshot => snapshot.isLoading && snapshot.blobs.length === 0);
+    const isAggregatedLoading = snapshots.some(
+      snapshot => snapshot.isLoading && snapshot.blobs.length === 0,
+    );
     if (isAggregatedLoading) return;
     if (viewMatchesStored("aggregated", aggregatedParentPathKey, baseAggregatedBlobs)) return;
     folderManifest.saveView("aggregated", aggregatedParentPathKey, baseAggregatedBlobs);
@@ -2274,7 +2404,14 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
       }
       return null;
     },
-    [aggregated.blobs, currentSnapshot, currentVisibleBlobs, visibleAggregatedBlobs, privateBlobs, privateVisibleBlobs]
+    [
+      aggregated.blobs,
+      currentSnapshot,
+      currentVisibleBlobs,
+      visibleAggregatedBlobs,
+      privateBlobs,
+      privateVisibleBlobs,
+    ],
   );
 
   const queueMetadataSync = useCallback(
@@ -2319,7 +2456,7 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
         }
       })();
     },
-    [effectiveRelays, ndk, showStatusMessage, signer]
+    [effectiveRelays, ndk, showStatusMessage, signer],
   );
 
   useEffect(() => {
@@ -2407,7 +2544,7 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
   const formatMoveDestinationLabel = useCallback(
     (value: string | null, isPrivate: boolean) =>
       isPrivate ? formatPrivateFolderLabel(value) : formatFolderLabel(value),
-    [formatFolderLabel, formatPrivateFolderLabel]
+    [formatFolderLabel, formatPrivateFolderLabel],
   );
 
   const moveDestinations = useMemo(() => {
@@ -2486,7 +2623,13 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
     }
 
     return options;
-  }, [formatFolderLabel, formatPrivateFolderLabel, moveDestinations, moveState, privateMoveDestinations]);
+  }, [
+    formatFolderLabel,
+    formatPrivateFolderLabel,
+    moveDestinations,
+    moveState,
+    privateMoveDestinations,
+  ]);
 
   const blobVariantsBySha = useMemo(() => {
     const map = new Map<string, BlossomBlob[]>();
@@ -2498,7 +2641,8 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
         const alreadyPresent = existing.some(entry => {
           if (entry === blob) return true;
           const sameUrl = entry.url && blob.url ? entry.url === blob.url : false;
-          const sameServer = entry.serverUrl && blob.serverUrl ? entry.serverUrl === blob.serverUrl : false;
+          const sameServer =
+            entry.serverUrl && blob.serverUrl ? entry.serverUrl === blob.serverUrl : false;
           return sameUrl && sameServer;
         });
         if (!alreadyPresent) {
@@ -2522,8 +2666,10 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
     (scope: FolderScope, normalizedPath: string, serverUrl?: string | null) => {
       const sanitizedPath = normalizedPath ?? "";
       const normalizedServer = serverUrl ? normalizeServerUrl(serverUrl) : null;
-      const hasUrl = (value: unknown): value is string => typeof value === "string" && value.trim().length > 0;
-      const normalizePath = (value?: string | null) => normalizeFolderPathInput(value ?? undefined) ?? "";
+      const hasUrl = (value: unknown): value is string =>
+        typeof value === "string" && value.trim().length > 0;
+      const normalizePath = (value?: string | null) =>
+        normalizeFolderPathInput(value ?? undefined) ?? "";
       const deriveServerFromUrl = (value: string, sha: string): string | null => {
         if (!value || !sha) return null;
         const trimmed = value.trim();
@@ -2559,7 +2705,22 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
           }
         };
 
-        (["url", "serverUrl", "serverType", "requiresAuth", "size", "type", "name", "label", "uploaded", "infohash", "magnet", "nip94"] as (keyof BlossomBlob)[]).forEach(applyFallback);
+        (
+          [
+            "url",
+            "serverUrl",
+            "serverType",
+            "requiresAuth",
+            "size",
+            "type",
+            "name",
+            "label",
+            "uploaded",
+            "infohash",
+            "magnet",
+            "nip94",
+          ] as (keyof BlossomBlob)[]
+        ).forEach(applyFallback);
         return merged;
       };
 
@@ -2572,12 +2733,18 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
         if (!withUrl.length) return blob;
 
         const blobPath = normalizePath(blob.folderPath);
-        const matchesPath = (candidate: BlossomBlob) => normalizePath(candidate.folderPath) === (sanitizedPath || blobPath);
+        const matchesPath = (candidate: BlossomBlob) =>
+          normalizePath(candidate.folderPath) === (sanitizedPath || blobPath);
         const matchesServer = (candidate: BlossomBlob) =>
-          normalizedServer ? normalizeMaybeServerUrl(candidate.serverUrl) === normalizedServer : true;
+          normalizedServer
+            ? normalizeMaybeServerUrl(candidate.serverUrl) === normalizedServer
+            : true;
 
         const pickCandidate =
-          withUrl.find(candidate => matchesServer(candidate) && matchesPath(candidate) && candidate.requiresAuth !== true) ??
+          withUrl.find(
+            candidate =>
+              matchesServer(candidate) && matchesPath(candidate) && candidate.requiresAuth !== true,
+          ) ??
           withUrl.find(candidate => matchesServer(candidate) && candidate.requiresAuth !== true) ??
           withUrl.find(candidate => matchesPath(candidate) && candidate.requiresAuth !== true) ??
           withUrl.find(candidate => matchesServer(candidate)) ??
@@ -2603,7 +2770,11 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
 
       let source: readonly BlossomBlob[] = aggregated.blobs;
       if (scope === "server") {
-        if (normalizedServer && currentSnapshot?.server && normalizeMaybeServerUrl(currentSnapshot.server.url) === normalizedServer) {
+        if (
+          normalizedServer &&
+          currentSnapshot?.server &&
+          normalizeMaybeServerUrl(currentSnapshot.server.url) === normalizedServer
+        ) {
           source = currentSnapshot.blobs;
         } else if (normalizedServer) {
           source = aggregated.blobs.filter(blob => matchesServer(blob));
@@ -2666,7 +2837,7 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
         return blob;
       });
     },
-    [aggregated.blobs, blobVariantsBySha, currentSnapshot, normalizeMaybeServerUrl]
+    [aggregated.blobs, blobVariantsBySha, currentSnapshot, normalizeMaybeServerUrl],
   );
 
   const handleShareFolderHint = useCallback(
@@ -2706,7 +2877,13 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
         items,
       });
     },
-    [collectFolderBlobs, onShareFolder, privateLinkServiceConfigured, findExistingPrivateLink, privateLinkHost]
+    [
+      collectFolderBlobs,
+      onShareFolder,
+      privateLinkServiceConfigured,
+      findExistingPrivateLink,
+      privateLinkHost,
+    ],
   );
 
   const handleUnshareFolderHint = useCallback(
@@ -2721,7 +2898,7 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
         blobs,
       });
     },
-    [collectFolderBlobs, onUnshareFolder]
+    [collectFolderBlobs, onUnshareFolder],
   );
 
   const isPrivateAggregated = isPrivateView && !privateScopeUrl;
@@ -2744,7 +2921,14 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
       isError: false,
       error: null,
     };
-  }, [currentSnapshot, isPrivateAggregated, isPrivateView, privateScopeUrl, privateVisibleBlobs, serverByUrl]);
+  }, [
+    currentSnapshot,
+    isPrivateAggregated,
+    isPrivateView,
+    privateScopeUrl,
+    privateVisibleBlobs,
+    serverByUrl,
+  ]);
 
   const privateReplicaInfo = useMemo(() => {
     if (!isPrivateView) return undefined;
@@ -2790,29 +2974,32 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
   }, [blobReplicaInfo, isPrivateView, privateVisibleBlobs, privateScopeUrl, serverByUrl]);
 
   const effectiveBrowsingAllServers = isPrivateView ? isPrivateAggregated : browsingAllServers;
-  const effectiveAggregatedBlobs = isPrivateView && isPrivateAggregated ? visiblePrivateBlobs : visibleAggregatedBlobs;
+  const effectiveAggregatedBlobs =
+    isPrivateView && isPrivateAggregated ? visiblePrivateBlobs : visibleAggregatedBlobs;
   const effectiveCurrentSnapshot = isPrivateView
     ? isPrivateAggregated
       ? undefined
-      : privateSnapshot ?? currentSnapshot
+      : (privateSnapshot ?? currentSnapshot)
     : currentSnapshot;
   const effectiveCurrentVisibleBlobs = isPrivateView ? visiblePrivateBlobs : currentVisibleBlobs;
   const effectiveReplicaInfo = isPrivateView ? privateReplicaInfo : blobReplicaInfo;
 
-  const activeServerForPrivate = isPrivateView ? activePrivateServer ?? privateSnapshot?.server : undefined;
+  const activeServerForPrivate = isPrivateView
+    ? (activePrivateServer ?? privateSnapshot?.server)
+    : undefined;
 
   const effectiveSignTemplate = signEventTemplate as SignTemplate | undefined;
 
   const statusCount = isPrivateView
     ? privateVisibleBlobs.length
     : currentSnapshot
-    ? currentVisibleBlobs?.length ?? 0
-    : visibleAggregatedBlobs.length;
+      ? (currentVisibleBlobs?.length ?? 0)
+      : visibleAggregatedBlobs.length;
   const statusSize = isPrivateView
     ? privateVisibleBlobs.reduce((acc, blob) => acc + (blob.size || 0), 0)
     : currentSnapshot
-    ? (currentVisibleBlobs ?? []).reduce((acc, blob) => acc + (blob.size || 0), 0)
-    : visibleAggregatedBlobs.reduce((acc, blob) => acc + (blob.size || 0), 0);
+      ? (currentVisibleBlobs ?? []).reduce((acc, blob) => acc + (blob.size || 0), 0)
+      : visibleAggregatedBlobs.reduce((acc, blob) => acc + (blob.size || 0), 0);
 
   useEffect(() => {
     onStatusMetricsChange({ count: statusCount, size: statusSize });
@@ -2831,7 +3018,7 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
       }
       toggleBlob(sha);
     },
-    [folderPlaceholderInfo, isPlaceholderSha, openFolderFromInfo, openPrivateList, toggleBlob]
+    [folderPlaceholderInfo, isPlaceholderSha, openFolderFromInfo, openPrivateList, toggleBlob],
   );
 
   const handleSelectManyBlobs = useCallback(
@@ -2842,14 +3029,16 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
       }
       const folderTarget = shas
         .map(sha => folderPlaceholderInfo.get(sha))
-        .find((info): info is { scope: FolderScope; path: string; serverUrl?: string | null } => Boolean(info));
+        .find((info): info is { scope: FolderScope; path: string; serverUrl?: string | null } =>
+          Boolean(info),
+        );
       if (folderTarget) {
         openFolderFromInfo(folderTarget);
         return;
       }
       selectManyBlobs(shas, value);
     },
-    [folderPlaceholderInfo, isPlaceholderSha, openFolderFromInfo, openPrivateList, selectManyBlobs]
+    [folderPlaceholderInfo, isPlaceholderSha, openFolderFromInfo, openPrivateList, selectManyBlobs],
   );
 
   const musicQueueSource = useMemo(() => {
@@ -2860,7 +3049,14 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
       return aggregatedFilteredBlobs;
     }
     return excludeListedBlobs(aggregated.blobs);
-  }, [aggregated.blobs, aggregatedFilteredBlobs, excludeListedBlobs, isPrivateView, isSearching, privateVisibleBlobs]);
+  }, [
+    aggregated.blobs,
+    aggregatedFilteredBlobs,
+    excludeListedBlobs,
+    isPrivateView,
+    isSearching,
+    privateVisibleBlobs,
+  ]);
 
   const resolvePlaybackUrl = useCallback(
     async (blob: BlossomBlob) => {
@@ -2952,7 +3148,7 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
       playbackUrlCacheRef.current.set(cacheKey, objectUrl);
       return objectUrl;
     },
-    [signEventTemplate]
+    [signEventTemplate],
   );
 
   const resolveCoverArtUrl = useCallback(
@@ -3017,9 +3213,7 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
           originalSize: coverEntry?.metadata?.size,
         });
         const mimeType =
-          coverEntry?.metadata?.type ||
-          response.headers.get("content-type") ||
-          "image/jpeg";
+          coverEntry?.metadata?.type || response.headers.get("content-type") || "image/jpeg";
         imageBlob = new Blob([decryptedBuffer], { type: mimeType });
       } else {
         imageBlob = await response.blob();
@@ -3037,7 +3231,7 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
       playbackUrlCacheRef.current.set(cacheKey, objectUrl);
       return objectUrl;
     },
-    [signEventTemplate]
+    [signEventTemplate],
   );
 
   const buildTrackForBlob = useCallback(
@@ -3067,7 +3261,7 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
       }
       return track;
     },
-    [entriesBySha, metadataMap, resolveCoverArtUrl, resolvePlaybackUrl]
+    [entriesBySha, metadataMap, resolveCoverArtUrl, resolvePlaybackUrl],
   );
 
   const buildQueueForPlayback = useCallback(
@@ -3099,7 +3293,8 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
         }
       }
 
-      let focusTrack = existingFocusTrack ?? tracks.find(track => track.id === focusBlob.sha256) ?? null;
+      let focusTrack =
+        existingFocusTrack ?? tracks.find(track => track.id === focusBlob.sha256) ?? null;
       if (!focusTrack) {
         try {
           focusTrack = await buildTrackForBlob(focusBlob);
@@ -3111,7 +3306,7 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
 
       return { focusTrack, queue: tracks };
     },
-    [buildTrackForBlob, musicQueueSource]
+    [buildTrackForBlob, musicQueueSource],
   );
 
   const handleDeleteBlob = useCallback(
@@ -3190,7 +3385,9 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
             if (metadataTargets.length) {
               queueMetadataSync(metadataTargets, {
                 successMessage: count =>
-                  count === 1 ? "Synced metadata for 1 item." : `Synced metadata for ${count} items.`,
+                  count === 1
+                    ? "Synced metadata for 1 item."
+                    : `Synced metadata for ${count} items.`,
                 errorMessage: failureCount =>
                   failureCount === 1
                     ? "Failed to sync metadata to relays."
@@ -3199,7 +3396,10 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
             }
           }
 
-          if (activeList?.type === "folder" && normalizeFolderPathInput(activeList.path) === normalizedPath) {
+          if (
+            activeList?.type === "folder" &&
+            normalizeFolderPathInput(activeList.path) === normalizedPath
+          ) {
             const parentPath = getParentFolderPath(normalizedPath);
             if (parentPath) {
               setActiveList({
@@ -3270,13 +3470,15 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
         return;
       }
       try {
-        const signTemplateForDelete = requiresSigner ? (signEventTemplate as SignTemplate | undefined) : undefined;
+        const signTemplateForDelete = requiresSigner
+          ? (signEventTemplate as SignTemplate | undefined)
+          : undefined;
         await performDelete(
           blob,
           signTemplateForDelete,
           targetServer.type,
           targetServer.url,
-          requiresSigner
+          requiresSigner,
         );
         if (entriesBySha.has(blob.sha256)) {
           try {
@@ -3334,7 +3536,7 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
       signEventTemplate,
       signer,
       visibleAggregatedBlobs,
-    ]
+    ],
   );
 
   const handleCopyUrl = useCallback(
@@ -3352,7 +3554,7 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
       navigator.clipboard.writeText(blob.url).catch(() => undefined);
       showStatusMessage("URL copied to clipboard", "success", 1500);
     },
-    [extractFolderInfo, isPlaceholderBlob, openFolderFromInfo, openPrivateList, showStatusMessage]
+    [extractFolderInfo, isPlaceholderBlob, openFolderFromInfo, openPrivateList, showStatusMessage],
   );
 
   const handleShareBlob = useCallback(
@@ -3422,7 +3624,7 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
       findExistingPrivateLink,
       privateLinkServiceConfigured,
       privateLinkHost,
-    ]
+    ],
   );
 
   const handlePlayBlob = useCallback(
@@ -3478,7 +3680,7 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
       openFolderFromInfo,
       openPrivateList,
       showStatusMessage,
-    ]
+    ],
   );
 
   const handleMoveRequest = useCallback(
@@ -3494,8 +3696,9 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
             showStatusMessage("Unable to determine the folder location.", "error", 4000);
             return;
           }
-          const folderName =
-            blob.name?.trim().length ? blob.name.trim() : normalizedPath.split("/").pop() ?? normalizedPath;
+          const folderName = blob.name?.trim().length
+            ? blob.name.trim()
+            : (normalizedPath.split("/").pop() ?? normalizedPath);
           const parentPathRaw = getParentFolderPath(normalizedPath);
           const parentPath = parentPathRaw && parentPathRaw.length > 0 ? parentPathRaw : null;
           setMoveError(null);
@@ -3515,9 +3718,11 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
           return;
         }
         const canonicalPath = resolveFolderPath(normalizedPath);
-        const folderName = getFolderDisplayName(canonicalPath) || canonicalPath.split("/").pop() || canonicalPath;
+        const folderName =
+          getFolderDisplayName(canonicalPath) || canonicalPath.split("/").pop() || canonicalPath;
         const parentPathRaw = getParentFolderPath(canonicalPath);
-        const parentPath = parentPathRaw && parentPathRaw.length > 0 ? resolveFolderPath(parentPathRaw) : null;
+        const parentPath =
+          parentPathRaw && parentPathRaw.length > 0 ? resolveFolderPath(parentPathRaw) : null;
         setMoveError(null);
         setMoveBusy(false);
         setMoveState({
@@ -3534,14 +3739,17 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
       if (isListLikeBlob(blob)) {
         const folderInfo = extractFolderInfo(blob);
         const scope = folderInfo?.scope ?? "aggregated";
-        const normalizedPath = normalizeFolderPathInput(folderInfo?.path ?? blob.folderPath ?? undefined);
+        const normalizedPath = normalizeFolderPathInput(
+          folderInfo?.path ?? blob.folderPath ?? undefined,
+        );
         if (scope === "private") {
           if (!normalizedPath) {
             showStatusMessage("This folder cannot be moved.", "error", 4000);
             return;
           }
-          const folderName =
-            blob.name?.trim().length ? blob.name.trim() : normalizedPath.split("/").pop() ?? normalizedPath;
+          const folderName = blob.name?.trim().length
+            ? blob.name.trim()
+            : (normalizedPath.split("/").pop() ?? normalizedPath);
           const parentPathRaw = getParentFolderPath(normalizedPath);
           const parentPath = parentPathRaw && parentPathRaw.length > 0 ? parentPathRaw : null;
           setMoveError(null);
@@ -3561,9 +3769,11 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
           return;
         }
         const canonicalPath = resolveFolderPath(normalizedPath);
-        const folderName = getFolderDisplayName(canonicalPath) || canonicalPath.split("/").pop() || canonicalPath;
+        const folderName =
+          getFolderDisplayName(canonicalPath) || canonicalPath.split("/").pop() || canonicalPath;
         const parentPathRaw = getParentFolderPath(canonicalPath);
-        const parentPath = parentPathRaw && parentPathRaw.length > 0 ? resolveFolderPath(parentPathRaw) : null;
+        const parentPath =
+          parentPathRaw && parentPathRaw.length > 0 ? resolveFolderPath(parentPathRaw) : null;
         setMoveError(null);
         setMoveBusy(false);
         setMoveState({
@@ -3580,7 +3790,8 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
       if (blob.privateData) {
         const entry = entriesBySha.get(blob.sha256);
         const normalizedPath =
-          normalizeFolderPathInput(entry?.metadata?.folderPath ?? blob.folderPath ?? undefined) ?? null;
+          normalizeFolderPathInput(entry?.metadata?.folderPath ?? blob.folderPath ?? undefined) ??
+          null;
         if (!entry) {
           showStatusMessage("Unable to locate private file details.", "error", 4000);
           return;
@@ -3597,7 +3808,15 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
       setMoveBusy(false);
       setMoveState({ kind: "blob", blob, currentPath, isPrivate: false });
     },
-    [entriesBySha, extractFolderInfo, getFolderDisplayName, getFoldersForBlob, isListLikeBlob, resolveFolderPath, showStatusMessage]
+    [
+      entriesBySha,
+      extractFolderInfo,
+      getFolderDisplayName,
+      getFoldersForBlob,
+      isListLikeBlob,
+      resolveFolderPath,
+      showStatusMessage,
+    ],
   );
 
   const handleMoveSubmit = useCallback(
@@ -3662,21 +3881,20 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
             if ((currentCanonical ?? null) === (targetCanonical ?? null)) {
               setMoveState(null);
               return;
-          }
-          await setBlobFolderMembership(moveState.blob.sha256, targetCanonical);
-          const destinationLabel = formatFolderLabel(targetCanonical);
-          showStatusMessage(`Moved to ${destinationLabel}. Syncing metadata…`, "success", 3000);
-          queueMetadataSync(
-            [{ blob: moveState.blob, folderPath: targetCanonical ?? null }],
-            {
+            }
+            await setBlobFolderMembership(moveState.blob.sha256, targetCanonical);
+            const destinationLabel = formatFolderLabel(targetCanonical);
+            showStatusMessage(`Moved to ${destinationLabel}. Syncing metadata…`, "success", 3000);
+            queueMetadataSync([{ blob: moveState.blob, folderPath: targetCanonical ?? null }], {
               successMessage: () => "Folder metadata synced across relays.",
               errorMessage: failureCount =>
-                failureCount === 1 ? "Failed to sync metadata to relays." : `Failed to sync metadata for ${failureCount} items.`,
-            }
-          );
-          setMoveState(null);
-          setMoveError(null);
-        }
+                failureCount === 1
+                  ? "Failed to sync metadata to relays."
+                  : `Failed to sync metadata for ${failureCount} items.`,
+            });
+            setMoveState(null);
+            setMoveError(null);
+          }
         } else {
           const targetCanonical = canonicalize(rawDestination);
           const currentCanonical = moveState.path;
@@ -3687,7 +3905,11 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
             return;
           }
 
-          if (targetCanonical && (targetCanonical === currentCanonical || targetCanonical.startsWith(`${currentCanonical}/`))) {
+          if (
+            targetCanonical &&
+            (targetCanonical === currentCanonical ||
+              targetCanonical.startsWith(`${currentCanonical}/`))
+          ) {
             throw new Error("Choose a destination outside this folder.");
           }
 
@@ -3746,7 +3968,9 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
           } else {
             const impactedRecords = Array.from(foldersByPath.values()).filter(record => {
               if (!currentCanonical) return false;
-              return record.path === currentCanonical || record.path.startsWith(`${currentCanonical}/`);
+              return (
+                record.path === currentCanonical || record.path.startsWith(`${currentCanonical}/`)
+              );
             });
             const metadataTargetMap = new Map<string, MetadataSyncTarget>();
             const computeTargetPath = (recordPath: string) => {
@@ -3779,11 +4003,17 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
             await renameFolder(currentCanonical, nextPath);
 
             const destinationLabel = formatFolderLabel(targetCanonical);
-            showStatusMessage(`Folder moved to ${destinationLabel}. Syncing metadata…`, "success", 3000);
+            showStatusMessage(
+              `Folder moved to ${destinationLabel}. Syncing metadata…`,
+              "success",
+              3000,
+            );
             if (metadataTargets.length) {
               queueMetadataSync(metadataTargets, {
                 successMessage: count =>
-                  count === 1 ? "Synced metadata for 1 item." : `Synced metadata for ${count} items.`,
+                  count === 1
+                    ? "Synced metadata for 1 item."
+                    : `Synced metadata for ${count} items.`,
                 errorMessage: failureCount =>
                   failureCount === 1
                     ? "Failed to sync metadata to relays."
@@ -3826,7 +4056,7 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
       setBlobFolderMembership,
       showStatusMessage,
       upsertEntries,
-    ]
+    ],
   );
 
   const closeMoveDialog = useCallback(() => {
@@ -3862,7 +4092,7 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
       onRequestRename,
       openFolderFromInfo,
       openPrivateList,
-    ]
+    ],
   );
 
   const handleOpenListBlob = useCallback(
@@ -3876,7 +4106,7 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
         openFolderFromInfo(folderInfo);
       }
     },
-    [extractFolderInfo, isPlaceholderBlob, openFolderFromInfo, openPrivateList]
+    [extractFolderInfo, isPlaceholderBlob, openFolderFromInfo, openPrivateList],
   );
 
   const navigateHome = useCallback(() => {
@@ -3950,7 +4180,7 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
         const label = getFolderDisplayName(targetPath) || segment;
         const id = `${activeList.scope}:${targetPath || "__root__"}:${activeList.serverUrl ?? "all"}`;
         const canonicalPath = resolveFolderPath(targetPath);
-        const record = canonicalPath ? foldersByPath.get(canonicalPath) ?? null : null;
+        const record = canonicalPath ? (foldersByPath.get(canonicalPath) ?? null) : null;
         segments.push({
           id,
           label,
@@ -3969,14 +4199,24 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
     }
 
     return segments;
-  }, [activeList, foldersByPath, getFolderDisplayName, isSearching, openFolderFromInfo, openPrivateList]);
+  }, [
+    activeList,
+    foldersByPath,
+    getFolderDisplayName,
+    isSearching,
+    openFolderFromInfo,
+    openPrivateList,
+  ]);
 
-  const navigationState = useMemo<BrowseNavigationState>(() => ({
-    segments: breadcrumbSegments,
-    canNavigateUp: Boolean(activeList) && !isSearching,
-    onNavigateHome: navigateHome,
-    onNavigateUp: navigateUp,
-  }), [activeList, breadcrumbSegments, isSearching, navigateHome, navigateUp]);
+  const navigationState = useMemo<BrowseNavigationState>(
+    () => ({
+      segments: breadcrumbSegments,
+      canNavigateUp: Boolean(activeList) && !isSearching,
+      onNavigateHome: navigateHome,
+      onNavigateUp: navigateUp,
+    }),
+    [activeList, breadcrumbSegments, isSearching, navigateHome, navigateUp],
+  );
 
   useEffect(() => {
     onNavigationChange?.(navigationState);
@@ -3990,8 +4230,8 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
 
   const moveDialogInitialValue = moveState
     ? moveState.kind === "folder"
-      ? moveState.currentParent ?? null
-      : moveState.currentPath ?? null
+      ? (moveState.currentParent ?? null)
+      : (moveState.currentPath ?? null)
     : null;
 
   const moveDialogCurrentLocation = moveState
@@ -4003,7 +4243,7 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
   const moveDialogItemLabel = moveState
     ? moveState.kind === "folder"
       ? moveState.name
-      : getBlobMetadataName(moveState.blob) ?? moveState.blob.name ?? moveState.blob.sha256
+      : (getBlobMetadataName(moveState.blob) ?? moveState.blob.name ?? moveState.blob.sha256)
     : "";
 
   const moveDialogItemPath =
@@ -4032,33 +4272,33 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
             browsingAllServers={effectiveBrowsingAllServers}
             aggregatedBlobs={effectiveAggregatedBlobs}
             currentSnapshot={effectiveCurrentSnapshot}
-          currentVisibleBlobs={effectiveCurrentVisibleBlobs}
-          selectedBlobs={selectedBlobs}
-          signTemplate={effectiveSignTemplate}
-          replicaInfo={effectiveReplicaInfo}
-          onToggle={handleToggleBlob}
-          onSelectMany={handleSelectManyBlobs}
-          onDelete={handleDeleteBlob}
-          onCopy={handleCopyUrl}
-          onShare={handleShareBlob}
-          onRename={handleRenameBlob}
-          onMove={handleMoveRequest}
-          onPlay={handlePlayBlob}
-          resolvePrivateLink={resolvePrivateLink}
-          currentTrackUrl={audio.current?.url}
-          currentTrackStatus={audio.status}
-          filterMode={filterMode}
-          showGridPreviews={showGridPreviews}
-          showListPreviews={showListPreviews}
-          onOpenList={handleOpenListBlob}
-          defaultSortOption={defaultSortOption}
-          sortDirection={sortDirection}
-          folderRecords={foldersByPath}
-          onShareFolder={handleShareFolderHint}
-          onUnshareFolder={handleUnshareFolderHint}
-          folderShareBusyPath={folderShareBusyPath}
-          privateLinkServiceConfigured={privateLinkServiceConfigured}
-        />
+            currentVisibleBlobs={effectiveCurrentVisibleBlobs}
+            selectedBlobs={selectedBlobs}
+            signTemplate={effectiveSignTemplate}
+            replicaInfo={effectiveReplicaInfo}
+            onToggle={handleToggleBlob}
+            onSelectMany={handleSelectManyBlobs}
+            onDelete={handleDeleteBlob}
+            onCopy={handleCopyUrl}
+            onShare={handleShareBlob}
+            onRename={handleRenameBlob}
+            onMove={handleMoveRequest}
+            onPlay={handlePlayBlob}
+            resolvePrivateLink={resolvePrivateLink}
+            currentTrackUrl={audio.current?.url}
+            currentTrackStatus={audio.status}
+            filterMode={filterMode}
+            showGridPreviews={showGridPreviews}
+            showListPreviews={showListPreviews}
+            onOpenList={handleOpenListBlob}
+            defaultSortOption={defaultSortOption}
+            sortDirection={sortDirection}
+            folderRecords={foldersByPath}
+            onShareFolder={handleShareFolderHint}
+            onUnshareFolder={handleUnshareFolderHint}
+            folderShareBusyPath={folderShareBusyPath}
+            privateLinkServiceConfigured={privateLinkServiceConfigured}
+          />
         </Suspense>
       </div>
       {moveState ? (
@@ -4087,15 +4327,25 @@ const performDelete = async (
   signTemplate: SignTemplate | undefined,
   serverType: ManagedServer["type"],
   serverUrl: string,
-  requiresSigner: boolean
+  requiresSigner: boolean,
 ) => {
   if (serverType === "nip96") {
-    await deleteNip96File(serverUrl, blob.sha256, requiresSigner ? signTemplate : undefined, requiresSigner);
+    await deleteNip96File(
+      serverUrl,
+      blob.sha256,
+      requiresSigner ? signTemplate : undefined,
+      requiresSigner,
+    );
     return;
   }
   if (serverType === "satellite") {
     await deleteSatelliteFile(serverUrl, blob.sha256, signTemplate, true);
     return;
   }
-  await deleteUserBlob(serverUrl, blob.sha256, requiresSigner ? signTemplate : undefined, requiresSigner);
+  await deleteUserBlob(
+    serverUrl,
+    blob.sha256,
+    requiresSigner ? signTemplate : undefined,
+    requiresSigner,
+  );
 };

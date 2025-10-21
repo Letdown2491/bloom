@@ -85,7 +85,7 @@ const sanitizeTheme = (value: unknown): SerializedPreferences["theme"] => {
 export const serializePreferences = (
   preferences: UserPreferences,
   savedSearches: SyncedSavedSearch[],
-  updatedAt: number
+  updatedAt: number,
 ): SyncedPreferencesPayload => {
   const payload: SyncedPreferencesPayload = {
     version: 1,
@@ -107,23 +107,30 @@ export const serializePreferences = (
 };
 
 export const deserializePreferences = (
-  input: unknown
-): { payload: SyncedPreferencesPayload; preferences: UserPreferences; savedSearches: SyncedSavedSearch[] } | null => {
+  input: unknown,
+): {
+  payload: SyncedPreferencesPayload;
+  preferences: UserPreferences;
+  savedSearches: SyncedSavedSearch[];
+} | null => {
   if (!input || typeof input !== "object") return null;
   const source = input as Partial<SyncedPreferencesPayload>;
   if (source.version !== 1) return null;
-  const updatedAt = typeof source.updated_at === "number" && Number.isFinite(source.updated_at)
-    ? Math.max(0, Math.trunc(source.updated_at))
-    : null;
+  const updatedAt =
+    typeof source.updated_at === "number" && Number.isFinite(source.updated_at)
+      ? Math.max(0, Math.trunc(source.updated_at))
+      : null;
   if (!updatedAt) return null;
 
-  const rawPreferences = source.preferences && typeof source.preferences === "object"
-    ? { ...DEFAULT_SERIALIZED_PREFERENCES, ...(source.preferences as SerializedPreferences) }
-    : DEFAULT_SERIALIZED_PREFERENCES;
+  const rawPreferences =
+    source.preferences && typeof source.preferences === "object"
+      ? { ...DEFAULT_SERIALIZED_PREFERENCES, ...(source.preferences as SerializedPreferences) }
+      : DEFAULT_SERIALIZED_PREFERENCES;
 
   const preferences: UserPreferences = {
     defaultServerUrl:
-      typeof rawPreferences.default_server_url === "string" && rawPreferences.default_server_url.trim()
+      typeof rawPreferences.default_server_url === "string" &&
+      rawPreferences.default_server_url.trim()
         ? rawPreferences.default_server_url.trim()
         : null,
     defaultViewMode: sanitizeViewMode(rawPreferences.default_view_mode),
@@ -166,8 +173,10 @@ const sanitizeSavedSearch = (value: unknown): SyncedSavedSearch | null => {
   if (!value || typeof value !== "object") return null;
   const source = value as Record<string, unknown>;
   const id = typeof source.id === "string" && source.id.trim() ? source.id.trim() : null;
-  const label = typeof source.label === "string" && source.label.trim() ? source.label.trim() : null;
-  const query = typeof source.query === "string" && source.query.trim() ? source.query.trim() : null;
+  const label =
+    typeof source.label === "string" && source.label.trim() ? source.label.trim() : null;
+  const query =
+    typeof source.query === "string" && source.query.trim() ? source.query.trim() : null;
   const createdAt = normalizeEpochSeconds(source.created_at);
   const updatedAt = normalizeEpochSeconds(source.updated_at);
   if (!id || !query || !createdAt || !updatedAt) return null;

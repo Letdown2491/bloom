@@ -35,7 +35,8 @@ export type PrivateLinkManager = {
   generateAlias: (length?: number) => string;
 };
 
-const buildQueryKey = (pubkey: string | null | undefined) => ["private-links", pubkey ?? "anonymous"] as const;
+const buildQueryKey = (pubkey: string | null | undefined) =>
+  ["private-links", pubkey ?? "anonymous"] as const;
 
 export const usePrivateLinks = (options?: UsePrivateLinksOptions): PrivateLinkManager => {
   const { ndk, signer, user, prepareRelaySet } = useNdk();
@@ -134,7 +135,12 @@ export const usePrivateLinks = (options?: UsePrivateLinksOptions): PrivateLinkMa
     links: query.data ?? [],
     isLoading: query.isLoading,
     isFetching: query.isFetching,
-    error: query.error instanceof Error ? query.error : query.error ? new Error(String(query.error)) : null,
+    error:
+      query.error instanceof Error
+        ? query.error
+        : query.error
+          ? new Error(String(query.error))
+          : null,
     refresh,
     create,
     creating: createMutation.isPending,

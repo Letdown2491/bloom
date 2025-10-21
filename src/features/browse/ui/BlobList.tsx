@@ -1,9 +1,17 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { FixedSizeList as VirtualList } from "react-window";
 import { prettyBytes, prettyDate } from "../../../shared/utils/format";
-import { buildAuthorizationHeader, extractSha256FromUrl, type BlossomBlob, type SignTemplate } from "../../../shared/api/blossomClient";
+import {
+  buildAuthorizationHeader,
+  extractSha256FromUrl,
+  type BlossomBlob,
+  type SignTemplate,
+} from "../../../shared/api/blossomClient";
 import { buildNip98AuthHeader } from "../../../shared/api/nip98";
-import { decryptPrivateBlob, type PrivateEncryptionMetadata } from "../../../shared/domain/privateEncryption";
+import {
+  decryptPrivateBlob,
+  type PrivateEncryptionMetadata,
+} from "../../../shared/domain/privateEncryption";
 import {
   DownloadIcon,
   EditIcon,
@@ -24,13 +32,21 @@ import {
 } from "../../../shared/ui/icons";
 import { PRIVATE_PLACEHOLDER_SHA } from "../../../shared/constants/private";
 import type { FileKind } from "../../../shared/ui/icons";
-import { getBlobMetadataName, normalizeFolderPathInput, type BlobAudioMetadata } from "../../../shared/utils/blobMetadataStore";
+import {
+  getBlobMetadataName,
+  normalizeFolderPathInput,
+  type BlobAudioMetadata,
+} from "../../../shared/utils/blobMetadataStore";
 import { useBlobMetadata } from "../useBlobMetadata";
 import { useBlobPreview, canBlobPreview } from "../useBlobPreview";
 import { useAudioMetadataMap } from "../useAudioMetadata";
 import { usePrivateLibrary } from "../../../app/context/PrivateLibraryContext";
 import type { PrivateListEntry } from "../../../shared/domain/privateList";
-import { useUserPreferences, type DefaultSortOption, type SortDirection } from "../../../app/context/UserPreferencesContext";
+import {
+  useUserPreferences,
+  type DefaultSortOption,
+  type SortDirection,
+} from "../../../app/context/UserPreferencesContext";
 import { useDialog } from "../../../app/context/DialogContext";
 import type { FolderListRecord } from "../../../shared/domain/folderList";
 import type { FolderShareHint, ShareFolderScope } from "../../../shared/types/shareFolder";
@@ -75,7 +91,9 @@ export type BlobListProps = {
   onRename?: (blob: BlossomBlob) => void;
   onMove?: (blob: BlossomBlob) => void;
   onOpenList?: (blob: BlossomBlob) => void;
-  resolvePrivateLink?: (blob: BlossomBlob) => { url: string; alias?: string | null; expiresAt?: number | null } | null;
+  resolvePrivateLink?: (
+    blob: BlossomBlob,
+  ) => { url: string; alias?: string | null; expiresAt?: number | null } | null;
   folderRecords?: Map<string, FolderListRecord>;
   onShareFolder?: (hint: FolderShareHint) => void;
   onUnshareFolder?: (hint: FolderShareHint) => void;
@@ -103,7 +121,7 @@ type ShareAvailability = {
 
 const computeShareAvailability = (
   blob: BlossomBlob,
-  privateLinkServiceConfigured: boolean
+  privateLinkServiceConfigured: boolean,
 ): ShareAvailability => {
   const isListBlob = isListLikeBlob(blob);
   const isPrivateList = isListBlob && blob.sha256 === PRIVATE_PLACEHOLDER_SHA;
@@ -156,7 +174,7 @@ const useDropdownPlacement = (
   menuOpen: boolean,
   triggerRef: React.RefObject<HTMLElement | null>,
   menuRef: React.RefObject<HTMLElement | null>,
-  boundary: HTMLElement | null
+  boundary: HTMLElement | null,
 ) => {
   const [placement, setPlacement] = useState<DropdownPlacement | null>(null);
 
@@ -276,7 +294,11 @@ const ReplicaBadge: React.FC<{
         onClick={event => event.stopPropagation()}
         onKeyDown={event => event.stopPropagation()}
       >
-        <LockIcon size={variant === "grid" ? 14 : 13} className="text-amber-200" aria-hidden="true" />
+        <LockIcon
+          size={variant === "grid" ? 14 : 13}
+          className="text-amber-200"
+          aria-hidden="true"
+        />
       </span>
     );
   }
@@ -288,9 +310,13 @@ const ReplicaBadge: React.FC<{
   const themeIsLight = theme === "light";
   const baseClass = (() => {
     if (variant === "grid") {
-      return themeIsLight ? "bg-white/90 text-emerald-600 shadow" : "bg-slate-950 text-emerald-100 shadow-lg";
+      return themeIsLight
+        ? "bg-white/90 text-emerald-600 shadow"
+        : "bg-slate-950 text-emerald-100 shadow-lg";
     }
-    return themeIsLight ? "bg-white text-emerald-600 shadow" : "bg-slate-900/85 text-emerald-100 shadow";
+    return themeIsLight
+      ? "bg-white text-emerald-600 shadow"
+      : "bg-slate-900/85 text-emerald-100 shadow";
   })();
   const paddingClass = variant === "grid" ? "px-2 py-1" : "px-2.5 py-0.5";
   const iconSize = variant === "grid" ? 14 : 13;
@@ -313,10 +339,7 @@ const ReplicaBadge: React.FC<{
 };
 
 const deriveBlobSortName = (blob: BlossomBlob) => {
-  const folderName =
-    blob.__bloomFolderPlaceholder || isListLikeBlob(blob)
-      ? blob.name
-      : undefined;
+  const folderName = blob.__bloomFolderPlaceholder || isListLikeBlob(blob) ? blob.name : undefined;
   if (typeof folderName === "string" && folderName.trim()) {
     return folderName.trim().toLowerCase();
   }
@@ -365,14 +388,17 @@ export const BlobList: React.FC<BlobListProps> = ({
     (blob: BlossomBlob) => {
       onMove?.(blob);
     },
-    [onMove]
+    [onMove],
   );
-  const { resolvedMeta, detectedKinds, requestMetadata, reportDetectedKind } = useBlobMetadata(blobs, {
-    baseUrl,
-    requiresAuth,
-    signTemplate,
-    serverType,
-  });
+  const { resolvedMeta, detectedKinds, requestMetadata, reportDetectedKind } = useBlobMetadata(
+    blobs,
+    {
+      baseUrl,
+      requiresAuth,
+      signTemplate,
+      serverType,
+    },
+  );
   const decoratedBlobs = useMemo(() => {
     return blobs.map(blob => {
       const overrides = resolvedMeta[blob.sha256];
@@ -409,9 +435,9 @@ export const BlobList: React.FC<BlobListProps> = ({
     (coverUrl?: string | null) => {
       if (!coverUrl) return null;
       const coverSha = extractSha256FromUrl(coverUrl);
-      return coverSha ? entriesBySha.get(coverSha) ?? null : null;
+      return coverSha ? (entriesBySha.get(coverSha) ?? null) : null;
     },
-    [entriesBySha]
+    [entriesBySha],
   );
 
   const deriveReplicaCount = useCallback(
@@ -438,7 +464,7 @@ export const BlobList: React.FC<BlobListProps> = ({
 
       return servers.size || (blob.serverUrl ? 1 : 0);
     },
-    [replicaInfo]
+    [replicaInfo],
   );
 
   const { previewTarget, openPreview, closePreview } = useBlobPreview({
@@ -466,17 +492,20 @@ export const BlobList: React.FC<BlobListProps> = ({
         return null;
       });
     },
-    [onShare]
+    [onShare],
   );
   const shareDialogAvailability = useMemo(
-    () => (shareDialogTarget ? computeShareAvailability(shareDialogTarget, privateLinkServiceConfigured) : null),
-    [shareDialogTarget, privateLinkServiceConfigured]
+    () =>
+      shareDialogTarget
+        ? computeShareAvailability(shareDialogTarget, privateLinkServiceConfigured)
+        : null,
+    [shareDialogTarget, privateLinkServiceConfigured],
   );
   const shareDialogPublicLink = shareDialogAvailability?.publicUrl ?? null;
   const shareDialogPrivateLink = shareDialogAvailability?.privateLinkUrl ?? null;
   const shareDialogHasPrivateLink = Boolean(shareDialogPrivateLink);
   const shareDialogCanCreatePrivateLink = Boolean(
-    privateLinkServiceConfigured && !(shareDialogAvailability?.isPrivateItem ?? false)
+    privateLinkServiceConfigured && !(shareDialogAvailability?.isPrivateItem ?? false),
   );
   const shareDialogPrivateDisabledReason = useMemo(() => {
     if (!shareDialogAvailability || shareDialogAvailability.allowPrivate) return null;
@@ -609,7 +638,7 @@ export const BlobList: React.FC<BlobListProps> = ({
     (sha: string, kind: "image" | "video") => {
       reportDetectedKind(sha, kind);
     },
-    [reportDetectedKind]
+    [reportDetectedKind],
   );
 
   const handlePreview = useCallback(
@@ -618,7 +647,9 @@ export const BlobList: React.FC<BlobListProps> = ({
       const kind = decideFileKind(blob, detectedKind);
       const displayName = buildDisplayName(blob);
       const fallbackBaseUrl = blob.serverUrl ?? baseUrl;
-      const effectiveRequiresAuth = Boolean((blob.requiresAuth ?? requiresAuth) || blob.privateData?.encryption);
+      const effectiveRequiresAuth = Boolean(
+        (blob.requiresAuth ?? requiresAuth) || blob.privateData?.encryption,
+      );
       const rawPreviewUrl = buildPreviewUrl(blob, fallbackBaseUrl);
       const canPreview = canBlobPreview(blob, detectedKind, kind);
       const isPdf = kind === "pdf";
@@ -635,7 +666,7 @@ export const BlobList: React.FC<BlobListProps> = ({
         disablePreview,
       });
     },
-    [baseUrl, detectedKinds, openPreview, requiresAuth, serverType]
+    [baseUrl, detectedKinds, openPreview, requiresAuth, serverType],
   );
 
   const handleDownload = useCallback(
@@ -694,11 +725,14 @@ export const BlobList: React.FC<BlobListProps> = ({
           };
           try {
             const decryptedBuffer = await decryptPrivateBlob(encryptedBuffer, decryptionMetadata);
-            const resolvedType = privateMetadata?.type || blob.type || mimeHint || "application/octet-stream";
+            const resolvedType =
+              privateMetadata?.type || blob.type || mimeHint || "application/octet-stream";
             downloadBlob = new Blob([decryptedBuffer], { type: resolvedType });
           } catch (decryptError) {
             throw new Error(
-              decryptError instanceof Error ? decryptError.message : "Failed to decrypt private file."
+              decryptError instanceof Error
+                ? decryptError.message
+                : "Failed to decrypt private file.",
             );
           }
         } else {
@@ -733,12 +767,17 @@ export const BlobList: React.FC<BlobListProps> = ({
         }
       }
     },
-    [showDialogAlert, signTemplate, serverType]
+    [showDialogAlert, signTemplate, serverType],
   );
 
   const listBlobs = useMemo(() => {
     if (viewMode !== "list") return baseSortedBlobs;
-    if (!sortConfig || sortConfig.key === "name" || sortConfig.key === "size" || sortConfig.key === "updated") {
+    if (
+      !sortConfig ||
+      sortConfig.key === "name" ||
+      sortConfig.key === "size" ||
+      sortConfig.key === "updated"
+    ) {
       return sortedBlobs;
     }
 
@@ -751,8 +790,10 @@ export const BlobList: React.FC<BlobListProps> = ({
       } else if (sortConfig.key === "artist" || sortConfig.key === "album") {
         const aMeta = audioMetadata.get(a.sha256);
         const bMeta = audioMetadata.get(b.sha256);
-        const aValue = (sortConfig.key === "artist" ? aMeta?.artist : aMeta?.album)?.trim().toLowerCase() ?? "";
-        const bValue = (sortConfig.key === "artist" ? bMeta?.artist : bMeta?.album)?.trim().toLowerCase() ?? "";
+        const aValue =
+          (sortConfig.key === "artist" ? aMeta?.artist : aMeta?.album)?.trim().toLowerCase() ?? "";
+        const bValue =
+          (sortConfig.key === "artist" ? bMeta?.artist : bMeta?.album)?.trim().toLowerCase() ?? "";
         if (aValue && !bValue) return -1;
         if (!aValue && bValue) return 1;
         if (aValue && bValue) {
@@ -942,10 +983,10 @@ const ListLayout: React.FC<{
   onDownload,
   onPreview,
   onPlay,
-      onShare,
-      onRename,
-      onMove,
-      onOpenList,
+  onShare,
+  onRename,
+  onMove,
+  onOpenList,
   folderRecords,
   onShareFolder,
   onUnshareFolder,
@@ -971,7 +1012,7 @@ const ListLayout: React.FC<{
     (blob: BlossomBlob) => {
       onMove?.(blob);
     },
-    [onMove]
+    [onMove],
   );
   const selectAllRef = useRef<HTMLInputElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -1047,9 +1088,15 @@ const ListLayout: React.FC<{
     };
   }, [listWidth]);
   const estimatedHeight = (listRowHeight + LIST_ROW_GAP) * Math.min(blobs.length, 8);
-  const listHeight = container.height > 0 ? container.height : Math.min(480, Math.max(listRowHeight + LIST_ROW_GAP, estimatedHeight));
+  const listHeight =
+    container.height > 0
+      ? container.height
+      : Math.min(480, Math.max(listRowHeight + LIST_ROW_GAP, estimatedHeight));
   const listOverscanCount = useMemo(() => {
-    const visibleRows = container.height > 0 ? Math.max(1, Math.ceil(container.height / (listRowHeight + LIST_ROW_GAP))) : 4;
+    const visibleRows =
+      container.height > 0
+        ? Math.max(1, Math.ceil(container.height / (listRowHeight + LIST_ROW_GAP)))
+        : 4;
     const dynamicOverscan = visibleRows + 2;
     return Math.min(MAX_LIST_OVERSCAN, Math.max(MIN_LIST_OVERSCAN, dynamicOverscan));
   }, [container.height, listRowHeight]);
@@ -1059,7 +1106,7 @@ const ListLayout: React.FC<{
       if (!sortConfig || sortConfig.key !== key) return null;
       return sortConfig.direction === "asc" ? "^" : "v";
     },
-    [sortConfig]
+    [sortConfig],
   );
 
   const handleSelectAll: React.ChangeEventHandler<HTMLInputElement> = event => {
@@ -1067,7 +1114,7 @@ const ListLayout: React.FC<{
     if (onSelectMany) {
       onSelectMany(
         blobs.map(blob => blob.sha256),
-        value
+        value,
       );
     } else {
       blobs.forEach(blob => {
@@ -1156,11 +1203,19 @@ const ListLayout: React.FC<{
       privateLinkServiceConfigured,
       openShareDialog,
       activeShareDialogSha,
-    ]
+    ],
   );
 
   const Row = useCallback(
-    ({ index, style, data }: { index: number; style: React.CSSProperties; data: typeof itemData }) => {
+    ({
+      index,
+      style,
+      data,
+    }: {
+      index: number;
+      style: React.CSSProperties;
+      data: typeof itemData;
+    }) => {
       const {
         blobs: listBlobs,
         baseUrl: rowBaseUrl,
@@ -1204,10 +1259,14 @@ const ListLayout: React.FC<{
       const blob = listBlobs[index];
       if (!blob) return null;
 
-      const rawTop = typeof style.top === "number" ? style.top : Number.parseFloat(String(style.top ?? 0));
+      const rawTop =
+        typeof style.top === "number" ? style.top : Number.parseFloat(String(style.top ?? 0));
       const top = Number.isFinite(rawTop) ? rawTop + LIST_ROW_GAP / 2 : rawTop;
       const baseRowHeight = rowListRowHeight;
-      const rawHeight = typeof style.height === "number" ? style.height : Number.parseFloat(String(style.height ?? baseRowHeight));
+      const rawHeight =
+        typeof style.height === "number"
+          ? style.height
+          : Number.parseFloat(String(style.height ?? baseRowHeight));
       const height = Number.isFinite(rawHeight) ? rawHeight : baseRowHeight;
       const replicaSummary = rowReplicaInfo?.get(blob.sha256);
       const isPrivateBlob = Boolean(blob.privateData);
@@ -1263,24 +1322,32 @@ const ListLayout: React.FC<{
         />
       );
     },
-    [itemData, listWidth]
+    [itemData, listWidth],
   );
 
   const handleItemsRendered = useCallback(
-    ({ visibleStartIndex, visibleStopIndex }: { visibleStartIndex: number; visibleStopIndex: number }) => {
+    ({
+      visibleStartIndex,
+      visibleStopIndex,
+    }: {
+      visibleStartIndex: number;
+      visibleStopIndex: number;
+    }) => {
       for (let index = visibleStartIndex; index <= visibleStopIndex; index += 1) {
         const blob = blobs[index];
         if (blob) requestMetadata(blob.sha256);
       }
     },
-    [blobs, requestMetadata]
+    [blobs, requestMetadata],
   );
 
   const renderHeader = () => {
     if (isMusicView) {
       return (
         <div className="grid grid-cols-[60px,minmax(0,1fr)] md:grid-cols-[60px,minmax(0,1fr),10rem,12rem,6rem,max-content] items-center gap-2 text-xs tracking-wide text-slate-200">
-          <div className="flex items-center justify-center font-semibold text-slate-300 normal-case">Cover</div>
+          <div className="flex items-center justify-center font-semibold text-slate-300 normal-case">
+            Cover
+          </div>
           <button
             type="button"
             onClick={() => onSort("name")}
@@ -1386,10 +1453,10 @@ const ListLayout: React.FC<{
         {blobs.length === 0 ? (
           <div className="p-4 text-sm text-slate-400">No content on this server yet.</div>
         ) : (
-        <VirtualList
-          height={listHeight}
-          itemCount={blobs.length}
-          itemSize={listRowHeight + LIST_ROW_GAP}
+          <VirtualList
+            height={listHeight}
+            itemCount={blobs.length}
+            itemSize={listRowHeight + LIST_ROW_GAP}
             width={listWidth}
             onItemsRendered={handleItemsRendered}
             overscanCount={listOverscanCount}
@@ -1485,9 +1552,12 @@ const GridLayout: React.FC<{
     }
     const width = Math.max(
       CARD_WIDTH,
-      Math.min(window.innerWidth, FALLBACK_MAX_WIDTH) - FALLBACK_HORIZONTAL_PADDING
+      Math.min(window.innerWidth, FALLBACK_MAX_WIDTH) - FALLBACK_HORIZONTAL_PADDING,
     );
-    const height = Math.max(CARD_HEIGHT + VERTICAL_GAP, Math.floor((window.innerHeight || 800) * 0.6));
+    const height = Math.max(
+      CARD_HEIGHT + VERTICAL_GAP,
+      Math.floor((window.innerHeight || 800) * 0.6),
+    );
     return { width, height };
   }, []);
   const [viewport, setViewport] = useState(() => ({
@@ -1525,10 +1595,15 @@ const GridLayout: React.FC<{
     const handleScroll = () => {
       if (frame) cancelAnimationFrame(frame);
       frame = window.requestAnimationFrame(() => {
-        setViewport(prev => ({ height: prev.height || el.clientHeight, width: prev.width || el.clientWidth, scrollTop: el.scrollTop }));
+        setViewport(prev => ({
+          height: prev.height || el.clientHeight,
+          width: prev.width || el.clientWidth,
+          scrollTop: el.scrollTop,
+        }));
       });
     };
-    const resizeObserver = typeof ResizeObserver === "function" ? new ResizeObserver(() => updateSize()) : null;
+    const resizeObserver =
+      typeof ResizeObserver === "function" ? new ResizeObserver(() => updateSize()) : null;
     updateSize();
     el.addEventListener("scroll", handleScroll, { passive: true });
     if (resizeObserver) resizeObserver.observe(el);
@@ -1576,10 +1651,13 @@ const GridLayout: React.FC<{
   const viewportHeight = hasMeasuredViewport ? viewport.height : fallbackViewport.height;
   const viewportWidth = hasMeasuredViewport ? viewport.width : fallbackViewport.width;
   const scrollTop = hasMeasuredViewport ? viewport.scrollTop : 0;
-  const columnCount = Math.max(1, Math.floor((viewportWidth + HORIZONTAL_GAP) / (CARD_WIDTH + HORIZONTAL_GAP)));
+  const columnCount = Math.max(
+    1,
+    Math.floor((viewportWidth + HORIZONTAL_GAP) / (CARD_WIDTH + HORIZONTAL_GAP)),
+  );
   const effectiveColumnWidth = Math.max(
     160,
-    Math.floor((viewportWidth - HORIZONTAL_GAP * (columnCount + 1)) / columnCount) || CARD_WIDTH
+    Math.floor((viewportWidth - HORIZONTAL_GAP * (columnCount + 1)) / columnCount) || CARD_WIDTH,
   );
   const rowHeight = CARD_HEIGHT + VERTICAL_GAP;
   const rowCount = Math.ceil(blobs.length / columnCount);
@@ -1767,8 +1845,9 @@ type GridDropdownItem =
       disabled?: boolean;
     };
 
-const isGridDropdownSeparator = (item: GridDropdownItem): item is { key: string; type: "separator" } =>
-  "type" in item && item.type === "separator";
+const isGridDropdownSeparator = (
+  item: GridDropdownItem,
+): item is { key: string; type: "separator" } => "type" in item && item.type === "separator";
 
 const GridCard = React.memo<GridCardProps>(
   ({
@@ -1816,7 +1895,12 @@ const GridCard = React.memo<GridCardProps>(
     const dropdownContainerRef = useRef<HTMLDivElement | null>(null);
     const menuRef = useRef<HTMLDivElement | null>(null);
     const menuBoundary = getMenuBoundary?.() ?? null;
-    const menuPlacement = useDropdownPlacement(isMenuOpen, dropdownContainerRef, menuRef, menuBoundary);
+    const menuPlacement = useDropdownPlacement(
+      isMenuOpen,
+      dropdownContainerRef,
+      menuRef,
+      menuBoundary,
+    );
     const {
       preferences: { theme },
     } = useUserPreferences();
@@ -1834,7 +1918,9 @@ const GridCard = React.memo<GridCardProps>(
     const toolbarNeutralButtonClass = `${toolbarBaseClass} ${neutralToolbarClass}`;
     const toolbarPrimaryButtonClass = `${toolbarBaseClass} ${primaryToolbarClass}`;
     const dropdownTriggerClass = `${toolbarNeutralButtonClass} justify-center`;
-    const dropdownSeparatorClass = isLightTheme ? "my-1 h-px bg-slate-200" : "my-1 h-px bg-slate-700/60";
+    const dropdownSeparatorClass = isLightTheme
+      ? "my-1 h-px bg-slate-200"
+      : "my-1 h-px bg-slate-700/60";
     const menuBaseClass = isLightTheme
       ? "absolute right-0 z-50 w-44 rounded-md border border-slate-300 bg-white p-1 text-slate-700 shadow-xl"
       : "absolute right-0 z-50 w-44 rounded-md border border-slate-700 bg-slate-900/95 p-1 text-slate-200 shadow-xl backdrop-blur";
@@ -1843,20 +1929,23 @@ const GridCard = React.memo<GridCardProps>(
       : "focus:outline-none focus:ring-1 focus:ring-emerald-400 focus:ring-offset-1 focus:ring-offset-slate-900";
     const makeItemClass = (variant?: "destructive", disabled?: boolean) => {
       const base = `flex items-center gap-2 rounded-md px-3 py-1.5 text-sm transition ${focusRingClass}`;
-      const variantClass = variant === "destructive"
-        ? isLightTheme
-          ? "text-red-600 hover:bg-red-50"
-          : "text-red-300 hover:bg-red-900/40"
-        : isLightTheme
-          ? "text-slate-700 hover:bg-slate-100"
-          : "text-slate-200 hover:bg-slate-700";
+      const variantClass =
+        variant === "destructive"
+          ? isLightTheme
+            ? "text-red-600 hover:bg-red-50"
+            : "text-red-300 hover:bg-red-900/40"
+          : isLightTheme
+            ? "text-slate-700 hover:bg-slate-100"
+            : "text-slate-200 hover:bg-slate-700";
       const disabledClass = disabled ? "cursor-not-allowed opacity-50 hover:bg-transparent" : "";
       return `${base} ${variantClass} ${disabledClass}`.trim();
     };
     const isAudio = blob.type?.startsWith("audio/");
     const isActiveTrack = Boolean(currentTrackUrl && blob.url && currentTrackUrl === blob.url);
     const isActivePlaying = isActiveTrack && currentTrackStatus === "playing";
-    const previewRequiresAuth = Boolean((blob.requiresAuth ?? requiresAuth) || blob.privateData?.encryption);
+    const previewRequiresAuth = Boolean(
+      (blob.requiresAuth ?? requiresAuth) || blob.privateData?.encryption,
+    );
     const kind = decideFileKind(blob, detectedKind);
     const trackMetadata = audioMetadata.get(blob.sha256);
     const canPreview = canBlobPreview(blob, detectedKind, kind);
@@ -1882,21 +1971,27 @@ const GridCard = React.memo<GridCardProps>(
         }
       : null;
     const isFolderParentLink = Boolean(folderInfo?.isParent);
-    const normalizedFolderPath = folderInfo ? normalizeFolderPathInput(folderInfo.path ?? undefined) ?? "" : null;
+    const normalizedFolderPath = folderInfo
+      ? (normalizeFolderPathInput(folderInfo.path ?? undefined) ?? "")
+      : null;
     const folderRecord =
-      normalizedFolderPath && folderRecords ? folderRecords.get(normalizedFolderPath) ?? null : null;
-    const folderShareable =
-      Boolean(
-        folderInfo &&
-          !folderInfo.isParent &&
-          folderInfo.scope !== "private" &&
-          normalizedFolderPath !== null &&
-          folderRecord
-      );
+      normalizedFolderPath && folderRecords
+        ? (folderRecords.get(normalizedFolderPath) ?? null)
+        : null;
+    const folderShareable = Boolean(
+      folderInfo &&
+        !folderInfo.isParent &&
+        folderInfo.scope !== "private" &&
+        normalizedFolderPath !== null &&
+        folderRecord,
+    );
     const shareBusy = normalizedFolderPath ? folderShareBusyPath === normalizedFolderPath : false;
     const folderVisibility = folderRecord?.visibility ?? "private";
-    const folderShareScope: ShareFolderScope = folderInfo?.scope === "server" ? "server" : "aggregated";
-    const folderIsShared = Boolean(folderInfo && !folderInfo.isParent && folderRecord?.visibility === "public");
+    const folderShareScope: ShareFolderScope =
+      folderInfo?.scope === "server" ? "server" : "aggregated";
+    const folderIsShared = Boolean(
+      folderInfo && !folderInfo.isParent && folderRecord?.visibility === "public",
+    );
     const folderShareHint: FolderShareHint | null =
       folderShareable && normalizedFolderPath
         ? {
@@ -1908,7 +2003,7 @@ const GridCard = React.memo<GridCardProps>(
 
     const shareAvailability = useMemo(
       () => computeShareAvailability(blob, privateLinkServiceConfigured),
-      [blob, privateLinkServiceConfigured]
+      [blob, privateLinkServiceConfigured],
     );
     const disabledNeutralButtonClass = isLightTheme
       ? [
@@ -1954,7 +2049,7 @@ const GridCard = React.memo<GridCardProps>(
         willChange: "transform",
         zIndex: isMenuOpen ? 40 : isShareDialogActive ? 45 : isSelected ? 30 : undefined,
       }),
-      [height, isMenuOpen, isShareDialogActive, isSelected, left, top, width]
+      [height, isMenuOpen, isShareDialogActive, isSelected, left, top, width],
     );
     const contentHeight = height * 0.75;
 
@@ -1964,7 +2059,7 @@ const GridCard = React.memo<GridCardProps>(
         event.stopPropagation();
         onToggleMenu(blob.sha256);
       },
-      [actionsMenuDisabled, blob.sha256, onToggleMenu]
+      [actionsMenuDisabled, blob.sha256, onToggleMenu],
     );
 
     const registerDropdownRef = useCallback(
@@ -1976,7 +2071,7 @@ const GridCard = React.memo<GridCardProps>(
           dropdownRefs.current.delete(blob.sha256);
         }
       },
-      [blob.sha256, dropdownRefs]
+      [blob.sha256, dropdownRefs],
     );
 
     const dropdownItems = useMemo(() => {
@@ -2036,10 +2131,7 @@ const GridCard = React.memo<GridCardProps>(
         });
       }
 
-      const canMove =
-        Boolean(onMove) &&
-        !isFolderParentLink &&
-        !isPrivateList;
+      const canMove = Boolean(onMove) && !isFolderParentLink && !isPrivateList;
 
       if (canMove) {
         items.push({
@@ -2073,11 +2165,7 @@ const GridCard = React.memo<GridCardProps>(
         key: "delete",
         label: isListBlob ? "Delete Folder" : isAudio ? "Delete Track" : "Delete",
         icon: <TrashIcon size={14} />,
-        ariaLabel: isListBlob
-          ? "Delete folder"
-          : isAudio
-            ? "Delete track"
-            : "Delete blob",
+        ariaLabel: isListBlob ? "Delete folder" : isAudio ? "Delete track" : "Delete blob",
         onSelect: () => onDelete(blob),
         variant: "destructive",
       });
@@ -2107,10 +2195,11 @@ const GridCard = React.memo<GridCardProps>(
         callback();
         onCloseMenu();
       },
-      [onCloseMenu]
+      [onCloseMenu],
     );
 
-    const previewAllowed = showPreviews && canPreview && !(kind === "pdf" || kind === "doc" || kind === "document");
+    const previewAllowed =
+      showPreviews && canPreview && !(kind === "pdf" || kind === "doc" || kind === "document");
     const allowCoverArt = showPreviews && Boolean(coverUrl);
 
     const fallbackPreview = useMemo(() => {
@@ -2129,7 +2218,9 @@ const GridCard = React.memo<GridCardProps>(
                     ? "from-amber-900/70 via-slate-900 to-slate-950"
                     : "from-slate-900 via-slate-900 to-slate-950";
       return (
-        <div className={`flex h-full w-full items-center justify-center rounded-lg border border-slate-800 bg-gradient-to-br ${backgroundClass}`}>
+        <div
+          className={`flex h-full w-full items-center justify-center rounded-lg border border-slate-800 bg-gradient-to-br ${backgroundClass}`}
+        >
           <FileTypeIcon
             kind={kind}
             size={Math.round(CARD_HEIGHT * 0.5)}
@@ -2145,7 +2236,7 @@ const GridCard = React.memo<GridCardProps>(
         return (
           <AudioCoverImage
             url={coverUrl}
-            alt={`${(trackMetadata?.title?.trim() || displayName)} cover art`}
+            alt={`${trackMetadata?.title?.trim() || displayName} cover art`}
             className="h-full w-full rounded-lg border border-slate-800 object-cover"
             fallback={fallbackPreview}
             requiresAuth={previewRequiresAuth}
@@ -2161,7 +2252,11 @@ const GridCard = React.memo<GridCardProps>(
           <BlobPreview
             sha={blob.sha256}
             url={previewUrl}
-            name={(blob.__bloomFolderPlaceholder || isListLikeBlob(blob) ? blob.name : getBlobMetadataName(blob)) ?? blob.sha256}
+            name={
+              (blob.__bloomFolderPlaceholder || isListLikeBlob(blob)
+                ? blob.name
+                : getBlobMetadataName(blob)) ?? blob.sha256
+            }
             type={blob.type}
             serverUrl={blob.serverUrl ?? baseUrl}
             requiresAuth={previewRequiresAuth}
@@ -2225,7 +2320,7 @@ const GridCard = React.memo<GridCardProps>(
       if (!onShare) return null;
       const disabled = shareAvailability.disabled;
       const shareDisabledClass = disabled ? disabledNeutralButtonClass : "";
-      const title = disabled ? shareAvailability.disabledReason ?? "Share unavailable" : "Share";
+      const title = disabled ? (shareAvailability.disabledReason ?? "Share unavailable") : "Share";
       const ariaLabel = isAudio ? "Share track" : "Share blob";
       return (
         <button
@@ -2325,10 +2420,10 @@ const GridCard = React.memo<GridCardProps>(
       : "grid grid-cols-3 border-t border-slate-800/70 bg-slate-950/85 backdrop-blur px-0 py-0";
 
     const menuPlacementClass =
-      menuPlacement === "up"
-        ? "bottom-full mb-2 origin-bottom"
-        : "top-full mt-2 origin-top";
-    const menuVisibilityClass = menuPlacement ? "visible opacity-100" : "invisible opacity-0 pointer-events-none";
+      menuPlacement === "up" ? "bottom-full mb-2 origin-bottom" : "top-full mt-2 origin-top";
+    const menuVisibilityClass = menuPlacement
+      ? "visible opacity-100"
+      : "invisible opacity-0 pointer-events-none";
 
     return (
       <div
@@ -2355,12 +2450,19 @@ const GridCard = React.memo<GridCardProps>(
           ) : null}
           {previewContent}
           <div className="pointer-events-none absolute inset-x-0 bottom-0 px-3 pb-2">
-            <div className="w-full rounded-md bg-slate-950/75 px-2 py-1 text-xs font-medium text-white text-center" title={displayName}>
-                <span className="flex max-w-full items-center justify-center gap-1">
-                  <span className="truncate">{displayName}</span>
-                  {folderIsShared ? <ShareIcon size={12} className="text-white" aria-hidden="true" /> : null}
-                  {isPrivateItem ? <LockIcon size={12} className="text-amber-300" aria-hidden="true" /> : null}
-                </span>
+            <div
+              className="w-full rounded-md bg-slate-950/75 px-2 py-1 text-xs font-medium text-white text-center"
+              title={displayName}
+            >
+              <span className="flex max-w-full items-center justify-center gap-1">
+                <span className="truncate">{displayName}</span>
+                {folderIsShared ? (
+                  <ShareIcon size={12} className="text-white" aria-hidden="true" />
+                ) : null}
+                {isPrivateItem ? (
+                  <LockIcon size={12} className="text-amber-300" aria-hidden="true" />
+                ) : null}
+              </span>
             </div>
           </div>
         </div>
@@ -2380,7 +2482,10 @@ const GridCard = React.memo<GridCardProps>(
                 disabled={actionsMenuDisabled}
                 aria-disabled={actionsMenuDisabled || undefined}
               >
-                <ChevronDownIcon size={18} className={actionsMenuDisabled ? disabledNeutralIconClass : undefined} />
+                <ChevronDownIcon
+                  size={18}
+                  className={actionsMenuDisabled ? disabledNeutralIconClass : undefined}
+                />
               </button>
               {!actionsMenuDisabled && isMenuOpen ? (
                 <div
@@ -2391,7 +2496,14 @@ const GridCard = React.memo<GridCardProps>(
                 >
                   {dropdownItems.map(item => {
                     if (isGridDropdownSeparator(item)) {
-                      return <div key={item.key} className={dropdownSeparatorClass} role="separator" aria-hidden="true" />;
+                      return (
+                        <div
+                          key={item.key}
+                          className={dropdownSeparatorClass}
+                          role="separator"
+                          aria-hidden="true"
+                        />
+                      );
                     }
                     return (
                       <a
@@ -2420,7 +2532,7 @@ const GridCard = React.memo<GridCardProps>(
         </div>
       </div>
     );
-  }
+  },
 );
 
 GridCard.displayName = "GridCard";
@@ -2461,7 +2573,7 @@ const ListThumbnail: React.FC<{
   const coverEncryption = coverEntry?.encryption;
   const effectiveRequiresAuth = Boolean((blob.requiresAuth ?? requiresAuth) || coverEncryption);
   const [devicePixelRatio, setDevicePixelRatio] = useState(() =>
-    typeof window === "undefined" ? 1 : window.devicePixelRatio || 1
+    typeof window === "undefined" ? 1 : window.devicePixelRatio || 1,
   );
 
   useEffect(() => {
@@ -2479,8 +2591,8 @@ const ListThumbnail: React.FC<{
   const shouldLoadCompactCover = effectivePixelSize >= 136;
   const previewName =
     blob.__bloomFolderPlaceholder || isListLikeBlob(blob)
-      ? blob.name ?? blob.sha256
-      : getBlobMetadataName(blob) ?? blob.sha256;
+      ? (blob.name ?? blob.sha256)
+      : (getBlobMetadataName(blob) ?? blob.sha256);
 
   if (kind === "music") {
     const fallbackContent = (
@@ -2696,7 +2808,7 @@ const ListRowComponent: React.FC<ListRowProps> = ({
 }) => {
   const rowStyle = useMemo<React.CSSProperties>(
     () => ({ position: "absolute", top, left, width, height }),
-    [top, left, width, height]
+    [top, left, width, height],
   );
   const footerHeight = height * 0.25;
   const kind = decideFileKind(blob, detectedKind);
@@ -2708,7 +2820,9 @@ const ListRowComponent: React.FC<ListRowProps> = ({
   const primaryActionBaseClass =
     "p-2 shrink-0 rounded-lg flex items-center justify-center transition focus:outline-none focus:ring-1 focus:ring-emerald-400";
   const playButtonClass = `${primaryActionBaseClass} ${
-    isActivePlaying ? "bg-emerald-500/80 text-slate-900 hover:bg-emerald-400" : "bg-emerald-700/70 text-slate-100 hover:bg-emerald-600"
+    isActivePlaying
+      ? "bg-emerald-500/80 text-slate-900 hover:bg-emerald-400"
+      : "bg-emerald-700/70 text-slate-100 hover:bg-emerald-600"
   }`;
   const playPauseIcon = isActivePlaying ? <PauseIcon size={16} /> : <PlayIcon size={16} />;
   const displayName = buildDisplayName(blob);
@@ -2720,21 +2834,27 @@ const ListRowComponent: React.FC<ListRowProps> = ({
         isParent: Boolean(blob.__bloomFolderIsParentLink),
       }
     : null;
-  const normalizedFolderPath = folderInfo ? normalizeFolderPathInput(folderInfo.path ?? undefined) ?? "" : null;
+  const normalizedFolderPath = folderInfo
+    ? (normalizeFolderPathInput(folderInfo.path ?? undefined) ?? "")
+    : null;
   const folderRecord =
-    normalizedFolderPath && folderRecords ? folderRecords.get(normalizedFolderPath) ?? null : null;
-  const folderShareable =
-    Boolean(
-      folderInfo &&
-        !folderInfo.isParent &&
-        folderInfo.scope !== "private" &&
-        normalizedFolderPath !== null &&
-        folderRecord
-    );
+    normalizedFolderPath && folderRecords
+      ? (folderRecords.get(normalizedFolderPath) ?? null)
+      : null;
+  const folderShareable = Boolean(
+    folderInfo &&
+      !folderInfo.isParent &&
+      folderInfo.scope !== "private" &&
+      normalizedFolderPath !== null &&
+      folderRecord,
+  );
   const shareBusy = normalizedFolderPath ? folderShareBusyPath === normalizedFolderPath : false;
   const folderVisibility = folderRecord?.visibility ?? "private";
-  const folderShareScope: ShareFolderScope = folderInfo?.scope === "server" ? "server" : "aggregated";
-  const folderIsShared = Boolean(folderInfo && !folderInfo.isParent && folderRecord?.visibility === "public");
+  const folderShareScope: ShareFolderScope =
+    folderInfo?.scope === "server" ? "server" : "aggregated";
+  const folderIsShared = Boolean(
+    folderInfo && !folderInfo.isParent && folderRecord?.visibility === "public",
+  );
   const folderShareHint: FolderShareHint | null =
     folderShareable && normalizedFolderPath
       ? {
@@ -2835,9 +2955,7 @@ const ListRowComponent: React.FC<ListRowProps> = ({
     notify();
 
     const resizeObserver =
-      typeof ResizeObserver === "function"
-        ? new ResizeObserver(() => notify())
-        : null;
+      typeof ResizeObserver === "function" ? new ResizeObserver(() => notify()) : null;
 
     resizeObserver?.observe(element);
 
@@ -2916,11 +3034,13 @@ const ListRowComponent: React.FC<ListRowProps> = ({
     const disabledClass = disabled ? "cursor-not-allowed opacity-50 hover:bg-transparent" : "";
     return `${base} ${variantClass} ${disabledClass}`.trim();
   };
-  const dropdownSeparatorClass = isLightTheme ? "my-1 h-px bg-slate-200" : "my-1 h-px bg-slate-700/60";
+  const dropdownSeparatorClass = isLightTheme
+    ? "my-1 h-px bg-slate-200"
+    : "my-1 h-px bg-slate-700/60";
 
   const shareAvailability = useMemo(
     () => computeShareAvailability(blob, privateLinkServiceConfigured),
-    [blob, privateLinkServiceConfigured]
+    [blob, privateLinkServiceConfigured],
   );
   const isShareDialogActive = activeShareDialogSha === blob.sha256;
 
@@ -2952,7 +3072,7 @@ const ListRowComponent: React.FC<ListRowProps> = ({
     if (!onShare) return null;
     const disabled = shareAvailability.disabled;
     const ariaLabel = isMusicListView ? "Share track" : "Share blob";
-    const title = disabled ? shareAvailability.disabledReason ?? "Share unavailable" : "Share";
+    const title = disabled ? (shareAvailability.disabledReason ?? "Share unavailable") : "Share";
     return (
       <button
         className="p-2 shrink-0 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-slate-800"
@@ -3045,10 +3165,7 @@ const ListRowComponent: React.FC<ListRowProps> = ({
     });
   }
 
-  const canMove =
-    Boolean(onMove) &&
-    !(folderInfo?.isParent) &&
-    !isPrivateListEntry;
+  const canMove = Boolean(onMove) && !folderInfo?.isParent && !isPrivateListEntry;
 
   if (canMove) {
     dropdownItems.push({
@@ -3087,80 +3204,88 @@ const ListRowComponent: React.FC<ListRowProps> = ({
   };
 
   const menuPlacementClass =
-    menuPlacement === "up"
-      ? "bottom-full mb-2 origin-bottom"
-      : "top-full mt-2 origin-top";
-  const menuVisibilityClass = menuPlacement ? "visible opacity-100" : "invisible opacity-0 pointer-events-none";
+    menuPlacement === "up" ? "bottom-full mb-2 origin-bottom" : "top-full mt-2 origin-top";
+  const menuVisibilityClass = menuPlacement
+    ? "visible opacity-100"
+    : "invisible opacity-0 pointer-events-none";
 
-  const dropdownMenu = !showDropdown
-    ? null
-    : (
-        <div className="relative" ref={dropdownRef}>
-          <button
-            className={dropdownTriggerClass}
-            onClick={handleMenuToggle}
-            aria-haspopup="true"
-            aria-expanded={menuOpen}
-            title="More actions"
-            type="button"
-          >
-            <ChevronDownIcon size={16} />
-          </button>
-          {menuOpen ? (
-            <div
-              ref={menuRef}
-              className={`${menuBaseClass} ${menuPlacementClass} ${menuVisibilityClass}`}
-              role="menu"
-              aria-label="More actions"
-            >
-              {dropdownItems.map(item => {
-                if ("type" in item) {
-                  return <div key={item.key} className={dropdownSeparatorClass} role="separator" aria-hidden="true" />;
-                }
-                return (
-                  <a
-                    key={item.key}
-                    href="#"
-                    role="menuitem"
-                    aria-label={item.ariaLabel ?? item.label}
-                    className={makeItemClass(item.variant, item.disabled)}
-                    aria-disabled={item.disabled || undefined}
-                    onClick={event => {
-                      event.preventDefault();
-                      event.stopPropagation();
-                      if (item.disabled) return;
-                      item.onSelect();
-                      setMenuOpen(false);
-                    }}
-                  >
-                    {item.icon}
-                    <span>{item.label}</span>
-                  </a>
-                );
-              })}
-            </div>
-          ) : null}
+  const dropdownMenu = !showDropdown ? null : (
+    <div className="relative" ref={dropdownRef}>
+      <button
+        className={dropdownTriggerClass}
+        onClick={handleMenuToggle}
+        aria-haspopup="true"
+        aria-expanded={menuOpen}
+        title="More actions"
+        type="button"
+      >
+        <ChevronDownIcon size={16} />
+      </button>
+      {menuOpen ? (
+        <div
+          ref={menuRef}
+          className={`${menuBaseClass} ${menuPlacementClass} ${menuVisibilityClass}`}
+          role="menu"
+          aria-label="More actions"
+        >
+          {dropdownItems.map(item => {
+            if ("type" in item) {
+              return (
+                <div
+                  key={item.key}
+                  className={dropdownSeparatorClass}
+                  role="separator"
+                  aria-hidden="true"
+                />
+              );
+            }
+            return (
+              <a
+                key={item.key}
+                href="#"
+                role="menuitem"
+                aria-label={item.ariaLabel ?? item.label}
+                className={makeItemClass(item.variant, item.disabled)}
+                aria-disabled={item.disabled || undefined}
+                onClick={event => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  if (item.disabled) return;
+                  item.onSelect();
+                  setMenuOpen(false);
+                }}
+              >
+                {item.icon}
+                <span>{item.label}</span>
+              </a>
+            );
+          })}
         </div>
-      );
+      ) : null}
+    </div>
+  );
 
   const showButtonClass = `${primaryActionBaseClass} ${
-    isLightTheme ? "bg-blue-700 text-white hover:bg-blue-600" : "bg-emerald-700/70 text-slate-100 hover:bg-emerald-600"
+    isLightTheme
+      ? "bg-blue-700 text-white hover:bg-blue-600"
+      : "bg-emerald-700/70 text-slate-100 hover:bg-emerald-600"
   }`;
 
-  const primaryAction = isListBlob && onOpenList ? (
-    <button
-      className={showButtonClass}
-      onClick={event => {
-        event.stopPropagation();
-        handleOpenList();
-      }}
-      aria-label="Open list"
-      title="Open"
-      type="button"
-    >
-      <PreviewIcon size={16} />
-    </button>
-  ) : isAudio && onPlay && blob.url ? (
+  const primaryAction =
+    isListBlob && onOpenList ? (
+      <button
+        className={showButtonClass}
+        onClick={event => {
+          event.stopPropagation();
+          handleOpenList();
+        }}
+        aria-label="Open list"
+        title="Open"
+        type="button"
+      >
+        <PreviewIcon size={16} />
+      </button>
+    ) : isAudio && onPlay && blob.url ? (
       <button
         className={playButtonClass}
         onClick={event => {
@@ -3211,13 +3336,16 @@ const ListRowComponent: React.FC<ListRowProps> = ({
         aria-current={isActiveTrack ? "true" : undefined}
         onClick={handleRowClick}
       >
-        <div className="flex h-full items-center justify-center">
-          {thumbnail}
-        </div>
+        <div className="flex h-full items-center justify-center">{thumbnail}</div>
         <div className="min-w-0">
-          <div className="flex items-center gap-2 truncate font-medium text-slate-100" title={displayName}>
+          <div
+            className="flex items-center gap-2 truncate font-medium text-slate-100"
+            title={displayName}
+          >
             <span className="truncate">{trackTitle}</span>
-            {folderIsShared ? <ShareIcon size={14} className="shrink-0" aria-hidden="true" /> : null}
+            {folderIsShared ? (
+              <ShareIcon size={14} className="shrink-0" aria-hidden="true" />
+            ) : null}
           </div>
           <div className="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-slate-400 md:hidden">
             <span className="truncate">{artistName || "—"}</span>
@@ -3230,12 +3358,10 @@ const ListRowComponent: React.FC<ListRowProps> = ({
         <div className="hidden truncate text-sm text-slate-200 lg:block" title={albumName}>
           {albumName || "—"}
         </div>
-        <div className="hidden justify-end text-sm text-slate-400 lg:flex">
-          {durationLabel}
-        </div>
+        <div className="hidden justify-end text-sm text-slate-400 lg:flex">{durationLabel}</div>
         <div
           ref={actionsContainerRef}
-        className="col-span-2 flex shrink-0 items-center justify-center gap-2 px-2 md:col-span-1 md:justify-end"
+          className="col-span-2 flex shrink-0 items-center justify-center gap-2 px-2 md:col-span-1 md:justify-end"
           style={actionsStyle}
         >
           {primaryAction}
@@ -3279,8 +3405,12 @@ const ListRowComponent: React.FC<ListRowProps> = ({
             <div className="min-w-0" title={displayName}>
               <div className="flex min-w-0 flex-wrap items-center gap-2 font-medium text-slate-100">
                 <span className="truncate">{displayName}</span>
-                {folderIsShared ? <ShareIcon size={14} className="text-slate-100" aria-hidden="true" /> : null}
-                {isPrivateItem ? <LockIcon size={14} className="text-amber-300" aria-hidden="true" /> : null}
+                {folderIsShared ? (
+                  <ShareIcon size={14} className="text-slate-100" aria-hidden="true" />
+                ) : null}
+                {isPrivateItem ? (
+                  <LockIcon size={14} className="text-amber-300" aria-hidden="true" />
+                ) : null}
               </div>
               {metadataInline}
             </div>
@@ -3336,7 +3466,10 @@ const ListRowComponent: React.FC<ListRowProps> = ({
           return "—";
         })()}
       </div>
-      <div className="hidden w-40 shrink-0 px-3 text-xs text-slate-400 md:block" title={updatedLabel !== "—" ? updatedLabel : undefined}>
+      <div
+        className="hidden w-40 shrink-0 px-3 text-xs text-slate-400 md:block"
+        title={updatedLabel !== "—" ? updatedLabel : undefined}
+      >
         {updatedLabel}
       </div>
       <div className="hidden w-24 shrink-0 px-3 text-sm text-slate-400 md:block">{sizeLabel}</div>
@@ -3351,8 +3484,7 @@ const ListRowComponent: React.FC<ListRowProps> = ({
       </div>
     </div>
   );
-}
-
+};
 
 const ListRow = React.memo(ListRowComponent, (prev, next) => {
   return (
@@ -3381,7 +3513,6 @@ const ListRow = React.memo(ListRowComponent, (prev, next) => {
     prev.activeShareDialogSha === next.activeShareDialogSha
   );
 });
-
 
 function formatDurationSeconds(value?: number | null) {
   if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) return "—";

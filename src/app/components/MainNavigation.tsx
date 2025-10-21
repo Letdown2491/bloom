@@ -1,10 +1,5 @@
 import React, { memo, useEffect, useRef, useState } from "react";
-import type {
-  ChangeEventHandler,
-  KeyboardEventHandler,
-  MutableRefObject,
-  ReactNode,
-} from "react";
+import type { ChangeEventHandler, KeyboardEventHandler, MutableRefObject, ReactNode } from "react";
 
 import { useSyncPipeline } from "../context/SyncPipelineContext";
 import { useIsCompactScreen } from "../../shared/hooks/useIsCompactScreen";
@@ -148,7 +143,8 @@ export const MainNavigation = memo(function MainNavigation({
     ? "flex flex-wrap items-center gap-3 rounded-2xl border border-slate-200 bg-white px-3 py-2 shadow-toolbar"
     : "flex flex-wrap items-center gap-3 rounded-2xl border border-slate-800/60 bg-slate-950/30 px-3 py-2 shadow-toolbar backdrop-blur-sm";
 
-  const mergeClasses = (...classes: Array<string | false | null | undefined>) => classes.filter(Boolean).join(" ");
+  const mergeClasses = (...classes: Array<string | false | null | undefined>) =>
+    classes.filter(Boolean).join(" ");
 
   const segmentBaseClass =
     "flex h-9 shrink-0 items-center gap-2 rounded-xl px-3 text-sm transition focus-visible:outline-none focus-visible:focus-emerald-ring disabled:cursor-not-allowed disabled:opacity-55";
@@ -158,7 +154,9 @@ export const MainNavigation = memo(function MainNavigation({
   const segmentActiveClass = isLightTheme
     ? "bg-emerald-200/60 text-emerald-700 shadow-toolbar"
     : "bg-emerald-500/15 text-emerald-200 shadow-toolbar";
-  const segmentDisabledClass = isLightTheme ? "bg-slate-100 text-slate-400" : "bg-transparent text-slate-500";
+  const segmentDisabledClass = isLightTheme
+    ? "bg-slate-100 text-slate-400"
+    : "bg-transparent text-slate-500";
   const searchSegmentState = !allowSearch
     ? segmentDisabledClass
     : isSearchOpen
@@ -189,14 +187,16 @@ export const MainNavigation = memo(function MainNavigation({
         className={mergeClasses(
           segmentBaseClass,
           "justify-center",
-          isActive ? segmentActiveClass : segmentDefaultClass
+          isActive ? segmentActiveClass : segmentDefaultClass,
         )}
         data-segment-type="label"
       >
         <IconComponent size={16} />
         <span
           className={
-            hideLabelOnMobile ? "hidden whitespace-nowrap text-sm font-medium sm:inline" : "whitespace-nowrap text-sm font-medium"
+            hideLabelOnMobile
+              ? "hidden whitespace-nowrap text-sm font-medium sm:inline"
+              : "whitespace-nowrap text-sm font-medium"
           }
         >
           {label}
@@ -236,7 +236,9 @@ export const MainNavigation = memo(function MainNavigation({
   const itemButtonClass = isLightTheme
     ? "flex w-full items-start gap-2 rounded-lg px-2 py-1 text-left text-sm text-slate-600 transition hover:bg-slate-100 focus:outline-none focus-visible:focus-emerald-ring"
     : "flex w-full items-start gap-2 rounded-lg px-2 py-1 text-left text-sm text-slate-200 transition hover:bg-slate-800/70 focus:outline-none focus-visible:focus-emerald-ring";
-  const tokenClass = isLightTheme ? "font-mono text-xs font-semibold text-slate-700" : "font-mono text-xs font-semibold text-slate-200";
+  const tokenClass = isLightTheme
+    ? "font-mono text-xs font-semibold text-slate-700"
+    : "font-mono text-xs font-semibold text-slate-200";
   const descriptionClass = isLightTheme ? "text-xs text-slate-500" : "text-xs text-slate-400";
 
   useEffect(() => {
@@ -280,7 +282,12 @@ export const MainNavigation = memo(function MainNavigation({
       setSyntaxOpen(false);
       return;
     }
-    if ((event.key === "/" || event.code === "Slash") && event.ctrlKey && !event.altKey && !event.metaKey) {
+    if (
+      (event.key === "/" || event.code === "Slash") &&
+      event.ctrlKey &&
+      !event.altKey &&
+      !event.metaKey
+    ) {
       event.preventDefault();
       setSyntaxOpen(prev => !prev);
       return;
@@ -358,7 +365,12 @@ export const MainNavigation = memo(function MainNavigation({
               ) : null}
             </div>
             {isSyntaxOpen ? (
-              <div ref={syntaxPopoverRef} className={popoverClass} role="dialog" aria-label="Search syntax help">
+              <div
+                ref={syntaxPopoverRef}
+                className={popoverClass}
+                role="dialog"
+                aria-label="Search syntax help"
+              >
                 {SEARCH_SYNTAX_SECTIONS.map(section => (
                   <div key={section.id} className="mt-3 first:mt-0">
                     <div className={sectionTitleClass}>{section.title}</div>
@@ -412,7 +424,10 @@ export const MainNavigation = memo(function MainNavigation({
         ) : null}
       </div>
       <div
-        className={mergeClasses("flex items-center gap-2", allowSearch && isSearchOpen ? "ml-auto" : "")}
+        className={mergeClasses(
+          "flex items-center gap-2",
+          allowSearch && isSearchOpen ? "ml-auto" : "",
+        )}
         role="group"
         aria-label="Main navigation controls"
       >
@@ -422,13 +437,18 @@ export const MainNavigation = memo(function MainNavigation({
               {browseControlSegments.map(segment => {
                 if (!React.isValidElement(segment)) return null;
                 const segmentType =
-                  segment.props["data-segment-type"] || (segment.type === "button" ? "icon" : undefined);
+                  segment.props["data-segment-type"] ||
+                  (segment.type === "button" ? "icon" : undefined);
                 const baseClass = mergeClasses(
                   segmentBaseClass,
-                  segmentType === "label" ? "" : "w-10 justify-center px-0"
+                  segmentType === "label" ? "" : "w-10 justify-center px-0",
                 );
                 return React.cloneElement(segment, {
-                  className: mergeClasses(baseClass, segmentDefaultClass, segment.props.className || ""),
+                  className: mergeClasses(
+                    baseClass,
+                    segmentDefaultClass,
+                    segment.props.className || "",
+                  ),
                   "data-segment-type": segmentType,
                 });
               })}
@@ -445,7 +465,7 @@ export const MainNavigation = memo(function MainNavigation({
                 className={mergeClasses(
                   segmentBaseClass,
                   "w-10 justify-center px-0",
-                  searchSegmentState
+                  searchSegmentState,
                 )}
                 data-segment-type="icon"
               >
@@ -454,13 +474,18 @@ export const MainNavigation = memo(function MainNavigation({
               {browseControlSegments.map(segment => {
                 if (!React.isValidElement(segment)) return null;
                 const segmentType =
-                  segment.props["data-segment-type"] || (segment.type === "button" ? "icon" : undefined);
+                  segment.props["data-segment-type"] ||
+                  (segment.type === "button" ? "icon" : undefined);
                 const baseClass = mergeClasses(
                   segmentBaseClass,
-                  segmentType === "label" ? "" : "w-10 justify-center px-0"
+                  segmentType === "label" ? "" : "w-10 justify-center px-0",
                 );
                 return React.cloneElement(segment, {
-                  className: mergeClasses(baseClass, segmentDefaultClass, segment.props.className || ""),
+                  className: mergeClasses(
+                    baseClass,
+                    segmentDefaultClass,
+                    segment.props.className || "",
+                  ),
                   "data-segment-type": segmentType,
                 });
               })}
@@ -472,13 +497,18 @@ export const MainNavigation = memo(function MainNavigation({
             {browseControlSegments.map(segment => {
               if (!React.isValidElement(segment)) return null;
               const segmentType =
-                segment.props["data-segment-type"] || (segment.type === "button" ? "icon" : undefined);
+                segment.props["data-segment-type"] ||
+                (segment.type === "button" ? "icon" : undefined);
               const baseClass = mergeClasses(
                 segmentBaseClass,
-                segmentType === "label" ? "" : "w-10 justify-center px-0"
+                segmentType === "label" ? "" : "w-10 justify-center px-0",
               );
               return React.cloneElement(segment, {
-                className: mergeClasses(baseClass, segmentDefaultClass, segment.props.className || ""),
+                className: mergeClasses(
+                  baseClass,
+                  segmentDefaultClass,
+                  segment.props.className || "",
+                ),
                 "data-segment-type": segmentType,
               });
             })}
@@ -491,4 +521,3 @@ export const MainNavigation = memo(function MainNavigation({
 });
 
 MainNavigation.displayName = "MainNavigation";
-

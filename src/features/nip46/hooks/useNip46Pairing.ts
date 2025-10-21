@@ -39,7 +39,7 @@ export const useNip46Pairing = () => {
       const nip46Service = await ensureServiceReady();
       return nip46Service.pairWithUri(uri, options);
     },
-    [ensureServiceReady]
+    [ensureServiceReady],
   );
 
   const createInvitation = useCallback(
@@ -47,7 +47,7 @@ export const useNip46Pairing = () => {
       const nip46Service = await ensureServiceReady();
       return nip46Service.createInvitation(options);
     },
-    [ensureServiceReady]
+    [ensureServiceReady],
   );
 
   return {

@@ -5,7 +5,10 @@ import { useNdk } from "../../../app/context/NdkContext";
 import { usePreferredRelays } from "../../../app/hooks/usePreferredRelays";
 import { useWorkspace } from "../../workspace/WorkspaceContext";
 import { publishNip94Metadata, extractExtraNip94Tags } from "../../../shared/api/nip94Publisher";
-import { containsReservedFolderSegment, getBlobMetadataName } from "../../../shared/utils/blobMetadataStore";
+import {
+  containsReservedFolderSegment,
+  getBlobMetadataName,
+} from "../../../shared/utils/blobMetadataStore";
 import type { StatusMessageTone } from "../../../shared/types/status";
 import type { BlossomBlob } from "../../../shared/api/blossomClient";
 
@@ -20,7 +23,11 @@ type MetadataSyncTarget = {
   folderPath: string | null;
 };
 
-export const FolderRenameDialog: React.FC<FolderRenameDialogProps> = ({ path, onClose, onStatus }) => {
+export const FolderRenameDialog: React.FC<FolderRenameDialogProps> = ({
+  path,
+  onClose,
+  onStatus,
+}) => {
   const { renameFolder, getFolderDisplayName, foldersByPath, getFoldersForBlob } = useFolderLists();
   const { ndk, signer } = useNdk();
   const { effectiveRelays } = usePreferredRelays();
@@ -49,7 +56,7 @@ export const FolderRenameDialog: React.FC<FolderRenameDialogProps> = ({ path, on
       }
       return null;
     },
-    [aggregated?.blobs, currentSnapshot?.blobs, privateBlobs]
+    [aggregated?.blobs, currentSnapshot?.blobs, privateBlobs],
   );
 
   const syncMetadata = useCallback(
@@ -75,14 +82,20 @@ export const FolderRenameDialog: React.FC<FolderRenameDialogProps> = ({ path, on
             successCount += 1;
           } catch (error) {
             failureCount += 1;
-            console.warn("Failed to sync NIP-94 metadata for folder rename", target.blob.sha256, error);
+            console.warn(
+              "Failed to sync NIP-94 metadata for folder rename",
+              target.blob.sha256,
+              error,
+            );
           }
         }
         if (failureCount === 0) {
           onStatus(
-            successCount === 1 ? "Synced metadata for 1 item." : `Synced metadata for ${successCount} items.`,
+            successCount === 1
+              ? "Synced metadata for 1 item."
+              : `Synced metadata for ${successCount} items.`,
             "success",
-            3000
+            3000,
           );
         } else {
           onStatus(
@@ -90,12 +103,12 @@ export const FolderRenameDialog: React.FC<FolderRenameDialogProps> = ({ path, on
               ? "Failed to sync metadata to relays."
               : `Failed to sync metadata for ${failureCount} items.`,
             "error",
-            4500
+            4500,
           );
         }
       })();
     },
-    [effectiveRelays, ndk, onStatus, signer]
+    [effectiveRelays, ndk, onStatus, signer],
   );
 
   useEffect(() => {
@@ -159,7 +172,17 @@ export const FolderRenameDialog: React.FC<FolderRenameDialogProps> = ({ path, on
     } finally {
       setBusy(false);
     }
-  }, [foldersByPath, getFoldersForBlob, name, onClose, onStatus, path, renameFolder, resolveBlobBySha, syncMetadata]);
+  }, [
+    foldersByPath,
+    getFoldersForBlob,
+    name,
+    onClose,
+    onStatus,
+    path,
+    renameFolder,
+    resolveBlobBySha,
+    syncMetadata,
+  ]);
 
   const handleKeyDown: React.KeyboardEventHandler<HTMLDivElement> = event => {
     if (event.key === "Escape") {
@@ -178,7 +201,10 @@ export const FolderRenameDialog: React.FC<FolderRenameDialogProps> = ({ path, on
     : "mt-2 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 focus:border-emerald-500 focus:outline-none";
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4" onKeyDown={handleKeyDown}>
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4"
+      onKeyDown={handleKeyDown}
+    >
       <div className="w-full max-w-md rounded-2xl border border-slate-800 bg-slate-900/90 p-6 shadow-xl">
         <h2 className="text-lg font-semibold text-slate-100">Rename folder</h2>
         <p className="mt-2 text-xs text-slate-400">{path || "(root)"}</p>
@@ -198,7 +224,9 @@ export const FolderRenameDialog: React.FC<FolderRenameDialogProps> = ({ path, on
           />
         </label>
         {nameHasReservedKeyword && (
-          <div className="mt-2 text-sm text-red-400">Folder names cannot include the word "private".</div>
+          <div className="mt-2 text-sm text-red-400">
+            Folder names cannot include the word "private".
+          </div>
         )}
         {error && <div className="mt-2 text-sm text-red-400">{error}</div>}
         <div className="mt-6 flex justify-end gap-3">

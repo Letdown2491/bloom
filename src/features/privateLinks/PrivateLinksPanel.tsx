@@ -4,7 +4,16 @@ import { usePrivateLinks } from "./hooks/usePrivateLinks";
 import type { PrivateLinkRecord } from "../../shared/domain/privateLinks";
 import { describeExpiration } from "../../shared/utils/format";
 
-const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".heic", ".avif"]);
+const IMAGE_EXTENSIONS = new Set([
+  ".png",
+  ".jpg",
+  ".jpeg",
+  ".gif",
+  ".webp",
+  ".bmp",
+  ".heic",
+  ".avif",
+]);
 const VIDEO_EXTENSIONS = new Set([".mp4", ".mov", ".webm", ".mkv", ".avi", ".hevc"]);
 const MUSIC_EXTENSIONS = new Set([".mp3", ".wav", ".flac", ".aac", ".ogg", ".m4a", ".opus"]);
 const PDF_EXTENSIONS = new Set([".pdf"]);
@@ -32,9 +41,10 @@ const deriveLinkLabel = (link: PrivateLinkRecord) => {
 };
 
 export const PrivateLinksPanel: React.FC = () => {
-  const { links, isLoading, isFetching, error, serviceConfigured, serviceHost, revoke, revoking } = usePrivateLinks({
-    enabled: true,
-  });
+  const { links, isLoading, isFetching, error, serviceConfigured, serviceHost, revoke, revoking } =
+    usePrivateLinks({
+      enabled: true,
+    });
   const [pendingAlias, setPendingAlias] = React.useState<string | null>(null);
   const [actionError, setActionError] = React.useState<string | null>(null);
   const activeLinks = React.useMemo(() => links.filter(link => link.status === "active"), [links]);
@@ -59,45 +69,42 @@ export const PrivateLinksPanel: React.FC = () => {
         setPendingAlias(null);
       }
     },
-    [revoke]
+    [revoke],
   );
 
-  const handleCopyLink = React.useCallback(
-    async (url: string, expired: boolean) => {
-      setActionError(null);
-      if (expired) {
-        setActionError("This link has expired. Create a new one to share again.");
-        return;
+  const handleCopyLink = React.useCallback(async (url: string, expired: boolean) => {
+    setActionError(null);
+    if (expired) {
+      setActionError("This link has expired. Create a new one to share again.");
+      return;
+    }
+    try {
+      if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(url);
+      } else if (typeof document !== "undefined") {
+        const textarea = document.createElement("textarea");
+        textarea.value = url;
+        textarea.style.position = "fixed";
+        textarea.style.opacity = "0";
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand("copy");
+        document.body.removeChild(textarea);
+      } else {
+        throw new Error("Clipboard API unavailable");
       }
-      try {
-        if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
-          await navigator.clipboard.writeText(url);
-        } else if (typeof document !== "undefined") {
-          const textarea = document.createElement("textarea");
-          textarea.value = url;
-          textarea.style.position = "fixed";
-          textarea.style.opacity = "0";
-          document.body.appendChild(textarea);
-          textarea.select();
-          document.execCommand("copy");
-          document.body.removeChild(textarea);
-        } else {
-          throw new Error("Clipboard API unavailable");
-        }
-        if (typeof window !== "undefined") {
-          window.dispatchEvent(
-            new CustomEvent("private-link:copied", {
-              detail: { url },
-            })
-          );
-        }
-      } catch (err) {
-        console.error("Failed to copy private link", err);
-        setActionError("Unable to copy link to clipboard.");
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(
+          new CustomEvent("private-link:copied", {
+            detail: { url },
+          }),
+        );
       }
-    },
-    []
-  );
+    } catch (err) {
+      console.error("Failed to copy private link", err);
+      setActionError("Unable to copy link to clipboard.");
+    }
+  }, []);
 
   return (
     <div
@@ -107,8 +114,8 @@ export const PrivateLinksPanel: React.FC = () => {
       <header>
         <h2 className="text-lg font-semibold text-slate-100">Manage Private Links</h2>
         <p className="mt-2 text-sm text-slate-400">
-          Review the private download links you've created, copy their proxy URLs, or revoke access when sharing is no
-          longer required.
+          Review the private download links you've created, copy their proxy URLs, or revoke access
+          when sharing is no longer required.
         </p>
       </header>
 
@@ -125,7 +132,9 @@ export const PrivateLinksPanel: React.FC = () => {
       )}
 
       {!serviceConfigured ? (
-        <p className="text-sm text-slate-400">Configure the private link service to manage shared links.</p>
+        <p className="text-sm text-slate-400">
+          Configure the private link service to manage shared links.
+        </p>
       ) : isLoading || isFetching ? (
         <p className="text-sm text-slate-400">Loading private links…</p>
       ) : activeLinks.length === 0 ? (
@@ -214,7 +223,9 @@ export const PrivateLinksPanel: React.FC = () => {
   );
 };
 
-const derivePreviewMeta = (link: PrivateLinkRecord): { previewUrl: string | null; kind: FileKind } => {
+const derivePreviewMeta = (
+  link: PrivateLinkRecord,
+): { previewUrl: string | null; kind: FileKind } => {
   const reference = (link.target?.url ?? link.displayName ?? link.alias).toLowerCase();
   const extension = extractExtension(reference);
   if (extension && IMAGE_EXTENSIONS.has(extension)) {

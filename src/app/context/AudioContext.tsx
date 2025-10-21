@@ -1,4 +1,12 @@
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import React, {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 export type Track = {
   id?: string;
@@ -114,7 +122,9 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     if (!visualizerEnabledRef.current) return;
     if (typeof window === "undefined") return;
     const audio = ensureAudio();
-    const AudioContextCtor = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    const AudioContextCtor =
+      window.AudioContext ||
+      (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
     if (!AudioContextCtor) return;
 
     let audioCtx = audioContextRef.current;
@@ -191,7 +201,7 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       audio.play().catch(() => undefined);
       setStatus("playing");
     },
-    [ensureAudio, ensureAudioGraph]
+    [ensureAudio, ensureAudioGraph],
   );
 
   useEffect(() => {
@@ -303,7 +313,7 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         }
       }
     },
-    [current?.url]
+    [current?.url],
   );
 
   const shuffleQueue = useCallback(() => {
@@ -338,7 +348,7 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       const targetIndex = index >= 0 ? index : 0;
       playTrackAtIndex(preparedQueue, targetIndex, true);
     },
-    [queue, playTrackAtIndex]
+    [queue, playTrackAtIndex],
   );
 
   const pause = useCallback(() => {
@@ -374,7 +384,7 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
       playTrackAtIndex(preparedQueue, targetIndex, true);
     },
-    [queue, current?.url, status, pause, playTrackAtIndex]
+    [queue, current?.url, status, pause, playTrackAtIndex],
   );
 
   const next = useCallback(() => {
@@ -416,12 +426,19 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const seek = useCallback(
     (time: number) => {
       const audio = ensureAudio();
-      const safeDuration = Number.isFinite(audio.duration) && audio.duration > 0 ? audio.duration : duration;
-      const clamped = Math.max(0, Math.min(isFinite(safeDuration) && safeDuration > 0 ? safeDuration : Number.MAX_SAFE_INTEGER, time));
+      const safeDuration =
+        Number.isFinite(audio.duration) && audio.duration > 0 ? audio.duration : duration;
+      const clamped = Math.max(
+        0,
+        Math.min(
+          isFinite(safeDuration) && safeDuration > 0 ? safeDuration : Number.MAX_SAFE_INTEGER,
+          time,
+        ),
+      );
       audio.currentTime = clamped;
       setCurrentTime(clamped);
     },
-    [ensureAudio, duration]
+    [ensureAudio, duration],
   );
 
   const getFrequencyData = useCallback(() => {
@@ -443,7 +460,8 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const hasNext = currentIndex !== null && currentIndex < queue.length - 1;
   const hasPrevious = currentIndex !== null && currentIndex > 0;
 
-  const visualizerAvailable = audioReady && visualizerEnabledRef.current && Boolean(analyserRef.current);
+  const visualizerAvailable =
+    audioReady && visualizerEnabledRef.current && Boolean(analyserRef.current);
 
   const setVolume = useCallback(
     (value: number) => {
@@ -455,7 +473,7 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         audio.volume = clamped;
       }
     },
-    [ensureAudio]
+    [ensureAudio],
   );
 
   useEffect(() => {
@@ -530,7 +548,7 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       shuffleQueue,
       visualizerAvailable,
       setVolume,
-    ]
+    ],
   );
 
   return <AudioCtx.Provider value={value}>{children}</AudioCtx.Provider>;

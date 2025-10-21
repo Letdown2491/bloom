@@ -89,13 +89,13 @@ const createEmptyBuckets = () => ({
   },
 });
 
-const finalizeBucketStats = (buckets: ReturnType<typeof createEmptyBuckets>): CacheDbBucketMetrics[] => {
+const finalizeBucketStats = (
+  buckets: ReturnType<typeof createEmptyBuckets>,
+): CacheDbBucketMetrics[] => {
   const list: CacheDbBucketMetrics[] = [];
 
   const previewInline = buckets.previewInline;
-  previewInline.stats = [
-    { label: "Entries", value: previewInline.entryCount.toString() },
-  ];
+  previewInline.stats = [{ label: "Entries", value: previewInline.entryCount.toString() }];
   list.push({
     id: previewInline.id,
     label: previewInline.label,
@@ -107,7 +107,10 @@ const finalizeBucketStats = (buckets: ReturnType<typeof createEmptyBuckets>): Ca
   const previewMeta = buckets.previewMeta;
   previewMeta.stats = [
     { label: "Tracked previews", value: previewMeta.trackedPreviews.toString() },
-    { label: "Schema version", value: previewMeta.version == null ? "—" : String(previewMeta.version) },
+    {
+      label: "Schema version",
+      value: previewMeta.version == null ? "—" : String(previewMeta.version),
+    },
   ];
   list.push({
     id: previewMeta.id,
@@ -144,9 +147,7 @@ const finalizeBucketStats = (buckets: ReturnType<typeof createEmptyBuckets>): Ca
   });
 
   const other = buckets.other;
-  other.stats = [
-    { label: "Entries", value: other.entryCount.toString() },
-  ];
+  other.stats = [{ label: "Entries", value: other.entryCount.toString() }];
   list.push({
     id: other.id,
     label: other.label,
@@ -284,7 +285,10 @@ export const measureIndexedDbUsage = async (): Promise<IndexedDbMeasurement> => 
     };
   }
 
-  const [cacheUsage, manifestStats] = await Promise.all([measureCacheDbUsage(), getManifestStats()]);
+  const [cacheUsage, manifestStats] = await Promise.all([
+    measureCacheDbUsage(),
+    getManifestStats(),
+  ]);
   const cacheBytes = cacheUsage.totalBytes;
   const manifestBytes = manifestStats?.approxBytes ?? 0;
 

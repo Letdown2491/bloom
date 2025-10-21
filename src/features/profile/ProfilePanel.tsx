@@ -189,18 +189,13 @@ const chooseDisplayName = (blob: BlossomBlob): string => {
   return blob.sha256;
 };
 
-const toImageOption = (
-  blob: BlossomBlob,
-  serverNames: string[]
-): ImageOption | null => {
+const toImageOption = (blob: BlossomBlob, serverNames: string[]): ImageOption | null => {
   const previewUrl = buildBlobUrl(blob);
   if (!previewUrl) return null;
   const displayName = chooseDisplayName(blob);
   const folderPath = blob.folderPath ?? null;
   const searchParts = [displayName, folderPath ?? "", ...serverNames, blob.sha256, previewUrl];
-  const searchText = searchParts
-    .map(part => part.toLowerCase())
-    .join(" ");
+  const searchText = searchParts.map(part => part.toLowerCase()).join(" ");
   return {
     sha: blob.sha256,
     url: previewUrl,
@@ -212,7 +207,10 @@ const toImageOption = (
   };
 };
 
-export const ProfilePanel: React.FC<ProfilePanelProps> = ({ onProfileUpdated, showStatusMessage }) => {
+export const ProfilePanel: React.FC<ProfilePanelProps> = ({
+  onProfileUpdated,
+  showStatusMessage,
+}) => {
   const { ndk, signer, user, connect, ensureConnection } = useNdk();
   const activeSigner = ndk?.signer ?? signer ?? null;
   const { aggregated, distribution, serverNameByUrl } = useWorkspace();
@@ -239,7 +237,8 @@ export const ProfilePanel: React.FC<ProfilePanelProps> = ({ onProfileUpdated, sh
       if (blob.__bloomFolderPlaceholder) return;
       if (!isImageBlob(blob)) return;
 
-      const servers = distribution?.[blob.sha256]?.servers ?? (blob.serverUrl ? [blob.serverUrl] : []);
+      const servers =
+        distribution?.[blob.sha256]?.servers ?? (blob.serverUrl ? [blob.serverUrl] : []);
       const serverNames = servers.map(normalizeServerName);
       const option = toImageOption(blob, serverNames);
       if (!option) return;
@@ -264,7 +263,9 @@ export const ProfilePanel: React.FC<ProfilePanelProps> = ({ onProfileUpdated, sh
     });
 
     const sorted = Array.from(map.values());
-    sorted.sort((a, b) => a.displayName.localeCompare(b.displayName, undefined, { sensitivity: "base" }));
+    sorted.sort((a, b) =>
+      a.displayName.localeCompare(b.displayName, undefined, { sensitivity: "base" }),
+    );
     return sorted;
   }, [aggregated, distribution, serverNameByUrl]);
 
@@ -278,7 +279,7 @@ export const ProfilePanel: React.FC<ProfilePanelProps> = ({ onProfileUpdated, sh
         console.info(message);
       }
     },
-    [showStatusMessage]
+    [showStatusMessage],
   );
 
   const hasChanges = useMemo(() => {
@@ -319,7 +320,7 @@ export const ProfilePanel: React.FC<ProfilePanelProps> = ({ onProfileUpdated, sh
         }
       }
     },
-    [ensureConnection, ndk, notify, user?.pubkey]
+    [ensureConnection, ndk, notify, user?.pubkey],
   );
 
   useEffect(() => {
@@ -413,13 +414,15 @@ export const ProfilePanel: React.FC<ProfilePanelProps> = ({ onProfileUpdated, sh
         setSaving(false);
       }
     },
-    [activeSigner, form, hasChanges, ndk, notify, onProfileUpdated, user?.pubkey]
+    [activeSigner, form, hasChanges, ndk, notify, onProfileUpdated, user?.pubkey],
   );
 
   return (
     <div className="flex h-full w-full min-h-0 flex-col overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/70 p-6 shadow">
       {loading ? (
-        <div className="flex flex-1 items-center justify-center text-sm text-slate-400">Loading profile…</div>
+        <div className="flex flex-1 items-center justify-center text-sm text-slate-400">
+          Loading profile…
+        </div>
       ) : !ndk || !user?.pubkey ? (
         <div className="flex flex-1 flex-col justify-center gap-3 text-sm text-slate-300">
           <p>Bloom could not detect an active Nostr session.</p>
@@ -452,7 +455,10 @@ export const ProfilePanel: React.FC<ProfilePanelProps> = ({ onProfileUpdated, sh
                 if (isWebsiteField) {
                   const websiteField = (
                     <div key={field.key} className={containerClassName}>
-                      <label htmlFor={inputId} className="text-[11px] font-semibold uppercase tracking-wide text-slate-300">
+                      <label
+                        htmlFor={inputId}
+                        className="text-[11px] font-semibold uppercase tracking-wide text-slate-300"
+                      >
                         {field.label}
                       </label>
                       <input
@@ -471,9 +477,13 @@ export const ProfilePanel: React.FC<ProfilePanelProps> = ({ onProfileUpdated, sh
                   if (user?.npub) {
                     const npubField = (
                       <div key="npub" className="flex flex-col gap-2">
-                        <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-300">NPUB (Public Key)</span>
+                        <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-300">
+                          NPUB (Public Key)
+                        </span>
                         <div className="flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-950 px-3 py-2">
-                          <span className="min-w-0 flex-1 truncate font-mono text-[13px] text-slate-200">{user.npub}</span>
+                          <span className="min-w-0 flex-1 truncate font-mono text-[13px] text-slate-200">
+                            {user.npub}
+                          </span>
                           <button
                             type="button"
                             onClick={handleCopyNpub}
@@ -497,7 +507,10 @@ export const ProfilePanel: React.FC<ProfilePanelProps> = ({ onProfileUpdated, sh
                   <div key={field.key} className={containerClassName}>
                     {isTextarea ? (
                       <>
-                        <label htmlFor={inputId} className="text-[11px] font-semibold uppercase tracking-wide text-slate-300">
+                        <label
+                          htmlFor={inputId}
+                          className="text-[11px] font-semibold uppercase tracking-wide text-slate-300"
+                        >
                           {field.label}
                         </label>
                         <textarea
@@ -510,7 +523,10 @@ export const ProfilePanel: React.FC<ProfilePanelProps> = ({ onProfileUpdated, sh
                       </>
                     ) : isImageField ? (
                       <>
-                        <label htmlFor={inputId} className="text-[11px] font-semibold uppercase tracking-wide text-slate-300">
+                        <label
+                          htmlFor={inputId}
+                          className="text-[11px] font-semibold uppercase tracking-wide text-slate-300"
+                        >
                           {field.label}
                         </label>
                         <ImagePickerInput
@@ -523,7 +539,10 @@ export const ProfilePanel: React.FC<ProfilePanelProps> = ({ onProfileUpdated, sh
                       </>
                     ) : (
                       <>
-                        <label htmlFor={inputId} className="text-[11px] font-semibold uppercase tracking-wide text-slate-300">
+                        <label
+                          htmlFor={inputId}
+                          className="text-[11px] font-semibold uppercase tracking-wide text-slate-300"
+                        >
                           {field.label}
                         </label>
                         <input
@@ -624,7 +643,13 @@ type ImagePickerInputProps = {
   onChange: (value: string) => void;
 };
 
-const ImagePickerInput: React.FC<ImagePickerInputProps> = ({ id, value, placeholder, options, onChange }) => {
+const ImagePickerInput: React.FC<ImagePickerInputProps> = ({
+  id,
+  value,
+  placeholder,
+  options,
+  onChange,
+}) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [isOpen, setIsOpen] = useState(false);
   const [highlightIndex, setHighlightIndex] = useState(0);
@@ -641,7 +666,9 @@ const ImagePickerInput: React.FC<ImagePickerInputProps> = ({ id, value, placehol
       .filter(entry => entry.index >= 0)
       .sort((a, b) => {
         if (a.index !== b.index) return a.index - b.index;
-        return a.option.displayName.localeCompare(b.option.displayName, undefined, { sensitivity: "base" });
+        return a.option.displayName.localeCompare(b.option.displayName, undefined, {
+          sensitivity: "base",
+        });
       })
       .map(entry => entry.option);
 
@@ -671,7 +698,7 @@ const ImagePickerInput: React.FC<ImagePickerInputProps> = ({ id, value, placehol
       onChange(event.target.value);
       setIsOpen(true);
     },
-    [onChange]
+    [onChange],
   );
 
   const handleSelect = useCallback(
@@ -679,7 +706,7 @@ const ImagePickerInput: React.FC<ImagePickerInputProps> = ({ id, value, placehol
       onChange(option.url);
       setIsOpen(false);
     },
-    [onChange]
+    [onChange],
   );
 
   const handleKeyDown = useCallback(
@@ -700,11 +727,15 @@ const ImagePickerInput: React.FC<ImagePickerInputProps> = ({ id, value, placehol
         setIsOpen(false);
       }
     },
-    [handleSelect, highlightIndex, isOpen, suggestions]
+    [handleSelect, highlightIndex, isOpen, suggestions],
   );
 
-  const selectedOption = useMemo(() => options.find(option => option.url === trimmedValue) ?? null, [options, trimmedValue]);
-  const previewSrc = selectedOption?.previewUrl || (trimmedValue.startsWith("http") ? trimmedValue : "");
+  const selectedOption = useMemo(
+    () => options.find(option => option.url === trimmedValue) ?? null,
+    [options, trimmedValue],
+  );
+  const previewSrc =
+    selectedOption?.previewUrl || (trimmedValue.startsWith("http") ? trimmedValue : "");
 
   const showSuggestions = isOpen && suggestions.length > 0;
 
@@ -712,11 +743,18 @@ const ImagePickerInput: React.FC<ImagePickerInputProps> = ({ id, value, placehol
     <div ref={containerRef} className="relative flex items-stretch gap-3">
       <div
         className={`flex-none self-stretch w-16 overflow-hidden rounded-lg border ${
-          previewSrc ? "border-slate-800 bg-slate-950" : "border-dashed border-slate-800/60 bg-slate-950/40"
+          previewSrc
+            ? "border-slate-800 bg-slate-950"
+            : "border-dashed border-slate-800/60 bg-slate-950/40"
         }`}
       >
         {previewSrc ? (
-          <img src={previewSrc} alt="Selected preview" className="h-full w-full object-cover" loading="lazy" />
+          <img
+            src={previewSrc}
+            alt="Selected preview"
+            className="h-full w-full object-cover"
+            loading="lazy"
+          />
         ) : null}
       </div>
       <div className="relative flex-1">
@@ -746,11 +784,18 @@ const ImagePickerInput: React.FC<ImagePickerInputProps> = ({ id, value, placehol
                     onMouseDown={event => event.preventDefault()}
                     onClick={() => handleSelect(option)}
                     className={`flex w-full items-center gap-3 rounded-md px-2 py-2 text-left transition ${
-                      isActive ? "bg-emerald-500/15 text-emerald-100" : "text-slate-200 hover:bg-slate-800/80"
+                      isActive
+                        ? "bg-emerald-500/15 text-emerald-100"
+                        : "text-slate-200 hover:bg-slate-800/80"
                     }`}
                   >
                     <div className="h-10 w-10 shrink-0 overflow-hidden rounded-md border border-slate-800 bg-slate-950">
-                      <img src={option.previewUrl} alt="Preview" className="h-full w-full object-cover" loading="lazy" />
+                      <img
+                        src={option.previewUrl}
+                        alt="Preview"
+                        className="h-full w-full object-cover"
+                        loading="lazy"
+                      />
                     </div>
                     <div className="min-w-0 flex-1">
                       <div className="truncate font-medium">{option.displayName}</div>

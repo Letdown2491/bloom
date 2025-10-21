@@ -1,7 +1,6 @@
-import {
+import type {
   Nip46AnyResponse,
   Nip46CodecConfig,
-  Nip46CodecError,
   Nip46EncryptFn,
   Nip46DecryptFn,
   Nip46EncryptionContext,
@@ -9,6 +8,7 @@ import {
   Nip46RequestPayload,
   Nip46ResponsePayload,
 } from "./types";
+import { Nip46CodecError } from "./types";
 
 export interface Nip46CodecOptions {
   config: Nip46CodecConfig;
@@ -28,16 +28,14 @@ const isPlainRecord = (value: unknown): value is Record<string, unknown> =>
 
 const assertMethod = (method: unknown): method is Nip46Method =>
   typeof method === "string" &&
-  (
-    method === "connect" ||
+  (method === "connect" ||
     method === "sign_event" ||
     method === "ping" ||
     method === "get_public_key" ||
     method === "nip04_encrypt" ||
     method === "nip04_decrypt" ||
     method === "nip44_encrypt" ||
-    method === "nip44_decrypt"
-  );
+    method === "nip44_decrypt");
 
 const assertParams = (params: unknown): params is string[] =>
   Array.isArray(params) && params.every(item => typeof item === "string");
@@ -80,7 +78,7 @@ export class Nip46Codec {
 
   async encodeRequest(
     payload: Nip46RequestPayload,
-    context: Nip46EncryptionContext
+    context: Nip46EncryptionContext,
   ): Promise<string> {
     try {
       const json = JSON.stringify(payload);
@@ -92,7 +90,7 @@ export class Nip46Codec {
 
   async decodeRequest(
     ciphertext: string,
-    context: Nip46EncryptionContext
+    context: Nip46EncryptionContext,
   ): Promise<Nip46RequestPayload> {
     let plaintext: string;
     try {
@@ -111,7 +109,7 @@ export class Nip46Codec {
     if (!assertRequest(parsed)) {
       throw new Nip46CodecError(
         "NIP46_UNEXPECTED_PAYLOAD",
-        "Decrypted payload is not a valid NIP-46 request"
+        "Decrypted payload is not a valid NIP-46 request",
       );
     }
     return parsed;
@@ -119,7 +117,7 @@ export class Nip46Codec {
 
   async encodeResponse(
     payload: Nip46ResponsePayload,
-    context: Nip46EncryptionContext
+    context: Nip46EncryptionContext,
   ): Promise<string> {
     try {
       const json = JSON.stringify(payload);
@@ -131,7 +129,7 @@ export class Nip46Codec {
 
   async decodeResponse(
     ciphertext: string,
-    context: Nip46EncryptionContext
+    context: Nip46EncryptionContext,
   ): Promise<Nip46AnyResponse> {
     let plaintext: string;
     try {
@@ -144,13 +142,17 @@ export class Nip46Codec {
     try {
       parsed = JSON.parse(plaintext);
     } catch (error) {
-      throw new Nip46CodecError("NIP46_DECODE_ERROR", "Failed to parse NIP-46 response JSON", error);
+      throw new Nip46CodecError(
+        "NIP46_DECODE_ERROR",
+        "Failed to parse NIP-46 response JSON",
+        error,
+      );
     }
 
     if (!assertResponse(parsed)) {
       throw new Nip46CodecError(
         "NIP46_UNEXPECTED_PAYLOAD",
-        "Decrypted payload is not a valid NIP-46 response"
+        "Decrypted payload is not a valid NIP-46 response",
       );
     }
     return parsed;

@@ -102,10 +102,7 @@ export const StatusFooter = memo(function StatusFooter({
     if (!serverMenuOpen) return;
     const handlePointerDown = (event: PointerEvent) => {
       const target = event.target as Node;
-      if (
-        !serverButtonRef.current?.contains(target) &&
-        !serverMenuRef.current?.contains(target)
-      ) {
+      if (!serverButtonRef.current?.contains(target) && !serverMenuRef.current?.contains(target)) {
         setServerMenuOpen(false);
       }
     };
@@ -138,10 +135,11 @@ export const StatusFooter = memo(function StatusFooter({
         target: { value },
       } as React.ChangeEvent<HTMLSelectElement>);
     },
-    [onStatusServerChange, statusSelectValue]
+    [onStatusServerChange, statusSelectValue],
   );
 
-  const lightFocusRing = "focus-visible:ring-2 focus-visible:ring-blue-400/70 focus-visible:ring-offset-2 focus-visible:ring-offset-white";
+  const lightFocusRing =
+    "focus-visible:ring-2 focus-visible:ring-blue-400/70 focus-visible:ring-offset-2 focus-visible:ring-offset-white";
   const serverSelectClass =
     theme === "light"
       ? `rounded-lg border border-slate-200 bg-white/90 px-2 py-1.5 text-xs text-slate-700 transition hover:border-blue-400 focus:outline-none sm:px-3 ${lightFocusRing}`
@@ -169,9 +167,12 @@ export const StatusFooter = memo(function StatusFooter({
     theme === "light"
       ? "flex items-center gap-3 rounded-xl border border-slate-200 bg-white/90 px-3 py-1.5 text-slate-700 shadow-toolbar"
       : "flex items-center gap-3 rounded-xl border border-slate-800/60 bg-slate-900/40 px-3 py-1.5 text-slate-200 shadow-toolbar";
-  const statusTotalsItemClass = theme === "light" ? "flex items-center gap-1" : "flex items-center gap-1 text-slate-200";
+  const statusTotalsItemClass =
+    theme === "light" ? "flex items-center gap-1" : "flex items-center gap-1 text-slate-200";
   const statusTotalsSizeClass =
-    theme === "light" ? "flex items-center gap-1 text-blue-700" : "flex items-center gap-1 text-emerald-300";
+    theme === "light"
+      ? "flex items-center gap-1 text-blue-700"
+      : "flex items-center gap-1 text-emerald-300";
 
   const serverOptions = useMemo(
     () => [
@@ -181,7 +182,7 @@ export const StatusFooter = memo(function StatusFooter({
         label: server.name || server.url,
       })),
     ],
-    [allServersValue, localServers]
+    [allServersValue, localServers],
   );
 
   const currentServerLabel = useMemo(() => {
@@ -198,7 +199,9 @@ export const StatusFooter = memo(function StatusFooter({
             target="_blank"
             rel="noopener noreferrer"
             className={`flex items-center gap-2 rounded-xl px-3 py-1.5 text-slate-200 transition ${
-              theme === "light" ? `${lightFocusRing} hover:text-blue-700` : "hover:text-emerald-300 focus-visible:focus-emerald-ring"
+              theme === "light"
+                ? `${lightFocusRing} hover:text-blue-700`
+                : "hover:text-emerald-300 focus-visible:focus-emerald-ring"
             }`}
           >
             <GithubIcon size={16} aria-hidden="true" />
@@ -209,7 +212,9 @@ export const StatusFooter = memo(function StatusFooter({
             target="_blank"
             rel="noopener noreferrer"
             className={`ml-auto flex items-center gap-2 rounded-xl px-3 py-1.5 text-slate-200 transition ${
-              theme === "light" ? `${lightFocusRing} hover:text-blue-700` : "hover:text-emerald-300 focus-visible:focus-emerald-ring"
+              theme === "light"
+                ? `${lightFocusRing} hover:text-blue-700`
+                : "hover:text-emerald-300 focus-visible:focus-emerald-ring"
             }`}
           >
             <LightningIcon size={16} aria-hidden="true" />
@@ -317,7 +322,9 @@ export const StatusFooter = memo(function StatusFooter({
               <span className="flex flex-1 items-center justify-center sm:justify-start">
                 <ServersIcon size={14} aria-hidden="true" />
               </span>
-              <span className="hidden sm:inline-flex sm:pl-2 sm:text-left sm:whitespace-nowrap">{currentServerLabel}</span>
+              <span className="hidden sm:inline-flex sm:pl-2 sm:text-left sm:whitespace-nowrap">
+                {currentServerLabel}
+              </span>
               <span className={`hidden items-center ${serverArrowClass} sm:flex`}>
                 <ChevronDownIcon size={12} aria-hidden="true" />
               </span>
@@ -374,9 +381,7 @@ export const StatusFooter = memo(function StatusFooter({
         {centerMessage ? (
           <span
             className={`inline-flex items-center gap-2 rounded-xl px-3 py-1.5 font-semibold shadow-toolbar ${
-              theme === "light"
-                ? "bg-blue-100 text-blue-700"
-                : "bg-emerald-500/10 text-emerald-200"
+              theme === "light" ? "bg-blue-100 text-blue-700" : "bg-emerald-500/10 text-emerald-200"
             } ${centerClass}`}
           >
             <BellIcon size={14} aria-hidden="true" />
@@ -391,7 +396,9 @@ export const StatusFooter = memo(function StatusFooter({
           target="_blank"
           rel="noopener noreferrer"
           className={`hidden shrink-0 items-center gap-2 rounded-xl px-3 py-1.5 text-slate-200 transition sm:flex ${
-            theme === "light" ? `${lightFocusRing} hover:text-blue-700` : "hover:text-emerald-300 focus-visible:focus-emerald-ring"
+            theme === "light"
+              ? `${lightFocusRing} hover:text-blue-700`
+              : "hover:text-emerald-300 focus-visible:focus-emerald-ring"
           }`}
         >
           <GithubIcon size={16} aria-hidden="true" />
@@ -401,12 +408,12 @@ export const StatusFooter = memo(function StatusFooter({
 
       {showCompactUploadControl && onCompactUploadClick ? (
         <div className="ml-auto flex shrink-0 items-center sm:hidden">
-            <button
-              type="button"
-              onClick={onCompactUploadClick}
-              disabled={!settingsReady}
-              className={`${compactUploadButtonClass} ${compactUploadActive ? compactUploadActiveClass : ""}`}
-            >
+          <button
+            type="button"
+            onClick={onCompactUploadClick}
+            disabled={!settingsReady}
+            className={`${compactUploadButtonClass} ${compactUploadActive ? compactUploadActiveClass : ""}`}
+          >
             {CompactUploadIcon ? <CompactUploadIcon size={14} aria-hidden="true" /> : null}
             <span className="font-medium">{compactUploadLabel}</span>
           </button>
@@ -426,7 +433,7 @@ export const StatusFooter = memo(function StatusFooter({
 
           {showSupportLink && (
             <a
-            href="https://getalby.com/p/geek"
+              href="https://getalby.com/p/geek"
               target="_blank"
               rel="noopener noreferrer"
               className={`${donateLinkClass} hidden sm:flex`}

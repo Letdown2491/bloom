@@ -289,7 +289,7 @@ export const useServerData = (servers: ManagedServer[], options?: UseServerDataO
   const metadataVersion = useSyncExternalStore(
     subscribeToBlobMetadataChanges,
     getBlobMetadataVersion,
-    getBlobMetadataVersion
+    getBlobMetadataVersion,
   );
 
   const {
@@ -316,7 +316,9 @@ export const useServerData = (servers: ManagedServer[], options?: UseServerDataO
     return ordered;
   }, [servers, prioritizedServerUrls, foregroundServerUrl]);
 
-  const [cachedSnapshots, setCachedSnapshots] = useState<Map<string, CachedServerSnapshot>>(new Map());
+  const [cachedSnapshots, setCachedSnapshots] = useState<Map<string, CachedServerSnapshot>>(
+    new Map(),
+  );
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -328,7 +330,10 @@ export const useServerData = (servers: ManagedServer[], options?: UseServerDataO
         if (cached) {
           map.set(server.url, cached);
           const queryKey = ["server-blobs", server.url, pubkey, server.type];
-          queryClient.setQueryData(queryKey, mergeBlobsWithStoredMetadata(server.url, cached.blobs));
+          queryClient.setQueryData(
+            queryKey,
+            mergeBlobsWithStoredMetadata(server.url, cached.blobs),
+          );
         }
       }
       if (!cancelled) {
@@ -384,7 +389,7 @@ export const useServerData = (servers: ManagedServer[], options?: UseServerDataO
         return priority ? [url, ...prev] : [...prev, url];
       });
     },
-    [maxConcurrentQueries]
+    [maxConcurrentQueries],
   );
 
   useEffect(() => {
@@ -436,7 +441,13 @@ export const useServerData = (servers: ManagedServer[], options?: UseServerDataO
     if (queueChanged) {
       setQueuedServerUrls(nextQueue);
     }
-  }, [servers, normalizedPrioritizedUrls, maxConcurrentQueries, activeServerUrls, queuedServerUrls]);
+  }, [
+    servers,
+    normalizedPrioritizedUrls,
+    maxConcurrentQueries,
+    activeServerUrls,
+    queuedServerUrls,
+  ]);
 
   useEffect(() => {
     if (activeServerUrls.size >= maxConcurrentQueries) return;
@@ -535,7 +546,14 @@ export const useServerData = (servers: ManagedServer[], options?: UseServerDataO
         document.removeEventListener("visibilitychange", visibilityListener);
       }
     };
-  }, [activateServer, activeServerUrls, queuedServerUrls, backgroundPrefetch, backgroundPrefetchDelayMs, servers]);
+  }, [
+    activateServer,
+    activeServerUrls,
+    queuedServerUrls,
+    backgroundPrefetch,
+    backgroundPrefetchDelayMs,
+    servers,
+  ]);
 
   const queries = useQueries({
     queries: servers.map(server => {
@@ -562,7 +580,9 @@ export const useServerData = (servers: ManagedServer[], options?: UseServerDataO
             const blobs = await listUserBlobs(
               server.url,
               pubkey,
-              server.requiresAuth && signer ? { requiresAuth: true, signTemplate: signEventTemplate } : undefined
+              server.requiresAuth && signer
+                ? { requiresAuth: true, signTemplate: signEventTemplate }
+                : undefined,
             );
             return filterHiddenBlobTypes(blobs);
           }

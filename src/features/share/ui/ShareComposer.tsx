@@ -1,7 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { NDKRelayStatus, NDKRelay } from "@nostr-dev-kit/ndk";
 import { useCurrentPubkey, useNdk } from "../../../app/context/NdkContext";
-import { DEFAULT_PUBLIC_RELAYS, extractPreferredRelays, sanitizeRelayUrl } from "../../../shared/utils/relays";
+import {
+  DEFAULT_PUBLIC_RELAYS,
+  extractPreferredRelays,
+  sanitizeRelayUrl,
+} from "../../../shared/utils/relays";
 import { nip19 } from "nostr-tools";
 import { PrivateLinkPanel } from "../PrivateLinkPanel";
 import { prettyBytes } from "../../../shared/utils/format";
@@ -83,7 +87,7 @@ type ProfileInfo = {
 const DEFAULT_RELAYS = DEFAULT_PUBLIC_RELAYS;
 
 const CONNECTION_VARIANT_STYLES: Record<ConnectionVariant, { label: string; dotClass: string }> = {
-  "connected": {
+  connected: {
     label: "Reachable",
     dotClass: "bg-emerald-500",
   },
@@ -91,35 +95,35 @@ const CONNECTION_VARIANT_STYLES: Record<ConnectionVariant, { label: string; dotC
     label: "Reachable (auth)",
     dotClass: "bg-emerald-500",
   },
-  "authenticating": {
+  authenticating: {
     label: "Authenticating…",
     dotClass: "bg-amber-400 animate-pulse",
   },
-  "connecting": {
+  connecting: {
     label: "Connecting…",
     dotClass: "bg-amber-400 animate-pulse",
   },
-  "reconnecting": {
+  reconnecting: {
     label: "Reconnecting…",
     dotClass: "bg-amber-400 animate-pulse",
   },
-  "flapping": {
+  flapping: {
     label: "Unstable connection",
     dotClass: "bg-amber-500",
   },
-  "disconnecting": {
+  disconnecting: {
     label: "Disconnecting…",
     dotClass: "bg-slate-500",
   },
-  "disconnected": {
+  disconnected: {
     label: "Disconnected",
     dotClass: "bg-red-500",
   },
-  "missing": {
+  missing: {
     label: "Not connected",
     dotClass: "bg-slate-500",
   },
-  "unknown": {
+  unknown: {
     label: "Status unknown",
     dotClass: "bg-slate-500",
   },
@@ -127,7 +131,7 @@ const CONNECTION_VARIANT_STYLES: Record<ConnectionVariant, { label: string; dotC
 
 const mapRelayStatus = (
   status: NDKRelayStatus | undefined,
-  enums: NdkModule["NDKRelayStatus"] | null
+  enums: NdkModule["NDKRelayStatus"] | null,
 ): ConnectionVariant => {
   if (status === undefined || !enums) return "unknown";
   switch (status) {
@@ -155,7 +159,7 @@ const mapRelayStatus = (
 
 const safeNormalizeRelayUrl = (
   value: string,
-  normalizeRelayUrlFn: ((value: string) => string) | null
+  normalizeRelayUrlFn: ((value: string) => string) | null,
 ): string | null => {
   if (!value) return null;
   if (normalizeRelayUrlFn) {
@@ -176,7 +180,10 @@ const safeNormalizeRelayUrl = (
   }
 };
 
-function describeConnectionState(state?: RelayConnectionState): { label: string; dotClass: string } {
+function describeConnectionState(state?: RelayConnectionState): {
+  label: string;
+  dotClass: string;
+} {
   if (!state) {
     const base = CONNECTION_VARIANT_STYLES.unknown;
     return { label: base.label, dotClass: base.dotClass };
@@ -185,7 +192,12 @@ function describeConnectionState(state?: RelayConnectionState): { label: string;
   return { label: base.label, dotClass: base.dotClass };
 }
 
-const emptyProfileInfo = (): ProfileInfo => ({ displayName: null, username: null, nip05: null, picture: null });
+const emptyProfileInfo = (): ProfileInfo => ({
+  displayName: null,
+  username: null,
+  nip05: null,
+  picture: null,
+});
 
 const computeInitials = (source: string | null | undefined): string => {
   if (!source) return "??";
@@ -194,7 +206,7 @@ const computeInitials = (source: string | null | undefined): string => {
   const parts = trimmed.split(/\s+/).filter(Boolean);
   if (!parts.length) return "??";
   const first = parts[0]?.[0] ?? "";
-  const second = parts.length > 1 ? parts[1]?.[0] ?? "" : parts[0]?.[1] ?? "";
+  const second = parts.length > 1 ? (parts[1]?.[0] ?? "") : (parts[0]?.[1] ?? "");
   const letters = `${first}${second}`.replace(/[^A-Za-z0-9]/g, "").slice(0, 2);
   if (letters) return letters.toUpperCase();
   const fallback = trimmed.replace(/[^A-Za-z0-9]/g, "").slice(0, 2);
@@ -360,7 +372,11 @@ const storeRecipients = (profiles: RecipientProfile[]) => {
   }
 };
 
-const toRecipientProfile = (pubkey: string, metadata?: Record<string, unknown>, existing?: RecipientProfile): RecipientProfile => {
+const toRecipientProfile = (
+  pubkey: string,
+  metadata?: Record<string, unknown>,
+  existing?: RecipientProfile,
+): RecipientProfile => {
   let npub: string;
   try {
     npub = nip19.npubEncode(pubkey);
@@ -503,13 +519,18 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
   const [noteContent, setNoteContent] = useState("");
   const [preferredRelays, setPreferredRelays] = useState<string[]>([]);
   const [relayStatuses, setRelayStatuses] = useState<Record<string, RelayState>>({});
-  const [connectionStatuses, setConnectionStatuses] = useState<Record<string, RelayConnectionState>>({});
+  const [connectionStatuses, setConnectionStatuses] = useState<
+    Record<string, RelayConnectionState>
+  >({});
   const [mediaError, setMediaError] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [metadataLoaded, setMetadataLoaded] = useState(false);
   const [metadataError, setMetadataError] = useState<string | null>(null);
   const [globalError, setGlobalError] = useState<string | null>(null);
-  const [privateLinkDetails, setPrivateLinkDetails] = useState<{ link: string; alias: string | null } | null>(null);
+  const [privateLinkDetails, setPrivateLinkDetails] = useState<{
+    link: string;
+    alias: string | null;
+  } | null>(null);
   const [showRelayDetails, setShowRelayDetails] = useState(false);
   const [profileInfo, setProfileInfo] = useState<ProfileInfo>(() => emptyProfileInfo());
   const {
@@ -549,7 +570,8 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
   const ensureRecipientProfile = useCallback(
     async (targetPubkey: string): Promise<RecipientProfile> => {
       const existing = profileCacheRef.current.get(targetPubkey);
-      const shouldRefresh = !existing || !existing.lastFetched || Date.now() - existing.lastFetched > 5 * 60 * 1000;
+      const shouldRefresh =
+        !existing || !existing.lastFetched || Date.now() - existing.lastFetched > 5 * 60 * 1000;
       let metadata: Record<string, unknown> | undefined;
       if (shouldRefresh && ndk) {
         try {
@@ -570,7 +592,7 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
       setProfileCacheTick(prev => prev + 1);
       return profile;
     },
-    [ndk]
+    [ndk],
   );
 
   const resolveNip05 = useCallback(
@@ -594,7 +616,7 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
         return null;
       }
     },
-    [ensureRecipientProfile]
+    [ensureRecipientProfile],
   );
 
   const interpretRecipientInput = useCallback(
@@ -629,7 +651,7 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
       }
       return null;
     },
-    [ensureRecipientProfile, resolveNip05]
+    [ensureRecipientProfile, resolveNip05],
   );
 
   const handleRecipientSelect = useCallback((profile: RecipientProfile) => {
@@ -688,7 +710,9 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
         });
 
         if (!suggestions.size && normalizedQuery.includes("@")) {
-          const nip05Profile = await resolveNip05(normalizedQuery.startsWith("@") ? normalizedQuery : `@${normalizedQuery}`);
+          const nip05Profile = await resolveNip05(
+            normalizedQuery.startsWith("@") ? normalizedQuery : `@${normalizedQuery}`,
+          );
           if (nip05Profile) {
             suggestions.set(nip05Profile.pubkey, { ...nip05Profile, origin: "nip05" });
           }
@@ -697,10 +721,15 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
         const ordered = Array.from(suggestions.values()).sort((a, b) => {
           if (a.origin === b.origin) {
             return (a.displayName || a.username || a.nip05 || a.npub).localeCompare(
-              b.displayName || b.username || b.nip05 || b.npub
+              b.displayName || b.username || b.nip05 || b.npub,
             );
           }
-          const priority: Record<RecipientSuggestion["origin"], number> = { direct: 0, nip05: 1, recent: 2, cache: 3 };
+          const priority: Record<RecipientSuggestion["origin"], number> = {
+            direct: 0,
+            nip05: 1,
+            recent: 2,
+            cache: 3,
+          };
           return priority[a.origin] - priority[b.origin];
         });
 
@@ -721,7 +750,14 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
     return () => {
       ignore = true;
     };
-  }, [shareMode, recipientQuery, interpretRecipientInput, recentRecipients, resolveNip05, profileCacheTick]);
+  }, [
+    shareMode,
+    recipientQuery,
+    interpretRecipientInput,
+    recentRecipients,
+    resolveNip05,
+    profileCacheTick,
+  ]);
 
   const shareKeyDetails = useMemo(() => {
     if (!shareKey) return null;
@@ -752,7 +788,6 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
     setSelectedRecipient(null);
     setRecipientError(null);
     setIsSearchingRecipients(false);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialPayload]);
 
   useEffect(() => {
@@ -784,7 +819,7 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
       }
       onShareComplete?.(result);
     },
-    [onShareComplete]
+    [onShareComplete],
   );
 
   useEffect(() => {
@@ -933,7 +968,7 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
 
   const selectedRelays = useMemo(
     () => effectiveRelays.filter(url => relaySelections[url] !== false),
-    [effectiveRelays, relaySelections]
+    [effectiveRelays, relaySelections],
   );
 
   useEffect(() => {
@@ -985,7 +1020,8 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
   }, [profileInfo.nip05, profileInfo.username, pubkey]);
 
   const previewInitials = useMemo(() => {
-    const source = profileInfo.displayName ?? profileInfo.username ?? profileInfo.nip05 ?? pubkey ?? null;
+    const source =
+      profileInfo.displayName ?? profileInfo.username ?? profileInfo.nip05 ?? pubkey ?? null;
     return computeInitials(source);
   }, [profileInfo.displayName, profileInfo.username, profileInfo.nip05, pubkey]);
 
@@ -1052,9 +1088,8 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
   }, [embedded, payload?.name, shareMode]);
 
   const successes = useMemo(
-    () =>
-      selectedRelays.filter(url => relayStatuses[url]?.status === "success"),
-    [relayStatuses, selectedRelays]
+    () => selectedRelays.filter(url => relayStatuses[url]?.status === "success"),
+    [relayStatuses, selectedRelays],
   );
 
   const failures = useMemo(
@@ -1062,7 +1097,7 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
       selectedRelays
         .filter(url => relayStatuses[url]?.status === "error")
         .map(url => ({ url, message: relayStatuses[url]?.message })),
-    [relayStatuses, selectedRelays]
+    [relayStatuses, selectedRelays],
   );
 
   const allComplete = useMemo(() => {
@@ -1093,7 +1128,7 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
       setGlobalError(
         effectiveRelays.length === 0
           ? "No relays available. Update your profile with preferred relays and try again."
-          : "Select at least one relay to share."
+          : "Select at least one relay to share.",
       );
       return;
     }
@@ -1171,11 +1206,14 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
             dmFailureCount > 0 && dmSuccessCount > 0
               ? `${dmFailureCount} relay${dmFailureCount === 1 ? "" : "s"} reported errors.`
               : dmSuccessCount === 0
-              ? "All relay deliveries failed."
-              : null,
+                ? "All relay deliveries failed."
+                : null,
         };
 
-        const nextRecent = [recipientProfile, ...recentRecipients.filter(item => item.pubkey !== recipientProfile.pubkey)].slice(0, 10);
+        const nextRecent = [
+          recipientProfile,
+          ...recentRecipients.filter(item => item.pubkey !== recipientProfile.pubkey),
+        ].slice(0, 10);
         setRecentRecipients(nextRecent);
         storeRecipients(nextRecent);
         onShareComplete?.(dmResult);
@@ -1256,11 +1294,14 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
             dmFailureCount > 0 && dmSuccessCount > 0
               ? `${dmFailureCount} relay${dmFailureCount === 1 ? "" : "s"} reported errors.`
               : dmSuccessCount === 0
-              ? "All relay deliveries failed."
-              : null,
+                ? "All relay deliveries failed."
+                : null,
         };
 
-        const nextRecent = [recipientProfile, ...recentRecipients.filter(item => item.pubkey !== recipientProfile.pubkey)].slice(0, 10);
+        const nextRecent = [
+          recipientProfile,
+          ...recentRecipients.filter(item => item.pubkey !== recipientProfile.pubkey),
+        ].slice(0, 10);
         setRecentRecipients(nextRecent);
         storeRecipients(nextRecent);
         onShareComplete?.(dmResult);
@@ -1287,7 +1328,12 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
     } else {
       for (const relayUrl of relays) {
         try {
-          const event = new NDKEvent(ndk, { kind: 1, content: finalContent, tags: [], created_at: createdAt });
+          const event = new NDKEvent(ndk, {
+            kind: 1,
+            content: finalContent,
+            tags: [],
+            created_at: createdAt,
+          });
           await event.sign();
           const relaySet = NDKRelaySet.fromRelayUrls([relayUrl], ndk);
           await event.publish(relaySet, 7000, 1);
@@ -1328,9 +1374,16 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
   const renderRelayStatus = (url: string) => {
     const publishState = relayStatuses[url];
     if (publishState) {
-      if (publishState.status === "pending") return <span className="text-amber-300">Publishing…</span>;
-      if (publishState.status === "success") return <span className="text-emerald-300">Published</span>;
-      if (publishState.status === "error") return <span className="text-red-400">Error{publishState.message ? `: ${publishState.message}` : ""}</span>;
+      if (publishState.status === "pending")
+        return <span className="text-amber-300">Publishing…</span>;
+      if (publishState.status === "success")
+        return <span className="text-emerald-300">Published</span>;
+      if (publishState.status === "error")
+        return (
+          <span className="text-red-400">
+            Error{publishState.message ? `: ${publishState.message}` : ""}
+          </span>
+        );
     }
 
     const connectionState = connectionStatuses[url];
@@ -1368,7 +1421,11 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
     </div>
   );
 
-  const contentUnavailable = payloadError ? renderUnavailable(payloadError) : !payload ? renderLoading() : null;
+  const contentUnavailable = payloadError
+    ? renderUnavailable(payloadError)
+    : !payload
+      ? renderLoading()
+      : null;
 
   const renderPrivateLinkComposer = () => {
     const containerClasses = embedded
@@ -1389,9 +1446,13 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
       ? "rounded-2xl border border-slate-200 bg-white/95 p-6 text-slate-700 shadow"
       : "rounded-2xl border border-slate-800 bg-slate-900/80 p-6 text-slate-200 shadow-lg";
     const infoLabelClass = "text-xs uppercase tracking-wide text-slate-500";
-    const infoNameClass = isLightTheme ? "text-lg font-semibold text-slate-900" : "text-lg font-semibold text-slate-100";
+    const infoNameClass = isLightTheme
+      ? "text-lg font-semibold text-slate-900"
+      : "text-lg font-semibold text-slate-100";
     const infoMetaClass = isLightTheme ? "text-xs text-slate-500" : "text-xs text-slate-400";
-    const infoHashClass = isLightTheme ? "font-mono text-[11px] text-slate-600" : "font-mono text-[11px] text-slate-300";
+    const infoHashClass = isLightTheme
+      ? "font-mono text-[11px] text-slate-600"
+      : "font-mono text-[11px] text-slate-300";
     const urlPanelClass = isLightTheme
       ? "mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4 text-xs text-slate-600"
       : "mt-4 rounded-xl border border-slate-800 bg-slate-950/80 p-4 text-xs text-slate-300";
@@ -1401,7 +1462,9 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
     const previewContainerClass = isLightTheme
       ? "mt-5 overflow-hidden rounded-xl border border-slate-200 bg-slate-50"
       : "mt-5 overflow-hidden rounded-xl border border-slate-800 bg-slate-950/70";
-    const previewFallbackClass = isLightTheme ? "p-6 text-sm text-slate-600" : "p-6 text-sm text-slate-300";
+    const previewFallbackClass = isLightTheme
+      ? "p-6 text-sm text-slate-600"
+      : "p-6 text-sm text-slate-300";
 
     let privateMediaType: "image" | "video" | null = null;
     if (!mediaError && data.url) {
@@ -1446,9 +1509,12 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
       );
 
     const previewContainerDynamicClass =
-      privateMediaType === "image" ? `${previewContainerClass} max-h-[300px]` : previewContainerClass;
+      privateMediaType === "image"
+        ? `${previewContainerClass} max-h-[300px]`
+        : previewContainerClass;
     const canSharePrivateLink = Boolean(privateLinkDetails?.link && onShareLinkRequest);
-    const shareButtonBaseClass = "inline-flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-medium transition";
+    const shareButtonBaseClass =
+      "inline-flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-medium transition";
     const shareButtonClass = shareButtonBaseClass.concat(
       canSharePrivateLink
         ? isLightTheme
@@ -1456,7 +1522,7 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
           : " border border-emerald-400 bg-emerald-600/90 text-white hover:bg-emerald-500"
         : isLightTheme
           ? " border border-slate-300 bg-slate-200 text-slate-500 cursor-not-allowed"
-          : " border border-slate-700 bg-slate-800 text-slate-500 cursor-not-allowed"
+          : " border border-slate-700 bg-slate-800 text-slate-500 cursor-not-allowed",
     );
     const closeButtonClass = isLightTheme
       ? "inline-flex items-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:border-slate-400 hover:text-slate-900"
@@ -1495,7 +1561,9 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
                   <div className={infoLabelClass}>File summary</div>
                   <div className={infoNameClass}>{data.name ?? "Unnamed file"}</div>
                   {typeof data.size === "number" && Number.isFinite(data.size) ? (
-                    <div className={infoMetaClass}>Size: {prettyBytes(Math.max(0, Math.round(data.size)))}</div>
+                    <div className={infoMetaClass}>
+                      Size: {prettyBytes(Math.max(0, Math.round(data.size)))}
+                    </div>
                   ) : null}
                   {data.sha256 ? (
                     <div className={infoMetaClass}>
@@ -1505,7 +1573,9 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
                 </div>
                 {data.url ? (
                   <div className={urlPanelClass}>
-                    <div className="text-[11px] uppercase tracking-wide text-slate-500">Blossom URL</div>
+                    <div className="text-[11px] uppercase tracking-wide text-slate-500">
+                      Blossom URL
+                    </div>
                     <a href={data.url} target="_blank" rel="noreferrer" className={urlAnchorClass}>
                       {data.url}
                     </a>
@@ -1515,7 +1585,11 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
               <div className={previewContainerDynamicClass}>{mediaPreview}</div>
               {!privateLinkState.serviceConfigured && (
                 <div className="mt-4 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-200">
-                  Configure <code className="font-mono text-xs text-amber-100">VITE_PRIVATE_LINK_SERVICE_PUBKEY</code> to enable private links.
+                  Configure{" "}
+                  <code className="font-mono text-xs text-amber-100">
+                    VITE_PRIVATE_LINK_SERVICE_PUBKEY
+                  </code>{" "}
+                  to enable private links.
                 </div>
               )}
               {privateLinkState.serviceConfigured && !canSharePrivateLink ? (
@@ -1533,11 +1607,7 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
                   <ShareIcon size={16} className="shrink-0" />
                   <span>Share</span>
                 </button>
-                <button
-                  type="button"
-                  onClick={handleClose}
-                  className={closeButtonClass}
-                >
+                <button type="button" onClick={handleClose} className={closeButtonClass}>
                   <CloseIcon className="h-4 w-4" />
                   <span>Close</span>
                 </button>
@@ -1561,11 +1631,16 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
     ? "flex flex-1 min-h-0 w-full flex-col lg:flex-row gap-6 p-2"
     : "flex flex-1 min-h-0 w-full max-w-5xl flex-col lg:flex-row gap-6 mx-auto";
 
-  const shareCardClasses = "flex h-full w-full flex-col overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/80 shadow-lg";
+  const shareCardClasses =
+    "flex h-full w-full flex-col overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/80 shadow-lg";
   const previewCardClasses = `hidden lg:flex lg:w-1/2 flex-col rounded-2xl border ${
-    isLightTheme ? "border-slate-200 bg-white text-slate-700" : "border-slate-800 bg-slate-900/70 text-slate-100"
+    isLightTheme
+      ? "border-slate-200 bg-white text-slate-700"
+      : "border-slate-800 bg-slate-900/70 text-slate-100"
   }`;
-  const previewTitleClass = isLightTheme ? "text-xl font-semibold text-slate-900" : "text-xl font-semibold text-slate-100";
+  const previewTitleClass = isLightTheme
+    ? "text-xl font-semibold text-slate-900"
+    : "text-xl font-semibold text-slate-100";
   const previewMessageCardClass = isLightTheme
     ? "rounded-xl border border-slate-200 bg-slate-50 p-5"
     : "rounded-xl border border-slate-800 bg-slate-950/70 p-5";
@@ -1575,7 +1650,9 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
   const previewDisplayNameClass = isLightTheme
     ? "truncate text-sm font-semibold text-slate-900"
     : "truncate text-sm font-semibold text-slate-100";
-  const previewHandleClass = isLightTheme ? "truncate text-xs text-slate-500" : "truncate text-xs text-slate-500";
+  const previewHandleClass = isLightTheme
+    ? "truncate text-xs text-slate-500"
+    : "truncate text-xs text-slate-500";
   const previewNoteTextClass = isLightTheme
     ? "whitespace-pre-wrap break-words text-sm text-slate-800"
     : "whitespace-pre-wrap break-words text-sm text-slate-100";
@@ -1604,7 +1681,10 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
     return payload.url ?? null;
   }, [payload, isDmMode]);
 
-  const composedContent = useMemo(() => combineContent(noteContent, shareAppendix), [noteContent, shareAppendix]);
+  const composedContent = useMemo(
+    () => combineContent(noteContent, shareAppendix),
+    [noteContent, shareAppendix],
+  );
 
   const previewNote = composedContent.trim().length > 0 ? composedContent : "";
   const mediaSourcePath = useMemo(() => {
@@ -1615,8 +1695,14 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
       return payload.url.toLowerCase();
     }
   }, [payload?.url]);
-  const isImage = useMemo(() => /\.(png|jpe?g|gif|webp|avif|bmp|svg)$/.test(mediaSourcePath), [mediaSourcePath]);
-  const isVideo = useMemo(() => /\.(mp4|webm|ogg|mov|m4v)$/.test(mediaSourcePath), [mediaSourcePath]);
+  const isImage = useMemo(
+    () => /\.(png|jpe?g|gif|webp|avif|bmp|svg)$/.test(mediaSourcePath),
+    [mediaSourcePath],
+  );
+  const isVideo = useMemo(
+    () => /\.(mp4|webm|ogg|mov|m4v)$/.test(mediaSourcePath),
+    [mediaSourcePath],
+  );
   const mediaType = useMemo(() => {
     if (mediaError || !payload?.url) return null;
     if (isImage) return "image";
@@ -1635,22 +1721,30 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
       ? "Sending…"
       : "Publishing…"
     : isDmMode
-    ? "Send DM"
-    : "Publish note";
+      ? "Send DM"
+      : "Publish note";
   const ShareActionIcon = isDmMode ? SendIcon : NoteIcon;
 
   const baseRelayLabel = isDmMode
     ? "Using connected relays"
     : usingFallbackRelays
-    ? usingDefaultFallback
-      ? "Using default Bloom relays"
-      : "Using connected relays"
-    : "Your preferred relays";
+      ? usingDefaultFallback
+        ? "Using default Bloom relays"
+        : "Using connected relays"
+      : "Your preferred relays";
   const relayLabelSuffix =
     effectiveRelays.length > 0 ? ` (${selectedRelays.length}/${effectiveRelays.length})` : "";
   const relayLabel = `${baseRelayLabel}${relayLabelSuffix}`;
   const RelayIcon: React.FC<{ className?: string }> = ({ className }) => (
-    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
       <circle cx="12" cy="12" r="3" />
       <path d="M5.05 5.05a10 10 0 0 1 0 13.9" />
       <path d="M18.95 5.05a10 10 0 0 0 0 13.9" />
@@ -1716,7 +1810,6 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
               {isDmMode && (
                 <section className="space-y-3 mb-[7px]">
                   <div className="flex items-center justify-between text-xs font-semibold uppercase tracking-wide text-slate-400">
-
                     {isSearchingRecipients && <span className="text-emerald-300">Searching…</span>}
                   </div>
                   <div className="relative">
@@ -1749,8 +1842,10 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
                   {recipientResults.length > 0 && (
                     <ul className="max-h-48 space-y-2 overflow-auto rounded-xl border border-slate-800 bg-slate-950/80 p-2 text-sm">
                       {recipientResults.map(result => {
-                        const display = result.displayName || result.username || result.nip05 || result.npub;
-                        const handle = result.nip05 || (result.username ? `@${result.username}` : result.npub);
+                        const display =
+                          result.displayName || result.username || result.nip05 || result.npub;
+                        const handle =
+                          result.nip05 || (result.username ? `@${result.username}` : result.npub);
                         const initials = computeInitials(display);
                         const isActive = selectedRecipient?.pubkey === result.pubkey;
                         return (
@@ -1768,7 +1863,11 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
                               <div className="flex items-center gap-3">
                                 <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center overflow-hidden rounded-full bg-slate-800 text-xs font-semibold">
                                   {result.picture ? (
-                                    <img src={result.picture} alt={`${display}'s avatar`} className="h-full w-full object-cover" />
+                                    <img
+                                      src={result.picture}
+                                      alt={`${display}'s avatar`}
+                                      className="h-full w-full object-cover"
+                                    />
                                   ) : (
                                     <span>{initials}</span>
                                   )}
@@ -1777,7 +1876,9 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
                                   <div className="truncate text-sm font-medium">{display}</div>
                                   <div className="truncate text-xs text-slate-400">{handle}</div>
                                 </div>
-                                <span className="text-[10px] uppercase text-slate-500">{result.origin}</span>
+                                <span className="text-[10px] uppercase text-slate-500">
+                                  {result.origin}
+                                </span>
                               </div>
                             </button>
                           </li>
@@ -1787,7 +1888,11 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
                   )}
                   {selectedRecipient && (
                     <div className="rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-100">
-                      Sending to {selectedRecipient.displayName || selectedRecipient.username || selectedRecipient.nip05 || selectedRecipient.npub}
+                      Sending to{" "}
+                      {selectedRecipient.displayName ||
+                        selectedRecipient.username ||
+                        selectedRecipient.nip05 ||
+                        selectedRecipient.npub}
                     </div>
                   )}
                 </section>
@@ -1801,13 +1906,19 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
                 )}
                 {isPrivateDmMode && (
                   <div className="text-xs text-slate-400">
-                    Send an encrypted DM with file summary and download details. NOTE: Not all Nostr clients support private DMs. If you're unsure, please choose Share via DM instead.
+                    Send an encrypted DM with file summary and download details. NOTE: Not all Nostr
+                    clients support private DMs. If you're unsure, please choose Share via DM
+                    instead.
                   </div>
                 )}
                 <textarea
                   id="share-note"
                   className="min-h-[160px] w-full resize-none rounded-xl border border-slate-800 bg-slate-950/80 px-3 py-2 text-sm text-slate-200 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                  placeholder={isDmMode ? "Add a message to include with the DM…" : "Write something about this file…"}
+                  placeholder={
+                    isDmMode
+                      ? "Add a message to include with the DM…"
+                      : "Write something about this file…"
+                  }
                   value={noteContent}
                   onChange={event => setNoteContent(event.target.value)}
                   disabled={publishing}
@@ -1823,9 +1934,19 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
                   <span className="flex items-center gap-2">
                     <RelayIcon className="h-3 w-3" />
                     <span>{relayLabel}</span>
-                    {!metadataLoaded && <span className="text-[10px] text-slate-500">Loading…</span>}
+                    {!metadataLoaded && (
+                      <span className="text-[10px] text-slate-500">Loading…</span>
+                    )}
                   </span>
-                  <svg className={`h-3 w-3 transition-transform ${showRelayDetails ? "rotate-180" : ""}` } viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                  <svg
+                    className={`h-3 w-3 transition-transform ${showRelayDetails ? "rotate-180" : ""}`}
+                    viewBox="0 0 16 16"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
                     <path d="M4 6l4 4 4-4" />
                   </svg>
                 </button>
@@ -1841,7 +1962,9 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
                         const checked = relaySelections[url] !== false;
                         return (
                           <li key={url}>
-                            <label className={`${relayOptionBaseClass} ${publishing ? "cursor-not-allowed opacity-60" : "cursor-pointer"}`}>
+                            <label
+                              className={`${relayOptionBaseClass} ${publishing ? "cursor-not-allowed opacity-60" : "cursor-pointer"}`}
+                            >
                               <input
                                 type="checkbox"
                                 className={relayCheckboxClass}
@@ -1856,7 +1979,9 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
                               />
                               <div className="flex flex-1 flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
                                 <span className={relayUrlTextClass}>{url}</span>
-                                <span className={relayStatusWrapperClass}>{renderRelayStatus(url)}</span>
+                                <span className={relayStatusWrapperClass}>
+                                  {renderRelayStatus(url)}
+                                </span>
                               </div>
                             </label>
                           </li>
@@ -1864,7 +1989,9 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
                       })}
                     </ul>
                     {selectedRelays.length === 0 && (
-                      <p className={relaySelectionHintClass}>Select at least one relay before sharing.</p>
+                      <p className={relaySelectionHintClass}>
+                        Select at least one relay before sharing.
+                      </p>
                     )}
                   </>
                 )}
@@ -1875,7 +2002,12 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
                   type="button"
                   onClick={handleShare}
                   className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-60"
-                  disabled={publishing || !data.url || (isDmMode && !selectedRecipient) || selectedRelays.length === 0}
+                  disabled={
+                    publishing ||
+                    !data.url ||
+                    (isDmMode && !selectedRecipient) ||
+                    selectedRelays.length === 0
+                  }
                 >
                   <ShareActionIcon className="h-4 w-4" />
                   <span>{shareButtonLabel}</span>
@@ -1949,7 +2081,11 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
                     </div>
                   </div>
                   <div className={previewNoteTextClass}>
-                    {previewNote ? previewNote : <span className={previewPlaceholderClass}>Start typing to add a note…</span>}
+                    {previewNote ? (
+                      previewNote
+                    ) : (
+                      <span className={previewPlaceholderClass}>Start typing to add a note…</span>
+                    )}
                   </div>
                   <div className={previewMediaContainerClass}>
                     {mediaType === "image" ? (
@@ -1975,15 +2111,21 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
                       >
                         View shared file
                       </a>
-                  ) : (
-                    <span className="text-sm text-slate-500">File preview will appear here once available.</span>
-                  )}
-                </div>
-                {shareMode === "note" && (
-                  <div className="flex items-center justify-between pt-1 text-slate-500">
-                    {PREVIEW_ACTIONS.map(action => (
-                      <span key={action.key} className={previewActionCircleClass} title={action.label}>
-                        <action.icon className="h-4 w-4" />
+                    ) : (
+                      <span className="text-sm text-slate-500">
+                        File preview will appear here once available.
+                      </span>
+                    )}
+                  </div>
+                  {shareMode === "note" && (
+                    <div className="flex items-center justify-between pt-1 text-slate-500">
+                      {PREVIEW_ACTIONS.map(action => (
+                        <span
+                          key={action.key}
+                          className={previewActionCircleClass}
+                          title={action.label}
+                        >
+                          <action.icon className="h-4 w-4" />
                         </span>
                       ))}
                     </div>

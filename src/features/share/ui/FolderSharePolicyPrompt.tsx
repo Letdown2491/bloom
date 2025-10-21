@@ -83,13 +83,20 @@ export const FolderSharePolicyPrompt: React.FC<FolderSharePolicyPromptProps> = (
     return `${name} (${path})`;
   }, [record.name, record.path]);
 
-  const overlayClass = "fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 backdrop-blur-sm p-4";
+  const overlayClass =
+    "fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 backdrop-blur-sm p-4";
   const containerClass = isLightTheme
     ? "w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-6 text-slate-800 shadow-xl"
     : "w-full max-w-lg rounded-2xl border border-slate-800 bg-slate-900/90 p-6 shadow-xl";
-  const headingClass = isLightTheme ? "text-lg font-semibold text-slate-900" : "text-lg font-semibold text-slate-100";
-  const folderLabelClass = isLightTheme ? "mt-2 text-sm text-slate-600 break-all" : "mt-2 text-sm text-slate-300 break-all";
-  const descriptionClass = isLightTheme ? "mt-4 text-sm text-slate-600" : "mt-4 text-sm text-slate-300";
+  const headingClass = isLightTheme
+    ? "text-lg font-semibold text-slate-900"
+    : "text-lg font-semibold text-slate-100";
+  const folderLabelClass = isLightTheme
+    ? "mt-2 text-sm text-slate-600 break-all"
+    : "mt-2 text-sm text-slate-300 break-all";
+  const descriptionClass = isLightTheme
+    ? "mt-4 text-sm text-slate-600"
+    : "mt-4 text-sm text-slate-300";
   const optionBaseClass = isLightTheme
     ? "flex cursor-pointer items-start gap-3 rounded-xl border px-3 py-3 transition"
     : "flex cursor-pointer items-start gap-3 rounded-xl border px-3 py-3 transition";
@@ -102,12 +109,18 @@ export const FolderSharePolicyPrompt: React.FC<FolderSharePolicyPromptProps> = (
   const optionIdleClass = isLightTheme
     ? "border-slate-200 bg-white hover:border-slate-300"
     : "border-slate-800 bg-slate-900/70 hover:border-slate-700/80";
-  const optionTitleClass = isLightTheme ? "text-sm font-semibold text-slate-900" : "text-sm font-semibold text-slate-100";
+  const optionTitleClass = isLightTheme
+    ? "text-sm font-semibold text-slate-900"
+    : "text-sm font-semibold text-slate-100";
   const countPillClass = isLightTheme
     ? "rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600"
     : "rounded-full bg-slate-800 px-2 py-0.5 text-xs font-medium text-slate-300";
-  const optionDescriptionClass = isLightTheme ? "mt-1 text-xs text-slate-500" : "mt-1 text-xs text-slate-400";
-  const optionDisabledHintClass = isLightTheme ? "mt-1 text-xs text-slate-500" : "mt-1 text-xs text-slate-500";
+  const optionDescriptionClass = isLightTheme
+    ? "mt-1 text-xs text-slate-500"
+    : "mt-1 text-xs text-slate-400";
+  const optionDisabledHintClass = isLightTheme
+    ? "mt-1 text-xs text-slate-500"
+    : "mt-1 text-xs text-slate-500";
   const cancelButtonClass = isLightTheme
     ? "inline-flex items-center gap-2 rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-400 hover:text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-white"
     : "inline-flex items-center gap-2 rounded-xl border border-slate-700 px-4 py-2 text-sm font-semibold text-slate-200 transition hover:border-slate-600 hover:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-slate-950";
@@ -132,10 +145,7 @@ export const FolderSharePolicyPrompt: React.FC<FolderSharePolicyPromptProps> = (
               disabled ? optionDisabledClass : isSelected ? optionSelectedClass : optionIdleClass,
             ].join(" ");
             return (
-              <label
-                key={option.value}
-                className={optionClassName}
-              >
+              <label key={option.value} className={optionClassName}>
                 <input
                   type="radio"
                   name="folder-share-policy"
@@ -170,11 +180,7 @@ export const FolderSharePolicyPrompt: React.FC<FolderSharePolicyPromptProps> = (
           })}
         </div>
         <div className="mt-6 flex items-center justify-between">
-          <button
-            type="button"
-            className={cancelButtonClass}
-            onClick={onCancel}
-          >
+          <button type="button" className={cancelButtonClass} onClick={onCancel}>
             <CloseIcon size={16} aria-hidden="true" />
             <span>Cancel</span>
           </button>

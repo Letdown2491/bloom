@@ -16,15 +16,15 @@ const sanitizeHashes = (hashes: readonly string[]) =>
     new Set(
       hashes
         .map(hash => (typeof hash === "string" ? hash.trim().toLowerCase() : ""))
-        .filter(hash => hash.length === 64 && /^[0-9a-f]+$/.test(hash))
-    )
+        .filter(hash => hash.length === 64 && /^[0-9a-f]+$/.test(hash)),
+    ),
   );
 
 export const fetchNip94ByHashes = async (
   ndk: NdkInstance,
   hashes: readonly string[],
   relayUrls?: readonly string[],
-  options?: FetchNip94Options
+  options?: FetchNip94Options,
 ): Promise<Map<string, Nip94ParsedEvent>> => {
   if (!ndk) return new Map();
   const targets = sanitizeHashes(hashes);
@@ -58,7 +58,11 @@ export const fetchNip94ByHashes = async (
   let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
   let eventsSet: Set<NdkEvent> = new Set();
   try {
-    const fetchPromise = ndk.fetchEvents(filters, { closeOnEose: true, groupable: false }, relaySet);
+    const fetchPromise = ndk.fetchEvents(
+      filters,
+      { closeOnEose: true, groupable: false },
+      relaySet,
+    );
     if (timeoutMs > 0) {
       eventsSet = (await Promise.race([
         fetchPromise.finally(() => {

@@ -84,7 +84,7 @@ const generateNonce = () => {
 async function createSatelliteAuthEvent(
   signTemplate: SignTemplate,
   purpose: SatelliteAuthPurpose,
-  data: SatelliteAuthData = {}
+  data: SatelliteAuthData = {},
 ): Promise<SignedEvent> {
   const createdAt = Math.floor(Date.now() / 1000);
   const tags: string[][] = [["nonce", generateNonce()]];
@@ -108,7 +108,11 @@ async function createSatelliteAuthEvent(
     }
     case "credit": {
       content = "Request Storage";
-      if (typeof data.gbMonths === "number" && Number.isInteger(data.gbMonths) && data.gbMonths > 0) {
+      if (
+        typeof data.gbMonths === "number" &&
+        Number.isInteger(data.gbMonths) &&
+        data.gbMonths > 0
+      ) {
         tags.push(["gb_months", String(data.gbMonths)]);
       }
       break;
@@ -161,7 +165,9 @@ const satelliteFileToBlob = (file: SatelliteAccountFile, serverUrl: string): Blo
   };
 };
 
-async function ensureUploadFile(source: Awaited<ReturnType<typeof resolveUploadSource>>): Promise<File> {
+async function ensureUploadFile(
+  source: Awaited<ReturnType<typeof resolveUploadSource>>,
+): Promise<File> {
   // If the source already exposes a File, reuse it to avoid buffering.
   if ((source as { originalFile?: unknown }).originalFile instanceof File) {
     return (source as { originalFile: File }).originalFile;
@@ -172,7 +178,10 @@ async function ensureUploadFile(source: Awaited<ReturnType<typeof resolveUploadS
   });
 }
 
-export async function getSatelliteAccount(serverUrl: string, signTemplate: SignTemplate): Promise<SatelliteAccount> {
+export async function getSatelliteAccount(
+  serverUrl: string,
+  signTemplate: SignTemplate,
+): Promise<SatelliteAccount> {
   const base = normalizeBase(serverUrl);
   const authEvent = await createSatelliteAuthEvent(signTemplate, "account");
   const url = buildEndpointUrl(base, "account");
@@ -190,14 +199,16 @@ export async function getSatelliteAccount(serverUrl: string, signTemplate: SignT
 
 export async function listSatelliteFiles(
   serverUrl: string,
-  options: { signTemplate?: SignTemplate }
+  options: { signTemplate?: SignTemplate },
 ): Promise<BlossomBlob[]> {
   if (!options.signTemplate) {
     throw new Error("Satellite servers require a connected signer.");
   }
   const account = await getSatelliteAccount(serverUrl, options.signTemplate);
   const files = Array.isArray(account.files) ? account.files : [];
-  return files.filter((item): item is SatelliteAccountFile => Boolean(item?.sha256)).map(file => satelliteFileToBlob(file, serverUrl));
+  return files
+    .filter((item): item is SatelliteAccountFile => Boolean(item?.sha256))
+    .map(file => satelliteFileToBlob(file, serverUrl));
 }
 
 export async function uploadBlobToSatellite(
@@ -206,7 +217,7 @@ export async function uploadBlobToSatellite(
   signTemplate: SignTemplate | undefined,
   requiresAuth: boolean,
   onProgress?: (event: AxiosProgressEvent) => void,
-  options: SatelliteUploadOptions = {}
+  options: SatelliteUploadOptions = {},
 ): Promise<BlossomBlob> {
   const base = normalizeBase(serverUrl);
   const endpoint = buildEndpointUrl(base, "item");
@@ -215,7 +226,10 @@ export async function uploadBlobToSatellite(
 
   const headers: Record<string, string> = {
     Accept: "application/json",
-    "Content-Type": uploadFile.type || (source as { contentType?: string }).contentType || "application/octet-stream",
+    "Content-Type":
+      uploadFile.type ||
+      (source as { contentType?: string }).contentType ||
+      "application/octet-stream",
   };
 
   let requestUrl = endpoint;
@@ -248,8 +262,11 @@ export async function uploadBlobToSatellite(
   } catch (error) {
     if (axios.isAxiosError(error)) {
       const status = error.response?.status;
-      const serverMessage = (error.response?.data as { message?: string } | undefined)?.message || error.message;
-      const uploadError = new Error(serverMessage || `Satellite upload failed with status ${status ?? "unknown"}`) as Error & {
+      const serverMessage =
+        (error.response?.data as { message?: string } | undefined)?.message || error.message;
+      const uploadError = new Error(
+        serverMessage || `Satellite upload failed with status ${status ?? "unknown"}`,
+      ) as Error & {
         status?: number;
       };
       uploadError.status = status;
@@ -263,7 +280,7 @@ export async function deleteSatelliteFile(
   serverUrl: string,
   hash: string,
   signTemplate: SignTemplate | undefined,
-  requiresAuth: boolean
+  requiresAuth: boolean,
 ): Promise<void> {
   const base = normalizeBase(serverUrl);
   const endpoint = buildEndpointUrl(base, "item");
@@ -292,14 +309,18 @@ export async function deleteSatelliteFile(
         message = null;
       }
     }
-    throw new Error(message ? `Delete failed with status ${res.status}: ${message}` : `Delete failed with status ${res.status}`);
+    throw new Error(
+      message
+        ? `Delete failed with status ${res.status}: ${message}`
+        : `Delete failed with status ${res.status}`,
+    );
   }
 }
 
 export async function requestSatelliteCreditOffer(
   serverUrl: string,
   gbMonths: number,
-  signTemplate: SignTemplate | undefined
+  signTemplate: SignTemplate | undefined,
 ): Promise<SatelliteCreditOffer> {
   if (!signTemplate) throw new Error("Satellite credit purchase requires a connected signer.");
   const base = normalizeBase(serverUrl);

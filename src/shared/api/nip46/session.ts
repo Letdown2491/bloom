@@ -1,6 +1,7 @@
 import { sanitizeRelayUrl } from "../../utils/relays";
-import { Nip46EncryptionAlgorithm } from "./types";
-import { generateKeypair, Nip46Keypair, exportPrivateKey } from "./keys";
+import type { Nip46EncryptionAlgorithm } from "./types";
+import type { Nip46Keypair } from "./keys";
+import { generateKeypair, exportPrivateKey } from "./keys";
 
 export type RemoteSignerStatus = "pairing" | "active" | "revoked";
 
@@ -80,7 +81,9 @@ export class SessionManager {
         if (normalized.pendingRelays) {
           const sanitizedPending = normalizeRelayList(normalized.pendingRelays);
           if (sanitizedPending.changed) {
-            normalized.pendingRelays = sanitizedPending.values.length ? sanitizedPending.values : null;
+            normalized.pendingRelays = sanitizedPending.values.length
+              ? sanitizedPending.values
+              : null;
             needsPersist = true;
           }
         }
@@ -134,10 +137,12 @@ export class SessionManager {
     return null;
   }
 
-  async upsertSession(partial: Omit<RemoteSignerSession, "createdAt" | "updatedAt"> & {
-    createdAt?: number;
-    updatedAt?: number;
-  }): Promise<RemoteSignerSession> {
+  async upsertSession(
+    partial: Omit<RemoteSignerSession, "createdAt" | "updatedAt"> & {
+      createdAt?: number;
+      updatedAt?: number;
+    },
+  ): Promise<RemoteSignerSession> {
     const now = Date.now();
     const existing = this.sessions.get(partial.id);
     const session: RemoteSignerSession = {
@@ -160,11 +165,17 @@ export class SessionManager {
     this.emit();
   }
 
-  async updateSession(id: string, update: Partial<RemoteSignerSession>): Promise<RemoteSignerSession | null> {
+  async updateSession(
+    id: string,
+    update: Partial<RemoteSignerSession>,
+  ): Promise<RemoteSignerSession | null> {
     const current = this.sessions.get(id);
     if (!current) return null;
     let changed = false;
-    const sanitizedEntries: [keyof RemoteSignerSession, RemoteSignerSession[keyof RemoteSignerSession]][] = [];
+    const sanitizedEntries: [
+      keyof RemoteSignerSession,
+      RemoteSignerSession[keyof RemoteSignerSession],
+    ][] = [];
     (Object.keys(update) as (keyof RemoteSignerSession)[]).forEach(key => {
       if (!Object.prototype.hasOwnProperty.call(update, key)) return;
       const value = update[key];
@@ -201,15 +212,15 @@ export class SessionManager {
     const keypair = input.keypair ?? generateKeypair();
     const now = Date.now();
     const baseId =
-      input.token.type === "nostrconnect" ? input.token.clientPubkey : input.token.remoteSignerPubkey;
+      input.token.type === "nostrconnect"
+        ? input.token.clientPubkey
+        : input.token.remoteSignerPubkey;
     const randomSuffix = Math.random().toString(36).substring(2, 10);
     const sessionId = `${input.token.type}:${baseId}:${now}:${randomSuffix}`;
     const relayNormalization = normalizeRelayList(input.token.relays);
     const relays = relayNormalization.values;
     const basePermissions =
-      input.token.type === "nostrconnect"
-        ? Array.from(new Set(input.token.permissions))
-        : [];
+      input.token.type === "nostrconnect" ? Array.from(new Set(input.token.permissions)) : [];
     const permissions = mergePermissions(basePermissions);
     const algorithm = input.algorithm ?? input.token.algorithm ?? "nip44";
 
@@ -317,7 +328,9 @@ interface RelayNormalizationResult {
   changed: boolean;
 }
 
-const normalizeRelayList = (relays: readonly string[] | null | undefined): RelayNormalizationResult => {
+const normalizeRelayList = (
+  relays: readonly string[] | null | undefined,
+): RelayNormalizationResult => {
   if (!relays?.length) return { values: [], changed: Boolean(relays && relays.length) };
   const values: string[] = [];
   const seen = new Set<string>();
@@ -328,7 +341,8 @@ const normalizeRelayList = (relays: readonly string[] | null | undefined): Relay
     seen.add(sanitized);
     values.push(sanitized);
   });
-  const changed = values.length !== relays.length || values.some((value, index) => value !== relays[index]);
+  const changed =
+    values.length !== relays.length || values.some((value, index) => value !== relays[index]);
   return { values, changed };
 };
 
@@ -406,7 +420,7 @@ export const parseNostrConnectUri = (uri: string): ParsedNostrConnectToken => {
   const metadata = decodeMetadata(params.get("metadata"));
   const perms = parsePermissions(params.get("perms"));
   const algorithm = parseAlgorithm(
-    params.get("alg") ?? params.get("algorithm") ?? params.get("encryption")
+    params.get("alg") ?? params.get("algorithm") ?? params.get("encryption"),
   );
 
   return {
@@ -434,7 +448,7 @@ export const parseBunkerUri = (uri: string): ParsedBunkerToken => {
   const secret = params.get("secret") ?? undefined;
   const metadata = decodeMetadata(params.get("metadata"));
   const algorithm = parseAlgorithm(
-    params.get("alg") ?? params.get("algorithm") ?? params.get("encryption")
+    params.get("alg") ?? params.get("algorithm") ?? params.get("encryption"),
   );
 
   return {
@@ -466,7 +480,7 @@ export interface CreateSessionFromUriOptions {
 export const createSessionFromUri = async (
   manager: SessionManager,
   uri: string,
-  options?: CreateSessionFromUriOptions
+  options?: CreateSessionFromUriOptions,
 ): Promise<CreatedSessionResult> => {
   const token = parsePairingUri(uri);
   return manager.createSession({

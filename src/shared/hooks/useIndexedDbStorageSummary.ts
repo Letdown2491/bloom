@@ -97,7 +97,8 @@ export const useIndexedDbStorageSummary = (): IndexedDbStorageSummary => {
         }
       } catch (error) {
         if (!cancelled) {
-          const message = error instanceof Error ? error.message : "Failed to inspect IndexedDB usage.";
+          const message =
+            error instanceof Error ? error.message : "Failed to inspect IndexedDB usage.";
           setState(prev => ({
             supported: prev.supported,
             measuring: false,

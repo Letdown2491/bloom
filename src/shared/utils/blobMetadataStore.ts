@@ -58,7 +58,8 @@ const enqueueMicrotask = (cb: () => void) => {
     .catch(() => undefined);
 };
 
-const metadataWriteKey = (serverUrl: string | undefined, sha256: string) => `${serverUrl ?? ""}\u0000${sha256}`;
+const metadataWriteKey = (serverUrl: string | undefined, sha256: string) =>
+  `${serverUrl ?? ""}\u0000${sha256}`;
 
 const flushPendingMetadataWrites = () => {
   metadataWriteScheduled = false;
@@ -69,7 +70,9 @@ const flushPendingMetadataWrites = () => {
   let changed = false;
 
   for (const entry of entries) {
-    const didChange = setStoredBlobMetadata(entry.serverUrl, entry.sha256, entry.metadata, { suppressPersist: true });
+    const didChange = setStoredBlobMetadata(entry.serverUrl, entry.sha256, entry.metadata, {
+      suppressPersist: true,
+    });
     changed = changed || didChange;
   }
 
@@ -85,7 +88,11 @@ const scheduleMetadataWrite = () => {
   enqueueMicrotask(flushPendingMetadataWrites);
 };
 
-const queueStoredBlobMetadata = (serverUrl: string | undefined, sha256: string, metadata: StoredMetadata) => {
+const queueStoredBlobMetadata = (
+  serverUrl: string | undefined,
+  sha256: string,
+  metadata: StoredMetadata,
+) => {
   if (!sha256) return;
   const key = metadataWriteKey(serverUrl, sha256);
   const existing = pendingMetadataWrites.get(key);
@@ -222,7 +229,7 @@ const pruneStaleMetadataEntries = (store: StoredMetadataRecord, cutoffMs: number
       const freshest =
         Math.max(
           typeof expanded.updatedAt === "number" ? expanded.updatedAt : 0,
-          typeof expanded.lastCheckedAt === "number" ? expanded.lastCheckedAt : 0
+          typeof expanded.lastCheckedAt === "number" ? expanded.lastCheckedAt : 0,
         ) || 0;
       if (!hasContent && freshest > 0 && freshest < cutoff) {
         delete serverEntries[sha];
@@ -372,7 +379,7 @@ export function setStoredBlobMetadata(
   serverUrl: string | undefined,
   sha256: string,
   metadata: StoredMetadata,
-  options?: { suppressPersist?: boolean }
+  options?: { suppressPersist?: boolean },
 ): boolean {
   if (!sha256) return false;
   const serverKey = normalizeServerKey(serverUrl);
@@ -448,14 +455,15 @@ export function setStoredBlobMetadata(
   const currentType = typeof current.type === "string" ? current.type : undefined;
   const nextType = typeof next.type === "string" ? next.type : undefined;
   const currentFolder = Object.prototype.hasOwnProperty.call(current, "folderPath")
-    ? current.folderPath ?? null
+    ? (current.folderPath ?? null)
     : undefined;
   const nextFolder = Object.prototype.hasOwnProperty.call(next, "folderPath")
-    ? next.folderPath ?? null
+    ? (next.folderPath ?? null)
     : undefined;
   const currentAudio = current.audio;
   const nextAudio = next.audio;
-  const currentChecked = typeof current.lastCheckedAt === "number" ? current.lastCheckedAt : undefined;
+  const currentChecked =
+    typeof current.lastCheckedAt === "number" ? current.lastCheckedAt : undefined;
   const nextChecked = typeof next.lastCheckedAt === "number" ? next.lastCheckedAt : undefined;
 
   const contentChanged =
@@ -483,7 +491,13 @@ export function setStoredBlobMetadata(
   }
 
   let changed = false;
-  if (!next.name && !next.type && !next.audio && !next.lastCheckedAt && typeof next.updatedAt !== "number") {
+  if (
+    !next.name &&
+    !next.type &&
+    !next.audio &&
+    !next.lastCheckedAt &&
+    typeof next.updatedAt !== "number"
+  ) {
     if (serverStore[sha256]) {
       delete serverStore[sha256];
       if (Object.keys(serverStore).length === 0) {
@@ -512,7 +526,10 @@ export function setStoredBlobMetadata(
   return changed;
 }
 
-export function mergeBlobWithStoredMetadata(serverUrl: string | undefined, blob: BlossomBlob): BlossomBlob {
+export function mergeBlobWithStoredMetadata(
+  serverUrl: string | undefined,
+  blob: BlossomBlob,
+): BlossomBlob {
   const stored = getStoredBlobMetadata(serverUrl, blob.sha256);
   let merged: BlossomBlob = blob;
   const ensureClone = () => {
@@ -601,7 +618,7 @@ export function mergeBlobsWithStoredMetadata(serverUrl: string | undefined, blob
 export function rememberBlobMetadata(
   serverUrl: string | undefined,
   blob: BlossomBlob,
-  options?: { folderPath?: string | null }
+  options?: { folderPath?: string | null },
 ) {
   if (!blob.sha256) return;
   const payload: StoredMetadata = {
@@ -620,7 +637,7 @@ export function rememberAudioMetadata(
   serverUrl: string | undefined,
   sha256: string,
   metadata: StoredAudioMetadata | null,
-  options?: { updatedAt?: number }
+  options?: { updatedAt?: number },
 ) {
   if (!sha256) return;
 
@@ -636,9 +653,10 @@ export function rememberAudioMetadata(
 
   const shouldUpdate = (existing: StoredMetadata | undefined) => {
     if (!existing) return true;
-    const currentUpdatedAt = typeof existing.updatedAt === "number" && Number.isFinite(existing.updatedAt)
-      ? existing.updatedAt
-      : 0;
+    const currentUpdatedAt =
+      typeof existing.updatedAt === "number" && Number.isFinite(existing.updatedAt)
+        ? existing.updatedAt
+        : 0;
     if (currentUpdatedAt > nextUpdatedAt) {
       return false;
     }
@@ -680,12 +698,13 @@ export function applyAliasUpdate(
   serverUrl: string | undefined,
   sha256: string,
   alias: string | null,
-  createdAtSeconds: number | undefined
+  createdAtSeconds: number | undefined,
 ) {
   if (!sha256) return false;
-  const updatedAt = typeof createdAtSeconds === "number" && Number.isFinite(createdAtSeconds)
-    ? Math.max(0, createdAtSeconds) * 1000
-    : Date.now();
+  const updatedAt =
+    typeof createdAtSeconds === "number" && Number.isFinite(createdAtSeconds)
+      ? Math.max(0, createdAtSeconds) * 1000
+      : Date.now();
   const existing = getStoredBlobMetadata(undefined, sha256);
   const existingUpdatedAt = existing?.updatedAt ?? 0;
   if (existingUpdatedAt >= updatedAt) {
@@ -703,7 +722,11 @@ export function applyAliasUpdate(
   return true;
 }
 
-export function markBlobMetadataChecked(serverUrl: string | undefined, sha256: string, checkedAt = Date.now()) {
+export function markBlobMetadataChecked(
+  serverUrl: string | undefined,
+  sha256: string,
+  checkedAt = Date.now(),
+) {
   setStoredBlobMetadata(serverUrl, sha256, { lastCheckedAt: checkedAt });
 }
 
@@ -777,11 +800,13 @@ function normalizeStoredAudio(audio?: StoredAudioMetadata | null): StoredAudioMe
   if (!audio) return undefined;
   const normalized: StoredAudioMetadata = {};
   if (typeof audio.title === "string" && audio.title.trim()) normalized.title = audio.title.trim();
-  if (typeof audio.artist === "string" && audio.artist.trim()) normalized.artist = audio.artist.trim();
+  if (typeof audio.artist === "string" && audio.artist.trim())
+    normalized.artist = audio.artist.trim();
   if (typeof audio.album === "string" && audio.album.trim()) normalized.album = audio.album.trim();
   if (isPositiveInteger(audio.trackNumber)) normalized.trackNumber = Math.trunc(audio.trackNumber!);
   if (isPositiveInteger(audio.trackTotal)) normalized.trackTotal = Math.trunc(audio.trackTotal!);
-  if (isPositiveInteger(audio.durationSeconds)) normalized.durationSeconds = Math.trunc(audio.durationSeconds!);
+  if (isPositiveInteger(audio.durationSeconds))
+    normalized.durationSeconds = Math.trunc(audio.durationSeconds!);
   if (typeof audio.genre === "string" && audio.genre.trim()) normalized.genre = audio.genre.trim();
   if (isPositiveInteger(audio.year)) normalized.year = Math.trunc(audio.year!);
   const coverUrl = sanitizeCoverUrl(audio.coverUrl);
@@ -863,7 +888,8 @@ const splitFolderSegments = (value: string) =>
     .map(segment => segment.trim())
     .filter(segment => segment.length > 0);
 
-const normalizeReservedScanTarget = (segment: string) => segment.toLowerCase().replace(/[^a-z0-9]/g, "");
+const normalizeReservedScanTarget = (segment: string) =>
+  segment.toLowerCase().replace(/[^a-z0-9]/g, "");
 
 const segmentContainsReservedKeyword = (segment: string) =>
   normalizeReservedScanTarget(segment).includes(RESERVED_FOLDER_KEYWORD);
@@ -892,7 +918,7 @@ export function rememberFolderPath(
   serverUrl: string | undefined,
   sha256: string,
   folderPath: string | null,
-  options?: { updatedAt?: number }
+  options?: { updatedAt?: number },
 ) {
   if (!sha256) return;
   const normalized = normalizeFolderPathInput(folderPath);
@@ -914,12 +940,13 @@ export function applyFolderUpdate(
   serverUrl: string | undefined,
   sha256: string,
   folderPath: string | null,
-  createdAtSeconds: number | undefined
+  createdAtSeconds: number | undefined,
 ): boolean {
   if (!sha256) return false;
-  const updatedAt = typeof createdAtSeconds === "number" && Number.isFinite(createdAtSeconds)
-    ? Math.max(0, createdAtSeconds) * 1000
-    : Date.now();
+  const updatedAt =
+    typeof createdAtSeconds === "number" && Number.isFinite(createdAtSeconds)
+      ? Math.max(0, createdAtSeconds) * 1000
+      : Date.now();
   const existing = getStoredBlobMetadata(undefined, sha256);
   const existingUpdatedAt = existing?.updatedAt ?? 0;
   if (existingUpdatedAt > updatedAt) {

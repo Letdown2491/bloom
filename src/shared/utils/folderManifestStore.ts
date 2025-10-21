@@ -20,7 +20,8 @@ type StoredViewRecord = {
 const viewId = (pubkey: string, scopeKey: string, parentPath: string) =>
   `${pubkey}::${scopeKey}::${parentPath || ""}`;
 
-export const scopePathKey = (scopeKey: string, parentPath: string) => `${scopeKey}::${parentPath || ""}`;
+export const scopePathKey = (scopeKey: string, parentPath: string) =>
+  `${scopeKey}::${parentPath || ""}`;
 
 export type ManifestStats = {
   viewCount: number;
@@ -101,7 +102,10 @@ type ScopeUsageMetrics = {
   approxBytes: number;
 };
 
-const gatherScopeMetrics = async (index: IDBIndex, pubkeyScope: string): Promise<ScopeUsageMetrics> =>
+const gatherScopeMetrics = async (
+  index: IDBIndex,
+  pubkeyScope: string,
+): Promise<ScopeUsageMetrics> =>
   new Promise((resolve, reject) => {
     const metrics: ScopeUsageMetrics = {
       viewCount: 0,
@@ -131,7 +135,8 @@ const resolveMaxViewsForScope = (stats: ScopeUsageMetrics) => {
   if (stats.viewCount <= base) return base;
   const weightedSize = stats.approxBytes / Math.max(1, stats.viewCount);
   const sizeFactor = weightedSize > 6_000 ? 0.5 : weightedSize > 3_500 ? 0.75 : 1;
-  const itemFactor = stats.totalItems / Math.max(1, stats.viewCount) > 40 ? 0.6 : stats.totalItems > 20 ? 0.8 : 1;
+  const itemFactor =
+    stats.totalItems / Math.max(1, stats.viewCount) > 40 ? 0.6 : stats.totalItems > 20 ? 0.8 : 1;
   const adaptive = Math.round(base * Math.min(sizeFactor, itemFactor));
   const upperBound = Math.max(base, Math.min(96, base + Math.floor(stats.viewCount / 3)));
   return Math.max(base, Math.min(upperBound, adaptive || base));
@@ -141,7 +146,7 @@ export const writeManifestView = async (
   pubkey: string,
   scopeKey: string,
   parentPath: string,
-  items: JSONObject[]
+  items: JSONObject[],
 ): Promise<void> => {
   return withDb(async db => {
     const tx = db.transaction(STORE_NAME, "readwrite");
@@ -199,7 +204,8 @@ export const resetManifestStore = async (): Promise<void> => {
   await new Promise<void>((resolve, reject) => {
     const deleteRequest = indexedDB.deleteDatabase(DB_NAME);
     deleteRequest.onsuccess = () => resolve();
-    deleteRequest.onerror = () => reject(deleteRequest.error ?? new Error("IndexedDB delete failed"));
+    deleteRequest.onerror = () =>
+      reject(deleteRequest.error ?? new Error("IndexedDB delete failed"));
   }).catch(() => {
     // Ignore delete failures; store may not exist.
   });

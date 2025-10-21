@@ -26,7 +26,7 @@ import {
 import type { SortDirection } from "../../app/context/UserPreferencesContext";
 
 const BlobListPanelLazy = React.lazy(() =>
-  import("./BlobListPanel").then(module => ({ default: module.BlobListPanel }))
+  import("./BlobListPanel").then(module => ({ default: module.BlobListPanel })),
 );
 
 type FilterOption = {
@@ -43,7 +43,7 @@ const BASE_FILTER_OPTIONS: FilterOption[] = [
 ];
 
 const FILTER_OPTIONS: FilterOption[] = [...BASE_FILTER_OPTIONS].sort((a, b) =>
-  a.label.localeCompare(b.label)
+  a.label.localeCompare(b.label),
 );
 
 const MARQUEE_GAP_PX = 48;
@@ -74,7 +74,10 @@ type ScrollingTextProps = {
 const ScrollingText: React.FC<ScrollingTextProps> = ({ children, className = "" }) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const contentRef = useRef<HTMLSpanElement | null>(null);
-  const [state, setState] = useState<{ scroll: boolean; width: number }>({ scroll: false, width: 0 });
+  const [state, setState] = useState<{ scroll: boolean; width: number }>({
+    scroll: false,
+    width: 0,
+  });
 
   useEffect(() => {
     const container = containerRef.current;
@@ -114,11 +117,13 @@ const ScrollingText: React.FC<ScrollingTextProps> = ({ children, className = "" 
   }, [state.scroll]);
 
   const animationDuration = state.scroll ? Math.max(12, state.width / 40) : 0;
-  const animationStyle = state.scroll
-    ? ({
+  type MarqueeStyle = React.CSSProperties & { "--bloom-marquee-distance": string };
+
+  const animationStyle: MarqueeStyle | undefined = state.scroll
+    ? {
         animation: `bloom-marquee ${animationDuration}s linear infinite`,
-        ["--bloom-marquee-distance" as any]: `${state.width + MARQUEE_GAP_PX}px`,
-      } as React.CSSProperties)
+        "--bloom-marquee-distance": `${state.width + MARQUEE_GAP_PX}px`,
+      }
     : undefined;
 
   return (
@@ -140,7 +145,6 @@ const ScrollingText: React.FC<ScrollingTextProps> = ({ children, className = "" 
     </div>
   );
 };
-
 
 const CONTROL_BUTTON_BASE =
   "flex h-10 items-center gap-2 rounded-xl border px-2.5 py-2 text-sm transition focus:outline-none focus:ring-1 focus:ring-emerald-500 disabled:cursor-not-allowed disabled:opacity-60";
@@ -354,7 +358,7 @@ export const BrowseControls: React.FC<BrowseControlsProps> = ({
 
     const buttonClass = (
       state: "default" | "active" | "disabled",
-      kind: "icon" | "default" = "default"
+      kind: "icon" | "default" = "default",
     ) => {
       const extras = kind === "icon" ? " w-11 justify-center" : " px-4";
       if (state === "active") return `${groupedButtonBase}${extras} ${groupedActive}`;
@@ -376,7 +380,7 @@ export const BrowseControls: React.FC<BrowseControlsProps> = ({
           data-segment-type="icon"
         >
           {viewMode === "grid" ? <GridIcon size={18} /> : <ListIcon size={18} />}
-        </button>
+        </button>,
       );
     }
 
@@ -391,14 +395,23 @@ export const BrowseControls: React.FC<BrowseControlsProps> = ({
           className={buttonClass(disabled ? "disabled" : "default", "icon")}
           data-segment-type="icon"
         >
-          {sortDirection === "ascending" ? <DoubleChevronUpIcon size={18} /> : <DoubleChevronDownIcon size={18} />}
-        </button>
+          {sortDirection === "ascending" ? (
+            <DoubleChevronUpIcon size={18} />
+          ) : (
+            <DoubleChevronDownIcon size={18} />
+          )}
+        </button>,
       );
     }
 
     if (showFilterButton) {
       groupedControls.push(
-        <div key="filter-menu" className="relative flex items-center" ref={filterMenuRef} data-segment-type="menu-container">
+        <div
+          key="filter-menu"
+          className="relative flex items-center"
+          ref={filterMenuRef}
+          data-segment-type="menu-container"
+        >
           <button
             type="button"
             onClick={onToggleFilterMenu}
@@ -408,7 +421,10 @@ export const BrowseControls: React.FC<BrowseControlsProps> = ({
             aria-haspopup="dialog"
             aria-expanded={isFilterMenuOpen}
             title={filterButtonLabel}
-            className={buttonClass(disabled ? "disabled" : filterButtonActive ? "active" : "default", "icon")}
+            className={buttonClass(
+              disabled ? "disabled" : filterButtonActive ? "active" : "default",
+              "icon",
+            )}
           >
             <FilterIcon size={18} />
             <span className="sr-only">{filterButtonAriaLabel}</span>
@@ -418,7 +434,7 @@ export const BrowseControls: React.FC<BrowseControlsProps> = ({
               {renderFilterMenu()}
             </div>
           )}
-        </div>
+        </div>,
       );
     }
 
@@ -439,7 +455,7 @@ export const BrowseControls: React.FC<BrowseControlsProps> = ({
         className={`${buttonBaseClass} ${disabled ? buttonDisabledClass : buttonDefaultClass}`}
       >
         {viewMode === "grid" ? <GridIcon size={18} /> : <ListIcon size={18} />}
-      </button>
+      </button>,
     );
   }
 
@@ -453,8 +469,12 @@ export const BrowseControls: React.FC<BrowseControlsProps> = ({
         aria-label={`Toggle sort direction (${sortDirection === "ascending" ? "ascending" : "descending"})`}
         className={`${buttonBaseClass} ${disabled ? buttonDisabledClass : buttonDefaultClass}`}
       >
-        {sortDirection === "ascending" ? <DoubleChevronUpIcon size={18} /> : <DoubleChevronDownIcon size={18} />}
-      </button>
+        {sortDirection === "ascending" ? (
+          <DoubleChevronUpIcon size={18} />
+        ) : (
+          <DoubleChevronDownIcon size={18} />
+        )}
+      </button>,
     );
   }
 
@@ -471,7 +491,11 @@ export const BrowseControls: React.FC<BrowseControlsProps> = ({
           aria-expanded={isFilterMenuOpen}
           title={filterButtonLabel}
           className={`${buttonBaseClass} ${
-            disabled ? buttonDisabledClass : filterButtonActive ? buttonActiveClass : buttonDefaultClass
+            disabled
+              ? buttonDisabledClass
+              : filterButtonActive
+                ? buttonActiveClass
+                : buttonDefaultClass
           }`}
         >
           <FilterIcon size={18} />
@@ -482,7 +506,7 @@ export const BrowseControls: React.FC<BrowseControlsProps> = ({
             {renderFilterMenu()}
           </div>
         )}
-      </div>
+      </div>,
     );
   }
 
@@ -519,7 +543,10 @@ const formatTime = (value: number) => {
   return `${minutes}:${seconds.toString().padStart(2, "0")}`;
 };
 
-export const AudioPlayerCard: React.FC<AudioPlayerCardProps> = ({ audio, variant = "floating" }) => {
+export const AudioPlayerCard: React.FC<AudioPlayerCardProps> = ({
+  audio,
+  variant = "floating",
+}) => {
   const currentTrack = audio.current;
   if (!currentTrack) return null;
 
@@ -534,7 +561,8 @@ export const AudioPlayerCard: React.FC<AudioPlayerCardProps> = ({ audio, variant
   };
 
   const isDocked = variant === "docked";
-  const coverContainerClass = "relative h-14 w-14 overflow-hidden rounded-lg border border-slate-800 bg-slate-900";
+  const coverContainerClass =
+    "relative h-14 w-14 overflow-hidden rounded-lg border border-slate-800 bg-slate-900";
   const progressLabelWidth = isDocked ? "w-12" : "w-10";
 
   const buttonBaseClass = (disabled: boolean) =>
@@ -544,12 +572,11 @@ export const AudioPlayerCard: React.FC<AudioPlayerCardProps> = ({ audio, variant
         : "bg-slate-800 hover:bg-slate-700 text-slate-200"
     }`;
 
-  const playButtonClass =
-    `flex items-center justify-center transition focus:outline-none focus:ring-2 focus:ring-emerald-400 rounded-full h-12 w-12 ${
-      audio.status === "playing"
-        ? "bg-emerald-500 text-slate-900 hover:bg-emerald-400"
-        : "bg-slate-100 text-slate-900 hover:bg-slate-200"
-    }`;
+  const playButtonClass = `flex items-center justify-center transition focus:outline-none focus:ring-2 focus:ring-emerald-400 rounded-full h-12 w-12 ${
+    audio.status === "playing"
+      ? "bg-emerald-500 text-slate-900 hover:bg-emerald-400"
+      : "bg-slate-100 text-slate-900 hover:bg-slate-200"
+  }`;
 
   const renderControls = (layout: "floating" | "docked", options?: { bare?: boolean }) => {
     const containerClass =
@@ -588,7 +615,7 @@ export const AudioPlayerCard: React.FC<AudioPlayerCardProps> = ({ audio, variant
       <button
         key="toggle"
         type="button"
-          onClick={() => audio.toggle(currentTrack, audio.queue)}
+        onClick={() => audio.toggle(currentTrack, audio.queue)}
         className={playButtonClass}
         aria-label={audio.status === "playing" ? "Pause track" : "Play track"}
       >
@@ -725,7 +752,9 @@ export const AudioPlayerCard: React.FC<AudioPlayerCardProps> = ({ audio, variant
                 </div>
               )}
               <div className="min-w-0 text-left">
-                <div className="text-[11px] uppercase tracking-wide text-slate-400">Now playing</div>
+                <div className="text-[11px] uppercase tracking-wide text-slate-400">
+                  Now playing
+                </div>
                 <ScrollingText className="min-w-0 text-sm font-semibold text-slate-100">
                   {songTitle}
                 </ScrollingText>
@@ -790,7 +819,9 @@ export const AudioPlayerCard: React.FC<AudioPlayerCardProps> = ({ audio, variant
                 </div>
               )}
               <div className="min-w-0 text-left">
-                <div className="text-[11px] uppercase tracking-wide text-slate-400">Now playing</div>
+                <div className="text-[11px] uppercase tracking-wide text-slate-400">
+                  Now playing
+                </div>
                 <ScrollingText className="min-w-0 text-sm font-semibold text-slate-100">
                   {songTitle}
                 </ScrollingText>
@@ -803,7 +834,9 @@ export const AudioPlayerCard: React.FC<AudioPlayerCardProps> = ({ audio, variant
               </div>
             </div>
             <div className="flex flex-1 items-center gap-3.5">
-              <span className="w-14 text-xs tabular-nums text-slate-400">{formatTime(audio.currentTime)}</span>
+              <span className="w-14 text-xs tabular-nums text-slate-400">
+                {formatTime(audio.currentTime)}
+              </span>
               <input
                 type="range"
                 min={0}

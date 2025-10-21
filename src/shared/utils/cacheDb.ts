@@ -53,7 +53,8 @@ const initializeSchema = (db: IDBDatabase): Promise<void> =>
             : 0;
       }
     };
-    getRequest.onerror = () => reject(getRequest.error ?? new Error("IndexedDB schema read failed"));
+    getRequest.onerror = () =>
+      reject(getRequest.error ?? new Error("IndexedDB schema read failed"));
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error ?? new Error("IndexedDB schema transaction failed"));
     tx.onabort = () => reject(tx.error ?? new Error("IndexedDB schema transaction aborted"));
@@ -106,7 +107,8 @@ const triggerCompactionIfNeeded = () => {
             }
             current.continue();
           };
-          cursor.onerror = () => reject(cursor.error ?? new Error("IndexedDB cursor failed during compaction"));
+          cursor.onerror = () =>
+            reject(cursor.error ?? new Error("IndexedDB cursor failed during compaction"));
           tx.oncomplete = () => resolve(removed);
           tx.onerror = () => reject(tx.error ?? new Error("IndexedDB compaction failed"));
           tx.onabort = () => reject(tx.error ?? new Error("IndexedDB compaction aborted"));
@@ -259,7 +261,7 @@ export type KvIteratorOptions = {
 
 export const iterateKvEntries = async (
   callback: (entry: { key: string; value: unknown; updatedAt: number }) => void | Promise<void>,
-  options?: KvIteratorOptions
+  options?: KvIteratorOptions,
 ): Promise<void> => {
   const { prefix, signal } = options ?? {};
   const db = await withDb();
@@ -289,7 +291,9 @@ export const iterateKvEntries = async (
       }
       const record = cursor.value as KvRecord;
       if (!prefix || record.key.startsWith(prefix)) {
-        void Promise.resolve(callback({ key: record.key, value: record.value, updatedAt: record.updatedAt }))
+        void Promise.resolve(
+          callback({ key: record.key, value: record.value, updatedAt: record.updatedAt }),
+        )
           .then(() => {
             cursor.continue();
           })
@@ -327,7 +331,8 @@ export const resetCacheDb = async (): Promise<void> => {
   await new Promise<void>((resolve, reject) => {
     const deleteRequest = indexedDB.deleteDatabase(DB_NAME);
     deleteRequest.onsuccess = () => resolve();
-    deleteRequest.onerror = () => reject(deleteRequest.error ?? new Error("IndexedDB delete failed"));
+    deleteRequest.onerror = () =>
+      reject(deleteRequest.error ?? new Error("IndexedDB delete failed"));
     deleteRequest.onblocked = () => resolve();
   }).catch(() => {
     // Ignore delete failures; database may not exist.

@@ -22,7 +22,7 @@ export class Nip46DelegatedSigner implements NDKSigner {
     private readonly service: Nip46Service,
     private readonly sessions: SessionManager,
     private readonly sessionId: string,
-    private readonly modulePromise: Promise<NdkModule> = loadNdkModule()
+    private readonly modulePromise: Promise<NdkModule> = loadNdkModule(),
   ) {}
 
   private cachedUser?: InstanceType<NdkModule["NDKUser"]>;
@@ -62,7 +62,9 @@ export class Nip46DelegatedSigner implements NDKSigner {
 
   async sign(event: NostrEvent): Promise<string> {
     const session = this.getSession();
-    const response = await this.service.sendRequest(session.id, "sign_event", [JSON.stringify(event)]);
+    const response = await this.service.sendRequest(session.id, "sign_event", [
+      JSON.stringify(event),
+    ]);
     if (response.error) {
       throw new Error(response.error);
     }
@@ -100,7 +102,7 @@ export class Nip46DelegatedSigner implements NDKSigner {
   async encrypt(
     recipient: InstanceType<NdkModule["NDKUser"]>,
     value: string,
-    scheme: "nip44" | "nip04" = "nip44"
+    scheme: "nip44" | "nip04" = "nip44",
   ): Promise<string> {
     const session = this.getSession();
     const method = scheme === "nip44" ? "nip44_encrypt" : "nip04_encrypt";
@@ -114,7 +116,7 @@ export class Nip46DelegatedSigner implements NDKSigner {
   async decrypt(
     sender: InstanceType<NdkModule["NDKUser"]>,
     value: string,
-    scheme: "nip44" | "nip04" = "nip44"
+    scheme: "nip44" | "nip04" = "nip44",
   ): Promise<string> {
     const session = this.getSession();
     const method = scheme === "nip44" ? "nip44_decrypt" : "nip04_decrypt";

@@ -33,7 +33,10 @@ type MetadataOptions = {
 
 const DEFAULT_TTL_MS = 12 * 60 * 60 * 1000; // 12 hours
 
-export const useBlobMetadata = (blobs: BlossomBlob[], options?: MetadataOptions): BlobMetadataState => {
+export const useBlobMetadata = (
+  blobs: BlossomBlob[],
+  options?: MetadataOptions,
+): BlobMetadataState => {
   const {
     baseUrl,
     requiresAuth = false,
@@ -56,7 +59,11 @@ export const useBlobMetadata = (blobs: BlossomBlob[], options?: MetadataOptions)
     detectedKindsRef.current = detectedKinds;
   }, [detectedKinds]);
 
-  const metadataSchedulerRef = useRef<{ running: number; queue: Array<() => void>; generation: number }>({
+  const metadataSchedulerRef = useRef<{
+    running: number;
+    queue: Array<() => void>;
+    generation: number;
+  }>({
     running: 0,
     queue: [],
     generation: 0,
@@ -69,13 +76,16 @@ export const useBlobMetadata = (blobs: BlossomBlob[], options?: MetadataOptions)
   const blobLookupRef = useRef(new Map<string, BlossomBlob>());
   const isMountedRef = useRef(true);
 
-  useEffect(() => () => {
-    isMountedRef.current = false;
-    passiveDetectors.current.forEach(cleanup => cleanup());
-    passiveDetectors.current.clear();
-    metadataAbortControllers.current.forEach(controller => controller.abort());
-    metadataAbortControllers.current.clear();
-  }, []);
+  useEffect(
+    () => () => {
+      isMountedRef.current = false;
+      passiveDetectors.current.forEach(cleanup => cleanup());
+      passiveDetectors.current.clear();
+      metadataAbortControllers.current.forEach(controller => controller.abort());
+      metadataAbortControllers.current.clear();
+    },
+    [],
+  );
 
   useEffect(() => {
     setResolvedMeta(prev => {
@@ -188,7 +198,12 @@ export const useBlobMetadata = (blobs: BlossomBlob[], options?: MetadataOptions)
     };
 
     const ensurePassiveProbe = (blob: BlossomBlob, resourceUrl: string) => {
-      if (requiresAuth || passiveDetectors.current.has(blob.sha256) || detectedKindsSnapshot[blob.sha256]) return;
+      if (
+        requiresAuth ||
+        passiveDetectors.current.has(blob.sha256) ||
+        detectedKindsSnapshot[blob.sha256]
+      )
+        return;
       const img = new Image();
       img.decoding = "async";
       const cleanup = () => {
@@ -199,7 +214,9 @@ export const useBlobMetadata = (blobs: BlossomBlob[], options?: MetadataOptions)
       };
       img.onload = () => {
         if (isMountedRef.current) {
-          setDetectedKinds(prev => (prev[blob.sha256] === "image" ? prev : { ...prev, [blob.sha256]: "image" }));
+          setDetectedKinds(prev =>
+            prev[blob.sha256] === "image" ? prev : { ...prev, [blob.sha256]: "image" },
+          );
         }
         cleanup();
       };
@@ -296,9 +313,13 @@ export const useBlobMetadata = (blobs: BlossomBlob[], options?: MetadataOptions)
 
         if (isMountedRef.current) {
           if (nextType?.startsWith("image/")) {
-            setDetectedKinds(prev => (prev[blob.sha256] === "image" ? prev : { ...prev, [blob.sha256]: "image" }));
+            setDetectedKinds(prev =>
+              prev[blob.sha256] === "image" ? prev : { ...prev, [blob.sha256]: "image" },
+            );
           } else if (nextType?.startsWith("video/")) {
-            setDetectedKinds(prev => (prev[blob.sha256] === "video" ? prev : { ...prev, [blob.sha256]: "video" }));
+            setDetectedKinds(prev =>
+              prev[blob.sha256] === "video" ? prev : { ...prev, [blob.sha256]: "video" },
+            );
           }
         }
 
@@ -405,7 +426,7 @@ export const useBlobMetadata = (blobs: BlossomBlob[], options?: MetadataOptions)
       requestMetadata,
       reportDetectedKind,
     }),
-    [detectedKinds, reportDetectedKind, requestMetadata, resolvedMeta]
+    [detectedKinds, reportDetectedKind, requestMetadata, resolvedMeta],
   );
 };
 
@@ -420,7 +441,8 @@ function isSameOrigin(url: string) {
 
 function deriveFilename(disposition?: string | null) {
   if (!disposition) return undefined;
-  const match = disposition.match(/filename\*=UTF-8''([^;]+)/i) || disposition.match(/filename="?([^";]+)"?/i);
+  const match =
+    disposition.match(/filename\*=UTF-8''([^;]+)/i) || disposition.match(/filename="?([^";]+)"?/i);
   if (!match) return undefined;
   const value = match[1];
   if (!value) return undefined;

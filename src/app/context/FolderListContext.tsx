@@ -1,8 +1,17 @@
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import React, {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useQueryClient } from "@tanstack/react-query";
 
 import { useNdk } from "./NdkContext";
 import { useSyncPipeline } from "./SyncPipelineContext";
+import type { NDKEvent as NdkEvent } from "@nostr-dev-kit/ndk";
 import {
   addShaToRecord,
   buildDefaultFolderRecord,
@@ -17,11 +26,17 @@ import {
   type FolderListRecord,
   type FolderListVisibility,
 } from "../../shared/domain/folderList";
-import { applyFolderUpdate, containsReservedFolderSegment, normalizeFolderPathInput } from "../../shared/utils/blobMetadataStore";
+import {
+  applyFolderUpdate,
+  containsReservedFolderSegment,
+  normalizeFolderPathInput,
+} from "../../shared/utils/blobMetadataStore";
 import { reconcileBlobWithStoredMetadata } from "../../shared/utils/queryBlobCache";
 
 const sortRecords = (records: Iterable<FolderListRecord>) =>
-  Array.from(records).sort((a, b) => a.path.localeCompare(b.path, undefined, { sensitivity: "base" }));
+  Array.from(records).sort((a, b) =>
+    a.path.localeCompare(b.path, undefined, { sensitivity: "base" }),
+  );
 
 type FolderListContextValue = {
   folders: FolderListRecord[];
@@ -36,7 +51,10 @@ type FolderListContextValue = {
   getFolderDisplayName: (path: string) => string;
   resolveFolderPath: (path: string) => string;
   deleteFolder: (path: string) => Promise<FolderListRecord | null>;
-  setFolderVisibility: (path: string, visibility: FolderListVisibility) => Promise<FolderListRecord | null>;
+  setFolderVisibility: (
+    path: string,
+    visibility: FolderListVisibility,
+  ) => Promise<FolderListRecord | null>;
   getFoldersForBlob: (sha256: string) => string[];
   setBlobFolderMembership: (sha256: string, targetPath: string | null) => Promise<void>;
 };
@@ -93,7 +111,7 @@ export const FolderListProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       setFolders(sorted);
       hydrateMetadataFromRecords(sorted);
     },
-    [hydrateMetadataFromRecords]
+    [hydrateMetadataFromRecords],
   );
 
   const applyRemoteFolderRecord = useCallback(
@@ -102,12 +120,19 @@ export const FolderListProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       const existing = foldersRef.current.get(record.path) ?? null;
       const incomingSeconds = typeof record.updatedAt === "number" ? record.updatedAt : null;
       const existingSeconds = existing?.updatedAt ?? null;
-      if (existing && incomingSeconds !== null && existingSeconds !== null && incomingSeconds <= existingSeconds) {
+      if (
+        existing &&
+        incomingSeconds !== null &&
+        existingSeconds !== null &&
+        incomingSeconds <= existingSeconds
+      ) {
         return;
       }
 
       const normalizedIncomingPath = normalizeFolderPathInput(record.path) ?? null;
-      const normalizedExistingPath = existing ? normalizeFolderPathInput(existing.path) ?? null : null;
+      const normalizedExistingPath = existing
+        ? (normalizeFolderPathInput(existing.path) ?? null)
+        : null;
       const existingShas = new Set((existing?.shas ?? []).map(sha => sha.trim()).filter(Boolean));
       const incomingShas = new Set((record.shas ?? []).map(sha => sha.trim()).filter(Boolean));
 
@@ -121,7 +146,8 @@ export const FolderListProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         if (!existingShas.has(sha)) added.push(sha);
       });
 
-      const reassigned = normalizedIncomingPath !== normalizedExistingPath ? Array.from(incomingShas) : added;
+      const reassigned =
+        normalizedIncomingPath !== normalizedExistingPath ? Array.from(incomingShas) : added;
 
       removed.forEach(sha => {
         applyFolderUpdate(undefined, sha, null, incomingSeconds ?? undefined);
@@ -140,7 +166,7 @@ export const FolderListProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       }
       updateState(Array.from(nextMap.values()));
     },
-    [queryClient, updateState]
+    [queryClient, updateState],
   );
 
   const refresh = useCallback(async () => {
@@ -200,7 +226,8 @@ export const FolderListProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     let disposed = false;
     const handleEvent = (event: unknown) => {
       if (disposed) return;
-      const parsed = parseFolderEvent(event as any);
+      if (!event || typeof event !== "object") return;
+      const parsed = parseFolderEvent(event as NdkEvent);
       if (!parsed) return;
       applyRemoteFolderRecord(parsed);
     };
@@ -228,8 +255,8 @@ export const FolderListProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       if (!normalized) return normalized;
       const exact = foldersRef.current.get(normalized);
       if (exact) return exact.path;
-      const caseInsensitive = Array.from(foldersRef.current.values()).find(record =>
-        record.path.localeCompare(normalized, undefined, { sensitivity: "accent" }) === 0
+      const caseInsensitive = Array.from(foldersRef.current.values()).find(
+        record => record.path.localeCompare(normalized, undefined, { sensitivity: "accent" }) === 0,
       );
       if (caseInsensitive) return caseInsensitive.path;
       const privateRecord = findRecordByName("private");
@@ -238,7 +265,7 @@ export const FolderListProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       }
       return normalized;
     },
-    [findRecordByName]
+    [findRecordByName],
   );
 
   const publishAndStore = useCallback(
@@ -251,7 +278,7 @@ export const FolderListProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       next.set(published.path, published);
       updateState(Array.from(next.values()));
     },
-    [ndk, signer, updateState, user]
+    [ndk, signer, updateState, user],
   );
 
   const addBlobToFolder = useCallback(
@@ -263,7 +290,9 @@ export const FolderListProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       const defaultRecord = existing ?? buildDefaultFolderRecord(normalizedPath, { shas: [] });
       const privateRecord = findRecordByName("private");
       const targetRecord =
-        privateRecord && privateRecord.path !== defaultRecord.path && isPrivateFolderName(defaultRecord.name)
+        privateRecord &&
+        privateRecord.path !== defaultRecord.path &&
+        isPrivateFolderName(defaultRecord.name)
           ? privateRecord
           : defaultRecord;
       const previousLength = targetRecord.shas.length;
@@ -273,7 +302,7 @@ export const FolderListProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       }
       await publishAndStore(updated);
     },
-    [findRecordByName, publishAndStore, resolveFolderPath]
+    [findRecordByName, publishAndStore, resolveFolderPath],
   );
 
   const removeBlobFromFolder = useCallback(
@@ -289,7 +318,7 @@ export const FolderListProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       }
       await publishAndStore(updated);
     },
-    [publishAndStore, resolveFolderPath]
+    [publishAndStore, resolveFolderPath],
   );
 
   const setBlobFolderMembership = useCallback(
@@ -322,14 +351,16 @@ export const FolderListProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         await task;
       }
     },
-    [addBlobToFolder, removeBlobFromFolder, resolveFolderPath]
+    [addBlobToFolder, removeBlobFromFolder, resolveFolderPath],
   );
 
   const renameFolder = useCallback(
     async (path: string, name: string) => {
       const normalizedPath = resolveFolderPath(path);
       if (!normalizedPath) return;
-      const existing = foldersRef.current.get(normalizedPath) ?? buildDefaultFolderRecord(normalizedPath, { shas: [] });
+      const existing =
+        foldersRef.current.get(normalizedPath) ??
+        buildDefaultFolderRecord(normalizedPath, { shas: [] });
 
       const trimmed = name.trim();
       if (!trimmed) {
@@ -395,7 +426,11 @@ export const FolderListProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       const normalizedTargetPath = normalizeFolderPath(targetPath);
       const normalizedExistingPath = existing.path;
 
-      const buildRecordForPath = (record: FolderListRecord, path: string, nameOverride?: string): FolderListRecord => {
+      const buildRecordForPath = (
+        record: FolderListRecord,
+        path: string,
+        nameOverride?: string,
+      ): FolderListRecord => {
         const base = buildDefaultFolderRecord(path, {
           name: nameOverride ?? record.name,
           shas: record.shas,
@@ -415,7 +450,7 @@ export const FolderListProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
       const descendantsToMove = !isSamePath
         ? Array.from(foldersRef.current.values()).filter(record =>
-            record.path.startsWith(`${normalizedExistingPath}/`)
+            record.path.startsWith(`${normalizedExistingPath}/`),
           )
         : [];
 
@@ -447,7 +482,7 @@ export const FolderListProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         }
       }
     },
-    [findRecordByName, ndk, signer, updateState, resolveFolderPath, user]
+    [findRecordByName, ndk, signer, updateState, resolveFolderPath, user],
   );
 
   const deleteFolder = useCallback(
@@ -460,11 +495,13 @@ export const FolderListProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         throw new Error("Connect your signer to update folders.");
       }
       await publishFolderList(ndk, signer, user, { ...existing, shas: [] });
-      const next = Array.from(foldersRef.current.values()).filter(record => record.path !== normalizedPath);
+      const next = Array.from(foldersRef.current.values()).filter(
+        record => record.path !== normalizedPath,
+      );
       updateState(next);
       return existing;
     },
-    [ndk, resolveFolderPath, signer, updateState, user]
+    [ndk, resolveFolderPath, signer, updateState, user],
   );
 
   const setFolderVisibility = useCallback(
@@ -472,7 +509,8 @@ export const FolderListProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       const normalizedPath = resolveFolderPath(path);
       if (!normalizedPath) return null;
       const existing =
-        foldersRef.current.get(normalizedPath) ?? buildDefaultFolderRecord(normalizedPath, { shas: [] });
+        foldersRef.current.get(normalizedPath) ??
+        buildDefaultFolderRecord(normalizedPath, { shas: [] });
       if (existing.visibility === visibility) {
         return existing;
       }
@@ -483,22 +521,22 @@ export const FolderListProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       await publishAndStore(updated);
       return updated;
     },
-    [publishAndStore, resolveFolderPath]
+    [publishAndStore, resolveFolderPath],
   );
 
-  const foldersByPath = useMemo(() => new Map(folders.map(record => [record.path, record])), [folders]);
+  const foldersByPath = useMemo(
+    () => new Map(folders.map(record => [record.path, record])),
+    [folders],
+  );
   const foldersByShaSnapshot = useMemo(() => new Map(foldersBySha), [foldersBySha]);
 
-  const getFoldersForBlob = useCallback(
-    (sha256: string) => {
-      if (!sha256) return [];
-      const normalizedSha = sha256.trim();
-      if (!normalizedSha) return [];
-      const paths = foldersByShaRef.current.get(normalizedSha);
-      return paths ? [...paths] : [];
-    },
-    []
-  );
+  const getFoldersForBlob = useCallback((sha256: string) => {
+    if (!sha256) return [];
+    const normalizedSha = sha256.trim();
+    if (!normalizedSha) return [];
+    const paths = foldersByShaRef.current.get(normalizedSha);
+    return paths ? [...paths] : [];
+  }, []);
 
   const getFolderDisplayName = useCallback(
     (path: string) => {
@@ -509,14 +547,14 @@ export const FolderListProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       const segments = normalizedPath.split("/");
       return segments[segments.length - 1] || normalizedPath;
     },
-    [foldersByPath, resolveFolderPath]
+    [foldersByPath, resolveFolderPath],
   );
 
   const value = useMemo<FolderListContextValue>(
     () => ({
       folders,
       foldersByPath,
-       foldersBySha: foldersByShaSnapshot,
+      foldersBySha: foldersByShaSnapshot,
       loading,
       error,
       refresh,
@@ -546,7 +584,7 @@ export const FolderListProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       setFolderVisibility,
       getFoldersForBlob,
       setBlobFolderMembership,
-    ]
+    ],
   );
 
   return <FolderListContext.Provider value={value}>{children}</FolderListContext.Provider>;

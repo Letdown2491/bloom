@@ -111,7 +111,7 @@ export const formatBytes = (bytes: number): string => {
 
 export const checkLocalStorageQuota = (
   context: string,
-  _options?: { log?: boolean }
+  _options?: { log?: boolean },
 ): StorageQuotaSnapshot => {
   const totalBytes = estimateLocalStorageUsage();
   const status = classifyQuotaStatus(totalBytes);
@@ -143,9 +143,11 @@ const listLocalStorageKeys = (): string[] => {
   }
 };
 
-const isBloomLocalStorageKey = (key: string): boolean => key.toLowerCase().startsWith(BLOOM_LOCAL_STORAGE_PREFIX);
+const isBloomLocalStorageKey = (key: string): boolean =>
+  key.toLowerCase().startsWith(BLOOM_LOCAL_STORAGE_PREFIX);
 
-export const listBloomLocalStorageKeys = (): string[] => listLocalStorageKeys().filter(isBloomLocalStorageKey);
+export const listBloomLocalStorageKeys = (): string[] =>
+  listLocalStorageKeys().filter(isBloomLocalStorageKey);
 
 export type ClearLocalStorageResult = {
   removedKeys: string[];
@@ -243,9 +245,13 @@ export const estimateOriginStorage = async (): Promise<OriginStorageEstimate | n
   try {
     const estimate = await navigator.storage.estimate();
     const usage =
-      typeof estimate.usage === "number" && Number.isFinite(estimate.usage) ? Math.max(0, estimate.usage) : null;
+      typeof estimate.usage === "number" && Number.isFinite(estimate.usage)
+        ? Math.max(0, estimate.usage)
+        : null;
     const quota =
-      typeof estimate.quota === "number" && Number.isFinite(estimate.quota) ? Math.max(0, estimate.quota) : null;
+      typeof estimate.quota === "number" && Number.isFinite(estimate.quota)
+        ? Math.max(0, estimate.quota)
+        : null;
     return {
       usage,
       quota,

@@ -16,12 +16,13 @@ const FILTER_LABELS: Record<Exclude<FilterMode, "all">, string> = {
   videos: "Videos",
 };
 
-const OPTION_MAP = (Object.keys(FILTER_LABELS) as Array<Exclude<FilterMode, "all">>).reduce<
-  Record<Exclude<FilterMode, "all">, FilterOption>
->((acc, key) => {
-  acc[key] = { id: key, label: FILTER_LABELS[key] };
-  return acc;
-}, {} as any);
+const OPTION_MAP = (Object.keys(FILTER_LABELS) as Array<Exclude<FilterMode, "all">>).reduce(
+  (acc, key) => {
+    acc[key] = { id: key, label: FILTER_LABELS[key] };
+    return acc;
+  },
+  {} as Record<Exclude<FilterMode, "all">, FilterOption>,
+);
 
 export const useBrowseControls = () => {
   const { preferences, setDefaultViewMode, setSortDirection } = useUserPreferences();
@@ -39,7 +40,7 @@ export const useBrowseControls = () => {
         setDefaultViewMode(mode);
       }
     },
-    [setDefaultViewMode]
+    [setDefaultViewMode],
   );
 
   const openFilterMenu = useCallback(() => setIsFilterMenuOpen(true), []);
@@ -55,7 +56,7 @@ export const useBrowseControls = () => {
         return nextValue;
       });
     },
-    [setFilterMode]
+    [setFilterMode],
   );
 
   const selectSharingFilter = useCallback((next: SharingFilter) => {
@@ -66,16 +67,13 @@ export const useBrowseControls = () => {
     setOnlyPrivateLinks(enabled);
   }, []);
 
-  const toggleSortDirection = useCallback(
-    () => {
-      setSortDirectionState(prev => {
-        const nextDirection: SortDirection = prev === "ascending" ? "descending" : "ascending";
-        setSortDirection(nextDirection);
-        return nextDirection;
-      });
-    },
-    [setSortDirection]
-  );
+  const toggleSortDirection = useCallback(() => {
+    setSortDirectionState(prev => {
+      const nextDirection: SortDirection = prev === "ascending" ? "descending" : "ascending";
+      setSortDirection(nextDirection);
+      return nextDirection;
+    });
+  }, [setSortDirection]);
 
   const resetFilters = useCallback(() => {
     setFilterMode("all");
@@ -84,7 +82,9 @@ export const useBrowseControls = () => {
   }, []);
 
   useEffect(() => {
-    setViewModeState(prev => (prev === preferences.defaultViewMode ? prev : preferences.defaultViewMode));
+    setViewModeState(prev =>
+      prev === preferences.defaultViewMode ? prev : preferences.defaultViewMode,
+    );
   }, [preferences.defaultViewMode]);
 
   useEffect(() => {
@@ -96,7 +96,9 @@ export const useBrowseControls = () => {
   }, [preferences.defaultFilterMode]);
 
   useEffect(() => {
-    setSortDirectionState(prev => (prev === preferences.sortDirection ? prev : preferences.sortDirection));
+    setSortDirectionState(prev =>
+      prev === preferences.sortDirection ? prev : preferences.sortDirection,
+    );
   }, [preferences.sortDirection]);
 
   const filterContext = useMemo(() => {

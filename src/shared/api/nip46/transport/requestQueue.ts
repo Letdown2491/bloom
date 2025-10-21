@@ -1,10 +1,11 @@
 import { finalizeEvent } from "nostr-tools";
 
-import { Nip46Codec } from "../codec";
-import { RemoteSignerSession, SessionManager } from "../session";
+import type { Nip46Codec } from "../codec";
+import type { RemoteSignerSession, SessionManager } from "../session";
 import { hexToBytes } from "../keys";
-import { Nip46AnyResponse, Nip46CodecError, Nip46RequestPayload, Nip46ResponsePayload } from "../types";
-import { PendingRequest, TransportConfig, NostrEvent, NostrFilter } from "./types";
+import type { Nip46AnyResponse, Nip46RequestPayload, Nip46ResponsePayload } from "../types";
+import { Nip46CodecError } from "../types";
+import type { PendingRequest, TransportConfig, NostrEvent, NostrFilter } from "./types";
 
 const REQUEST_KIND = 24133;
 
@@ -76,7 +77,10 @@ export class RequestQueue {
     this.inflight.clear();
   }
 
-  async enqueue(session: RemoteSignerSession, payload: Nip46RequestPayload): Promise<Nip46AnyResponse> {
+  async enqueue(
+    session: RemoteSignerSession,
+    payload: Nip46RequestPayload,
+  ): Promise<Nip46AnyResponse> {
     if (!session.remoteSignerPubkey) {
       throw new Error("Session does not yet know remote signer pubkey");
     }
@@ -125,7 +129,10 @@ export class RequestQueue {
     }, timeoutMs);
   }
 
-  private async publishRequest(session: RemoteSignerSession, request: PendingRequest): Promise<void> {
+  private async publishRequest(
+    session: RemoteSignerSession,
+    request: PendingRequest,
+  ): Promise<void> {
     const privateKey = hexToBytes(session.clientPrivateKey);
     const context = {
       localPrivateKey: privateKey,
@@ -144,7 +151,9 @@ export class RequestQueue {
       ciphertext = await this.options.codec.encodeRequest(request.payload, context);
     } catch (error) {
       const message =
-        error instanceof Nip46CodecError ? error.message : "Failed to encode NIP-46 request payload";
+        error instanceof Nip46CodecError
+          ? error.message
+          : "Failed to encode NIP-46 request payload";
       throw new Error(message);
     }
 
@@ -161,7 +170,9 @@ export class RequestQueue {
     try {
       signed = finalizeEvent(unsigned, privateKey);
     } catch (error) {
-      throw new Error(error instanceof Error ? error.message : "Failed to sign NIP-46 request event");
+      throw new Error(
+        error instanceof Error ? error.message : "Failed to sign NIP-46 request event",
+      );
     }
 
     const event: NostrEvent = {
@@ -253,7 +264,7 @@ export class RequestQueue {
     if (event.kind !== REQUEST_KIND) return;
 
     const clientTag = event.tags.find(
-      (tag): tag is [string, string, ...string[]] => tag[0] === TAG_P && typeof tag[1] === "string"
+      (tag): tag is [string, string, ...string[]] => tag[0] === TAG_P && typeof tag[1] === "string",
     );
     if (!clientTag) return;
     const clientPubkey = clientTag[1];
@@ -279,11 +290,13 @@ export class RequestQueue {
           throw new Error(
             innerError instanceof Nip46CodecError
               ? innerError.message
-              : "Failed to decode NIP-46 response payload"
+              : "Failed to decode NIP-46 response payload",
           );
         }
       }
-      throw new Error(error instanceof Error ? error.message : "Failed to decode NIP-46 response payload");
+      throw new Error(
+        error instanceof Error ? error.message : "Failed to decode NIP-46 response payload",
+      );
     }
 
     const pendingRequest = this.requests.get(payload.id);
@@ -351,7 +364,7 @@ export class RequestQueue {
       baseUpdate.remoteSignerPubkey = event.pubkey;
     } else if (session.remoteSignerPubkey !== event.pubkey) {
       console.warn(
-        `Ignoring response from unexpected pubkey. Expected ${session.remoteSignerPubkey}, got ${event.pubkey}`
+        `Ignoring response from unexpected pubkey. Expected ${session.remoteSignerPubkey}, got ${event.pubkey}`,
       );
       return;
     }
@@ -418,7 +431,7 @@ export class RequestQueue {
   private async handleIncomingRequest(
     session: RemoteSignerSession,
     request: Nip46RequestPayload,
-    event: NostrEvent
+    event: NostrEvent,
   ): Promise<void> {
     if (request.method !== "connect") {
       await this.publishResponse(session, event.pubkey, {
@@ -439,7 +452,7 @@ export class RequestQueue {
       update.remoteSignerPubkey = remoteSignerPubkey;
     } else if (session.remoteSignerPubkey !== remoteSignerPubkey) {
       console.warn(
-        `Ignoring connect request from unexpected pubkey. Expected ${session.remoteSignerPubkey}, got ${remoteSignerPubkey}`
+        `Ignoring connect request from unexpected pubkey. Expected ${session.remoteSignerPubkey}, got ${remoteSignerPubkey}`,
       );
       return;
     }
@@ -492,7 +505,7 @@ export class RequestQueue {
   private async publishResponse(
     session: RemoteSignerSession,
     remotePubkey: string,
-    payload: Nip46ResponsePayload
+    payload: Nip46ResponsePayload,
   ): Promise<void> {
     const privateKey = hexToBytes(session.clientPrivateKey);
     const context = {
@@ -506,7 +519,9 @@ export class RequestQueue {
       ciphertext = await this.options.codec.encodeResponse(payload, context);
     } catch (error) {
       throw new Error(
-        error instanceof Nip46CodecError ? error.message : "Failed to encode NIP-46 response payload"
+        error instanceof Nip46CodecError
+          ? error.message
+          : "Failed to encode NIP-46 response payload",
       );
     }
 
@@ -523,7 +538,9 @@ export class RequestQueue {
     try {
       signed = finalizeEvent(unsigned, privateKey);
     } catch (error) {
-      throw new Error(error instanceof Error ? error.message : "Failed to sign NIP-46 response event");
+      throw new Error(
+        error instanceof Error ? error.message : "Failed to sign NIP-46 response event",
+      );
     }
 
     const event = {

@@ -61,7 +61,7 @@ export const ConnectSignerDialog: React.FC<ConnectSignerDialogProps> = ({ open, 
 
   const readySession = useMemo(
     () => snapshot.sessions.find(session => session.userPubkey && !session.lastError) ?? null,
-    [snapshot.sessions]
+    [snapshot.sessions],
   );
 
   const activeSessionReady = Boolean(adoptedSigner || readySession);
@@ -105,7 +105,7 @@ export const ConnectSignerDialog: React.FC<ConnectSignerDialogProps> = ({ open, 
     });
     if (!pendingSessions.length) return;
     const latest = pendingSessions.reduce((prev, current) =>
-      current.createdAt > prev.createdAt ? current : prev
+      current.createdAt > prev.createdAt ? current : prev,
     );
     setInvitationSessionId(latest.id);
     setInvitationUri(buildNostrConnectUriFromSession(latest));
@@ -116,7 +116,7 @@ export const ConnectSignerDialog: React.FC<ConnectSignerDialogProps> = ({ open, 
         extras.map(session => {
           attemptedAutoConnectRef.current.delete(session.id);
           return sessionManager.removeSession(session.id).catch(() => undefined);
-        })
+        }),
       );
     }
   }, [activeSessionReady, invitationSessionId, open, service, sessionManager, snapshot.sessions]);
@@ -150,14 +150,14 @@ export const ConnectSignerDialog: React.FC<ConnectSignerDialogProps> = ({ open, 
     setInvitationUri(null);
     invitationRef.current = null;
     const stale = snapshot.sessions.filter(
-      session => session.status === "pairing" && !session.userPubkey
+      session => session.status === "pairing" && !session.userPubkey,
     );
     if (stale.length) {
       void Promise.all(
         stale.map(session => {
           attemptedAutoConnectRef.current.delete(session.id);
           return sessionManager.removeSession(session.id).catch(() => undefined);
-        })
+        }),
       );
     }
   }, [activeSessionReady, sessionManager, snapshot.sessions]);
@@ -231,11 +231,11 @@ export const ConnectSignerDialog: React.FC<ConnectSignerDialogProps> = ({ open, 
   useEffect(() => {
     if (!open || !sessionManager) return;
     const errored = snapshot.sessions.filter(
-      session => session.lastError && !session.userPubkey && session.status !== "revoked"
+      session => session.lastError && !session.userPubkey && session.status !== "revoked",
     );
     if (!errored.length) return;
     void Promise.all(
-      errored.map(session => sessionManager.removeSession(session.id).catch(() => undefined))
+      errored.map(session => sessionManager.removeSession(session.id).catch(() => undefined)),
     );
   }, [open, sessionManager, snapshot.sessions]);
 
@@ -304,7 +304,7 @@ export const ConnectSignerDialog: React.FC<ConnectSignerDialogProps> = ({ open, 
         console.error("Failed to revoke signer", error);
       }
     },
-    [sessionManager]
+    [sessionManager],
   );
 
   const handleReconnect = useCallback(
@@ -319,7 +319,7 @@ export const ConnectSignerDialog: React.FC<ConnectSignerDialogProps> = ({ open, 
         setBusySessionId(current => (current === sessionId ? null : current));
       }
     },
-    [service]
+    [service],
   );
 
   const activeSessions = useMemo(
@@ -329,7 +329,7 @@ export const ConnectSignerDialog: React.FC<ConnectSignerDialogProps> = ({ open, 
         if (session.userPubkey && !session.lastError) return true;
         return invitationSessionId ? session.id === invitationSessionId : false;
       }),
-    [invitationSessionId, snapshot.sessions]
+    [invitationSessionId, snapshot.sessions],
   );
 
   if (!open) return null;
@@ -404,7 +404,11 @@ export const ConnectSignerDialog: React.FC<ConnectSignerDialogProps> = ({ open, 
                 <div className="flex flex-col items-center gap-4">
                   <div className="flex h-60 w-60 items-center justify-center rounded-xl border border-slate-800 bg-slate-950/60 p-3">
                     {qrDataUrl ? (
-                      <img src={qrDataUrl} alt="nostrconnect invitation" className="h-full w-full rounded-md" />
+                      <img
+                        src={qrDataUrl}
+                        alt="nostrconnect invitation"
+                        className="h-full w-full rounded-md"
+                      />
                     ) : invitationBusy ? (
                       <span className="text-xs text-slate-400">Preparing QR…</span>
                     ) : (
@@ -421,7 +425,11 @@ export const ConnectSignerDialog: React.FC<ConnectSignerDialogProps> = ({ open, 
                       className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-xs font-medium text-emerald-300 hover:border-emerald-500 hover:text-emerald-200 focus:outline-none focus:ring-2 focus:ring-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
                       title={invitationUri ?? "Invitation link not ready"}
                     >
-                      {invitationUri ? "Click to copy Nostr Connect URL" : invitationBusy ? "Preparing invitation…" : "Waiting for invitation…"}
+                      {invitationUri
+                        ? "Click to copy Nostr Connect URL"
+                        : invitationBusy
+                          ? "Preparing invitation…"
+                          : "Waiting for invitation…"}
                     </button>
                     <button
                       type="button"
@@ -432,7 +440,9 @@ export const ConnectSignerDialog: React.FC<ConnectSignerDialogProps> = ({ open, 
                       {invitationBusy ? "Generating new link…" : "Regenerate invitation"}
                     </button>
                   </div>
-                  {copied ? <div className="text-[11px] text-emerald-300">Link copied to clipboard</div> : null}
+                  {copied ? (
+                    <div className="text-[11px] text-emerald-300">Link copied to clipboard</div>
+                  ) : null}
 
                   {invitationUri ? (
                     <details className="w-full rounded-lg border border-slate-800 bg-slate-950/70 px-3 py-2 text-left text-[11px] text-slate-400">
@@ -442,7 +452,9 @@ export const ConnectSignerDialog: React.FC<ConnectSignerDialogProps> = ({ open, 
                       <div className="mt-2 space-y-2 break-all">
                         <div className="font-mono text-slate-400">{invitationUri}</div>
                         {invitationSession?.relays.length ? (
-                          <div className="text-slate-400">Relays: {invitationSession.relays.join(", ")}</div>
+                          <div className="text-slate-400">
+                            Relays: {invitationSession.relays.join(", ")}
+                          </div>
                         ) : null}
                       </div>
                     </details>
@@ -454,7 +466,9 @@ export const ConnectSignerDialog: React.FC<ConnectSignerDialogProps> = ({ open, 
                 <div>
                   <h3 className="text-sm font-semibold text-slate-200">Use a bunker link</h3>
                   <p className="mt-1 text-xs text-slate-400">
-                    Paste a <code className="rounded bg-slate-800 px-1 py-0.5 text-[10px]">bunker://</code> URL to reuse an existing invitation from your signer.
+                    Paste a{" "}
+                    <code className="rounded bg-slate-800 px-1 py-0.5 text-[10px]">bunker://</code>{" "}
+                    URL to reuse an existing invitation from your signer.
                   </p>
                 </div>
                 <form
@@ -485,11 +499,18 @@ export const ConnectSignerDialog: React.FC<ConnectSignerDialogProps> = ({ open, 
                     >
                       {manualBusy ? "Connecting…" : "Connect"}
                     </button>
-                    {manualError ? <span className="text-[11px] text-rose-400">{manualError}</span> : null}
-                    {manualSuccess ? <span className="text-[11px] text-emerald-300">{manualSuccess}</span> : null}
+                    {manualError ? (
+                      <span className="text-[11px] text-rose-400">{manualError}</span>
+                    ) : null}
+                    {manualSuccess ? (
+                      <span className="text-[11px] text-emerald-300">{manualSuccess}</span>
+                    ) : null}
                   </div>
                 </form>
-                <p className="text-[11px] text-slate-400">Tip: bunker links and QR codes from the same signer usually represent the same invitation.</p>
+                <p className="text-[11px] text-slate-400">
+                  Tip: bunker links and QR codes from the same signer usually represent the same
+                  invitation.
+                </p>
               </section>
             )}
           </div>
@@ -503,7 +524,10 @@ export const ConnectSignerDialog: React.FC<ConnectSignerDialogProps> = ({ open, 
             </div>
             <ul className="space-y-2">
               {activeSessions.map(session => (
-                <li key={session.id} className="rounded-lg border border-slate-800 bg-slate-950/70 p-3">
+                <li
+                  key={session.id}
+                  className="rounded-lg border border-slate-800 bg-slate-950/70 p-3"
+                >
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div className="text-slate-100">
                       {session.metadata?.name || session.remoteSignerPubkey || session.id}

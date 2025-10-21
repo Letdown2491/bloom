@@ -40,12 +40,12 @@ export interface Nip46EncryptionContext {
 
 export type Nip46EncryptFn = (
   plaintext: string,
-  context: Nip46EncryptionContext
+  context: Nip46EncryptionContext,
 ) => Promise<string>;
 
 export type Nip46DecryptFn = (
   ciphertext: string,
-  context: Nip46EncryptionContext
+  context: Nip46EncryptionContext,
 ) => Promise<string>;
 
 export interface Nip46CodecConfig {

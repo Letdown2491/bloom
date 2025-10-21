@@ -5,7 +5,10 @@ import { useServerData } from "./hooks/useServerData";
 import type { ServerSnapshot, BlobDistribution } from "./hooks/useServerData";
 import type { BlobReplicaSummary } from "../browse/ui/BlobList";
 import { deriveServerNameFromUrl } from "../../shared/utils/serverName";
-import { normalizeFolderPathInput, mergeBlobsWithStoredMetadata } from "../../shared/utils/blobMetadataStore";
+import {
+  normalizeFolderPathInput,
+  mergeBlobsWithStoredMetadata,
+} from "../../shared/utils/blobMetadataStore";
 import { usePrivateLibrary } from "../../app/context/PrivateLibraryContext";
 import type { PrivateListEntry } from "../../shared/domain/privateList";
 import type { BlossomBlob } from "../../shared/api/blossomClient";
@@ -52,9 +55,15 @@ export const WorkspaceProvider: React.FC<WorkspaceProviderProps> = ({
   const { stage, allowServerFetch, markServerStageComplete } = useSyncPipeline();
   const { entries: privateEntries } = usePrivateLibrary();
   const syncEnabledServers = useMemo(() => servers.filter(server => server.sync), [servers]);
-  const syncEnabledServerUrls = useMemo(() => syncEnabledServers.map(server => server.url), [syncEnabledServers]);
+  const syncEnabledServerUrls = useMemo(
+    () => syncEnabledServers.map(server => server.url),
+    [syncEnabledServers],
+  );
 
-  const serverNameByUrl = useMemo(() => new Map(servers.map(server => [server.url, server.name])), [servers]);
+  const serverNameByUrl = useMemo(
+    () => new Map(servers.map(server => [server.url, server.name])),
+    [servers],
+  );
 
   const eagerServerUrls = useMemo(() => {
     const urls = new Set<string>();
@@ -78,7 +87,7 @@ export const WorkspaceProvider: React.FC<WorkspaceProviderProps> = ({
 
   const currentSnapshot = useMemo(
     () => snapshots.find(snapshot => snapshot.server.url === selectedServer),
-    [snapshots, selectedServer]
+    [snapshots, selectedServer],
   );
 
   const browsingAllServers = selectedServer === null;
@@ -95,7 +104,10 @@ export const WorkspaceProvider: React.FC<WorkspaceProviderProps> = ({
     return map;
   }, [distribution, serverNameByUrl]);
 
-  const privateServerMap = useMemo(() => new Map(servers.map(server => [server.url, server])), [servers]);
+  const privateServerMap = useMemo(
+    () => new Map(servers.map(server => [server.url, server])),
+    [servers],
+  );
 
   const serverStageTriggeredRef = useRef(false);
   const serverFetchStartedRef = useRef(false);
@@ -156,12 +168,16 @@ export const WorkspaceProvider: React.FC<WorkspaceProviderProps> = ({
       const [primaryServer] = entry.servers ?? [];
       const server = primaryServer ? privateServerMap.get(primaryServer) : null;
       const normalizedServerUrl = primaryServer ? primaryServer.replace(/\/$/, "") : undefined;
-      const downloadUrl = normalizedServerUrl ? `${normalizedServerUrl}/${entry.sha256}` : undefined;
+      const downloadUrl = normalizedServerUrl
+        ? `${normalizedServerUrl}/${entry.sha256}`
+        : undefined;
       const metadata = entry.metadata;
       const encryption = entry.encryption;
       const normalizedFolder = normalizeFolderPathInput(metadata?.folderPath ?? undefined) ?? null;
       const metadataName =
-        typeof metadata?.name === "string" && metadata.name.trim().length > 0 ? metadata.name.trim() : null;
+        typeof metadata?.name === "string" && metadata.name.trim().length > 0
+          ? metadata.name.trim()
+          : null;
       const displayName = metadataName ?? entry.sha256;
       const normalizedSize = (() => {
         if (typeof metadata?.size === "number") return metadata.size;
@@ -172,7 +188,9 @@ export const WorkspaceProvider: React.FC<WorkspaceProviderProps> = ({
         return undefined;
       })();
 
-      const privateMetadata = metadata ? { ...metadata, size: normalizedSize, folderPath: normalizedFolder } : undefined;
+      const privateMetadata = metadata
+        ? { ...metadata, size: normalizedSize, folderPath: normalizedFolder }
+        : undefined;
       const privateData: BlossomBlob["privateData"] | undefined = encryption
         ? {
             encryption,
@@ -234,7 +252,7 @@ export const WorkspaceProvider: React.FC<WorkspaceProviderProps> = ({
       currentSnapshot,
       privateEntries,
       privateBlobs,
-    ]
+    ],
   );
 
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;

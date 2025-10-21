@@ -16,7 +16,7 @@ export const sanitizeRelayUrl = (value: unknown): string | null => {
 };
 
 export const normalizeRelayUrls = (
-  relays: readonly (string | null | undefined)[] | null | undefined
+  relays: readonly (string | null | undefined)[] | null | undefined,
 ): string[] => {
   if (!relays || relays.length === 0) return [];
   const normalized = new Set<string>();
@@ -31,7 +31,7 @@ export const normalizeRelayUrls = (
 
 export const collectRelayTargets = (
   relays: readonly (string | null | undefined)[] | null | undefined,
-  fallback: readonly string[] = DEFAULT_PUBLIC_RELAYS
+  fallback: readonly string[] = DEFAULT_PUBLIC_RELAYS,
 ): string[] => {
   const normalized = normalizeRelayUrls(relays);
   if (normalized.length > 0) {

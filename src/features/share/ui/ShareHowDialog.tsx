@@ -55,15 +55,24 @@ export const ShareHowDialog: React.FC<ShareHowDialogProps> = ({
 
   if (!mounted || !open || typeof document === "undefined") return null;
 
-  const overlayClass = "fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 backdrop-blur-sm p-4";
+  const overlayClass =
+    "fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 backdrop-blur-sm p-4";
   const dialogClass = isLightTheme
     ? "w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 text-slate-800 shadow-xl"
     : "w-full max-w-md rounded-2xl border border-slate-800 bg-slate-900/90 p-6 text-slate-100 shadow-xl";
-  const headingClass = isLightTheme ? "text-lg font-semibold text-slate-900" : "text-lg font-semibold text-slate-100";
-  const descriptionClass = isLightTheme ? "mt-2 text-sm text-slate-600" : "mt-2 text-sm text-slate-400";
+  const headingClass = isLightTheme
+    ? "text-lg font-semibold text-slate-900"
+    : "text-lg font-semibold text-slate-100";
+  const descriptionClass = isLightTheme
+    ? "mt-2 text-sm text-slate-600"
+    : "mt-2 text-sm text-slate-400";
   const optionsContainerClass = "mt-4 space-y-3";
-  const optionTitleClass = isLightTheme ? "text-sm font-semibold text-slate-900" : "text-sm font-semibold text-slate-100";
-  const optionDescriptionClass = isLightTheme ? "mt-1 text-xs text-slate-500" : "mt-1 text-xs text-slate-400";
+  const optionTitleClass = isLightTheme
+    ? "text-sm font-semibold text-slate-900"
+    : "text-sm font-semibold text-slate-100";
+  const optionDescriptionClass = isLightTheme
+    ? "mt-1 text-xs text-slate-500"
+    : "mt-1 text-xs text-slate-400";
   const optionBaseClass = isLightTheme
     ? "flex cursor-pointer items-start gap-3 rounded-xl border px-3 py-3 transition"
     : "flex cursor-pointer items-start gap-3 rounded-xl border px-3 py-3 transition";
@@ -92,7 +101,8 @@ export const ShareHowDialog: React.FC<ShareHowDialogProps> = ({
 
   const handleSubmit: React.FormEventHandler<HTMLFormElement> = event => {
     event.preventDefault();
-    if ((selection === "public" && !allowPublic) || (selection === "private" && !allowPrivate)) return;
+    if ((selection === "public" && !allowPublic) || (selection === "private" && !allowPrivate))
+      return;
     onSelect(selection);
   };
 
@@ -119,7 +129,7 @@ export const ShareHowDialog: React.FC<ShareHowDialogProps> = ({
         },
         () => {
           setCopyState(null);
-        }
+        },
       );
     }
   };
@@ -221,7 +231,9 @@ export const ShareHowDialog: React.FC<ShareHowDialogProps> = ({
               <span className="whitespace-nowrap text-left text-sm font-medium">Public link</span>
               <span className={linkTextClass}>{publicLinkUrl}</span>
               <CopyIcon size={14} className="flex-shrink-0" />
-              <span className="text-xs text-emerald-500">{copyState === "public" ? "Copied!" : ""}</span>
+              <span className="text-xs text-emerald-500">
+                {copyState === "public" ? "Copied!" : ""}
+              </span>
             </button>
           ) : null}
           {privateLinkUrl ? (
@@ -235,7 +247,9 @@ export const ShareHowDialog: React.FC<ShareHowDialogProps> = ({
               <span className="whitespace-nowrap text-left text-sm font-medium">Private link</span>
               <span className={linkTextClass}>{privateLinkUrl}</span>
               <CopyIcon size={14} className="flex-shrink-0" />
-              <span className="text-xs text-emerald-500">{copyState === "private" ? "Copied!" : ""}</span>
+              <span className="text-xs text-emerald-500">
+                {copyState === "private" ? "Copied!" : ""}
+              </span>
             </button>
           ) : null}
         </div>
@@ -250,7 +264,9 @@ export const ShareHowDialog: React.FC<ShareHowDialogProps> = ({
           <button
             type="submit"
             className={continueButtonClass}
-            disabled={(selection === "public" && !allowPublic) || (selection === "private" && !allowPrivate)}
+            disabled={
+              (selection === "public" && !allowPublic) || (selection === "private" && !allowPrivate)
+            }
           >
             <span className="flex items-center gap-2">
               <SaveIcon size={16} />
@@ -260,7 +276,7 @@ export const ShareHowDialog: React.FC<ShareHowDialogProps> = ({
         </div>
       </form>
     </div>,
-    document.body
+    document.body,
   );
 };
 

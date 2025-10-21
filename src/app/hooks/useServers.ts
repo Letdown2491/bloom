@@ -9,7 +9,13 @@ export type { ManagedServer } from "../../shared/types/servers";
 import { collectRelayTargets, DEFAULT_PUBLIC_RELAYS } from "../../shared/utils/relays";
 
 const DEFAULT_SERVERS: ManagedServer[] = [
-  { name: "Primal", url: "https://blossom.primal.net", type: "blossom", requiresAuth: true, sync: false },
+  {
+    name: "Primal",
+    url: "https://blossom.primal.net",
+    type: "blossom",
+    requiresAuth: true,
+    sync: false,
+  },
 ];
 
 function parseServerTags(event: NdkEvent): ManagedServer[] {
@@ -23,7 +29,8 @@ function parseServerTags(event: NdkEvent): ManagedServer[] {
     if (seen.has(url)) continue;
     seen.add(url);
     const rawType = (tag[2] as ManagedServer["type"] | "satellite") || "blossom";
-    const type: ManagedServer["type"] = rawType === "nip96" || rawType === "satellite" ? rawType : "blossom";
+    const type: ManagedServer["type"] =
+      rawType === "nip96" || rawType === "satellite" ? rawType : "blossom";
     const flag = tag[3] || "";
     const note = tag[4];
     const customName = (tag[5] || "").trim();
@@ -37,11 +44,19 @@ function parseServerTags(event: NdkEvent): ManagedServer[] {
 }
 
 export const sortServersByName = (servers: ManagedServer[]): ManagedServer[] => {
-  return servers.slice().sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
+  return servers
+    .slice()
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
 };
 
 export const useServers = () => {
-  const { ndk, status: ndkStatus, connectionError: ndkError, getModule, prepareRelaySet } = useNdk();
+  const {
+    ndk,
+    status: ndkStatus,
+    connectionError: ndkError,
+    getModule,
+    prepareRelaySet,
+  } = useNdk();
   const pubkey = useCurrentPubkey();
   const queryClient = useQueryClient();
 
@@ -49,7 +64,8 @@ export const useServers = () => {
 
   const resolveRelayTargets = useCallback(() => {
     if (!ndk) return Array.from(DEFAULT_PUBLIC_RELAYS);
-    const base = ndk.explicitRelayUrls && ndk.explicitRelayUrls.length > 0 ? ndk.explicitRelayUrls : undefined;
+    const base =
+      ndk.explicitRelayUrls && ndk.explicitRelayUrls.length > 0 ? ndk.explicitRelayUrls : undefined;
     return collectRelayTargets(base, DEFAULT_PUBLIC_RELAYS);
   }, [ndk]);
 
@@ -77,7 +93,7 @@ export const useServers = () => {
           kinds: [USER_BLOSSOM_SERVER_LIST_KIND],
         },
         { closeOnEose: true },
-        relaySet
+        relaySet,
       )) as Set<NdkEvent>;
       if (events.size === 0) return [];
       const eventsArray = Array.from(events) as NdkEvent[];
@@ -138,7 +154,7 @@ export const useServers = () => {
       }
       return mutateServersAsync(servers);
     },
-    [isPending, mutateServersAsync]
+    [isPending, mutateServersAsync],
   );
 
   const servers = useMemo(() => {

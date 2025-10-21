@@ -7,6 +7,7 @@ import type {
   StorageAdapter,
   TransportConfig,
 } from "../../shared/api/nip46";
+import type * as Nip46ModuleTypes from "../../shared/api/nip46";
 import { useNdk } from "./NdkContext";
 
 export interface Nip46ContextValue {
@@ -25,7 +26,7 @@ const defaultSnapshot: SessionSnapshot = {
 
 const Nip46Context = createContext<Nip46ContextValue | undefined>(undefined);
 
-type Nip46Module = typeof import("../../shared/api/nip46");
+type Nip46Module = typeof Nip46ModuleTypes;
 
 let nip46ModuleLoader: Promise<Nip46Module> | null = null;
 
@@ -54,7 +55,7 @@ export const Nip46Provider: React.FC<{ children: React.ReactNode }> = ({ childre
       },
       subscribe: () => () => undefined,
     }),
-    []
+    [],
   );
 
   const fetchTrackerRef = useRef(new Map<string, number>());
@@ -85,7 +86,13 @@ export const Nip46Provider: React.FC<{ children: React.ReactNode }> = ({ childre
         const codecInstance = mod.createNip46Codec(mod.createDefaultCodecConfig());
         setSessionManager(manager);
         setCodec(codecInstance);
-        setService(new mod.Nip46Service({ codec: codecInstance, sessionManager: manager, transport: missingTransport }));
+        setService(
+          new mod.Nip46Service({
+            codec: codecInstance,
+            sessionManager: manager,
+            transport: missingTransport,
+          }),
+        );
         setTransportReady(false);
       })
       .catch(error => {
@@ -209,7 +216,7 @@ export const Nip46Provider: React.FC<{ children: React.ReactNode }> = ({ childre
     if (!mod || !ndk || !ready || !transportReady || !service || !sessionManager) return;
 
     const candidate = snapshot.sessions.find(
-      session => session.status === "active" && session.userPubkey && !session.lastError
+      session => session.status === "active" && session.userPubkey && !session.lastError,
     );
 
     const current = activeSessionRef.current;
@@ -240,7 +247,7 @@ export const Nip46Provider: React.FC<{ children: React.ReactNode }> = ({ childre
       ready,
       transportReady,
     }),
-    [codec, sessionManager, service, snapshot, ready, transportReady]
+    [codec, sessionManager, service, snapshot, ready, transportReady],
   );
 
   return <Nip46Context.Provider value={value}>{children}</Nip46Context.Provider>;

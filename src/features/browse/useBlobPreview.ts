@@ -41,8 +41,12 @@ export const useBlobPreview = (options?: PreviewOptions) => {
       const requiresAuth = context.requiresAuth;
       const signTemplate = requiresAuth ? defaultSignTemplate : undefined;
       const disablePreview =
-        context.disablePreview ?? shouldDisableBlobPreview(blob, context.detectedKind, context.kind);
-      const rawUrl = context.previewUrl ?? blob.url ?? (baseUrl ? `${baseUrl.replace(/\/$/, "")}/${blob.sha256}` : null);
+        context.disablePreview ??
+        shouldDisableBlobPreview(blob, context.detectedKind, context.kind);
+      const rawUrl =
+        context.previewUrl ??
+        blob.url ??
+        (baseUrl ? `${baseUrl.replace(/\/$/, "")}/${blob.sha256}` : null);
       const previewUrl = disablePreview ? null : rawUrl;
 
       setPreviewTarget({
@@ -57,7 +61,7 @@ export const useBlobPreview = (options?: PreviewOptions) => {
         kind: context.kind ?? context.detectedKind,
       });
     },
-    [defaultServerType, defaultSignTemplate]
+    [defaultServerType, defaultSignTemplate],
   );
 
   const closePreview = useCallback(() => {
@@ -70,20 +74,20 @@ export const useBlobPreview = (options?: PreviewOptions) => {
       openPreview,
       closePreview,
     }),
-    [closePreview, openPreview, previewTarget]
+    [closePreview, openPreview, previewTarget],
   );
 };
 
 export const canBlobPreview = (
   blob: BlossomBlob,
   detectedKind?: "image" | "video",
-  declaredKind?: string
+  declaredKind?: string,
 ) => !shouldDisableBlobPreview(blob, detectedKind, declaredKind);
 
 function shouldDisableBlobPreview(
   blob: BlossomBlob,
   detectedKind?: "image" | "video",
-  declaredKind?: string
+  declaredKind?: string,
 ) {
   if (declaredKind && declaredKind.toLowerCase() === "pdf") {
     return false;

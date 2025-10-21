@@ -123,27 +123,48 @@ export const MoveDialog: React.FC<MoveDialogProps> = ({
   const moveVerb = busy ? "Moving…" : "Move";
   const itemDescriptor = itemType === "folder" ? "folder" : "file";
 
-  const overlayClass = "fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 backdrop-blur-sm p-4";
+  const overlayClass =
+    "fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 backdrop-blur-sm p-4";
   const dialogClass = isLightTheme
     ? "w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 text-slate-800 shadow-xl"
     : "w-full max-w-md rounded-2xl border border-slate-800 bg-slate-900/90 p-6 text-slate-100 shadow-xl";
-  const headingClass = isLightTheme ? "text-lg font-semibold text-slate-900" : "text-lg font-semibold text-slate-100";
-  const itemSummaryTextClass = isLightTheme ? "mt-1 text-sm text-slate-600" : "mt-1 text-sm text-slate-400";
+  const headingClass = isLightTheme
+    ? "text-lg font-semibold text-slate-900"
+    : "text-lg font-semibold text-slate-100";
+  const itemSummaryTextClass = isLightTheme
+    ? "mt-1 text-sm text-slate-600"
+    : "mt-1 text-sm text-slate-400";
   const itemLabelClass = isLightTheme ? "text-slate-900" : "text-slate-200";
-  const locationTextClass = isLightTheme ? "mt-3 text-sm text-slate-700" : "mt-3 text-sm text-slate-300";
-  const locationHighlightClass = isLightTheme ? "font-medium text-emerald-600" : "font-medium text-emerald-300";
-  const pathTextClass = isLightTheme ? "mt-1 text-xs text-slate-500" : "mt-1 text-xs text-slate-500";
-  const destinationLabelClass = isLightTheme ? "mt-5 block text-sm text-slate-700" : "mt-5 block text-sm text-slate-200";
+  const locationTextClass = isLightTheme
+    ? "mt-3 text-sm text-slate-700"
+    : "mt-3 text-sm text-slate-300";
+  const locationHighlightClass = isLightTheme
+    ? "font-medium text-emerald-600"
+    : "font-medium text-emerald-300";
+  const pathTextClass = isLightTheme
+    ? "mt-1 text-xs text-slate-500"
+    : "mt-1 text-xs text-slate-500";
+  const destinationLabelClass = isLightTheme
+    ? "mt-5 block text-sm text-slate-700"
+    : "mt-5 block text-sm text-slate-200";
   const selectClass = isLightTheme
     ? "mt-2 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 placeholder:text-slate-500 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
     : "mt-2 w-full rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500";
-  const newFolderLabelClass = isLightTheme ? "block text-xs text-slate-600" : "block text-xs text-slate-300";
+  const newFolderLabelClass = isLightTheme
+    ? "block text-xs text-slate-600"
+    : "block text-xs text-slate-300";
   const newFolderInputClass = isLightTheme
     ? "mt-2 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 placeholder:text-slate-500 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
     : "mt-2 w-full rounded-lg border border-slate-800 bg-slate-950 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500";
-  const helperTextClass = isLightTheme ? "mt-1 text-xs text-slate-500" : "mt-1 text-xs text-slate-500";
-  const hintTextClass = isLightTheme ? "mt-2 text-xs text-slate-500" : "mt-2 text-xs text-slate-500";
-  const warningTextClass = isLightTheme ? "mt-1 text-xs text-amber-600" : "mt-1 text-xs text-amber-400";
+  const helperTextClass = isLightTheme
+    ? "mt-1 text-xs text-slate-500"
+    : "mt-1 text-xs text-slate-500";
+  const hintTextClass = isLightTheme
+    ? "mt-2 text-xs text-slate-500"
+    : "mt-2 text-xs text-slate-500";
+  const warningTextClass = isLightTheme
+    ? "mt-1 text-xs text-amber-600"
+    : "mt-1 text-xs text-amber-400";
   const errorTextClass = isLightTheme ? "mt-2 text-sm text-red-500" : "mt-2 text-sm text-red-400";
   const cancelButtonClass = isLightTheme
     ? "rounded-xl border border-slate-300 px-4 py-2 text-sm text-slate-700 transition hover:border-slate-400 disabled:cursor-not-allowed disabled:opacity-60"
@@ -199,35 +220,30 @@ export const MoveDialog: React.FC<MoveDialogProps> = ({
                 placeholder={newFolderDefaultPath}
               />
             </label>
-            <p className={helperTextClass}>Enter the destination folder name. It will be created if needed.</p>
+            <p className={helperTextClass}>
+              Enter the destination folder name. It will be created if needed.
+            </p>
           </div>
         ) : null}
         <p className={hintTextClass}>{destinationHint}</p>
         {selectionDisabled ? (
-          <p className={warningTextClass}>You cannot move a folder into itself or one of its subfolders.</p>
+          <p className={warningTextClass}>
+            You cannot move a folder into itself or one of its subfolders.
+          </p>
         ) : null}
         {error ? <p className={errorTextClass}>{error}</p> : null}
 
         <div className="mt-6 flex justify-end gap-3">
-          <button
-            type="button"
-            onClick={onCancel}
-            disabled={busy}
-            className={cancelButtonClass}
-          >
+          <button type="button" onClick={onCancel} disabled={busy} className={cancelButtonClass}>
             Cancel
           </button>
-          <button
-            type="submit"
-            disabled={!canSubmit}
-            className={submitButtonClass}
-          >
+          <button type="submit" disabled={!canSubmit} className={submitButtonClass}>
             {moveVerb}
           </button>
         </div>
       </form>
     </div>,
-    document.body
+    document.body,
   );
 };
 

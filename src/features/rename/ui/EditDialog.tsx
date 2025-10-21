@@ -83,20 +83,29 @@ export const EditDialog: React.FC<EditDialogProps> = ({
   } = useUserPreferences();
   const isLightTheme = theme === "light";
 
-  const overlayClass = "fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 backdrop-blur-sm p-4";
+  const overlayClass =
+    "fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 backdrop-blur-sm p-4";
   const dialogClass = isLightTheme
     ? "w-full max-w-xl rounded-2xl border border-slate-200 bg-white p-6 text-slate-800 shadow-xl"
     : "w-full max-w-xl rounded-2xl border border-slate-800 bg-slate-900/90 p-6 shadow-xl";
-  const headingClass = isLightTheme ? "text-lg font-semibold text-slate-900" : "text-lg font-semibold text-slate-100";
-  const descriptionClass = isLightTheme ? "mt-2 text-sm text-slate-600" : "mt-2 text-sm text-slate-400";
+  const headingClass = isLightTheme
+    ? "text-lg font-semibold text-slate-900"
+    : "text-lg font-semibold text-slate-100";
+  const descriptionClass = isLightTheme
+    ? "mt-2 text-sm text-slate-600"
+    : "mt-2 text-sm text-slate-400";
   const labelClass = isLightTheme ? "block text-sm text-slate-700" : "block text-sm text-slate-300";
   const helperTextClass = isLightTheme ? "mt-2 text-xs text-red-500" : "mt-2 text-xs text-red-400";
   const infoTextClass = isLightTheme ? "text-sm text-slate-600" : "text-sm text-slate-400";
   const infoPanelClass = isLightTheme
     ? "rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600"
     : "rounded-xl border border-slate-800 bg-slate-950/70 px-4 py-3 text-sm text-slate-300";
-  const infoPanelHeadingClass = isLightTheme ? "font-medium text-slate-900" : "font-medium text-slate-100";
-  const infoPanelAliasClass = isLightTheme ? "mt-1 font-mono text-emerald-600" : "mt-1 font-mono text-emerald-300";
+  const infoPanelHeadingClass = isLightTheme
+    ? "font-medium text-slate-900"
+    : "font-medium text-slate-100";
+  const infoPanelAliasClass = isLightTheme
+    ? "mt-1 font-mono text-emerald-600"
+    : "mt-1 font-mono text-emerald-300";
   const errorTextClass = isLightTheme ? "mt-2 text-sm text-red-500" : "mt-2 text-sm text-red-400";
   const cancelButtonClass = isLightTheme
     ? "rounded-xl border border-slate-300 px-4 py-2 text-sm text-slate-700 hover:border-slate-400"
@@ -104,8 +113,12 @@ export const EditDialog: React.FC<EditDialogProps> = ({
   const saveButtonClass = isLightTheme
     ? "rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-500 disabled:opacity-50"
     : "rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-slate-900 hover:bg-emerald-500 disabled:opacity-50";
-  const shaHighlightClass = isLightTheme ? "font-mono text-emerald-600" : "font-mono text-emerald-300";
-  const panelNoteClass = isLightTheme ? "mt-2 text-xs text-slate-500" : "mt-2 text-xs text-slate-400";
+  const shaHighlightClass = isLightTheme
+    ? "font-mono text-emerald-600"
+    : "font-mono text-emerald-300";
+  const panelNoteClass = isLightTheme
+    ? "mt-2 text-xs text-slate-500"
+    : "mt-2 text-xs text-slate-400";
   const [mounted, setMounted] = useState(false);
 
   const baseInputClass = isLightTheme
@@ -119,7 +132,9 @@ export const EditDialog: React.FC<EditDialogProps> = ({
     ? "inline-flex items-center gap-2 rounded-lg border border-red-400/70 px-3 py-1.5 text-sm font-medium text-red-600 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:border-slate-200 disabled:text-slate-400"
     : "inline-flex items-center gap-2 rounded-lg border border-red-500/50 px-3 py-1.5 text-sm font-medium text-red-200 transition hover:bg-red-500/10 disabled:cursor-not-allowed disabled:border-slate-700 disabled:text-slate-500";
   const privateLinkExpirationText =
-    privateLink && privateLink.expiresAt ? prettyDate(privateLink.expiresAt) || "No expiration" : "No expiration";
+    privateLink && privateLink.expiresAt
+      ? prettyDate(privateLink.expiresAt) || "No expiration"
+      : "No expiration";
 
   type FolderSelectProps = {
     value: string;
@@ -149,10 +164,13 @@ export const EditDialog: React.FC<EditDialogProps> = ({
           id: option.value === null ? HOME_FOLDER_VALUE : option.value,
           label: option.label,
         })),
-      [options]
+      [options],
     );
 
-    const optionIds = useMemo(() => new Set(normalizedOptions.map(option => option.id)), [normalizedOptions]);
+    const optionIds = useMemo(
+      () => new Set(normalizedOptions.map(option => option.id)),
+      [normalizedOptions],
+    );
 
     const selectValue =
       normalizedValue === ""
@@ -162,7 +180,9 @@ export const EditDialog: React.FC<EditDialogProps> = ({
           : CUSTOM_FOLDER_VALUE;
 
     const [customValue, setCustomValue] = useState<string>(
-      selectValue === CUSTOM_FOLDER_VALUE ? normalizedValue || customDefaultPath || "" : customDefaultPath || ""
+      selectValue === CUSTOM_FOLDER_VALUE
+        ? normalizedValue || customDefaultPath || ""
+        : customDefaultPath || "",
     );
 
     useEffect(() => {
@@ -265,14 +285,16 @@ export const EditDialog: React.FC<EditDialogProps> = ({
       year: "",
     };
 
-    const handleAudioChange = (field: keyof EditDialogAudioFields) => (event: React.ChangeEvent<HTMLInputElement>) => {
-      onAudioFieldChange?.(field, event.target.value);
-    };
+    const handleAudioChange =
+      (field: keyof EditDialogAudioFields) => (event: React.ChangeEvent<HTMLInputElement>) => {
+        onAudioFieldChange?.(field, event.target.value);
+      };
 
     return (
       <div className="mt-4 space-y-4">
         <p className={infoTextClass}>
-          Update the track metadata for <span className={shaHighlightClass}>{blob.sha256.slice(0, 12)}…</span>. Title is required.
+          Update the track metadata for{" "}
+          <span className={shaHighlightClass}>{blob.sha256.slice(0, 12)}…</span>. Title is required.
         </p>
         <label className={labelClass}>
           Title
@@ -401,7 +423,8 @@ export const EditDialog: React.FC<EditDialogProps> = ({
           <div className={infoPanelHeadingClass}>Display name</div>
           <div className={infoPanelAliasClass}>{alias}</div>
           <p className={panelNoteClass}>
-            The display name is automatically derived as <span className="font-semibold">Artist – Title</span> when an artist is provided.
+            The display name is automatically derived as{" "}
+            <span className="font-semibold">Artist – Title</span> when an artist is provided.
           </p>
         </div>
       </div>
@@ -418,8 +441,9 @@ export const EditDialog: React.FC<EditDialogProps> = ({
         <h2 className={headingClass}>Edit file details</h2>
         {!isMusic && (
           <p className={descriptionClass}>
-            Provide a new display name for <span className={shaHighlightClass}>{blob.sha256.slice(0, 12)}…</span>. Leave the field empty to clear the
-            alias.
+            Provide a new display name for{" "}
+            <span className={shaHighlightClass}>{blob.sha256.slice(0, 12)}…</span>. Leave the field
+            empty to clear the alias.
           </p>
         )}
 
@@ -479,10 +503,15 @@ export const EditDialog: React.FC<EditDialogProps> = ({
                 <button
                   type="button"
                   onClick={() => onRevokePrivateLink?.()}
-                  disabled={busy || revokingPrivateLink || disablePrivateLinkRevoke || !onRevokePrivateLink}
+                  disabled={
+                    busy || revokingPrivateLink || disablePrivateLinkRevoke || !onRevokePrivateLink
+                  }
                   className={privateLinkButtonClass}
                 >
-                  <CancelIcon size={16} className={revokingPrivateLink ? "opacity-60" : "opacity-80"} />
+                  <CancelIcon
+                    size={16}
+                    className={revokingPrivateLink ? "opacity-60" : "opacity-80"}
+                  />
                   {revokingPrivateLink ? "Revoking…" : "Revoke"}
                 </button>
                 {revokePrivateLinkError ? (
@@ -514,6 +543,6 @@ export const EditDialog: React.FC<EditDialogProps> = ({
         </div>
       </div>
     </div>,
-    document.body
+    document.body,
   );
 };

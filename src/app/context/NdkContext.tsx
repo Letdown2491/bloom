@@ -1,4 +1,12 @@
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import React, {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import type { NDKRelay, NDKSigner, NDKUser } from "@nostr-dev-kit/ndk";
 import type { EventTemplate, SignedEvent } from "../../shared/api/blossomClient";
 import { loadNdkModule, type NdkModule } from "../../shared/api/ndkModule";
@@ -43,11 +51,11 @@ export type NdkContextValue = {
   getModule: () => Promise<NdkModule>;
   ensureRelays: (
     relayUrls: readonly string[],
-    options?: RelayPreparationOptions
+    options?: RelayPreparationOptions,
   ) => Promise<RelayPreparationResult>;
   prepareRelaySet: (
     relayUrls: readonly string[],
-    options?: RelayPreparationOptions
+    options?: RelayPreparationOptions,
   ) => Promise<RelayPreparationResult>;
 };
 
@@ -56,7 +64,9 @@ const NdkContext = createContext<NdkContextValue | undefined>(undefined);
 const RAW_DEFAULT_RELAYS = ["wss://purplepag.es", "wss://user.kindpag.es"] as const;
 
 const getNormalizedFallbackRelays = (): string[] => {
-  return RAW_DEFAULT_RELAYS.map(url => normalizeRelayUrl(url)).filter((url): url is string => Boolean(url));
+  return RAW_DEFAULT_RELAYS.map(url => normalizeRelayUrl(url)).filter((url): url is string =>
+    Boolean(url),
+  );
 };
 
 const removeFallbackRelays = (instance: NdkInstance | null | undefined) => {
@@ -162,7 +172,12 @@ export const NdkProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setStatus(prev => (prev === "connected" ? prev : "connecting"));
     setConnectionError(null);
     setRelayHealth(current =>
-      current.map(relay => ({ ...relay, status: "connecting", lastError: null, lastEventAt: relay.lastEventAt }))
+      current.map(relay => ({
+        ...relay,
+        status: "connecting",
+        lastError: null,
+        lastEventAt: relay.lastEventAt,
+      })),
     );
 
     attempt
@@ -171,7 +186,8 @@ export const NdkProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         return undefined;
       })
       .catch(error => {
-        const normalized = error instanceof Error ? error : new Error("Failed to connect to relays");
+        const normalized =
+          error instanceof Error ? error : new Error("Failed to connect to relays");
         setConnectionError(normalized);
         setStatus("error");
         return undefined;
@@ -209,7 +225,10 @@ export const NdkProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, [ensureNdkModule]);
 
   const prepareRelaySet = useCallback(
-    async (relayUrls: readonly string[], options?: RelayPreparationOptions): Promise<RelayPreparationResult> => {
+    async (
+      relayUrls: readonly string[],
+      options?: RelayPreparationOptions,
+    ): Promise<RelayPreparationResult> => {
       const { ndk: instance } = await ensureNdkInstance();
       if (!relayManagerRef.current && instance) {
         relayManagerRef.current = createRelayConnectionManager(instance, ensureNdkModule);
@@ -219,14 +238,17 @@ export const NdkProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
       return relayManagerRef.current.prepareRelaySet(relayUrls, options);
     },
-    [ensureNdkInstance, ensureNdkModule]
+    [ensureNdkInstance, ensureNdkModule],
   );
 
   const ensureRelays = useCallback(
-    async (relayUrls: readonly string[], options?: RelayPreparationOptions): Promise<RelayPreparationResult> => {
+    async (
+      relayUrls: readonly string[],
+      options?: RelayPreparationOptions,
+    ): Promise<RelayPreparationResult> => {
       return prepareRelaySet(relayUrls, options);
     },
-    [prepareRelaySet]
+    [prepareRelaySet],
   );
 
   useEffect(() => {
@@ -255,56 +277,64 @@ export const NdkProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
 
     const primeKnownRelays = () => {
-    setRelayHealth(current => {
-      const previousMap = new Map<string, RelayHealth>();
-      current.forEach(entry => {
-        previousMap.set(entry.url, entry);
-      });
-
-      const next = new Map<string, RelayHealth>();
-      const explicitRelays = ndk.explicitRelayUrls ?? [];
-      const baseRelays =
-        explicitRelays.length > 0
-          ? explicitRelays
-          : pool.relays.size > 0
-          ? []
-          : getNormalizedFallbackRelays();
-
-      baseRelays.forEach(url => {
-        const normalized = normalizeRelayUrl(url);
-        if (!normalized) return;
-        const existing = previousMap.get(normalized);
-        next.set(normalized, existing ?? { url: normalized, status: "connecting", lastError: null, lastEventAt: null });
-      });
-
-      pool.relays.forEach(relay => {
-        const url = normalizeRelayUrl(relay.url);
-        if (!url) return;
-        const previous = next.get(url) ?? previousMap.get(url);
-        next.set(url, {
-          url,
-          status: statusFromRelay(relay),
-          lastError: previous?.lastError ?? null,
-          lastEventAt: previous?.lastEventAt ?? null,
+      setRelayHealth(current => {
+        const previousMap = new Map<string, RelayHealth>();
+        current.forEach(entry => {
+          previousMap.set(entry.url, entry);
         });
-      });
 
-      const nextArray = Array.from(next.values());
-      const unchanged =
-        nextArray.length === current.length &&
-        nextArray.every((entry, index) => {
-          const currentEntry = current[index];
-          return (
-            currentEntry &&
-            currentEntry.url === entry.url &&
-            currentEntry.status === entry.status &&
-            (currentEntry.lastError ?? null) === (entry.lastError ?? null) &&
-            (currentEntry.lastEventAt ?? null) === (entry.lastEventAt ?? null)
+        const next = new Map<string, RelayHealth>();
+        const explicitRelays = ndk.explicitRelayUrls ?? [];
+        const baseRelays =
+          explicitRelays.length > 0
+            ? explicitRelays
+            : pool.relays.size > 0
+              ? []
+              : getNormalizedFallbackRelays();
+
+        baseRelays.forEach(url => {
+          const normalized = normalizeRelayUrl(url);
+          if (!normalized) return;
+          const existing = previousMap.get(normalized);
+          next.set(
+            normalized,
+            existing ?? {
+              url: normalized,
+              status: "connecting",
+              lastError: null,
+              lastEventAt: null,
+            },
           );
         });
 
-      return unchanged ? current : nextArray;
-    });
+        pool.relays.forEach(relay => {
+          const url = normalizeRelayUrl(relay.url);
+          if (!url) return;
+          const previous = next.get(url) ?? previousMap.get(url);
+          next.set(url, {
+            url,
+            status: statusFromRelay(relay),
+            lastError: previous?.lastError ?? null,
+            lastEventAt: previous?.lastEventAt ?? null,
+          });
+        });
+
+        const nextArray = Array.from(next.values());
+        const unchanged =
+          nextArray.length === current.length &&
+          nextArray.every((entry, index) => {
+            const currentEntry = current[index];
+            return (
+              currentEntry &&
+              currentEntry.url === entry.url &&
+              currentEntry.status === entry.status &&
+              (currentEntry.lastError ?? null) === (entry.lastError ?? null) &&
+              (currentEntry.lastEventAt ?? null) === (entry.lastEventAt ?? null)
+            );
+          });
+
+        return unchanged ? current : nextArray;
+      });
     };
 
     const flushRelayUpdates = () => {
@@ -329,8 +359,10 @@ export const NdkProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           if (foundIndex >= 0) {
             const entry = next[foundIndex]!;
             const nextStatus = patch.status ?? entry.status;
-            const nextLastError = patch.lastError !== undefined ? patch.lastError : entry.lastError ?? null;
-            const nextLastEventAt = patch.lastEventAt !== undefined ? patch.lastEventAt : entry.lastEventAt ?? null;
+            const nextLastError =
+              patch.lastError !== undefined ? patch.lastError : (entry.lastError ?? null);
+            const nextLastEventAt =
+              patch.lastEventAt !== undefined ? patch.lastEventAt : (entry.lastEventAt ?? null);
 
             if (
               nextStatus === entry.status &&
@@ -368,7 +400,8 @@ export const NdkProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         return;
       }
       relayUpdateScheduledRef.current = true;
-      const schedule = typeof window === "undefined" ? (fn: () => void) => fn() : window.requestAnimationFrame;
+      const schedule =
+        typeof window === "undefined" ? (fn: () => void) => fn() : window.requestAnimationFrame;
       schedule(() => flushRelayUpdates());
     };
 
@@ -407,7 +440,11 @@ export const NdkProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
 
     const handleDisconnect = (relay: NDKRelay) => {
-      updateRelay(relay.url, { status: "error", lastError: "Disconnected", lastEventAt: Date.now() });
+      updateRelay(relay.url, {
+        status: "error",
+        lastError: "Disconnected",
+        lastEventAt: Date.now(),
+      });
       relayManagerRef.current?.handlePoolEvent(relay, "error");
     };
 
@@ -446,8 +483,14 @@ export const NdkProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       relayPersistTimerRef.current = null;
     }
 
-    const builderLimit = relayHealthQuotaLimitedRef.current ? RELAY_HEALTH_CRITICAL_LIMIT : RELAY_HEALTH_MAX_ENTRIES;
-    const snapshot = buildRelayHealthSnapshot(relayHealth, lastPersistedRelayMapRef.current, builderLimit);
+    const builderLimit = relayHealthQuotaLimitedRef.current
+      ? RELAY_HEALTH_CRITICAL_LIMIT
+      : RELAY_HEALTH_MAX_ENTRIES;
+    const snapshot = buildRelayHealthSnapshot(
+      relayHealth,
+      lastPersistedRelayMapRef.current,
+      builderLimit,
+    );
     latestRelaySnapshotRef.current = snapshot;
 
     if (lastPersistedRelaySignatureRef.current === snapshot.serialized) {
@@ -546,11 +589,16 @@ export const NdkProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         throw normalized;
       }
     },
-    [ensureNdkConnection]
+    [ensureNdkConnection],
   );
 
   const connect = useCallback(async () => {
-    if (!(window as any).nostr) {
+    const nostrApi = (
+      typeof window !== "undefined"
+        ? (window as typeof window & { nostr?: unknown }).nostr
+        : undefined
+    ) as object | undefined;
+    if (!nostrApi) {
       const error = new Error("A NIP-07 signer is required (e.g. Alby, nos2x).");
       setConnectionError(error);
       setStatus("error");
@@ -562,7 +610,8 @@ export const NdkProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       await nip07Signer.blockUntilReady();
       await adoptSigner(nip07Signer);
     } catch (error) {
-      const normalized = error instanceof Error ? error : new Error("Failed to connect Nostr signer");
+      const normalized =
+        error instanceof Error ? error : new Error("Failed to connect Nostr signer");
       setConnectionError(normalized);
       setStatus("error");
       throw normalized;
@@ -585,7 +634,7 @@ export const NdkProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       await event.sign();
       return event.rawEvent();
     },
-    [ensureNdkInstance, signer]
+    [ensureNdkInstance, signer],
   );
 
   useEffect(() => {
@@ -593,7 +642,8 @@ export const NdkProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (autoConnectAttemptedRef.current) return;
     if (signer) return;
     if (typeof window === "undefined") return;
-    if (!(window as any).nostr) return;
+    const nostrApi = (window as typeof window & { nostr?: unknown }).nostr;
+    if (!nostrApi) return;
 
     autoConnectAttemptedRef.current = true;
 
@@ -659,7 +709,7 @@ export const NdkProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       getNdkModule,
       ensureRelays,
       prepareRelaySet,
-    ]
+    ],
   );
 
   return <NdkContext.Provider value={value}>{children}</NdkContext.Provider>;

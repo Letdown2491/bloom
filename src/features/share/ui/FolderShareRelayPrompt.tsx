@@ -115,15 +115,26 @@ export const FolderShareRelayPrompt: React.FC<FolderShareRelayPromptProps> = ({
   const selectedCount = selected.size;
   const totalCount = relays.length;
 
-  const overlayClass = "fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 backdrop-blur-sm p-4";
+  const overlayClass =
+    "fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 backdrop-blur-sm p-4";
   const containerClass = isLightTheme
     ? "w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-6 text-slate-800 shadow-xl"
     : "w-full max-w-lg rounded-2xl border border-slate-800 bg-slate-900/90 p-6 shadow-xl text-slate-100";
-  const headingClass = isLightTheme ? "text-lg font-semibold text-slate-900" : "text-lg font-semibold text-slate-100";
-  const folderLabelClass = isLightTheme ? "mt-2 text-sm text-slate-600 break-all" : "mt-2 text-sm text-slate-300 break-all";
-  const descriptionClass = isLightTheme ? "mt-4 text-sm text-slate-600" : "mt-4 text-sm text-slate-300";
-  const helperTextClass = isLightTheme ? "mt-3 text-xs text-slate-500" : "mt-3 text-xs text-slate-500";
-  const selectionIntroClass = isLightTheme ? "flex items-center justify-between text-xs text-slate-500" : "flex items-center justify-between text-xs text-slate-400";
+  const headingClass = isLightTheme
+    ? "text-lg font-semibold text-slate-900"
+    : "text-lg font-semibold text-slate-100";
+  const folderLabelClass = isLightTheme
+    ? "mt-2 text-sm text-slate-600 break-all"
+    : "mt-2 text-sm text-slate-300 break-all";
+  const descriptionClass = isLightTheme
+    ? "mt-4 text-sm text-slate-600"
+    : "mt-4 text-sm text-slate-300";
+  const helperTextClass = isLightTheme
+    ? "mt-3 text-xs text-slate-500"
+    : "mt-3 text-xs text-slate-500";
+  const selectionIntroClass = isLightTheme
+    ? "flex items-center justify-between text-xs text-slate-500"
+    : "flex items-center justify-between text-xs text-slate-400";
   const selectionContainerClass = isLightTheme
     ? "max-h-56 space-y-2 overflow-y-auto rounded-xl border border-slate-200 bg-slate-50 p-3"
     : "max-h-56 space-y-2 overflow-y-auto rounded-xl border border-slate-800/80 bg-slate-950/60 p-3";
@@ -150,12 +161,13 @@ export const FolderShareRelayPrompt: React.FC<FolderShareRelayPromptProps> = ({
         <h2 className={headingClass}>Select where to share</h2>
         <p className={folderLabelClass}>{folderLabel}</p>
         <p className={descriptionClass}>
-          Sharing this folder will make it publicly accessible to anyone with the link. We will publish the folder
-          details to your preferred relays (NIP-65) so other clients can find it.
+          Sharing this folder will make it publicly accessible to anyone with the link. We will
+          publish the folder details to your preferred relays (NIP-65) so other clients can find it.
         </p>
         {!showSelection ? (
           <p className={helperTextClass}>
-            Continue to publish to all {totalCount} configured relays, or review the list before publishing.
+            Continue to publish to all {totalCount} configured relays, or review the list before
+            publishing.
           </p>
         ) : (
           <div className="mt-4 space-y-3">
@@ -187,8 +199,12 @@ export const FolderShareRelayPrompt: React.FC<FolderShareRelayPromptProps> = ({
                 const labelBaseClass = isLightTheme
                   ? "flex items-center gap-3 rounded-lg border border-transparent px-2 py-1.5 text-sm text-slate-700 transition"
                   : "flex items-center gap-3 rounded-lg border border-transparent px-2 py-1.5 text-sm text-slate-200 transition";
-                const labelActiveClass = isLightTheme ? "border-emerald-500/60 bg-emerald-50" : "border-slate-700/80";
-                const labelInactiveHoverClass = isLightTheme ? "hover:border-slate-300" : "hover:border-slate-700/80";
+                const labelActiveClass = isLightTheme
+                  ? "border-emerald-500/60 bg-emerald-50"
+                  : "border-slate-700/80";
+                const labelInactiveHoverClass = isLightTheme
+                  ? "hover:border-slate-300"
+                  : "hover:border-slate-700/80";
                 return (
                   <label
                     key={url}
@@ -207,7 +223,9 @@ export const FolderShareRelayPrompt: React.FC<FolderShareRelayPromptProps> = ({
                       disabled={submitting}
                       onChange={() => toggleRelay(url)}
                     />
-                    <span className={isLightTheme ? "font-medium text-slate-800" : "font-medium"}>{formatRelayLabel(url)}</span>
+                    <span className={isLightTheme ? "font-medium text-slate-800" : "font-medium"}>
+                      {formatRelayLabel(url)}
+                    </span>
                     <span className="text-xs text-slate-500">{url}</span>
                   </label>
                 );

@@ -18,27 +18,27 @@ import { FolderRenameDialog } from "../../rename/ui/FolderRenameDialog";
 import { WorkspaceProvider } from "../WorkspaceContext";
 
 const WorkspaceLazy = React.lazy(() =>
-  import("../Workspace").then(module => ({ default: module.Workspace }))
+  import("../Workspace").then(module => ({ default: module.Workspace })),
 );
 
 const ServerListLazy = React.lazy(() =>
-  import("./ServerList").then(module => ({ default: module.ServerList }))
+  import("./ServerList").then(module => ({ default: module.ServerList })),
 );
 
 const ShareComposerLazy = React.lazy(() =>
-  import("../../share/ShareComposerPanel").then(module => ({ default: module.ShareComposerPanel }))
+  import("../../share/ShareComposerPanel").then(module => ({ default: module.ShareComposerPanel })),
 );
 
 const SettingsPanelLazy = React.lazy(() =>
-  import("../../settings/SettingsPanel").then(module => ({ default: module.SettingsPanel }))
+  import("../../settings/SettingsPanel").then(module => ({ default: module.SettingsPanel })),
 );
 
 const ProfilePanelLazy = React.lazy(() =>
-  import("../../profile/ProfilePanel").then(module => ({ default: module.ProfilePanel }))
+  import("../../profile/ProfilePanel").then(module => ({ default: module.ProfilePanel })),
 );
 
 const RelayListLazy = React.lazy(() =>
-  import("../../../shared/ui/RelayList").then(module => ({ default: module.RelayList }))
+  import("../../../shared/ui/RelayList").then(module => ({ default: module.RelayList })),
 );
 
 type ShareWorkflowState = ReturnType<typeof useShareWorkflow>;
@@ -186,7 +186,11 @@ export const WorkspaceSection = memo(function WorkspaceSection({
         tab === "browse" || tab === "share" || tab === "share-private" ? "" : " overflow-y-auto"
       }`}
     >
-      <WorkspaceProvider servers={localServers} selectedServer={selectedServer} onSelectServer={onSelectServer}>
+      <WorkspaceProvider
+        servers={localServers}
+        selectedServer={selectedServer}
+        onSelectServer={onSelectServer}
+      >
         <Suspense
           fallback={
             <div className="flex flex-1 items-center justify-center text-sm text-slate-400">
@@ -263,12 +267,19 @@ export const WorkspaceSection = memo(function WorkspaceSection({
               </div>
             }
           >
-            <ProfilePanelLazy onProfileUpdated={onProfileUpdated} showStatusMessage={showStatusMessage} />
+            <ProfilePanelLazy
+              onProfileUpdated={onProfileUpdated}
+              showStatusMessage={showStatusMessage}
+            />
           </Suspense>
         )}
 
         {folderRenamePath && (
-          <FolderRenameDialog path={folderRenamePath} onClose={onCloseFolderRename} onStatus={showStatusMessage} />
+          <FolderRenameDialog
+            path={folderRenamePath}
+            onClose={onCloseFolderRename}
+            onStatus={showStatusMessage}
+          />
         )}
       </WorkspaceProvider>
 
@@ -285,7 +296,9 @@ export const WorkspaceSection = memo(function WorkspaceSection({
               embedded
               payload={shareState.payload}
               shareKey={shareState.shareKey}
-              initialMode={shareState.mode && shareState.mode !== "private-link" ? shareState.mode : null}
+              initialMode={
+                shareState.mode && shareState.mode !== "private-link" ? shareState.mode : null
+              }
               onClose={() => {
                 onClearShareState();
                 onSetTab("browse");

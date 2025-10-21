@@ -52,7 +52,7 @@ export const SelectionProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
   const value = useMemo<SelectionContextValue>(
     () => ({ selected, isSelected, toggle, selectMany, replace, clear }),
-    [selected, isSelected, toggle, selectMany, replace, clear]
+    [selected, isSelected, toggle, selectMany, replace, clear],
   );
 
   return <SelectionContext.Provider value={value}>{children}</SelectionContext.Provider>;

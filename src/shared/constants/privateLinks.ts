@@ -1,12 +1,14 @@
 const DEFAULT_HOST = "https://bloomapp.me";
 
-const rawHost = typeof import.meta.env.VITE_PRIVATE_LINK_SERVICE_HOST === "string"
-  ? import.meta.env.VITE_PRIVATE_LINK_SERVICE_HOST.trim()
-  : "";
+const rawHost =
+  typeof import.meta.env.VITE_PRIVATE_LINK_SERVICE_HOST === "string"
+    ? import.meta.env.VITE_PRIVATE_LINK_SERVICE_HOST.trim()
+    : "";
 
-const rawPubkey = typeof import.meta.env.VITE_PRIVATE_LINK_SERVICE_PUBKEY === "string"
-  ? import.meta.env.VITE_PRIVATE_LINK_SERVICE_PUBKEY.trim()
-  : "";
+const rawPubkey =
+  typeof import.meta.env.VITE_PRIVATE_LINK_SERVICE_PUBKEY === "string"
+    ? import.meta.env.VITE_PRIVATE_LINK_SERVICE_PUBKEY.trim()
+    : "";
 
 const normalizeHost = (value: string): string => {
   if (!value) return DEFAULT_HOST;

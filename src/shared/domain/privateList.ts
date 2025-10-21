@@ -59,7 +59,7 @@ const ensureSigner = (signer: NDKSigner | null | undefined): signer is Encryptio
   Boolean(
     signer &&
       typeof (signer as Partial<EncryptionCapableSigner>).encrypt === "function" &&
-      typeof (signer as Partial<EncryptionCapableSigner>).decrypt === "function"
+      typeof (signer as Partial<EncryptionCapableSigner>).decrypt === "function",
   );
 
 const sanitizeEntry = (entry: unknown): PrivateListEntry | null => {
@@ -68,7 +68,8 @@ const sanitizeEntry = (entry: unknown): PrivateListEntry | null => {
   const sha256 = typeof source.sha256 === "string" ? source.sha256 : null;
   if (!sha256) return null;
   const encryptionSource = source.encryption as Record<string, unknown> | undefined;
-  const algorithm = typeof encryptionSource?.algorithm === "string" ? encryptionSource.algorithm : undefined;
+  const algorithm =
+    typeof encryptionSource?.algorithm === "string" ? encryptionSource.algorithm : undefined;
   const key = typeof encryptionSource?.key === "string" ? encryptionSource.key : undefined;
   const iv = typeof encryptionSource?.iv === "string" ? encryptionSource.iv : undefined;
   const metadataSource = source.metadata as Record<string, unknown> | undefined;
@@ -76,35 +77,38 @@ const sanitizeEntry = (entry: unknown): PrivateListEntry | null => {
   const rawFolderPath = metadataSource?.folderPath;
   const normalizedFolder =
     typeof rawFolderPath === "string"
-      ? normalizeFolderPathInput(rawFolderPath) ?? null
+      ? (normalizeFolderPathInput(rawFolderPath) ?? null)
       : rawFolderPath === null
         ? null
         : undefined;
-  const metadata = metadataSource && typeof metadataSource === "object"
-    ? {
-        name: typeof metadataSource.name === "string" ? metadataSource.name : undefined,
-        type: typeof metadataSource.type === "string" ? metadataSource.type : undefined,
-        size: typeof metadataSource.size === "number" ? metadataSource.size : undefined,
-        audio: audioMetadata,
-        folderPath: normalizedFolder,
-      }
-    : undefined;
+  const metadata =
+    metadataSource && typeof metadataSource === "object"
+      ? {
+          name: typeof metadataSource.name === "string" ? metadataSource.name : undefined,
+          type: typeof metadataSource.type === "string" ? metadataSource.type : undefined,
+          size: typeof metadataSource.size === "number" ? metadataSource.size : undefined,
+          audio: audioMetadata,
+          folderPath: normalizedFolder,
+        }
+      : undefined;
   const serversValue = source.servers;
   const servers = Array.isArray(serversValue)
     ? (() => {
         const cleaned = serversValue
-          .filter((value: unknown): value is string => typeof value === "string" && value.trim().length > 0)
+          .filter(
+            (value: unknown): value is string =>
+              typeof value === "string" && value.trim().length > 0,
+          )
           .map((value: string) => value.trim());
         if (!cleaned.length) return undefined;
-        const unique = Array.from(new Set<string>(cleaned.map((value: string) => value.replace(/\/+$/, ""))));
+        const unique = Array.from(
+          new Set<string>(cleaned.map((value: string) => value.replace(/\/+$/, ""))),
+        );
         return unique.length ? unique : undefined;
       })()
     : undefined;
   const updatedAt = typeof source.updatedAt === "number" ? source.updatedAt : undefined;
-  const encryption =
-    algorithm && key && iv
-      ? { algorithm, key, iv }
-      : undefined;
+  const encryption = algorithm && key && iv ? { algorithm, key, iv } : undefined;
 
   return {
     sha256,
@@ -144,7 +148,7 @@ export const loadPrivateList = async (
   ndk: NdkInstance | null,
   signer: NDKSigner | null,
   user: NDKUser | null,
-  options?: PrivateListOptions
+  options?: PrivateListOptions,
 ): Promise<PrivateListEntry[]> => {
   if (!ndk || !signer || !user) return [];
   const events = (await ndk.fetchEvents(
@@ -154,7 +158,7 @@ export const loadPrivateList = async (
       "#d": [PRIVATE_LIST_IDENTIFIER],
     },
     { closeOnEose: true },
-    options?.relaySet ?? undefined
+    options?.relaySet ?? undefined,
   )) as Set<NdkEvent>;
   if (!events || events.size === 0) return [];
   const sorted = Array.from(events).sort((a, b) => (b.created_at ?? 0) - (a.created_at ?? 0));
@@ -183,7 +187,7 @@ export const publishPrivateList = async (
   signer: NDKSigner | null,
   user: NDKUser | null,
   entries: PrivateListEntry[],
-  options?: PrivateListOptions
+  options?: PrivateListOptions,
 ) => {
   if (!ndk || !signer || !user) throw new Error("Nostr signer unavailable");
   if (!ensureSigner(signer)) throw new Error("Signer does not support encryption");
@@ -221,7 +225,7 @@ export const publishPrivateList = async (
 
 export const mergePrivateEntries = (
   existing: PrivateListEntry[],
-  updates: PrivateListEntry[]
+  updates: PrivateListEntry[],
 ): PrivateListEntry[] => {
   const map = new Map<string, PrivateListEntry>();
   existing.forEach(entry => {
@@ -255,7 +259,7 @@ export const mergePrivateEntries = (
 
 const mergeMetadata = (
   base: PrivateListEntry["metadata"] | undefined,
-  update: PrivateListEntry["metadata"] | undefined
+  update: PrivateListEntry["metadata"] | undefined,
 ): PrivateListEntry["metadata"] | undefined => {
   if (!base) return update;
   if (!update) return base;

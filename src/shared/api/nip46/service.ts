@@ -1,16 +1,16 @@
-import { Nip46Codec } from "./codec";
-import {
+import type { Nip46Codec } from "./codec";
+import type {
   SessionManager,
-  createSessionFromUri,
   CreateSessionFromUriOptions,
   CreatedSessionResult,
   RemoteSignerMetadata,
   ParsedNostrConnectToken,
 } from "./session";
+import { createSessionFromUri } from "./session";
 import { generateKeypair } from "./keys";
-import { Nip46Method, Nip46EncryptionAlgorithm } from "./types";
+import type { Nip46Method, Nip46EncryptionAlgorithm } from "./types";
 import { RequestQueue } from "./transport/requestQueue";
-import { TransportConfig } from "./transport";
+import type { TransportConfig } from "./transport";
 import { sanitizeRelayUrl } from "../../utils/relays";
 
 interface ServiceOptions {
@@ -45,7 +45,10 @@ export class Nip46Service {
     this.initialized = false;
   }
 
-  async pairWithUri(uri: string, options?: CreateSessionFromUriOptions): Promise<CreatedSessionResult> {
+  async pairWithUri(
+    uri: string,
+    options?: CreateSessionFromUriOptions,
+  ): Promise<CreatedSessionResult> {
     const result = await createSessionFromUri(this.options.sessionManager, uri, options);
     await this.init();
 
@@ -96,12 +99,7 @@ export class Nip46Service {
     };
   }
 
-  async sendRequest(
-    sessionId: string,
-    method: Nip46Method,
-    params: string[],
-    requestId?: string
-  ) {
+  async sendRequest(sessionId: string, method: Nip46Method, params: string[], requestId?: string) {
     const session = this.options.sessionManager.getSession(sessionId);
     if (!session) throw new Error(`Unknown NIP-46 session: ${sessionId}`);
     await this.init();
@@ -139,7 +137,8 @@ export class Nip46Service {
       return;
     }
 
-    const shouldFetchUserPubkey = !session.userPubkey && session.permissions.includes("get_public_key");
+    const shouldFetchUserPubkey =
+      !session.userPubkey && session.permissions.includes("get_public_key");
     if (shouldFetchUserPubkey) {
       await this.fetchUserPublicKey(sessionId);
     }
