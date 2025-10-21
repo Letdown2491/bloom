@@ -2750,25 +2750,44 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
     if (!isPrivateView) return undefined;
     const map = new Map<string, BlobReplicaSummary>();
     privateVisibleBlobs.forEach(blob => {
-      const urls = new Set<string>();
+      const urls = new Map<string, string | undefined>();
+      const addServer = (value?: string | null, preferredName?: string | null) => {
+        if (!value) return;
+        const normalized = normalizeMaybeServerUrl(value);
+        if (!normalized) return;
+        if (!urls.has(normalized)) {
+          urls.set(normalized, preferredName ?? serverByUrl.get(normalized)?.name);
+          return;
+        }
+        if (!urls.get(normalized) && preferredName) {
+          urls.set(normalized, preferredName);
+        }
+      };
+
       const privateServers = blob.privateData?.servers ?? [];
-      privateServers.forEach(url => {
-        const normalized = normalizeMaybeServerUrl(url);
-        if (normalized) urls.add(normalized);
-      });
-      const fallback = normalizeMaybeServerUrl(blob.serverUrl);
-      if (fallback) urls.add(fallback);
-      if (urls.size === 0 && privateScopeUrl) urls.add(privateScopeUrl);
+      privateServers.forEach(url => addServer(url));
+
+      const globalSummary = blobReplicaInfo.get(blob.sha256);
+      if (globalSummary) {
+        globalSummary.servers.forEach(entry => addServer(entry.url, entry.name));
+      }
+
+      addServer(blob.serverUrl);
+
+      if (urls.size === 0 && privateScopeUrl) {
+        addServer(privateScopeUrl);
+      }
       if (urls.size === 0) return;
-      const servers = Array.from(urls).map(url => {
+
+      const servers = Array.from(urls.entries()).map(([url, preferredName]) => {
         const server = serverByUrl.get(url);
-        const name = server?.name ?? server?.url ?? url;
+        const name = preferredName ?? server?.name ?? server?.url ?? url;
         return { url, name };
       });
       map.set(blob.sha256, { count: servers.length, servers });
     });
     return map;
-  }, [isPrivateView, privateVisibleBlobs, privateScopeUrl, serverByUrl]);
+  }, [blobReplicaInfo, isPrivateView, privateVisibleBlobs, privateScopeUrl, serverByUrl]);
 
   const effectiveBrowsingAllServers = isPrivateView ? isPrivateAggregated : browsingAllServers;
   const effectiveAggregatedBlobs = isPrivateView && isPrivateAggregated ? visiblePrivateBlobs : visibleAggregatedBlobs;
