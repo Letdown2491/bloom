@@ -15,6 +15,31 @@ export const sanitizeRelayUrl = (value: unknown): string | null => {
   return normalized;
 };
 
+export const normalizeRelayUrls = (
+  relays: readonly (string | null | undefined)[] | null | undefined
+): string[] => {
+  if (!relays || relays.length === 0) return [];
+  const normalized = new Set<string>();
+  relays.forEach(url => {
+    const sanitized = sanitizeRelayUrl(url);
+    if (sanitized) {
+      normalized.add(sanitized);
+    }
+  });
+  return Array.from(normalized);
+};
+
+export const collectRelayTargets = (
+  relays: readonly (string | null | undefined)[] | null | undefined,
+  fallback: readonly string[] = DEFAULT_PUBLIC_RELAYS
+): string[] => {
+  const normalized = normalizeRelayUrls(relays);
+  if (normalized.length > 0) {
+    return normalized;
+  }
+  return normalizeRelayUrls(fallback) ?? [];
+};
+
 export const extractPreferredRelays = (metadata: unknown): string[] => {
   if (!metadata || typeof metadata !== "object") return [];
   const urls = new Set<string>();

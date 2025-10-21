@@ -54,6 +54,37 @@ const expirationDateFormatter = new Intl.DateTimeFormat(undefined, {
 
 const relativeTimeFormatter = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" });
 
+export const formatRelativeTime = (timestampMs: number, options?: { now?: number }): string => {
+  const now = options?.now ?? Date.now();
+  const diff = timestampMs - now;
+  const divisions: { amount: number; unit: Intl.RelativeTimeFormatUnit }[] = [
+    { amount: 60, unit: "minute" },
+    { amount: 60, unit: "hour" },
+    { amount: 24, unit: "day" },
+    { amount: 7, unit: "week" },
+    { amount: 4.34524, unit: "month" },
+    { amount: 12, unit: "year" },
+  ];
+
+  let duration = diff / 1000;
+  let unit: Intl.RelativeTimeFormatUnit = "second";
+
+  for (const division of divisions) {
+    if (Math.abs(duration) < division.amount) {
+      unit = division.unit;
+      break;
+    }
+    duration /= division.amount;
+    unit = division.unit;
+  }
+
+  try {
+    return relativeTimeFormatter.format(Math.round(duration), unit);
+  } catch {
+    return new Date(timestampMs).toLocaleString();
+  }
+};
+
 export const describeExpiration = (
   expiresAt: number | null | undefined,
   options?: { now?: number; soonThresholdSeconds?: number }

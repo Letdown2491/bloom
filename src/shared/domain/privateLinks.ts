@@ -7,7 +7,7 @@ import {
   isPrivateLinkServiceConfigured,
 } from "../constants/privateLinks";
 import { extractSha256FromUrl } from "../api/blossomClient";
-import { DEFAULT_PUBLIC_RELAYS } from "../utils/relays";
+import { collectRelayTargets, DEFAULT_PUBLIC_RELAYS } from "../utils/relays";
 import { loadNdkModule, type NdkModule } from "../api/ndkModule";
 
 const ALIAS_ALLOWED = "abcdefghijklmnopqrstuvwxyz0123456789";
@@ -284,13 +284,8 @@ const publishPrivateLinkEvent = async (
   event.content = await encryptPayload(signer, serviceUser, envelope);
   await event.sign();
 
-  const baseRelayUrls = ndk.explicitRelayUrls?.length ? ndk.explicitRelayUrls : Array.from(DEFAULT_PUBLIC_RELAYS);
-  const relayUrls = new Set<string>();
-  baseRelayUrls.forEach((url: string | null | undefined) => {
-    if (typeof url === "string" && url.trim()) {
-      relayUrls.add(url.trim());
-    }
-  });
+  const baseRelayUrls = collectRelayTargets(ndk.explicitRelayUrls, DEFAULT_PUBLIC_RELAYS);
+  const relayUrls = new Set<string>(baseRelayUrls);
   relayUrls.add(PRIVATE_LINK_REQUIRED_RELAY);
 
   let relaySet: NdkRelaySetInstance | null = relayContext?.relaySet ?? null;

@@ -17,11 +17,12 @@ import { useSelection } from "../features/selection/SelectionContext";
 import { LoggedOutPrompt } from "./components/LoggedOutPrompt";
 import { MainNavigation, type NavigationTab } from "./components/MainNavigation";
 import { deriveServerNameFromUrl } from "../shared/utils/serverName";
-import { DEFAULT_PUBLIC_RELAYS, sanitizeRelayUrl } from "../shared/utils/relays";
+import { collectRelayTargets, DEFAULT_PUBLIC_RELAYS, normalizeRelayUrls, sanitizeRelayUrl } from "../shared/utils/relays";
 import { buildNip94EventTemplate } from "../shared/api/nip94";
 import { ShareFolderRequest, type ShareFolderItem } from "../shared/types/shareFolder";
 import { usePrivateLinks } from "../features/privateLinks/hooks/usePrivateLinks";
 import type { PrivateLinkRecord } from "../shared/domain/privateLinks";
+import { buildItemsFromRecord, buildShareableItemHints, buildShareItemsFromRequest, filterItemsByPolicy } from "../shared/domain/folderShareHelpers";
 
 import type { ShareCompletion, SharePayload, ShareMode } from "../features/share/ui/ShareComposer";
 import type { BlossomBlob } from "../shared/api/blossomClient";
@@ -49,7 +50,6 @@ import {
   isPrivateFolderName,
   buildFolderEventTemplate,
   type FolderListRecord,
-  type FolderFileHint,
   type FolderSharePolicy,
 } from "../shared/domain/folderList";
 import type {
@@ -158,160 +158,6 @@ type ShareFolderExecutionRequest = {
   relayHints: readonly string[];
   items: ShareFolderItem[];
   sharePolicy: FolderSharePolicy;
-};
-
-const normalizeLinkValue = (value?: string | null): string | null => {
-  if (typeof value !== "string") return null;
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : null;
-};
-
-const deriveServerUrlFromLink = (url: string, sha: string): string | null => {
-  if (!url || !sha) return null;
-  const trimmedUrl = url.trim();
-  const normalizedSha = sha.toLowerCase();
-  try {
-    const parsed = new URL(trimmedUrl);
-    const strippedPath = parsed.pathname.replace(new RegExp(`${normalizedSha}.*$`, "i"), "");
-    const normalizedPath = strippedPath.replace(/\/+$/, "");
-    const base = `${parsed.origin}${normalizedPath}`;
-    return base.replace(/\/+$/, "");
-  } catch {
-    const index = trimmedUrl.toLowerCase().indexOf(normalizedSha);
-    if (index >= 0) {
-      return trimmedUrl.slice(0, index).replace(/\/+$/, "");
-    }
-  }
-  return null;
-};
-
-const resolveBlobServerUrl = (blob: BlossomBlob): string | null => {
-  const explicit = normalizeLinkValue(blob.serverUrl);
-  if (explicit) {
-    return explicit.replace(/\/+$/, "");
-  }
-  const direct = normalizeLinkValue(blob.url);
-  const sha = typeof blob.sha256 === "string" ? blob.sha256.trim().toLowerCase() : "";
-  if (direct && sha.length === 64) {
-    const derived = deriveServerUrlFromLink(direct, sha);
-    if (derived) return derived;
-  }
-  return null;
-};
-
-const resolvePublicBlobUrl = (blob: BlossomBlob): string | null => {
-  const direct = normalizeLinkValue(blob.url);
-  if (direct) return direct;
-  const server = resolveBlobServerUrl(blob);
-  const sha = typeof blob.sha256 === "string" ? blob.sha256.trim().toLowerCase() : "";
-  if (server && sha.length === 64) {
-    return `${server}/${sha}`;
-  }
-  return null;
-};
-
-const buildShareItemsFromRequest = (request: ShareFolderRequest): ShareFolderItem[] => {
-  if (Array.isArray(request.items) && request.items.length > 0) {
-    return request.items
-      .filter(item => item && item.blob && typeof item.blob.sha256 === "string")
-      .map(item => ({
-        blob: item.blob,
-        privateLinkAlias: item.privateLinkAlias ?? null,
-        privateLinkUrl: item.privateLinkUrl ?? null,
-      }));
-  }
-  if (Array.isArray(request.blobs) && request.blobs.length > 0) {
-    return request.blobs
-      .filter(blob => blob && typeof blob.sha256 === "string")
-      .map(blob => ({
-        blob,
-        privateLinkAlias: null,
-        privateLinkUrl: null,
-      }));
-  }
-  return [];
-};
-
-const filterItemsByPolicy = (items: ShareFolderItem[], policy: FolderSharePolicy): ShareFolderItem[] => {
-  return items.filter(item => {
-    const hasPrivate = Boolean(item.privateLinkUrl);
-    const hasPublic = Boolean(resolvePublicBlobUrl(item.blob));
-    if (policy === "private-only") return hasPrivate;
-    if (policy === "public-only") return !hasPrivate && hasPublic;
-    return hasPrivate || hasPublic;
-  });
-};
-
-const buildItemsFromRecord = (
-  record: FolderListRecord,
-  activeLinks: Map<string, PrivateLinkRecord>,
-  privateLinkHost: string
-): ShareFolderItem[] => {
-  const normalizedHost = privateLinkHost ? privateLinkHost.replace(/\/+$/, "") : "";
-  const items: ShareFolderItem[] = [];
-  record.shas.forEach(sha => {
-    if (typeof sha !== "string" || sha.length !== 64) return;
-    const normalizedSha = sha.toLowerCase();
-    const hint = record.fileHints?.[normalizedSha] ?? record.fileHints?.[sha] ?? null;
-    const hintUrl = normalizeLinkValue(hint?.url);
-    const hintedServer = normalizeLinkValue(hint?.serverUrl);
-    const serverUrl = hintedServer ? hintedServer.replace(/\/+$/, "") : undefined;
-    const requiresAuth =
-      typeof hint?.requiresAuth === "boolean" ? hint.requiresAuth : undefined;
-    const aliasRecord = activeLinks.get(normalizedSha) ?? null;
-    const alias = aliasRecord?.alias ?? null;
-    const hasHost = normalizedHost.length > 0;
-    const isPrivateUrl = Boolean(
-      hasHost && hint?.privateLinkAlias && hintUrl && hintUrl.startsWith(normalizedHost)
-    );
-    const derivedPublicUrl =
-      !isPrivateUrl && hintUrl
-        ? hintUrl
-        : serverUrl
-          ? `${serverUrl}/${normalizedSha}`
-          : undefined;
-    const sizeValue =
-      typeof hint?.size === "number" && Number.isFinite(hint.size) ? hint.size : undefined;
-    const normalizedServerType =
-      hint?.serverType === "blossom" || hint?.serverType === "nip96" || hint?.serverType === "satellite"
-        ? hint.serverType
-        : undefined;
-    const blob: BlossomBlob = {
-      sha256: normalizedSha,
-    };
-    if (derivedPublicUrl) blob.url = derivedPublicUrl;
-    const effectiveServer =
-      serverUrl ??
-      (derivedPublicUrl
-        ? deriveServerUrlFromLink(derivedPublicUrl, normalizedSha) ?? undefined
-        : undefined);
-    if (effectiveServer) blob.serverUrl = effectiveServer;
-    if (typeof requiresAuth === "boolean") blob.requiresAuth = requiresAuth;
-    if (normalizedServerType) blob.serverType = normalizedServerType;
-    if (typeof sizeValue === "number") blob.size = sizeValue;
-    if (hint?.mimeType) blob.type = hint.mimeType;
-    if (hint?.name) blob.name = hint.name;
-
-    const privateLinkUrl = alias && hasHost ? `${normalizedHost}/${alias}` : undefined;
-    const item: ShareFolderItem = {
-      blob,
-      privateLinkAlias: alias ?? undefined,
-      privateLinkUrl,
-    };
-    items.push(item);
-  });
-  return items;
-};
-
-const collectRelayUrls = (relays: readonly string[]) => {
-  const set = new Set<string>();
-  relays.forEach(url => {
-    const normalized = sanitizeRelayUrl(url);
-    if (normalized) {
-      set.add(normalized);
-    }
-  });
-  return Array.from(set);
 };
 
 export default function App() {
@@ -686,7 +532,7 @@ export default function App() {
         items?: ShareFolderItem[] | null;
       }
     ): Promise<{ record: FolderListRecord; summary: PublishOperationSummary }> => {
-      const sanitizedRelays = collectRelayUrls(relayUrls.length ? relayUrls : DEFAULT_PUBLIC_RELAYS);
+      const sanitizedRelays = collectRelayTargets(relayUrls, DEFAULT_PUBLIC_RELAYS);
       const baseSummary: PublishOperationSummary = {
         total: sanitizedRelays.length,
         succeeded: 0,
@@ -735,7 +581,7 @@ export default function App() {
       const sharePolicy: FolderSharePolicy =
         policyRaw === "private-only" || policyRaw === "public-only" ? policyRaw : "all";
 
-      const candidateItemsSource =
+      const candidateItems =
         options?.items && options.items.length > 0
           ? options.items
           : Array.isArray(blobs)
@@ -748,115 +594,31 @@ export default function App() {
                 }))
             : [];
 
-      const normalizedItems = candidateItemsSource
+      const normalizedItems = candidateItems
         .filter(item => item && item.blob && typeof item.blob.sha256 === "string")
         .map(item => ({
           blob: item.blob,
           privateLinkAlias: item.privateLinkAlias ?? null,
           privateLinkUrl: item.privateLinkUrl ?? null,
-        }));
+        }))
+        .filter(item => {
+          const sha = item.blob.sha256?.toLowerCase();
+          if (!sha || sha.length !== 64) return false;
+          if (!isAllowedSha(sha)) return false;
+          return true;
+        });
 
-      const shareableItems = normalizedItems.filter(item => {
-        const hasPrivate = Boolean(item.privateLinkUrl);
-        const trimmedUrl = typeof item.blob.url === "string" ? item.blob.url.trim() : "";
-        const trimmedServer = typeof item.blob.serverUrl === "string" ? item.blob.serverUrl.trim() : "";
-        const hasPublic = Boolean(trimmedUrl || trimmedServer);
-        if (sharePolicy === "private-only") return hasPrivate;
-        if (sharePolicy === "public-only") return !hasPrivate && hasPublic;
-        return hasPrivate || hasPublic;
+      const { shas, hints } = buildShareableItemHints({
+        record,
+        items: normalizedItems,
+        sharePolicy,
       });
-
-      const filteredItems = shareableItems.filter(item => {
-        const sha = item.blob.sha256?.toLowerCase();
-        if (!sha || sha.length !== 64) return false;
-        if (!isAllowedSha(sha)) return false;
-        return true;
-      });
-
-      const shas = Array.from(
-        new Set(filteredItems.map(item => (item.blob.sha256 as string).toLowerCase()))
-      ).sort((a, b) => a.localeCompare(b));
-
-      const baseHints = record.fileHints ?? {};
-      const hintMap: Record<string, FolderFileHint> = {};
-      shas.forEach(sha => {
-        const existing = baseHints[sha];
-        hintMap[sha] = existing ? { ...existing, sha } : { sha };
-      });
-
-      const applyItemToHint = (item: ShareFolderItem) => {
-        const blob = item.blob;
-        if (!blob?.sha256 || blob.sha256.length !== 64) return;
-        const sha = blob.sha256.toLowerCase();
-        if (!hintMap[sha]) {
-          hintMap[sha] = { sha };
-        }
-        const entry = hintMap[sha];
-        const normalizedServer = resolveBlobServerUrl(blob) ?? undefined;
-        if (normalizedServer) {
-          entry.serverUrl = normalizedServer;
-        }
-        if (typeof blob.requiresAuth === "boolean") entry.requiresAuth = blob.requiresAuth;
-        if (blob.serverType) entry.serverType = blob.serverType;
-        if (blob.type) entry.mimeType = blob.type;
-        if (typeof blob.size === "number" && Number.isFinite(blob.size)) entry.size = blob.size;
-        if (blob.name) entry.name = blob.name;
-
-        const publicUrl = resolvePublicBlobUrl(blob) ?? undefined;
-
-        if (sharePolicy === "private-only") {
-          if (item.privateLinkUrl) {
-            entry.url = item.privateLinkUrl;
-            if (item.privateLinkAlias) entry.privateLinkAlias = item.privateLinkAlias;
-            else if (entry.privateLinkAlias !== undefined) delete entry.privateLinkAlias;
-          } else if (entry.url) {
-            delete entry.url;
-            if (entry.privateLinkAlias !== undefined) delete entry.privateLinkAlias;
-          }
-        } else if (sharePolicy === "public-only") {
-          if (publicUrl) {
-            entry.url = publicUrl;
-            if (entry.privateLinkAlias !== undefined) delete entry.privateLinkAlias;
-          } else if (entry.url) {
-            delete entry.url;
-            if (entry.privateLinkAlias !== undefined) delete entry.privateLinkAlias;
-          }
-        } else {
-          if (item.privateLinkUrl) {
-            entry.url = item.privateLinkUrl;
-            if (item.privateLinkAlias) entry.privateLinkAlias = item.privateLinkAlias;
-            else if (entry.privateLinkAlias !== undefined) delete entry.privateLinkAlias;
-          } else if (publicUrl) {
-            entry.url = publicUrl;
-            if (entry.privateLinkAlias !== undefined) delete entry.privateLinkAlias;
-          } else if (entry.url) {
-            delete entry.url;
-            if (entry.privateLinkAlias !== undefined) delete entry.privateLinkAlias;
-          }
-        }
-      };
-
-      filteredItems.forEach(applyItemToHint);
-
-      const effectiveHints = Object.fromEntries(
-        Object.entries(hintMap).filter(([, hint]) => {
-          if (!hint) return false;
-          if (hint.url && hint.url.trim()) return true;
-          if (hint.serverUrl && hint.serverUrl.trim()) return true;
-          if (typeof hint.requiresAuth === "boolean") return true;
-          if (hint.mimeType) return true;
-          if (typeof hint.size === "number" && Number.isFinite(hint.size)) return true;
-          if (hint.name) return true;
-          if (hint.privateLinkAlias) return true;
-          return false;
-        })
-      );
 
       const shareRecord: FolderListRecord = {
         ...record,
         shas,
         pubkey: record.pubkey ?? user.pubkey,
-        fileHints: Object.keys(effectiveHints).length > 0 ? effectiveHints : record.fileHints,
+        fileHints: Object.keys(hints).length > 0 ? hints : record.fileHints,
         sharePolicy,
       };
 
@@ -965,7 +727,7 @@ export default function App() {
       relayUrls: readonly string[],
       blobs?: BlossomBlob[]
     ): Promise<PublishOperationSummary> => {
-      const sanitizedRelays = collectRelayUrls(relayUrls.length ? relayUrls : DEFAULT_PUBLIC_RELAYS);
+      const sanitizedRelays = collectRelayTargets(relayUrls, DEFAULT_PUBLIC_RELAYS);
       const summary: PublishOperationSummary = {
         total: sanitizedRelays.length,
         succeeded: 0,
@@ -1268,7 +1030,7 @@ export default function App() {
 
   const shareFolderWithRelays = useCallback(
     async ({ record, normalizedPath, relayHints, items, sharePolicy }: ShareFolderExecutionRequest) => {
-      const sanitizedHints = collectRelayUrls(relayHints.length ? relayHints : shareRelayCandidates);
+      const sanitizedHints = collectRelayTargets(relayHints, shareRelayCandidates);
       if (!sanitizedHints.length) {
         showStatusMessage("Select at least one relay before sharing.", "error", 4000);
         return;
@@ -1357,9 +1119,10 @@ export default function App() {
             const metadataSummary = await ensureFolderMetadataOnRelays(shareRecord, sanitizedHints, filteredBlobs);
             setFolderShareDialog(current => {
               if (!current || current.record.path !== shareRecord.path) return current;
-              const relayUniverse = current.relayHints && current.relayHints.length > 0
-                ? collectRelayUrls(current.relayHints)
-                : sanitizedHints;
+              const relayUniverse =
+                current.relayHints && current.relayHints.length > 0
+                  ? normalizeRelayUrls(current.relayHints)
+                  : sanitizedHints;
               const baseTotal = relayUniverse.length;
               const listPhase: PublishPhaseState =
                 current.phases?.list ?? {
@@ -1395,9 +1158,10 @@ export default function App() {
             console.warn("Failed to publish folder metadata for share", metadataError);
             setFolderShareDialog(current => {
               if (!current || current.record.path !== shareRecord.path) return current;
-              const relayUniverse = current.relayHints && current.relayHints.length > 0
-                ? collectRelayUrls(current.relayHints)
-                : sanitizedHints;
+              const relayUniverse =
+                current.relayHints && current.relayHints.length > 0
+                  ? normalizeRelayUrls(current.relayHints)
+                  : sanitizedHints;
               const baseTotal = relayUniverse.length;
               const nextPhases =
                 current.phases ?? {
@@ -1494,7 +1258,7 @@ export default function App() {
       const publicCount = filterItemsByPolicy(shareableItems, "public-only").length;
       const defaultPolicy = record.sharePolicy ?? "all";
 
-      const relayOptions = collectRelayUrls(shareRelayCandidates);
+      const relayOptions = normalizeRelayUrls(shareRelayCandidates);
       if (!relayOptions.length) {
         showStatusMessage("Configure at least one relay before sharing.", "error", 4000);
         return;
@@ -1585,10 +1349,10 @@ export default function App() {
     const { record, relayHints, shareBlobs, shareItems, phases } = folderShareDialog;
     const failedUrls = phases?.list?.failed?.map(entry => entry.url).filter(Boolean) ?? [];
     const relayTargets = failedUrls.length
-      ? collectRelayUrls(failedUrls)
+      ? normalizeRelayUrls(failedUrls)
       : relayHints && relayHints.length > 0
-        ? collectRelayUrls(relayHints)
-        : collectRelayUrls(shareRelayCandidates);
+        ? collectRelayTargets(relayHints, shareRelayCandidates)
+        : normalizeRelayUrls(shareRelayCandidates);
     if (!relayTargets.length) {
       showStatusMessage("No relays available to retry.", "info", 3500);
       return;
@@ -1601,9 +1365,10 @@ export default function App() {
       if (!current || current.record.path !== record.path) return current;
       const existingList = current.phases?.list;
       const existingMetadata = current.phases?.metadata;
-      const relayUniverse = current.relayHints && current.relayHints.length > 0
-        ? collectRelayUrls(current.relayHints)
-        : collectRelayUrls(shareRelayCandidates);
+      const relayUniverse =
+        current.relayHints && current.relayHints.length > 0
+          ? normalizeRelayUrls(current.relayHints)
+          : normalizeRelayUrls(shareRelayCandidates);
       const baseTotal = relayUniverse.length;
       const succeededBefore = existingList
         ? Math.min(existingList.succeeded, baseTotal)
@@ -1659,9 +1424,10 @@ export default function App() {
       });
       setFolderShareDialog(current => {
         if (!current || current.record.path !== record.path) return current;
-        const relayUniverse = current.relayHints && current.relayHints.length > 0
-          ? collectRelayUrls(current.relayHints)
-          : collectRelayUrls(shareRelayCandidates);
+        const relayUniverse =
+          current.relayHints && current.relayHints.length > 0
+            ? normalizeRelayUrls(current.relayHints)
+            : normalizeRelayUrls(shareRelayCandidates);
         const baseTotal = relayUniverse.length;
         const currentMetadata = current.phases?.metadata ?? {
           status: "idle" as const,
@@ -1697,9 +1463,10 @@ export default function App() {
       const message = error instanceof Error ? error.message : "Failed to republish folder list.";
       setFolderShareDialog(current => {
         if (!current || current.record.path !== record.path) return current;
-        const relayUniverse = current.relayHints && current.relayHints.length > 0
-          ? collectRelayUrls(current.relayHints)
-          : collectRelayUrls(shareRelayCandidates);
+        const relayUniverse =
+          current.relayHints && current.relayHints.length > 0
+            ? normalizeRelayUrls(current.relayHints)
+            : normalizeRelayUrls(shareRelayCandidates);
         const baseTotal = relayUniverse.length;
         const currentMetadata = current.phases?.metadata ?? {
           status: "idle" as const,
@@ -1732,10 +1499,10 @@ export default function App() {
     const { record, relayHints, shareBlobs, phases } = folderShareDialog;
     const failedUrls = phases?.metadata?.failed?.map(entry => entry.url).filter(Boolean) ?? [];
     const relayTargets = failedUrls.length
-      ? collectRelayUrls(failedUrls)
+      ? normalizeRelayUrls(failedUrls)
       : relayHints && relayHints.length > 0
-        ? collectRelayUrls(relayHints)
-        : collectRelayUrls(shareRelayCandidates);
+        ? collectRelayTargets(relayHints, shareRelayCandidates)
+        : normalizeRelayUrls(shareRelayCandidates);
     if (!relayTargets.length) {
       showStatusMessage("No relays available to retry.", "info", 3500);
       return;
@@ -1746,9 +1513,10 @@ export default function App() {
     }
     setFolderShareDialog(current => {
       if (!current || current.record.path !== record.path) return current;
-      const relayUniverse = current.relayHints && current.relayHints.length > 0
-        ? collectRelayUrls(current.relayHints)
-        : collectRelayUrls(shareRelayCandidates);
+      const relayUniverse =
+        current.relayHints && current.relayHints.length > 0
+          ? normalizeRelayUrls(current.relayHints)
+          : normalizeRelayUrls(shareRelayCandidates);
       const baseTotal = relayUniverse.length;
       const currentList = current.phases?.list ?? {
         status: "ready" as const,
@@ -1776,9 +1544,10 @@ export default function App() {
       const summary = await ensureFolderMetadataOnRelays(record, relayTargets, shareBlobs ?? undefined);
       setFolderShareDialog(current => {
         if (!current || current.record.path !== record.path) return current;
-        const relayUniverse = current.relayHints && current.relayHints.length > 0
-          ? collectRelayUrls(current.relayHints)
-          : collectRelayUrls(shareRelayCandidates);
+        const relayUniverse =
+          current.relayHints && current.relayHints.length > 0
+            ? normalizeRelayUrls(current.relayHints)
+            : normalizeRelayUrls(shareRelayCandidates);
         const baseTotal = relayUniverse.length;
         const currentList = current.phases?.list ?? {
           status: "ready" as const,
@@ -1810,9 +1579,10 @@ export default function App() {
       const message = error instanceof Error ? error.message : "Failed to republish metadata.";
       setFolderShareDialog(current => {
         if (!current || current.record.path !== record.path) return current;
-        const relayUniverse = current.relayHints && current.relayHints.length > 0
-          ? collectRelayUrls(current.relayHints)
-          : collectRelayUrls(shareRelayCandidates);
+        const relayUniverse =
+          current.relayHints && current.relayHints.length > 0
+            ? normalizeRelayUrls(current.relayHints)
+            : normalizeRelayUrls(shareRelayCandidates);
         const baseTotal = relayUniverse.length;
         const currentList = current.phases?.list ?? {
           status: "ready" as const,
@@ -1843,7 +1613,7 @@ export default function App() {
   const handleConfirmShareRelays = useCallback(
     async (selectedRelays: readonly string[]) => {
       if (!folderShareRelayPrompt) return;
-      const sanitized = collectRelayUrls(selectedRelays.length ? selectedRelays : folderShareRelayPrompt.relayOptions);
+      const sanitized = collectRelayTargets(selectedRelays, folderShareRelayPrompt.relayOptions);
       if (!sanitized.length) {
         showStatusMessage("Choose at least one relay to publish to.", "warning", 4000);
         return;

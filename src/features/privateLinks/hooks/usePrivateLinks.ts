@@ -14,7 +14,7 @@ import {
   PRIVATE_LINK_SERVICE_HOST,
   PRIVATE_LINK_REQUIRED_RELAY,
 } from "../../../shared/constants/privateLinks";
-import { DEFAULT_PUBLIC_RELAYS, sanitizeRelayUrl } from "../../../shared/utils/relays";
+import { collectRelayTargets, DEFAULT_PUBLIC_RELAYS } from "../../../shared/utils/relays";
 
 export type UsePrivateLinksOptions = {
   enabled?: boolean;
@@ -46,16 +46,8 @@ export const usePrivateLinks = (options?: UsePrivateLinksOptions): PrivateLinkMa
   const queryKey = useMemo(() => buildQueryKey(user?.pubkey), [user?.pubkey]);
 
   const resolveRelayTargets = useCallback((): string[] => {
-    if (!ndk) return [PRIVATE_LINK_REQUIRED_RELAY];
-    const base =
-      ndk.explicitRelayUrls && ndk.explicitRelayUrls.length > 0
-        ? ndk.explicitRelayUrls
-        : Array.from(DEFAULT_PUBLIC_RELAYS);
-    const set = new Set<string>();
-    base.forEach(url => {
-      const sanitized = sanitizeRelayUrl(url);
-      if (sanitized) set.add(sanitized);
-    });
+    const targets = collectRelayTargets(ndk?.explicitRelayUrls, DEFAULT_PUBLIC_RELAYS);
+    const set = new Set<string>(targets);
     set.add(PRIVATE_LINK_REQUIRED_RELAY);
     return Array.from(set);
   }, [ndk]);

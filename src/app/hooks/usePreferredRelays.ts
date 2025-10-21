@@ -1,7 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { NDKRelay } from "@nostr-dev-kit/ndk";
 import { useCurrentPubkey, useNdk } from "../context/NdkContext";
-import { DEFAULT_PUBLIC_RELAYS, extractPreferredRelays, normalizeRelayOrigin, sanitizeRelayUrl } from "../../shared/utils/relays";
+import {
+  collectRelayTargets,
+  DEFAULT_PUBLIC_RELAYS,
+  extractPreferredRelays,
+  normalizeRelayOrigin,
+  normalizeRelayUrls,
+  sanitizeRelayUrl,
+} from "../../shared/utils/relays";
 
 export type RelayPolicy = {
   url: string;
@@ -46,12 +53,7 @@ export const usePreferredRelays = () => {
     async (options?: { waitForConnection?: boolean }): Promise<RelayPolicy[]> => {
       if (!ndk || !pubkey) return [];
 
-      const candidateRelays = ndk.explicitRelayUrls?.length
-        ? ndk.explicitRelayUrls
-        : Array.from(DEFAULT_PUBLIC_RELAYS);
-      const sanitizedTargets = candidateRelays
-        .map(url => sanitizeRelayUrl(url))
-        .filter((url): url is string => Boolean(url));
+      const sanitizedTargets = collectRelayTargets(ndk.explicitRelayUrls, DEFAULT_PUBLIC_RELAYS);
 
       if (sanitizedTargets.length) {
         const uniqueTargets = Array.from(new Set(sanitizedTargets));
@@ -123,12 +125,8 @@ export const usePreferredRelays = () => {
 
   useEffect(() => {
     if (!ndk) return;
-    const preferredUrls = relayPolicies.length > 0 ? relayPolicies.map(policy => policy.url) : Array.from(DEFAULT_PUBLIC_RELAYS);
-    const sanitized = preferredUrls
-      .map(url => sanitizeRelayUrl(url))
-      .filter((url): url is string => Boolean(url));
-
-    const unique = Array.from(new Set(sanitized.length > 0 ? sanitized : Array.from(DEFAULT_PUBLIC_RELAYS)));
+    const preferredUrls = relayPolicies.length > 0 ? relayPolicies.map(policy => policy.url) : undefined;
+    const unique = collectRelayTargets(preferredUrls, DEFAULT_PUBLIC_RELAYS);
     ndk.explicitRelayUrls = unique;
 
     const pool = ndk.pool;
@@ -140,10 +138,8 @@ export const usePreferredRelays = () => {
       if (normalized) existing.add(normalized);
     });
 
-    const seen = new Set<string>();
+    const seen = new Set<string>(unique);
     unique.forEach(url => {
-      if (seen.has(url)) return;
-      seen.add(url);
       if (!existing.has(url)) {
         ndk.addExplicitRelay(url, undefined, false);
       }
@@ -164,12 +160,12 @@ export const usePreferredRelays = () => {
 
   const poolRelays = useMemo(() => {
     if (!ndk?.pool) return [] as string[];
-    const urls = new Set<string>();
+    const urls: string[] = [];
     ndk.pool.relays.forEach((relay: NDKRelay) => {
       const normalized = normalizeRelayOrigin(relay.url);
-      if (normalized) urls.add(normalized);
+      if (normalized) urls.push(normalized);
     });
-    return Array.from(urls);
+    return normalizeRelayUrls(urls);
   }, [ndk]);
 
   const preferredRelays = useMemo(() => {

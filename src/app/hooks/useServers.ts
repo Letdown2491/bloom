@@ -6,7 +6,7 @@ import type { NDKEvent as NdkEvent } from "@nostr-dev-kit/ndk";
 import { deriveServerNameFromUrl } from "../../shared/utils/serverName";
 import type { ManagedServer } from "../../shared/types/servers";
 export type { ManagedServer } from "../../shared/types/servers";
-import { DEFAULT_PUBLIC_RELAYS, sanitizeRelayUrl } from "../../shared/utils/relays";
+import { collectRelayTargets, DEFAULT_PUBLIC_RELAYS } from "../../shared/utils/relays";
 
 const DEFAULT_SERVERS: ManagedServer[] = [
   { name: "Primal", url: "https://blossom.primal.net", type: "blossom", requiresAuth: true, sync: false },
@@ -49,14 +49,8 @@ export const useServers = () => {
 
   const resolveRelayTargets = useCallback(() => {
     if (!ndk) return Array.from(DEFAULT_PUBLIC_RELAYS);
-    const base =
-      ndk.explicitRelayUrls && ndk.explicitRelayUrls.length > 0
-        ? ndk.explicitRelayUrls
-        : Array.from(DEFAULT_PUBLIC_RELAYS);
-    const sanitized = base
-      .map(url => sanitizeRelayUrl(url))
-      .filter((url): url is string => Boolean(url));
-    return Array.from(new Set(sanitized));
+    const base = ndk.explicitRelayUrls && ndk.explicitRelayUrls.length > 0 ? ndk.explicitRelayUrls : undefined;
+    return collectRelayTargets(base, DEFAULT_PUBLIC_RELAYS);
   }, [ndk]);
 
   const query = useQuery({

@@ -12,7 +12,7 @@ import {
 import { fetchNip94ByHashes } from "../../shared/api/nip94Fetch";
 import type { Nip94ParsedEvent } from "../../shared/api/nip94";
 import { prettyBytes, prettyDate } from "../../shared/utils/format";
-import { DEFAULT_PUBLIC_RELAYS } from "../../shared/utils/relays";
+import { collectRelayTargets, DEFAULT_PUBLIC_RELAYS } from "../../shared/utils/relays";
 import { DocumentIcon, RefreshIcon, LinkIcon, DownloadIcon } from "../../shared/ui/icons";
 
 type PublicFolderPageProps = {
@@ -43,18 +43,6 @@ type LoadState =
     };
 
 const shortenHash = (value: string) => `${value.slice(0, 8)}…${value.slice(-6)}`;
-
-const normalizeRelayUrl = (value: string) => {
-  try {
-    const parsed = new URL(value);
-    parsed.hash = "";
-    parsed.search = "";
-    return parsed.toString().replace(/\/+$/, "");
-  } catch {
-    const trimmed = value.trim();
-    return trimmed ? trimmed.replace(/\/+$/, "") : trimmed;
-  }
-};
 
 const describeUpdatedAt = (timestamp?: number) => {
   if (!timestamp) return null;
@@ -158,13 +146,7 @@ export const PublicFolderPage: React.FC<PublicFolderPageProps> = ({ naddr }) => 
         let relayHints: string[] | undefined;
         let relayPreparation: Awaited<ReturnType<typeof prepareRelaySet>> | null = null;
         if (ndk) {
-          const candidateRelays =
-            Array.isArray(address.relays) && address.relays.length > 0
-              ? address.relays
-              : Array.from(DEFAULT_PUBLIC_RELAYS);
-          const normalizedRelays = candidateRelays
-            .map(url => normalizeRelayUrl(url))
-            .filter((url): url is string => url.length > 0);
+          const normalizedRelays = collectRelayTargets(address.relays, DEFAULT_PUBLIC_RELAYS);
           relayHints = normalizedRelays.length > 0 ? normalizedRelays : undefined;
           if (normalizedRelays.length > 0) {
             try {

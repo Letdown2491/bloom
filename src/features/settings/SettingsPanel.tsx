@@ -36,14 +36,16 @@ import { useIsCompactScreen } from "../../shared/hooks/useIsCompactScreen";
 import { useIndexedDbStorageSummary } from "../../shared/hooks/useIndexedDbStorageSummary";
 import { useStorageQuota } from "../../shared/hooks/useStorageQuota";
 import { formatBytes } from "../../shared/utils/storageQuota";
+import { formatRelativeTime } from "../../shared/utils/format";
 import { useFolderLists } from "../../app/context/FolderListContext";
 import { encodeFolderNaddr, isPrivateFolderName } from "../../shared/domain/folderList";
 import { usePreferredRelays } from "../../app/hooks/usePreferredRelays";
 import { useCurrentPubkey } from "../../app/context/NdkContext";
-import { DEFAULT_PUBLIC_RELAYS, sanitizeRelayUrl } from "../../shared/utils/relays";
+import { DEFAULT_PUBLIC_RELAYS, normalizeRelayUrls } from "../../shared/utils/relays";
 import { clearPreviewInlineStorage } from "../../shared/utils/blobPreviewCache";
 import { resetManifestStore } from "../../shared/utils/folderManifestStore";
 import { resetCacheDb } from "../../shared/utils/cacheDb";
+import { SwitchControl } from "../../shared/ui/SwitchControl";
 
 type FilterOption = {
   id: FilterMode;
@@ -103,17 +105,6 @@ const VISIBILITY_OPTIONS: SegmentedOption[] = [
   { id: "public", label: "Public", Icon: ShareIcon },
 ];
 
-const collectRelayHints = (relays: readonly string[]): string[] => {
-  const normalized = new Set<string>();
-  relays.forEach(url => {
-    const sanitized = sanitizeRelayUrl(url);
-    if (sanitized) {
-      normalized.add(sanitized);
-    }
-  });
-  return Array.from(normalized);
-};
-
 const buildShareLink = (
   record: FolderListRecord,
   fallbackPubkey: string | null,
@@ -137,91 +128,6 @@ const getProgressBarClass = (percent: number, theme: "dark" | "light"): string =
   if (percent >= 80) return "bg-red-400";
   if (percent >= 66.6666667) return "bg-amber-400";
   return theme === "light" ? "bg-blue-500" : "bg-emerald-400";
-};
-const formatRelativeTime = (timestampMs: number): string => {
-  const now = Date.now();
-  const diff = timestampMs - now;
-  const divisions: { amount: number; unit: Intl.RelativeTimeFormatUnit }[] = [
-    { amount: 60, unit: "minute" },
-    { amount: 60, unit: "hour" },
-    { amount: 24, unit: "day" },
-    { amount: 7, unit: "week" },
-    { amount: 4.34524, unit: "month" },
-    { amount: 12, unit: "year" },
-  ];
-
-  let duration = diff / 1000;
-  let unit: Intl.RelativeTimeFormatUnit = "second";
-
-  for (const division of divisions) {
-    if (Math.abs(duration) < division.amount) {
-      unit = division.unit;
-      break;
-    }
-    duration /= division.amount;
-    unit = division.unit;
-  }
-
-  try {
-    const rtf = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" });
-    return rtf.format(Math.round(duration), unit);
-  } catch {
-    return new Date(timestampMs).toLocaleString();
-  }
-};
-
-type SwitchControlProps = {
-  id?: string;
-  checked: boolean;
-  onToggle: (value: boolean) => void;
-  disabled?: boolean;
-  labelledBy?: string;
-  label?: string;
-  theme?: "dark" | "light";
-};
-
-const SwitchControl: React.FC<SwitchControlProps> = ({ id, checked, onToggle, disabled, labelledBy, label, theme = "dark" }) => {
-  const isLightTheme = theme === "light";
-  const activeTrackClass = isLightTheme ? "border-blue-600 bg-blue-600" : "border-emerald-500/80 bg-emerald-400/90";
-  const inactiveTrackClass = "border-slate-500/80 bg-slate-600/70";
-
-  const trackClass = disabled
-    ? "cursor-not-allowed border-slate-600 bg-slate-700/70 opacity-60"
-    : checked
-    ? activeTrackClass
-    : inactiveTrackClass;
-
-  const knobPosition = checked ? "right-1" : "left-1";
-  const knobColor = checked
-    ? isLightTheme
-      ? "border-blue-600 text-blue-600"
-      : "border-emerald-500 text-emerald-500"
-    : "border-slate-500 text-slate-500";
-
-  return (
-    <button
-      id={id}
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      aria-labelledby={labelledBy}
-      aria-label={labelledBy ? undefined : label}
-      className={`relative inline-flex h-8 w-16 flex-shrink-0 items-center rounded-full border transition duration-300 ease-out ${trackClass}`}
-      onClick={() => {
-        if (disabled) return;
-        onToggle(!checked);
-      }}
-    >
-      {!labelledBy && label ? <span className="sr-only">{label}</span> : null}
-      <span
-        className={`pointer-events-none absolute top-1 bottom-1 flex aspect-square items-center justify-center rounded-full border-2 bg-white text-base transition-all duration-300 ease-out ${
-          knobPosition
-        } ${knobColor}`}
-      >
-        {checked ? "✓" : "✕"}
-      </span>
-    </button>
-  );
 };
 
 type SettingCardProps = {
@@ -531,7 +437,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const { effectiveRelays } = usePreferredRelays();
   const currentPubkey = useCurrentPubkey();
   const shareRelayHints = React.useMemo(
-    () => collectRelayHints(effectiveRelays.length > 0 ? effectiveRelays : DEFAULT_PUBLIC_RELAYS),
+    () => normalizeRelayUrls(effectiveRelays.length > 0 ? effectiveRelays : DEFAULT_PUBLIC_RELAYS),
     [effectiveRelays]
   );
   const shareOrigin = React.useMemo(() => {

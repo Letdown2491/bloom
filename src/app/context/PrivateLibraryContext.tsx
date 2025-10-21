@@ -6,7 +6,7 @@ import {
   publishPrivateList,
   type PrivateListEntry,
 } from "../../shared/domain/privateList";
-import { DEFAULT_PUBLIC_RELAYS, sanitizeRelayUrl } from "../../shared/utils/relays";
+import { collectRelayTargets, DEFAULT_PUBLIC_RELAYS } from "../../shared/utils/relays";
 
 type PrivateLibraryContextValue = {
   entries: PrivateListEntry[];
@@ -34,14 +34,8 @@ export const PrivateLibraryProvider: React.FC<{ children: React.ReactNode }> = (
 
   const resolveRelayTargets = useCallback(() => {
     if (!ndk) return [] as string[];
-    const base =
-      ndk.explicitRelayUrls && ndk.explicitRelayUrls.length > 0
-        ? ndk.explicitRelayUrls
-        : Array.from(DEFAULT_PUBLIC_RELAYS);
-    const sanitized = base
-      .map(url => sanitizeRelayUrl(url))
-      .filter((url): url is string => Boolean(url));
-    return Array.from(new Set(sanitized));
+    const base = ndk.explicitRelayUrls && ndk.explicitRelayUrls.length > 0 ? ndk.explicitRelayUrls : undefined;
+    return collectRelayTargets(base, DEFAULT_PUBLIC_RELAYS);
   }, [ndk]);
 
   const refresh = useCallback(async () => {

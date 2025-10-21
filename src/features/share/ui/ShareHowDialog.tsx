@@ -61,11 +61,21 @@ export const ShareHowDialog: React.FC<ShareHowDialogProps> = ({
     : "w-full max-w-md rounded-2xl border border-slate-800 bg-slate-900/90 p-6 text-slate-100 shadow-xl";
   const headingClass = isLightTheme ? "text-lg font-semibold text-slate-900" : "text-lg font-semibold text-slate-100";
   const descriptionClass = isLightTheme ? "mt-2 text-sm text-slate-600" : "mt-2 text-sm text-slate-400";
-  const optionsContainerClass = isLightTheme
-    ? "mt-4 space-y-3 rounded-2xl border border-slate-200 bg-slate-50 p-4"
-    : "mt-4 space-y-3 rounded-2xl border border-slate-800 bg-slate-950/70 p-4";
+  const optionsContainerClass = "mt-4 space-y-3";
   const optionTitleClass = isLightTheme ? "text-sm font-semibold text-slate-900" : "text-sm font-semibold text-slate-100";
   const optionDescriptionClass = isLightTheme ? "mt-1 text-xs text-slate-500" : "mt-1 text-xs text-slate-400";
+  const optionBaseClass = isLightTheme
+    ? "flex cursor-pointer items-start gap-3 rounded-xl border px-3 py-3 transition"
+    : "flex cursor-pointer items-start gap-3 rounded-xl border px-3 py-3 transition";
+  const optionDisabledClass = isLightTheme
+    ? "cursor-not-allowed border-slate-200 bg-slate-100 opacity-60"
+    : "cursor-not-allowed border-slate-800 bg-slate-900/50 opacity-60";
+  const optionSelectedClass = isLightTheme
+    ? "border-emerald-500/70 bg-emerald-50"
+    : "border-emerald-500/60 bg-emerald-500/10";
+  const optionIdleClass = isLightTheme
+    ? "border-slate-200 bg-white hover:border-slate-300"
+    : "border-slate-800 bg-slate-900/70 hover:border-slate-700/80";
   const radioClass = isLightTheme
     ? "mt-1 h-4 w-4 text-emerald-600 focus:ring-emerald-500 border-slate-300"
     : "mt-1 h-4 w-4 text-emerald-500 focus:ring-emerald-500 border-slate-600 bg-slate-900";
@@ -124,6 +134,33 @@ export const ShareHowDialog: React.FC<ShareHowDialogProps> = ({
     }`;
   const linkTextClass = "flex-1 min-w-0 truncate text-left font-mono text-[13px]";
 
+  const publicDescription = allowPublic
+    ? "Share a direct link that anyone can open without additional approval."
+    : "Public sharing isn’t available for this file.";
+
+  const shareOptions: Array<{
+    value: "public" | "private";
+    title: string;
+    description: string;
+    allowed: boolean;
+    Icon: typeof ShareIcon;
+  }> = [
+    {
+      value: "public",
+      title: "Share via public link",
+      description: publicDescription,
+      allowed: allowPublic,
+      Icon: ShareIcon,
+    },
+    {
+      value: "private",
+      title: "Share via private link",
+      description: privateDescription,
+      allowed: allowPrivate,
+      Icon: LockIcon,
+    },
+  ];
+
   return createPortal(
     <div className={overlayClass} role="presentation">
       <form
@@ -138,49 +175,38 @@ export const ShareHowDialog: React.FC<ShareHowDialogProps> = ({
 
         <fieldset className={optionsContainerClass}>
           <legend className="sr-only">Share options</legend>
-          <label className={`flex gap-3 ${!allowPublic ? "opacity-60" : ""}`}>
-            <input
-              type="radio"
-              name="share-mode"
-              value="public"
-              className={radioClass}
-              checked={selection === "public"}
-              disabled={!allowPublic}
-              onChange={() => allowPublic && setSelection("public")}
-            />
-            <div className="flex flex-1 flex-col gap-1">
-              <div className="flex items-center gap-2">
-                <span className={iconPillClass}>
-                  <ShareIcon size={16} />
-                </span>
-                <span className={optionTitleClass}>Share via public link</span>
-              </div>
-              <p className={optionDescriptionClass}>
-                Share a direct link that anyone can open without additional approval.
-              </p>
-            </div>
-          </label>
-
-          <label className={`flex gap-3 ${!allowPrivate ? "opacity-60" : ""}`}>
-            <input
-              type="radio"
-              name="share-mode"
-              value="private"
-              className={radioClass}
-              checked={selection === "private"}
-              disabled={!allowPrivate}
-              onChange={() => allowPrivate && setSelection("private")}
-            />
-            <div className="flex flex-1 flex-col gap-1">
-              <div className="flex items-center gap-2">
-                <span className={iconPillClass}>
-                  <LockIcon size={16} />
-                </span>
-                <span className={optionTitleClass}>Share via private link</span>
-              </div>
-              <p className={optionDescriptionClass}>{privateDescription}</p>
-            </div>
-          </label>
+          {shareOptions.map(option => {
+            const isSelected = selection === option.value;
+            const disabled = !option.allowed;
+            const optionClassName = [
+              optionBaseClass,
+              disabled ? optionDisabledClass : isSelected ? optionSelectedClass : optionIdleClass,
+            ].join(" ");
+            return (
+              <label key={option.value} className={optionClassName}>
+                <input
+                  type="radio"
+                  name="share-mode"
+                  value={option.value}
+                  className={radioClass}
+                  checked={isSelected}
+                  disabled={disabled}
+                  onChange={() => {
+                    if (!disabled) setSelection(option.value);
+                  }}
+                />
+                <div className="flex flex-1 flex-col gap-1">
+                  <div className="flex items-center gap-2">
+                    <span className={iconPillClass}>
+                      <option.Icon size={16} />
+                    </span>
+                    <span className={optionTitleClass}>{option.title}</span>
+                  </div>
+                  <p className={optionDescriptionClass}>{option.description}</p>
+                </div>
+              </label>
+            );
+          })}
         </fieldset>
 
         <div className="mt-5 space-y-2">
