@@ -196,41 +196,33 @@ export const getKv = async <T = unknown>(key: string): Promise<T | undefined> =>
 
 export const setKv = async (key: string, value: unknown): Promise<void> => {
   if (!key) return;
-  try {
-    const db = await withDb();
-    await new Promise<void>((resolve, reject) => {
-      const tx = db.transaction(STORE_NAME, "readwrite");
-      const store = tx.objectStore(STORE_NAME);
-      const record: KvRecord = { key, value, updatedAt: Date.now() };
-      const request = store.put(record);
-      request.onsuccess = () => {
-        resolve();
-        triggerCompactionIfNeeded();
-      };
-      request.onerror = () => reject(request.error ?? new Error("IndexedDB write failed"));
-    });
-  } catch (error) {
-    throw error;
-  }
+  const db = await withDb();
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, "readwrite");
+    const store = tx.objectStore(STORE_NAME);
+    const record: KvRecord = { key, value, updatedAt: Date.now() };
+    const request = store.put(record);
+    request.onsuccess = () => {
+      resolve();
+      triggerCompactionIfNeeded();
+    };
+    request.onerror = () => reject(request.error ?? new Error("IndexedDB write failed"));
+  });
 };
 
 export const deleteKv = async (key: string): Promise<void> => {
   if (!key) return;
-  try {
-    const db = await withDb();
-    await new Promise<void>((resolve, reject) => {
-      const tx = db.transaction(STORE_NAME, "readwrite");
-      const store = tx.objectStore(STORE_NAME);
-      const request = store.delete(key);
-      request.onsuccess = () => {
-        resolve();
-        triggerCompactionIfNeeded();
-      };
-      request.onerror = () => reject(request.error ?? new Error("IndexedDB delete failed"));
-    });
-  } catch (error) {
-    throw error;
-  }
+  const db = await withDb();
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, "readwrite");
+    const store = tx.objectStore(STORE_NAME);
+    const request = store.delete(key);
+    request.onsuccess = () => {
+      resolve();
+      triggerCompactionIfNeeded();
+    };
+    request.onerror = () => reject(request.error ?? new Error("IndexedDB delete failed"));
+  });
 };
 
 export const getKvKeys = async (prefix?: string): Promise<string[]> => {

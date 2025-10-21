@@ -115,7 +115,6 @@ export const describeExpiration = (
     };
   }
 
-  let relative: string | undefined;
   let value = diffSeconds;
   let unit: Intl.RelativeTimeFormatUnit = "second";
   if (diffSeconds >= 365 * 24 * 3600) {
@@ -137,7 +136,7 @@ export const describeExpiration = (
     value = Math.max(1, Math.round(diffSeconds / 60));
     unit = "minute";
   }
-  relative = relativeTimeFormatter.format(value, unit);
+  const relative = relativeTimeFormatter.format(value, unit);
 
   return {
     summary: `Expires ${absolute}${relative ? ` (${relative})` : ""}`,

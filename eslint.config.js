@@ -43,10 +43,27 @@ export default tseslint.config(
       react: { version: "detect" },
     },
     rules: {
-      "prettier/prettier": "error",
+      "prettier/prettier": [
+        "warn",
+        {
+          singleQuote: false,
+          semi: true,
+          trailingComma: "all",
+          printWidth: 100,
+          arrowParens: "avoid",
+        },
+      ],
       "react/react-in-jsx-scope": "off",
       "@typescript-eslint/no-explicit-any": "warn",
       "@typescript-eslint/consistent-type-imports": "warn",
+      "@typescript-eslint/no-unused-vars": [
+        "warn",
+        {
+          argsIgnorePattern: "^_",
+          varsIgnorePattern: "^_",
+          caughtErrors: "none",
+        },
+      ],
     },
   }
 );

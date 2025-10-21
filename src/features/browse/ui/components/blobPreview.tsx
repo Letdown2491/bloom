@@ -1355,6 +1355,7 @@ async function buildTextPreview(blob: Blob): Promise<{ content: string; truncate
   const raw = await limitedBlob.text();
   let truncated = blob.size > TEXT_PREVIEW_MAX_BYTES;
 
+  // eslint-disable-next-line no-control-regex -- Expected to normalize NUL bytes from binary blobs.
   const sanitized = raw.replace(/\u0000/g, "\uFFFD").replace(/\r\n/g, "\n");
   let content = sanitized;
 

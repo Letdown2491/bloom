@@ -634,7 +634,7 @@ export const useServerData = (servers: ManagedServer[], options?: UseServerDataO
 
     snapshots.forEach(snapshot => {
       snapshot.blobs.forEach(blob => {
-        let entry = entryMap.get(blob.sha256);
+        const entry = entryMap.get(blob.sha256);
         if (!entry) {
           entryMap.set(blob.sha256, {
             blob,

@@ -290,8 +290,7 @@ export async function buildAuthorizationHeader(signTemplate: SignTemplate, kind:
       return header;
     };
 
-    let pendingPromise: Promise<string>;
-    pendingPromise = buildPromise().catch(error => {
+    const pendingPromise = buildPromise().catch(error => {
       const current = cache!.get(cacheKey);
       if (current?.promise === pendingPromise) {
         cache!.delete(cacheKey);

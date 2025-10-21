@@ -269,7 +269,9 @@ export const useBlobMetadata = (blobs: BlossomBlob[], options?: MetadataOptions)
             if (response.body) {
               try {
                 await response.body.cancel();
-              } catch {}
+              } catch {
+                // ignore cancellation failure; fetch cleanup best-effort
+              }
             }
           } else {
             return;
