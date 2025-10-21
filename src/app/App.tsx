@@ -39,6 +39,7 @@ import {
   buildShareItemsFromRequest,
   filterItemsByPolicy,
 } from "../shared/domain/folderShareHelpers";
+import type { NdkEventInstance, NdkRelayInstance } from "../shared/api/ndkModule";
 
 import type { ShareCompletion, SharePayload, ShareMode } from "../features/share/ui/ShareComposer";
 import type { BlossomBlob } from "../shared/api/blossomClient";
@@ -711,14 +712,12 @@ export default function App() {
             "publishedToRelays" in publishError &&
             publishError.publishedToRelays instanceof Set
           ) {
-            (publishError.publishedToRelays as Set<InstanceType<typeof module.NDKRelay>>).forEach(
-              relay => {
-                const normalized = sanitizeRelayUrl(relay.url);
-                if (normalized) {
-                  successUrls.add(normalized);
-                }
-              },
-            );
+            (publishError.publishedToRelays as Set<NdkRelayInstance>).forEach(relay => {
+              const normalized = sanitizeRelayUrl(relay.url);
+              if (normalized) {
+                successUrls.add(normalized);
+              }
+            });
           }
           if (
             publishError &&
@@ -726,14 +725,12 @@ export default function App() {
             "errors" in publishError &&
             publishError.errors instanceof Map
           ) {
-            (publishError.errors as Map<InstanceType<typeof module.NDKRelay>, Error>).forEach(
-              (err, relayInstance) => {
-                const normalized = sanitizeRelayUrl(relayInstance.url);
-                if (normalized) {
-                  failedMap.set(normalized, err instanceof Error ? err.message : String(err));
-                }
-              },
-            );
+            (publishError.errors as Map<NdkRelayInstance, Error>).forEach((err, relayInstance) => {
+              const normalized = sanitizeRelayUrl(relayInstance.url);
+              if (normalized) {
+                failedMap.set(normalized, err instanceof Error ? err.message : String(err));
+              }
+            });
           }
           summary.succeeded = successUrls.size;
           const failedUrls = sanitizedRelays.filter(url => !successUrls.has(url));
@@ -812,8 +809,6 @@ export default function App() {
         }
       });
 
-      type NdkEventInstance = InstanceType<typeof module.NDKEvent>;
-
       let fetchedEvents: Set<NdkEventInstance> = new Set<NdkEventInstance>();
       let metadataFetchTimedOut = false;
       let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
@@ -856,7 +851,7 @@ export default function App() {
       }
 
       const found = new Set<string>();
-      const eventsToPublish: InstanceType<typeof module.NDKEvent>[] = [];
+      const eventsToPublish: NdkEventInstance[] = [];
 
       fetchedEvents.forEach(eventInstance => {
         if (!eventInstance || !Array.isArray(eventInstance.tags)) return;
@@ -920,15 +915,13 @@ export default function App() {
             "publishedToRelays" in publishError &&
             publishError.publishedToRelays instanceof Set
           ) {
-            (publishError.publishedToRelays as Set<InstanceType<typeof module.NDKRelay>>).forEach(
-              relay => {
-                const normalized = sanitizeRelayUrl(relay.url);
-                if (normalized) {
-                  successUrls.add(normalized);
-                  trackSuccess(normalized);
-                }
-              },
-            );
+            (publishError.publishedToRelays as Set<NdkRelayInstance>).forEach(relay => {
+              const normalized = sanitizeRelayUrl(relay.url);
+              if (normalized) {
+                successUrls.add(normalized);
+                trackSuccess(normalized);
+              }
+            });
           }
           if (
             publishError &&
@@ -936,14 +929,12 @@ export default function App() {
             "errors" in publishError &&
             publishError.errors instanceof Map
           ) {
-            (publishError.errors as Map<InstanceType<typeof module.NDKRelay>, Error>).forEach(
-              (err, relayInstance) => {
-                const normalized = sanitizeRelayUrl(relayInstance.url);
-                if (normalized) {
-                  failureMap.set(normalized, err instanceof Error ? err.message : String(err));
-                }
-              },
-            );
+            (publishError.errors as Map<NdkRelayInstance, Error>).forEach((err, relayInstance) => {
+              const normalized = sanitizeRelayUrl(relayInstance.url);
+              if (normalized) {
+                failureMap.set(normalized, err instanceof Error ? err.message : String(err));
+              }
+            });
           }
           const fallbackMessage =
             publishError instanceof Error
