@@ -1109,6 +1109,54 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
     [filterMode, matchesSharingFilter, onlyPrivateLinks, sharingFilter]
   );
 
+  const reinforceFolderAssignments = useCallback(
+    (source: readonly BlossomBlob[]): BlossomBlob[] => {
+      let changed = false;
+      const mapped = source.map(blob => {
+        if (!blob || blob.__bloomFolderPlaceholder) {
+          return blob;
+        }
+        const normalizedDirect = normalizeFolderPathInput(blob.folderPath ?? undefined);
+        if (typeof normalizedDirect === "string" && normalizedDirect.length > 0) {
+          if (blob.folderPath !== normalizedDirect) {
+            changed = true;
+            return {
+              ...blob,
+              folderPath: normalizedDirect,
+            };
+          }
+          return blob;
+        }
+        if (!blob.sha256) {
+          return blob;
+        }
+        const membershipPaths = getFoldersForBlob(blob.sha256);
+        if (!membershipPaths || membershipPaths.length === 0) {
+          return blob;
+        }
+        const targetPath = membershipPaths.find(path => typeof path === "string" && path.trim().length > 0);
+        if (!targetPath) {
+          return blob;
+        }
+        const canonical = resolveFolderPath(targetPath) ?? targetPath;
+        const normalizedMembership = normalizeFolderPathInput(canonical);
+        if (typeof normalizedMembership !== "string" || normalizedMembership.length === 0) {
+          return blob;
+        }
+        if (blob.folderPath === normalizedMembership) {
+          return blob;
+        }
+        changed = true;
+        return {
+          ...blob,
+          folderPath: normalizedMembership,
+        };
+      });
+      return changed ? mapped : (source as BlossomBlob[]);
+    },
+    [getFoldersForBlob, resolveFolderPath]
+  );
+
   const signaturesEqual = (prev: SearchTokenSignature, next: SearchTokenSignature) => {
     return (
       prev.name === next.name &&
@@ -1865,7 +1913,7 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
 
   const aggregatedFilteredBlobs = useMemo(() => {
     const base = applyContentFilters(aggregated.blobs);
-    const filtered = excludeListedBlobs(base);
+    const filtered = reinforceFolderAssignments(excludeListedBlobs(base));
     if (!isSearching) return filtered;
     const matches = filtered.filter(matchesSearch);
     if (privateSearchMatches.length === 0) {
@@ -1878,8 +1926,16 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
       seen.add(blob.sha256);
       merged.push(blob);
     });
-    return merged;
-  }, [aggregated.blobs, applyContentFilters, excludeListedBlobs, isSearching, matchesSearch, privateSearchMatches]);
+    return reinforceFolderAssignments(merged);
+  }, [
+    aggregated.blobs,
+    applyContentFilters,
+    excludeListedBlobs,
+    isSearching,
+    matchesSearch,
+    privateSearchMatches,
+    reinforceFolderAssignments,
+  ]);
 
   const aggregatedFolderIndex = useMemo(() => buildFolderIndex(aggregatedFilteredBlobs), [aggregatedFilteredBlobs]);
 
@@ -2022,7 +2078,7 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
   const currentFilteredBlobs = useMemo(() => {
     if (!currentSnapshot) return undefined;
     const base = applyContentFilters(currentSnapshot.blobs);
-    const filtered = excludeListedBlobs(base);
+    const filtered = reinforceFolderAssignments(excludeListedBlobs(base));
     if (!isSearching) return filtered;
     const matches = filtered.filter(matchesSearch);
     if (privateSearchMatches.length === 0) {
@@ -2035,8 +2091,16 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
       seen.add(blob.sha256);
       merged.push(blob);
     });
-    return merged;
-  }, [applyContentFilters, currentSnapshot, excludeListedBlobs, isSearching, matchesSearch, privateSearchMatches]);
+    return reinforceFolderAssignments(merged);
+  }, [
+    applyContentFilters,
+    currentSnapshot,
+    excludeListedBlobs,
+    isSearching,
+    matchesSearch,
+    privateSearchMatches,
+    reinforceFolderAssignments,
+  ]);
 
   const currentFolderIndex = useMemo(
     () => (currentFilteredBlobs ? buildFolderIndex(currentFilteredBlobs) : null),
