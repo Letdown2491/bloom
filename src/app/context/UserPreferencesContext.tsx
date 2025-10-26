@@ -50,6 +50,8 @@ export type PreferencesSyncState = {
   pending: boolean;
 };
 
+const IMAGE_RESIZE_MAX_ID = 3;
+
 type UserPreferencesContextValue = {
   preferences: UserPreferences;
   setDefaultServerUrl: (url: string | null) => void;
@@ -61,6 +63,9 @@ type UserPreferencesContextValue = {
   setShowListPreviews: (value: boolean) => void;
   setKeepSearchExpanded: (value: boolean) => void;
   setTheme: (theme: "dark" | "light") => void;
+  setOptimizeImageUploadsByDefault: (value: boolean) => void;
+  setStripImageMetadataByDefault: (value: boolean) => void;
+  setDefaultImageResizeOption: (value: number) => void;
   setSyncEnabled: (value: boolean) => Promise<void>;
   syncState: PreferencesSyncState;
   preferencesReady: boolean;
@@ -99,7 +104,10 @@ const preferencesEqual = (a: UserPreferences, b: UserPreferences) =>
   a.showGridPreviews === b.showGridPreviews &&
   a.showListPreviews === b.showListPreviews &&
   a.keepSearchExpanded === b.keepSearchExpanded &&
-  a.theme === b.theme;
+  a.theme === b.theme &&
+  a.optimizeImageUploadsByDefault === b.optimizeImageUploadsByDefault &&
+  a.stripImageMetadataByDefault === b.stripImageMetadataByDefault &&
+  a.defaultImageResizeOption === b.defaultImageResizeOption;
 
 export const UserPreferencesProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { ndk, signer, user, ensureConnection } = useNdk();
@@ -517,6 +525,37 @@ export const UserPreferencesProvider: React.FC<{ children: React.ReactNode }> = 
     [mutatePreferences],
   );
 
+  const setOptimizeImageUploadsByDefault = useCallback(
+    (value: boolean) => {
+      mutatePreferences(prev => {
+        if (prev.optimizeImageUploadsByDefault === value) return prev;
+        return { ...prev, optimizeImageUploadsByDefault: value };
+      });
+    },
+    [mutatePreferences],
+  );
+
+  const setStripImageMetadataByDefault = useCallback(
+    (value: boolean) => {
+      mutatePreferences(prev => {
+        if (prev.stripImageMetadataByDefault === value) return prev;
+        return { ...prev, stripImageMetadataByDefault: value };
+      });
+    },
+    [mutatePreferences],
+  );
+
+  const setDefaultImageResizeOption = useCallback(
+    (value: number) => {
+      const clamped = Math.max(0, Math.min(IMAGE_RESIZE_MAX_ID, Math.trunc(value)));
+      mutatePreferences(prev => {
+        if (prev.defaultImageResizeOption === clamped) return prev;
+        return { ...prev, defaultImageResizeOption: clamped };
+      });
+    },
+    [mutatePreferences],
+  );
+
   const setSyncEnabled = useCallback(
     async (value: boolean) => {
       if (value === syncEnabled) return;
@@ -569,6 +608,9 @@ export const UserPreferencesProvider: React.FC<{ children: React.ReactNode }> = 
       setShowListPreviews,
       setKeepSearchExpanded,
       setTheme,
+      setOptimizeImageUploadsByDefault,
+      setStripImageMetadataByDefault,
+      setDefaultImageResizeOption,
       setSyncEnabled,
       syncState,
       preferencesReady: initialSyncReady,
@@ -584,6 +626,9 @@ export const UserPreferencesProvider: React.FC<{ children: React.ReactNode }> = 
       setShowListPreviews,
       setKeepSearchExpanded,
       setTheme,
+      setOptimizeImageUploadsByDefault,
+      setStripImageMetadataByDefault,
+      setDefaultImageResizeOption,
       setSyncEnabled,
       syncState,
       initialSyncReady,

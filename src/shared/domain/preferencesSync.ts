@@ -2,6 +2,8 @@ import type { FilterMode } from "../types/filter";
 import type { UserPreferences } from "../types/preferences";
 import { normalizeEpochSeconds } from "../utils/time";
 
+const RESIZE_OPTIONS_MAX_ID = 3;
+
 export const PREFERENCES_SYNC_KIND = 30078;
 export const PREFERENCES_SYNC_IDENTIFIER = "bloom:prefs:v1";
 
@@ -30,6 +32,9 @@ type SerializedPreferences = {
   show_list_previews: boolean;
   keep_search_expanded: boolean;
   theme: "dark" | "light";
+  optimize_image_uploads_by_default: boolean;
+  strip_image_metadata_by_default: boolean;
+  default_image_resize_option: number;
 };
 
 const DEFAULT_SERIALIZED_PREFERENCES: SerializedPreferences = {
@@ -42,6 +47,9 @@ const DEFAULT_SERIALIZED_PREFERENCES: SerializedPreferences = {
   show_list_previews: true,
   keep_search_expanded: false,
   theme: "dark",
+  optimize_image_uploads_by_default: false,
+  strip_image_metadata_by_default: true,
+  default_image_resize_option: 0,
 };
 
 const sanitizeFilterMode = (value: unknown): FilterMode => {
@@ -100,6 +108,9 @@ export const serializePreferences = (
       show_list_previews: preferences.showListPreviews,
       keep_search_expanded: preferences.keepSearchExpanded,
       theme: preferences.theme,
+      optimize_image_uploads_by_default: preferences.optimizeImageUploadsByDefault,
+      strip_image_metadata_by_default: preferences.stripImageMetadataByDefault,
+      default_image_resize_option: preferences.defaultImageResizeOption,
     },
     saved_searches: savedSearches,
   };
@@ -141,6 +152,17 @@ export const deserializePreferences = (
     showListPreviews: Boolean(rawPreferences.show_list_previews),
     keepSearchExpanded: Boolean(rawPreferences.keep_search_expanded),
     theme: sanitizeTheme(rawPreferences.theme),
+    optimizeImageUploadsByDefault: Boolean(rawPreferences.optimize_image_uploads_by_default),
+    stripImageMetadataByDefault: Boolean(rawPreferences.strip_image_metadata_by_default),
+    defaultImageResizeOption: Math.max(
+      0,
+      Math.min(
+        RESIZE_OPTIONS_MAX_ID,
+        Number.isFinite(rawPreferences.default_image_resize_option)
+          ? Math.trunc(rawPreferences.default_image_resize_option)
+          : 0,
+      ),
+    ),
   };
 
   const savedSearches: SyncedSavedSearch[] = Array.isArray(source.saved_searches)
@@ -162,6 +184,9 @@ export const deserializePreferences = (
       show_list_previews: preferences.showListPreviews,
       keep_search_expanded: preferences.keepSearchExpanded,
       theme: preferences.theme,
+      optimize_image_uploads_by_default: preferences.optimizeImageUploadsByDefault,
+      strip_image_metadata_by_default: preferences.stripImageMetadataByDefault,
+      default_image_resize_option: preferences.defaultImageResizeOption,
     },
     saved_searches: savedSearches,
   };

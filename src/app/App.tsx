@@ -199,6 +199,9 @@ export default function App() {
     setKeepSearchExpanded,
     setTheme,
     setSortDirection,
+    setOptimizeImageUploadsByDefault,
+    setStripImageMetadataByDefault,
+    setDefaultImageResizeOption,
     setSyncEnabled,
     syncState,
   } = useUserPreferences();
@@ -2010,6 +2013,27 @@ export default function App() {
     [setTheme],
   );
 
+  const handleSetOptimizeImageUploadsByDefault = useCallback(
+    (value: boolean) => {
+      setOptimizeImageUploadsByDefault(value);
+    },
+    [setOptimizeImageUploadsByDefault],
+  );
+
+  const handleSetStripImageMetadataByDefault = useCallback(
+    (value: boolean) => {
+      setStripImageMetadataByDefault(value);
+    },
+    [setStripImageMetadataByDefault],
+  );
+
+  const handleSetDefaultImageResizeOption = useCallback(
+    (value: number) => {
+      setDefaultImageResizeOption(value);
+    },
+    [setDefaultImageResizeOption],
+  );
+
   const handleToggleSearch = useCallback(() => {
     if (keepSearchExpanded) {
       selectTab("browse");
@@ -2680,6 +2704,12 @@ export default function App() {
                 onSetShowListPreviews={handleSetShowPreviewsInList}
                 onSetKeepSearchExpanded={handleSetKeepSearchExpanded}
                 onSetTheme={handleSetTheme}
+                optimizeImageUploadsByDefault={preferences.optimizeImageUploadsByDefault}
+                stripImageMetadataByDefault={preferences.stripImageMetadataByDefault}
+                defaultImageResizeOption={preferences.defaultImageResizeOption}
+                onSetOptimizeImageUploadsByDefault={handleSetOptimizeImageUploadsByDefault}
+                onSetStripImageMetadataByDefault={handleSetStripImageMetadataByDefault}
+                onSetDefaultImageResizeOption={handleSetDefaultImageResizeOption}
                 saving={saving}
                 signer={signer}
                 onAddServer={handleAddServer}

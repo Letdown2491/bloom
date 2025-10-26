@@ -99,6 +99,12 @@ export type WorkspaceSectionProps = {
   onSetShowListPreviews: (value: boolean) => void;
   onSetKeepSearchExpanded: (value: boolean) => void;
   onSetTheme: (theme: "dark" | "light") => void;
+  optimizeImageUploadsByDefault: boolean;
+  stripImageMetadataByDefault: boolean;
+  onSetOptimizeImageUploadsByDefault: (value: boolean) => void;
+  onSetStripImageMetadataByDefault: (value: boolean) => void;
+  defaultImageResizeOption: number;
+  onSetDefaultImageResizeOption: (value: number) => void;
   saving: boolean;
   signer: NdkContextValue["signer"];
   onAddServer: (server: ManagedServer) => void;
@@ -167,6 +173,12 @@ export const WorkspaceSection = memo(function WorkspaceSection({
   onSetShowListPreviews,
   onSetKeepSearchExpanded,
   onSetTheme,
+  optimizeImageUploadsByDefault,
+  stripImageMetadataByDefault,
+  onSetOptimizeImageUploadsByDefault,
+  onSetStripImageMetadataByDefault,
+  defaultImageResizeOption,
+  onSetDefaultImageResizeOption,
   saving,
   signer,
   onAddServer,
@@ -382,6 +394,12 @@ export const WorkspaceSection = memo(function WorkspaceSection({
             onSetShowListPreviews={onSetShowListPreviews}
             onSetKeepSearchExpanded={onSetKeepSearchExpanded}
             onSetTheme={onSetTheme}
+            optimizeImageUploadsByDefault={optimizeImageUploadsByDefault}
+            stripImageMetadataByDefault={stripImageMetadataByDefault}
+            defaultImageResizeOption={defaultImageResizeOption}
+            onSetOptimizeImageUploadsByDefault={onSetOptimizeImageUploadsByDefault}
+            onSetStripImageMetadataByDefault={onSetStripImageMetadataByDefault}
+            onSetDefaultImageResizeOption={onSetDefaultImageResizeOption}
             showStatusMessage={showStatusMessage}
             onShareFolder={onShareFolder}
             onUnshareFolder={onUnshareFolder}

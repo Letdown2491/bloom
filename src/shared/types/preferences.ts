@@ -16,4 +16,7 @@ export type UserPreferences = {
   showListPreviews: boolean;
   keepSearchExpanded: boolean;
   theme: "dark" | "light";
+  optimizeImageUploadsByDefault: boolean;
+  stripImageMetadataByDefault: boolean;
+  defaultImageResizeOption: number;
 };

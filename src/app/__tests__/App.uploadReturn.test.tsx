@@ -26,6 +26,10 @@ const preferencesMock = {
   showGridPreviews: true,
   showListPreviews: true,
   keepSearchExpanded: false,
+  theme: "dark",
+  optimizeImageUploadsByDefault: true,
+  stripImageMetadataByDefault: true,
+  defaultImageResizeOption: 0,
 };
 
 const syncStateMock = {
@@ -64,6 +68,10 @@ vi.mock("../context/UserPreferencesContext", () => ({
     setShowGridPreviews: vi.fn(),
     setShowListPreviews: vi.fn(),
     setKeepSearchExpanded: vi.fn(),
+    setTheme: vi.fn(),
+    setOptimizeImageUploadsByDefault: vi.fn(),
+    setStripImageMetadataByDefault: vi.fn(),
+    setDefaultImageResizeOption: vi.fn(),
     setSyncEnabled: vi.fn(async () => undefined),
     syncState: syncStateMock,
   }),

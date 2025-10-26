@@ -31,3 +31,41 @@ export async function stripImageMetadata(file: File): Promise<File> {
   if (!blob) return file;
   return new File([blob], file.name, { type: blob.type, lastModified: Date.now() });
 }
+
+const deriveWebpName = (originalName: string): string => {
+  const trimmed = originalName.trim();
+  if (!trimmed) return "image.webp";
+  const lastDot = trimmed.lastIndexOf(".");
+  if (lastDot <= 0) return `${trimmed}.webp`;
+  const base = trimmed.slice(0, lastDot);
+  return `${base || "image"}.webp`;
+};
+
+export async function convertImageToWebp(file: File, quality = 1): Promise<File> {
+  if (file.type === "image/webp") return file;
+  try {
+    const bitmap = await createImageBitmap(file);
+    const canvas = document.createElement("canvas");
+    canvas.width = bitmap.width;
+    canvas.height = bitmap.height;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) {
+      bitmap.close?.();
+      return file;
+    }
+    ctx.drawImage(bitmap, 0, 0);
+    bitmap.close?.();
+    const blob = await new Promise<Blob | null>(resolve =>
+      canvas.toBlob(resolve, "image/webp", quality),
+    );
+    if (!blob) return file;
+    const webpName = deriveWebpName(file.name);
+    return new File([blob], webpName, {
+      type: "image/webp",
+      lastModified: file.lastModified,
+    });
+  } catch (error) {
+    console.warn("Failed to convert image to WebP", error);
+    return file;
+  }
+}

@@ -29,6 +29,7 @@ import {
   FolderIcon,
   LockIcon,
   TrashIcon,
+  UploadIcon,
 } from "../../shared/ui/icons";
 import { ServerList } from "../workspace/ui/ServerList";
 const RelayListLazy = React.lazy(() => import("../../shared/ui/RelayList"));
@@ -84,6 +85,13 @@ const SORT_DIRECTION_OPTIONS: SegmentedOption[] = [
 const VIEW_MODE_OPTIONS: SegmentedOption[] = [
   { id: "grid", label: "Grid view", Icon: GridIcon },
   { id: "list", label: "List view", Icon: ListIcon },
+];
+
+const IMAGE_RESIZE_OPTIONS = [
+  { id: 0, label: "Original" },
+  { id: 1, label: "Large (2048px)" },
+  { id: 2, label: "Medium (1280px)" },
+  { id: 3, label: "Small (720px)" },
 ];
 
 const TONE_CLASS_BY_KEY: Record<StatusTone, string> = {
@@ -354,6 +362,12 @@ type SettingsPanelProps = {
   onSetShowListPreviews: (value: boolean) => void;
   onSetKeepSearchExpanded: (value: boolean) => void;
   onSetTheme: (theme: "dark" | "light") => void;
+  optimizeImageUploadsByDefault: boolean;
+  stripImageMetadataByDefault: boolean;
+  onSetOptimizeImageUploadsByDefault: (value: boolean) => void;
+  onSetStripImageMetadataByDefault: (value: boolean) => void;
+  defaultImageResizeOption: number;
+  onSetDefaultImageResizeOption: (value: number) => void;
   showStatusMessage?: (message: string, tone?: StatusMessageTone, duration?: number) => void;
   onShareFolder: (request: ShareFolderRequest) => void;
   onUnshareFolder: (request: ShareFolderRequest) => void;
@@ -397,6 +411,12 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   onSetShowListPreviews,
   onSetKeepSearchExpanded,
   onSetTheme,
+  optimizeImageUploadsByDefault,
+  stripImageMetadataByDefault,
+  onSetOptimizeImageUploadsByDefault,
+  onSetStripImageMetadataByDefault,
+  defaultImageResizeOption,
+  onSetDefaultImageResizeOption,
   showStatusMessage,
   onShareFolder,
   onUnshareFolder,
@@ -421,6 +441,19 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const sortDescriptionId = React.useId();
   const sortDirectionHeadingId = React.useId();
   const sortDirectionDescriptionId = React.useId();
+  const optimizeUploadsHeadingId = React.useId();
+  const optimizeUploadsDescriptionId = React.useId();
+  const stripExifHeadingId = React.useId();
+  const stripExifDescriptionId = React.useId();
+  const resizeHeadingId = React.useId();
+  const resizeDescriptionId = React.useId();
+  const normalizedImageResizeOption = React.useMemo(
+    () =>
+      IMAGE_RESIZE_OPTIONS.some(option => option.id === defaultImageResizeOption)
+        ? defaultImageResizeOption
+        : 0,
+    [defaultImageResizeOption],
+  );
   const iconsPreviewHeadingId = React.useId();
   const iconsPreviewDescriptionId = React.useId();
   const listPreviewHeadingId = React.useId();
@@ -949,7 +982,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
     const baseSections = [
       {
         id: "primary",
-        label: "Application Settings",
+        label: "Application",
         description: "Keep Bloom connected and choose your default server.",
         icon: SyncIndicatorIcon,
         cards: [
@@ -1097,8 +1130,136 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
         ],
       },
       {
+        id: "uploads",
+        label: "Uploads",
+        description: "Control default processing before files leave your device.",
+        icon: UploadIcon,
+        cards: [
+          <SettingCard
+            key="strip-exif"
+            headingId={stripExifHeadingId}
+            descriptionId={stripExifDescriptionId}
+            title="Remove EXIF metadata from images"
+            description="Strip location, camera, and other metadata before uploading."
+          >
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div
+                  className={`flex h-10 w-10 items-center justify-center rounded-xl ${
+                    stripImageMetadataByDefault
+                      ? theme === "light"
+                        ? "bg-blue-700 text-white"
+                        : "bg-emerald-500/20 text-emerald-300"
+                      : "bg-slate-800 text-slate-300"
+                  }`}
+                >
+                  <ImageIcon size={18} />
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-slate-100">
+                    {stripImageMetadataByDefault
+                      ? "Metadata stripping enabled"
+                      : "Choose metadata handling per upload"}
+                  </p>
+                  <p className="text-xs text-slate-400">
+                    Disabling this setting will not remove EXIF metadata. For additional privacy,
+                    it is recommended to keep this enabled.
+                  </p>
+                </div>
+              </div>
+              <SwitchControl
+                checked={stripImageMetadataByDefault}
+                onToggle={onSetStripImageMetadataByDefault}
+                labelledBy={stripExifHeadingId}
+                theme={theme}
+              />
+            </div>
+          </SettingCard>,
+          <SettingCard
+            key="optimize-images"
+            headingId={optimizeUploadsHeadingId}
+            descriptionId={optimizeUploadsDescriptionId}
+            title="Optimize images for web"
+            description="Convert new image uploads to WebP automatically."
+          >
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div
+                  className={`flex h-10 w-10 items-center justify-center rounded-xl ${
+                    optimizeImageUploadsByDefault
+                      ? theme === "light"
+                        ? "bg-blue-700 text-white"
+                        : "bg-emerald-500/20 text-emerald-300"
+                      : "bg-slate-800 text-slate-300"
+                  }`}
+                >
+                  <UploadIcon size={18} />
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-slate-100">
+                    {optimizeImageUploadsByDefault
+                      ? "WebP conversion enabled"
+                      : "Choose conversion per upload"}
+                  </p>
+                  <p className="text-xs text-slate-400">
+                    When enabled, Bloom re-encodes JPG and PNG images as WebP before uploading.
+                  </p>
+                </div>
+              </div>
+              <SwitchControl
+                checked={optimizeImageUploadsByDefault}
+                onToggle={onSetOptimizeImageUploadsByDefault}
+                labelledBy={optimizeUploadsHeadingId}
+                theme={theme}
+              />
+            </div>
+          </SettingCard>,
+          <SettingCard
+            key="resize-images"
+            headingId={resizeHeadingId}
+            descriptionId={resizeDescriptionId}
+            title="Resize images"
+            description="Set the default size Bloom applies before uploading."
+          >
+            <div className="flex flex-col gap-3 text-sm text-slate-300 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-center gap-3">
+                <div
+                  className={`flex h-10 w-10 items-center justify-center rounded-xl ${
+                    theme === "light"
+                      ? "bg-blue-700 text-white"
+                      : "bg-emerald-500/20 text-emerald-300"
+                  }`}
+                >
+                  <ImageIcon size={18} />
+                </div>
+                <p className="text-xs text-slate-400">
+                  Bloom never upscales images. Smaller originals stay at their native size even when
+                  a larger preset is selected.
+                </p>
+              </div>
+              <select
+                aria-labelledby={resizeHeadingId}
+                value={normalizedImageResizeOption}
+                onChange={event => onSetDefaultImageResizeOption(Number(event.target.value))}
+                className={`rounded-lg border px-3 py-2 text-sm focus:outline-none focus:ring-1 ${
+                  theme === "light"
+                    ? "border-slate-300 bg-white text-slate-700 focus:border-blue-600 focus:ring-blue-500"
+                    : "border-slate-700 bg-slate-900 text-slate-200 focus:border-emerald-500 focus:ring-emerald-400"
+                }`}
+              >
+                {IMAGE_RESIZE_OPTIONS.map(option => (
+                  <option key={option.id} value={option.id}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </SettingCard>,
+        ],
+      },
+      {
         id: "library",
-        label: "Layout Settings",
+        label: "Layout",
         description: "Tune how Bloom displays and organises your files by default.",
         icon: SettingsIcon,
         cards: [
@@ -1286,7 +1447,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
       },
       {
         id: "storage",
-        label: "Storage Settings",
+        label: "Local Storage",
         description: "Review how Bloom uses browser storage.",
         icon: DownloadIcon,
         cards: [
@@ -1643,7 +1804,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
       },
       {
         id: "relays",
-        label: "Relay Settings",
+        label: "Relays",
         description: "Manage which relays Bloom connects to and publishes through.",
         icon: RelayIcon,
         cards: [
@@ -1661,7 +1822,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
       },
       {
         id: "servers",
-        label: "Server Settings",
+        label: "Media Servers",
         description: "Manage the servers connected to Bloom.",
         icon: ServersIcon,
         cards: [
@@ -1751,6 +1912,19 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
     onSetSortDirection,
     filterSegmentOptions,
     sortSegmentOptions,
+    optimizeUploadsHeadingId,
+    optimizeUploadsDescriptionId,
+    stripExifHeadingId,
+    stripExifDescriptionId,
+    resizeHeadingId,
+    resizeDescriptionId,
+    optimizeImageUploadsByDefault,
+    stripImageMetadataByDefault,
+    defaultImageResizeOption,
+    normalizedImageResizeOption,
+    onSetOptimizeImageUploadsByDefault,
+    onSetStripImageMetadataByDefault,
+    onSetDefaultImageResizeOption,
     iconsPreviewHeadingId,
     iconsPreviewDescriptionId,
     showIconsPreviews,
@@ -2025,7 +2199,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
         </div>
       ) : null}
 
-      <div className="grid gap-6 xl:grid-cols-[220px_minmax(0,1fr)]">
+      <div className="grid gap-6 xl:grid-cols-[260px_minmax(0,1fr)]">
         <nav className="hidden rounded-2xl border border-slate-800 bg-slate-900/70 p-4 shadow-sm xl:block">
           <ul className="space-y-2 text-sm">
             {sections.map(section => {

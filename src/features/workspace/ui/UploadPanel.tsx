@@ -1,4 +1,4 @@
-import React, { useCallback, useId, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import pLimit from "p-limit";
 import type { AxiosProgressEvent } from "axios";
 import type { ManagedServer } from "../../../shared/types/servers";
@@ -26,14 +26,7 @@ import { encryptFileForPrivateUpload } from "../../../shared/domain/privateEncry
 import { usePrivateLibrary } from "../../../app/context/PrivateLibraryContext";
 import type { PrivateListEntry } from "../../../shared/domain/privateList";
 import { useFolderLists } from "../../../app/context/FolderListContext";
-import {
-  FolderIcon,
-  LockIcon,
-  WarningIcon,
-  UploadIcon,
-  EditIcon,
-  TrashIcon,
-} from "../../../shared/ui/icons";
+import { LockIcon, WarningIcon, UploadIcon, EditIcon, TrashIcon, SettingsIcon, CloseIcon } from "../../../shared/ui/icons";
 import { useUserPreferences } from "../../../app/context/UserPreferencesContext";
 import { publishNip94Metadata } from "../../../shared/api/nip94Publisher";
 import { usePreferredRelays } from "../../../app/hooks/usePreferredRelays";
@@ -45,6 +38,21 @@ const RESIZE_OPTIONS = [
   { id: 2, label: "Medium (1280px)", size: 1280 },
   { id: 3, label: "Small (720px)", size: 720 },
 ];
+
+const isWebpConvertible = (file: File): boolean => {
+  const mime = (file.type || "").toLowerCase();
+  if (mime === "image/jpeg" || mime === "image/jpg" || mime === "image/png") {
+    return true;
+  }
+  const name = file.name.toLowerCase();
+  return (
+    name.endsWith(".jpeg") ||
+    name.endsWith(".jpg") ||
+    name.endsWith(".png")
+  );
+};
+
+const RESIZE_OPTIONS_MAX_ID = RESIZE_OPTIONS[RESIZE_OPTIONS.length - 1]?.id ?? 0;
 
 let audioMetadataModule: Promise<typeof AudioMetadataModule> | null = null;
 
@@ -145,6 +153,12 @@ const ENTRY_STATUS_HEADING: Record<UploadEntryStatus, string> = {
 
 type UploadPhase = "idle" | "uploading" | "completed" | "attention";
 
+type ImageUploadOptions = {
+  optimizeForWeb: boolean;
+  removeMetadata: boolean;
+  resizeOption: number;
+};
+
 const resetEntryProgress = (entry: UploadEntry): UploadEntry => {
   const serverStatuses = Object.keys(entry.serverStatuses).reduce<
     Record<string, UploadEntryStatus>
@@ -169,6 +183,7 @@ type UploadEntry = {
   isPrivate: boolean;
   status: UploadEntryStatus;
   serverStatuses: Record<string, UploadEntryStatus>;
+  imageOptions?: ImageUploadOptions;
 };
 
 type PrivatePreparedInfo = {
@@ -222,8 +237,7 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
     return servers.slice(0, 1).map(s => s.url);
   });
   const [entries, setEntries] = useState<UploadEntry[]>([]);
-  const [cleanMetadata, setCleanMetadata] = useState(true);
-  const [resizeOption, setResizeOption] = useState(0);
+  const [optionsEntryId, setOptionsEntryId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [transfers, setTransfers] = useState<TransferState[]>([]);
   const [isDragActive, setIsDragActive] = useState(false);
@@ -232,6 +246,8 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const pendingSelectionRef = useRef(0);
   const dropZoneDescriptionId = useId();
+  const optionsPopoverRef = useRef<HTMLDivElement | null>(null);
+  const optionsTriggerRef = useRef<HTMLButtonElement | null>(null);
   const queryClient = useQueryClient();
   const { signEventTemplate, ndk, signer, user } = useNdk();
   const { upsertEntries: upsertPrivateEntries, entries: privateLibraryEntries } =
@@ -245,175 +261,38 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
     return normalized ?? "";
   }, [defaultFolderPath]);
 
-  const serverMap = useMemo(() => new Map(servers.map(server => [server.url, server])), [servers]);
-
-  const transferMap = useMemo(
-    () => new Map([...syncTransfers, ...transfers].map(item => [item.id, item])),
-    [syncTransfers, transfers],
-  );
-
-  const entryStatusBadgeMap = isLightTheme ? ENTRY_STATUS_BADGE_LIGHT : ENTRY_STATUS_BADGE_DARK;
-
-  const requiresAuthSelected = useMemo(
-    () =>
-      selectedServers.some(url => {
-        const server = serverMap.get(url);
-        if (!server) return false;
-        return Boolean(server.requiresAuth);
-      }),
-    [selectedServers, serverMap],
-  );
-
-  const activeSigner = ndk?.signer ?? signer ?? null;
-  const signerMissing = requiresAuthSelected && !activeSigner;
-  const folderNamesInvalid = useMemo(
-    () => entries.some(entry => containsReservedFolderSegment(entry.metadata.folder)),
-    [entries],
-  );
-  const canUpload = !signerMissing && !folderNamesInvalid;
-  const hasPendingUploads = useMemo(
-    () =>
-      entries.some(entry =>
-        selectedServers.some(serverUrl => entry.serverStatuses[serverUrl] !== "success"),
+  const defaultImageOptions = useMemo<ImageUploadOptions>(
+    () => ({
+      optimizeForWeb: preferences.optimizeImageUploadsByDefault,
+      removeMetadata: preferences.stripImageMetadataByDefault,
+      resizeOption: Math.max(
+        0,
+        Math.min(RESIZE_OPTIONS_MAX_ID, Math.trunc(preferences.defaultImageResizeOption || 0)),
       ),
-    [entries, selectedServers],
+    }),
+    [
+      preferences.optimizeImageUploadsByDefault,
+      preferences.stripImageMetadataByDefault,
+      preferences.defaultImageResizeOption,
+    ],
   );
-  const hasImageEntries = useMemo(() => entries.some(entry => entry.kind === "image"), [entries]);
-  const hasCompletedEntries = useMemo(
-    () => entries.some(entry => entry.status === "success"),
-    [entries],
-  );
-  const entryCounts = useMemo(() => {
-    let pending = 0;
-    let completed = 0;
-    let errors = 0;
-    for (const entry of entries) {
-      if (entry.status === "success") {
-        completed += 1;
-      } else if (entry.status === "error") {
-        errors += 1;
-      } else {
-        pending += 1;
+
+  const getEntryImageOptions = useCallback(
+    (entry: UploadEntry): ImageUploadOptions => {
+      if (entry.imageOptions) return entry.imageOptions;
+      const base = { ...defaultImageOptions };
+      if (!isWebpConvertible(entry.file)) {
+        base.optimizeForWeb = false;
       }
-    }
-    return { total: entries.length, pending, completed, errors };
-  }, [entries]);
-
-  const uploadPhase = useMemo<UploadPhase>(() => {
-    if (entries.some(entry => entry.status === "uploading")) return "uploading";
-    if (busy) return "uploading";
-    if (entries.length > 0 && entries.every(entry => entry.status === "success"))
-      return "completed";
-    if (entries.some(entry => entry.status === "error")) return "attention";
-    return "idle";
-  }, [busy, entries]);
-
-  const showSetupContent = uploadPhase === "idle" || uploadPhase === "attention";
-  const readOnlyMode = uploadPhase === "uploading" || uploadPhase === "completed";
-
-  const uploadCompletionPercent = useMemo(() => {
-    if (entryCounts.total === 0) return 0;
-    return Math.min(100, Math.round((entryCounts.completed / entryCounts.total) * 100));
-  }, [entryCounts.completed, entryCounts.total]);
-
-  const targetServerNames = useMemo(() => {
-    if (!selectedServers.length) return "";
-    const seen = new Set<string>();
-    const labels = selectedServers
-      .map(url => serverMap.get(url)?.name || url)
-      .filter(label => {
-        if (seen.has(label)) return false;
-        seen.add(label);
-        return true;
-      });
-    return labels.join(", ");
-  }, [selectedServers, serverMap]);
-
-  const filteredEntries = useMemo(() => {
-    switch (entryFilter) {
-      case "pending":
-        return entries.filter(entry => entry.status === "idle" || entry.status === "uploading");
-      case "completed":
-        return entries.filter(entry => entry.status === "success");
-      case "errors":
-        return entries.filter(entry => entry.status === "error");
-      default:
-        return entries;
-    }
-  }, [entries, entryFilter]);
-  const sortedEntries = useMemo(() => {
-    const statusPriority: Record<UploadEntryStatus, number> = {
-      uploading: 0,
-      idle: 1,
-      error: 2,
-      success: 3,
-    };
-    return [...filteredEntries].sort((a, b) => {
-      const diff = statusPriority[a.status] - statusPriority[b.status];
-      if (diff !== 0) return diff;
-      return a.file.name.localeCompare(b.file.name, undefined, { sensitivity: "base" });
-    });
-  }, [filteredEntries]);
-  const allMetadataExpanded = useMemo(
-    () => entries.length > 0 && entries.every(entry => entry.showMetadata),
-    [entries],
-  );
-  const uploadSummary = useMemo(() => {
-    if (entries.length === 0) return null;
-    const totalBytes = entries.reduce((acc, entry) => acc + entry.file.size, 0);
-    const privateCount = entries.reduce((count, entry) => (entry.isPrivate ? count + 1 : count), 0);
-    const folderGroupsMap = new Map<
-      string,
-      {
-        key: string;
-        label: string;
-        invalid: boolean;
-        count: number;
-      }
-    >();
-    let noFolderCount = 0;
-    for (const entry of entries) {
-      const trimmed = entry.metadata.folder?.trim();
-      if (!trimmed) {
-        noFolderCount += 1;
-        continue;
-      }
-      const normalized = normalizeFolderPathInput(entry.metadata.folder);
-      const key = normalized ?? `invalid:${trimmed}`;
-      if (!folderGroupsMap.has(key)) {
-        folderGroupsMap.set(key, {
-          key,
-          label: normalized ?? trimmed,
-          invalid: !normalized,
-          count: 0,
-        });
-      }
-      folderGroupsMap.get(key)!.count += 1;
-    }
-
-    return {
-      count: entries.length,
-      totalBytes,
-      privateCount,
-      folderGroups: Array.from(folderGroupsMap.values()),
-      noFolderCount,
-    };
-  }, [entries]);
-
-  const completedEntries = useMemo(
-    () => entries.filter(entry => entry.status === "success"),
-    [entries],
-  );
-  const completedTotalBytes = useMemo(
-    () => completedEntries.reduce((acc, entry) => acc + entry.file.size, 0),
-    [completedEntries],
+      return base;
+    },
+    [defaultImageOptions],
   );
 
-  const [bulkFolderSelector, setBulkFolderSelector] = useState<{
-    value: string;
-    isPrivate: boolean;
-    error: string | null;
-  } | null>(null);
+  const createImageOptions = useCallback(
+    (): ImageUploadOptions => ({ ...defaultImageOptions }),
+    [defaultImageOptions],
+  );
 
   const formatFolderLabel = useCallback((value: string | null) => {
     if (!value) return "Home";
@@ -467,73 +346,221 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
     ];
   }, [formatPrivateFolderLabel, privateLibraryEntries]);
 
-  const handleOpenBulkFolderSelector = useCallback(() => {
-    if (!entries.length || busy) return;
-    const isPrivateBatch = entries.every(entry => entry.isPrivate);
-    const firstFolder =
-      entries.find(entry => entry.metadata.folder?.trim())?.metadata.folder.trim() ?? "";
-    setBulkFolderSelector({ value: firstFolder, isPrivate: isPrivateBatch, error: null });
-  }, [busy, entries]);
+  useEffect(() => {
+    setEntries(prev => {
+      let changed = false;
+      const next = prev.map(entry => {
+        if (entry.kind !== "image" || entry.imageOptions) return entry;
+        changed = true;
+        const baseOptions = createImageOptions();
+        if (!isWebpConvertible(entry.file)) {
+          baseOptions.optimizeForWeb = false;
+        }
+        return { ...entry, imageOptions: baseOptions };
+      });
+      return changed ? next : prev;
+    });
+  }, [createImageOptions]);
 
-  const handleBulkFolderValueChange = useCallback((value: string) => {
-    setBulkFolderSelector(prev => (prev ? { ...prev, value, error: null } : prev));
-  }, []);
-
-  const handleBulkFolderApply = useCallback(() => {
-    if (!bulkFolderSelector) return;
-    const raw = bulkFolderSelector.value ?? "";
-    const trimmed = raw.trim();
-    if (trimmed && containsReservedFolderSegment(trimmed)) {
-      setBulkFolderSelector(prev =>
-        prev ? { ...prev, error: 'Folder names cannot include the word "private".' } : prev,
-      );
+  const prevDefaultsRef = useRef(defaultImageOptions);
+  useEffect(() => {
+    const prevDefaults = prevDefaultsRef.current;
+    const nextDefaults = defaultImageOptions;
+    if (
+      prevDefaults.optimizeForWeb === nextDefaults.optimizeForWeb &&
+      prevDefaults.removeMetadata === nextDefaults.removeMetadata &&
+      prevDefaults.resizeOption === nextDefaults.resizeOption
+    ) {
+      prevDefaultsRef.current = nextDefaults;
       return;
     }
-    let nextFolder = trimmed;
-    if (trimmed) {
-      const normalized = normalizeFolderPathInput(trimmed);
-      if (normalized === null) {
-        setBulkFolderSelector(prev =>
-          prev ? { ...prev, error: 'Folder names cannot include the word "private".' } : prev,
-        );
+    prevDefaultsRef.current = nextDefaults;
+    setEntries(prev => {
+      let changed = false;
+      const next = prev.map(entry => {
+        if (entry.kind !== "image") {
+          return entry;
+        }
+        const imageOptions = getEntryImageOptions(entry);
+        const convertible = isWebpConvertible(entry.file);
+        const expectedPrev = {
+          optimizeForWeb: convertible ? prevDefaults.optimizeForWeb : false,
+          removeMetadata: prevDefaults.removeMetadata,
+          resizeOption: prevDefaults.resizeOption,
+        };
+        const expectedNext = {
+          optimizeForWeb: convertible ? nextDefaults.optimizeForWeb : false,
+          removeMetadata: nextDefaults.removeMetadata,
+          resizeOption: nextDefaults.resizeOption,
+        };
+        const userCustomized =
+          imageOptions.optimizeForWeb !== expectedPrev.optimizeForWeb ||
+          imageOptions.removeMetadata !== expectedPrev.removeMetadata ||
+          imageOptions.resizeOption !== expectedPrev.resizeOption;
+        if (userCustomized) {
+          return entry;
+        }
+        changed = true;
+        return resetEntryProgress({
+          ...entry,
+          imageOptions: { ...expectedNext },
+        });
+      });
+      return changed ? next : prev;
+    });
+  }, [defaultImageOptions, getEntryImageOptions]);
+
+  useEffect(() => {
+    if (!optionsEntryId) return;
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target as Node | null;
+      if (
+        (optionsPopoverRef.current && optionsPopoverRef.current.contains(target)) ||
+        (optionsTriggerRef.current && optionsTriggerRef.current.contains(target))
+      ) {
         return;
       }
-      nextFolder = normalized ?? trimmed;
-    }
-    setEntries(prev =>
-      prev.map(entry => {
-        if (entry.metadata.kind === "audio") {
-          return resetEntryProgress({
-            ...entry,
-            metadata: { ...entry.metadata, folder: nextFolder },
-          });
-        }
-        if (entry.metadata.kind === "generic") {
-          return resetEntryProgress({
-            ...entry,
-            metadata: { ...entry.metadata, folder: nextFolder },
-          });
-        }
-        return entry;
+      setOptionsEntryId(null);
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setOptionsEntryId(null);
+      }
+    };
+    window.addEventListener("pointerdown", handlePointerDown, true);
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("pointerdown", handlePointerDown, true);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [optionsEntryId]);
+
+  const serverMap = useMemo(() => new Map(servers.map(server => [server.url, server])), [servers]);
+
+  const transferMap = useMemo(
+    () => new Map([...syncTransfers, ...transfers].map(item => [item.id, item])),
+    [syncTransfers, transfers],
+  );
+
+  const entryStatusBadgeMap = isLightTheme ? ENTRY_STATUS_BADGE_LIGHT : ENTRY_STATUS_BADGE_DARK;
+
+  const requiresAuthSelected = useMemo(
+    () =>
+      selectedServers.some(url => {
+        const server = serverMap.get(url);
+        if (!server) return false;
+        return Boolean(server.requiresAuth);
       }),
-    );
-    setBulkFolderSelector(null);
-  }, [bulkFolderSelector, setEntries]);
+    [selectedServers, serverMap],
+  );
 
-  const handleCloseBulkFolderSelector = useCallback(() => {
-    setBulkFolderSelector(null);
-  }, []);
+  const activeSigner = ndk?.signer ?? signer ?? null;
+  const signerMissing = requiresAuthSelected && !activeSigner;
+  const folderNamesInvalid = useMemo(
+    () => entries.some(entry => containsReservedFolderSegment(entry.metadata.folder)),
+    [entries],
+  );
+  const canUpload = !signerMissing && !folderNamesInvalid;
+  const hasPendingUploads = useMemo(
+    () =>
+      entries.some(entry =>
+        selectedServers.some(serverUrl => entry.serverStatuses[serverUrl] !== "success"),
+      ),
+    [entries, selectedServers],
+  );
+  const hasCompletedEntries = useMemo(
+    () => entries.some(entry => entry.status === "success"),
+    [entries],
+  );
+  const entryCounts = useMemo(() => {
+    let pending = 0;
+    let completed = 0;
+    let errors = 0;
+    for (const entry of entries) {
+      if (entry.status === "success") {
+        completed += 1;
+      } else if (entry.status === "error") {
+        errors += 1;
+      } else {
+        pending += 1;
+      }
+    }
+    return { total: entries.length, pending, completed, errors };
+  }, [entries]);
 
-  React.useEffect(() => {
-    if (!entries.length) {
-      setBulkFolderSelector(null);
+  const uploadPhase = useMemo<UploadPhase>(() => {
+    if (entries.some(entry => entry.status === "uploading")) return "uploading";
+    if (busy) return "uploading";
+    if (entries.length > 0 && entries.every(entry => entry.status === "success"))
+      return "completed";
+    if (entries.some(entry => entry.status === "error")) return "attention";
+    return "idle";
+  }, [busy, entries]);
+
+  const showSetupContent = uploadPhase === "idle" || uploadPhase === "attention";
+  const readOnlyMode = uploadPhase === "uploading" || uploadPhase === "completed";
+
+  useEffect(() => {
+    if (readOnlyMode && optionsEntryId) {
+      setOptionsEntryId(null);
     }
-  }, [entries.length]);
-  React.useEffect(() => {
-    if (!showSetupContent) {
-      setBulkFolderSelector(null);
+  }, [optionsEntryId, readOnlyMode]);
+
+  const uploadCompletionPercent = useMemo(() => {
+    if (entryCounts.total === 0) return 0;
+    return Math.min(100, Math.round((entryCounts.completed / entryCounts.total) * 100));
+  }, [entryCounts.completed, entryCounts.total]);
+
+  const targetServerNames = useMemo(() => {
+    if (!selectedServers.length) return "";
+    const seen = new Set<string>();
+    const labels = selectedServers
+      .map(url => serverMap.get(url)?.name || url)
+      .filter(label => {
+        if (seen.has(label)) return false;
+        seen.add(label);
+        return true;
+      });
+    return labels.join(", ");
+  }, [selectedServers, serverMap]);
+
+  const filteredEntries = useMemo(() => {
+    switch (entryFilter) {
+      case "pending":
+        return entries.filter(entry => entry.status === "idle" || entry.status === "uploading");
+      case "completed":
+        return entries.filter(entry => entry.status === "success");
+      case "errors":
+        return entries.filter(entry => entry.status === "error");
+      default:
+        return entries;
     }
-  }, [showSetupContent]);
+  }, [entries, entryFilter]);
+  const sortedEntries = useMemo(() => {
+    const statusPriority: Record<UploadEntryStatus, number> = {
+      uploading: 0,
+      idle: 1,
+      error: 2,
+      success: 3,
+    };
+    return [...filteredEntries].sort((a, b) => {
+      const diff = statusPriority[a.status] - statusPriority[b.status];
+      if (diff !== 0) return diff;
+      return a.file.name.localeCompare(b.file.name, undefined, { sensitivity: "base" });
+    });
+  }, [filteredEntries]);
+  const allMetadataExpanded = useMemo(
+    () => entries.length > 0 && entries.every(entry => entry.showMetadata),
+    [entries],
+  );
+  const completedEntries = useMemo(
+    () => entries.filter(entry => entry.status === "success"),
+    [entries],
+  );
+  const completedTotalBytes = useMemo(
+    () => completedEntries.reduce((acc, entry) => acc + entry.file.size, 0),
+    [completedEntries],
+  );
 
   React.useEffect(() => {
     if (!feedback) return;
@@ -592,13 +619,14 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
         if (!target) return prev;
         setFeedback({
           id: Date.now(),
-          message: `Removed ${target.file.name} from the queue.`,
-        });
-        return prev.filter(entry => entry.id !== id);
+        message: `Removed ${target.file.name} from the queue.`,
       });
-      setTransfers(prev => prev.filter(item => !item.id.endsWith(`-${id}`)));
-    },
-    [setFeedback],
+      return prev.filter(entry => entry.id !== id);
+    });
+    setTransfers(prev => prev.filter(item => !item.id.endsWith(`-${id}`)));
+    setOptionsEntryId(prev => (prev === id ? null : prev));
+  },
+    [setFeedback, setOptionsEntryId],
   );
 
   const clearCompletedEntries = useCallback(() => {
@@ -615,9 +643,13 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
         id: Date.now(),
         message: `Cleared ${completedEntries.length} uploaded ${completedEntries.length === 1 ? "file" : "files"}.`,
       });
+      if (completedEntries.length > 0) {
+        const clearedIds = new Set(completedEntries.map(entry => entry.id));
+        setOptionsEntryId(prev => (prev && clearedIds.has(prev) ? null : prev));
+      }
       return prev.filter(entry => entry.status !== "success");
     });
-  }, [setFeedback, setTransfers]);
+  }, [setFeedback, setTransfers, setOptionsEntryId]);
   const reset = useCallback(() => {
     setEntries([]);
     setTransfers([]);
@@ -625,6 +657,7 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
     }
+    setOptionsEntryId(null);
     const message = "Upload queue reset.";
     if (showStatusMessage) {
       showStatusMessage(message, "info", 4000);
@@ -646,12 +679,13 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
 
     for (const file of selectedFiles) {
       const kind = detectEntryKind(file);
+      const entryId = createUploadEntryId();
       if (kind === "audio") {
         const { extractAudioMetadata } = await loadAudioMetadataModule();
         const extracted = await extractAudioMetadata(file);
         const metadata = createAudioMetadataFormState(file, extracted, normalizedFolderSuggestion);
         nextEntries.push({
-          id: createUploadEntryId(),
+          id: entryId,
           file,
           kind,
           metadata,
@@ -662,8 +696,8 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
           serverStatuses: {},
         });
       } else {
-        nextEntries.push({
-          id: createUploadEntryId(),
+        const baseEntry: UploadEntry = {
+          id: entryId,
           file,
           kind,
           metadata: createGenericMetadataFormState(file, normalizedFolderSuggestion),
@@ -672,7 +706,11 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
           isPrivate: false,
           status: "idle",
           serverStatuses: {},
-        });
+        };
+        if (kind === "image") {
+          baseEntry.imageOptions = createImageOptions();
+        }
+        nextEntries.push(baseEntry);
       }
     }
 
@@ -810,13 +848,45 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
     });
   };
 
-  const setEntryPrivacy = (id: string, value: boolean) => {
-    setEntries(prev =>
-      prev.map(entry =>
-        entry.id === id ? resetEntryProgress({ ...entry, isPrivate: value }) : entry,
-      ),
-    );
-  };
+  const updateEntryImageOptions = useCallback(
+    (id: string, changes: Partial<ImageUploadOptions>) => {
+      setEntries(prev =>
+        prev.map(entry => {
+          if (entry.id !== id || entry.kind !== "image") return entry;
+          const current = entry.imageOptions ?? createImageOptions();
+          const nextOptions: ImageUploadOptions = {
+            optimizeForWeb:
+              changes.optimizeForWeb ?? current.optimizeForWeb,
+            removeMetadata: changes.removeMetadata ?? current.removeMetadata,
+            resizeOption:
+              changes.resizeOption ?? current.resizeOption,
+          };
+          if (!RESIZE_OPTIONS.some(option => option.id === nextOptions.resizeOption)) {
+            nextOptions.resizeOption = 0;
+          }
+          const unchanged =
+            nextOptions.optimizeForWeb === current.optimizeForWeb &&
+            nextOptions.removeMetadata === current.removeMetadata &&
+            nextOptions.resizeOption === current.resizeOption;
+          if (unchanged) {
+            if (entry.imageOptions) return entry;
+            return { ...entry, imageOptions: nextOptions };
+          }
+          return resetEntryProgress({ ...entry, imageOptions: nextOptions });
+        }),
+      );
+    },
+    [createImageOptions],
+  );
+
+const setEntryPrivacy = (id: string, value: boolean) => {
+  setEntries(prev =>
+    prev.map(entry =>
+      entry.id === id ? resetEntryProgress({ ...entry, isPrivate: value }) : entry,
+    ),
+  );
+};
+
 
   const { effectiveRelays } = usePreferredRelays();
 
@@ -908,7 +978,7 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
     );
 
     setBusy(true);
-    const limit = pLimit(2);
+    const limit = pLimit(1);
     const preparedUploads: {
       entry: UploadEntry;
       file: File;
@@ -925,17 +995,31 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
       }
       return imageUtils;
     };
-
     for (const { entry, servers } of targetEntries) {
       let processed = entry.file;
-      if (cleanMetadata && entry.kind === "image") {
-        const { stripImageMetadata } = await ensureImageUtils();
-        processed = await stripImageMetadata(processed);
-      }
-      const resize = RESIZE_OPTIONS.find(r => r.id === resizeOption && r.size);
-      if (resize && entry.kind === "image") {
-        const { resizeImage } = await ensureImageUtils();
-        processed = await resizeImage(processed, resize.size!, resize.size!);
+      if (entry.kind === "image") {
+        const options = entry.imageOptions ?? createImageOptions();
+        if (options.removeMetadata) {
+          const { stripImageMetadata } = await ensureImageUtils();
+          processed = await stripImageMetadata(processed);
+        }
+        const resizeSetting = RESIZE_OPTIONS.find(
+          r => r.id === options.resizeOption && r.size,
+        );
+        if (resizeSetting) {
+          const { resizeImage } = await ensureImageUtils();
+          processed = await resizeImage(
+            processed,
+            resizeSetting.size!,
+            resizeSetting.size!,
+          );
+        }
+        if (options.optimizeForWeb && isWebpConvertible(entry.file)) {
+          if (processed.type !== "image/webp") {
+            const { convertImageToWebp } = await ensureImageUtils();
+            processed = await convertImageToWebp(processed);
+          }
+        }
       }
 
       if (entry.isPrivate) {
@@ -1077,7 +1161,7 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
         }
         const blob: BlossomBlob = {
           ...uploaded,
-          name: uploaded.name || entry.file.name,
+          name: uploaded.name || serverFile.name || entry.file.name,
           type: uploaded.type || serverFile.type || entry.file.type,
         };
 
@@ -1310,7 +1394,8 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
         <p className="text-xs text-slate-400">
           After adding a file for upload, you will be able to edit metadata before publishing to
           your selected server. Bloom will automatically post metadata for music files with embedded
-          ID3 tags.
+          ID3 tags. Private uploads encrypt the file on your device and require your signer to
+          access them later.
         </p>
       </header>
       <div className="space-y-3">
@@ -1507,85 +1592,6 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
             )}
           </>
         ) : null}
-        {uploadSummary && entries.length > 1 && showSetupContent && (
-          <div
-            className={`rounded-xl border px-4 py-3 text-sm space-y-2 ${
-              isLightTheme
-                ? "border-slate-200 bg-white text-slate-700 shadow-sm"
-                : "border-slate-800 bg-slate-950/60 text-slate-200"
-            }`}
-          >
-            <div className="flex flex-wrap items-center gap-3">
-              <span className={`font-medium ${isLightTheme ? "text-slate-900" : "text-slate-100"}`}>
-                {uploadSummary.count} {uploadSummary.count === 1 ? "file" : "files"} ·{" "}
-                {prettyBytes(uploadSummary.totalBytes)}
-              </span>
-              {uploadSummary.privateCount > 0 ? (
-                <span
-                  className={`inline-flex items-center gap-1 text-xs ${isLightTheme ? "text-slate-500" : "text-slate-400"}`}
-                >
-                  <LockIcon
-                    size={14}
-                    className={isLightTheme ? "text-emerald-600" : "text-emerald-300"}
-                  />
-                  <span>
-                    {uploadSummary.privateCount}{" "}
-                    {uploadSummary.privateCount === 1 ? "private file" : "private files"}
-                  </span>
-                </span>
-              ) : null}
-            </div>
-            {(uploadSummary.folderGroups.length > 0 || uploadSummary.noFolderCount > 0) && (
-              <div
-                className={`flex flex-col gap-1 text-xs ${isLightTheme ? "text-slate-500" : "text-slate-400"}`}
-              >
-                {uploadSummary.folderGroups.map(group => (
-                  <span
-                    key={group.key}
-                    className={`inline-flex items-center gap-2 ${
-                      group.invalid
-                        ? isLightTheme
-                          ? "text-amber-600"
-                          : "text-amber-300"
-                        : isLightTheme
-                          ? "text-emerald-600"
-                          : "text-emerald-300"
-                    }`}
-                  >
-                    {group.invalid ? (
-                      <WarningIcon size={14} aria-hidden="true" />
-                    ) : (
-                      <FolderIcon size={14} />
-                    )}
-                    <span className="font-medium">{group.label}</span>
-                    <span className={isLightTheme ? "text-slate-500" : "text-slate-400"}>
-                      · {group.count} {group.count === 1 ? "file" : "files"}
-                    </span>
-                  </span>
-                ))}
-                {uploadSummary.noFolderCount > 0 ? (
-                  <span
-                    className={`inline-flex items-center gap-2 ${isLightTheme ? "text-slate-500" : "text-slate-400"}`}
-                  >
-                    <FolderIcon
-                      size={14}
-                      className={isLightTheme ? "text-slate-500" : "text-slate-400"}
-                    />
-                    <span
-                      className={`font-medium ${isLightTheme ? "text-slate-700" : "text-slate-300"}`}
-                    >
-                      No folder selected
-                    </span>
-                    <span>
-                      · {uploadSummary.noFolderCount}{" "}
-                      {uploadSummary.noFolderCount === 1 ? "file" : "files"}
-                    </span>
-                  </span>
-                ) : null}
-              </div>
-            )}
-          </div>
-        )}
         {entries.length > 0 && uploadPhase !== "completed" ? (
           <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 px-4 py-3">
             <div className="flex flex-wrap items-center justify-between gap-3">
@@ -1635,14 +1641,6 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
                       <button
                         type="button"
                         className="rounded-lg border border-slate-700 px-2 py-1 text-xs font-medium text-slate-200 hover:border-emerald-400 hover:text-emerald-200"
-                        onClick={handleOpenBulkFolderSelector}
-                        disabled={busy}
-                      >
-                        Apply folder…
-                      </button>
-                      <button
-                        type="button"
-                        className="rounded-lg border border-slate-700 px-2 py-1 text-xs font-medium text-slate-200 hover:border-emerald-400 hover:text-emerald-200"
                         onClick={() => {
                           const shouldSetPrivate = entries.some(entry => !entry.isPrivate);
                           setEntries(prev =>
@@ -1684,69 +1682,7 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
                 </div>
               </div>
             ) : null}
-            {showSetupContent && bulkFolderSelector ? (
-              <div
-                className={`mt-3 flex flex-wrap items-center gap-3 rounded-lg border p-3 text-xs ${
-                  isLightTheme
-                    ? "border-slate-200 bg-white text-slate-600 shadow-sm"
-                    : "border-slate-800 bg-slate-950/60 text-slate-300"
-                }`}
-              >
-                <div className="w-64 min-w-[16rem]">
-                  <UploadFolderSelect
-                    value={bulkFolderSelector.value}
-                    onChange={handleBulkFolderValueChange}
-                    options={
-                      bulkFolderSelector.isPrivate ? privateFolderOptions : publicFolderOptions
-                    }
-                    invalid={Boolean(bulkFolderSelector.error)}
-                    customDefaultPath={
-                      bulkFolderSelector.value?.trim() ||
-                      (bulkFolderSelector.isPrivate
-                        ? DEFAULT_PRIVATE_FOLDER_PATH
-                        : DEFAULT_PUBLIC_FOLDER_PATH)
-                    }
-                    placeholder={
-                      bulkFolderSelector.isPrivate ? "e.g. Trips/2024" : "e.g. Pictures/2024"
-                    }
-                  />
-                </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    className="rounded-lg bg-emerald-600 px-3 py-1 font-semibold text-slate-900 transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-60"
-                    onClick={handleBulkFolderApply}
-                    disabled={busy}
-                  >
-                    Apply
-                  </button>
-                  <button
-                    type="button"
-                    className={`rounded-lg border px-3 py-1 font-medium transition ${
-                      isLightTheme
-                        ? "border-slate-300 text-slate-600 hover:border-slate-400 hover:text-slate-800"
-                        : "border-slate-700 text-slate-200 hover:border-slate-600 hover:text-slate-100"
-                    }`}
-                    onClick={handleCloseBulkFolderSelector}
-                    disabled={busy}
-                  >
-                    Cancel
-                  </button>
-                </div>
-                {bulkFolderSelector.error ? (
-                  <span className={isLightTheme ? "text-red-500" : "text-red-400"}>
-                    {bulkFolderSelector.error}
-                  </span>
-                ) : (
-                  <span className="text-slate-500">
-                    {bulkFolderSelector.isPrivate
-                      ? "Applies to encrypted uploads in your Private library."
-                      : "Organize public uploads across Blossom-compatible servers."}
-                  </span>
-                )}
-              </div>
-            ) : null}
-            {sortedEntries.length === 0 ? (
+                        {sortedEntries.length === 0 ? (
               <div className="mt-4 rounded-xl border border-slate-800 bg-slate-950/70 px-4 py-6 text-center text-xs text-slate-400">
                 No files match this view. Try switching filters or add new uploads.
               </div>
@@ -1769,6 +1705,10 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
                       lastStatus = entry.status;
                     }
                     const { file, metadata, kind, showMetadata } = entry;
+                    const imageOptions =
+                      kind === "image" ? entry.imageOptions ?? createImageOptions() : null;
+                    const canOptimizeToWebp =
+                      kind === "image" && isWebpConvertible(entry.file);
                     const typeLabel = describeUploadEntryKind(kind);
                     const folderInputValue = metadata.folder?.trim() ?? "";
                     const normalizedFolderPreview = normalizeFolderPathInput(metadata.folder);
@@ -1906,7 +1846,7 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
                               ) : null}
                             </div>
                             {!readOnlyMode ? (
-                              <div className="flex items-center gap-2">
+                              <div className="relative flex items-center gap-2">
                                 <button
                                   type="button"
                                   onClick={() => toggleMetadataVisibility(entry.id)}
@@ -1939,6 +1879,22 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
                                 ) : null}
                                 <button
                                   type="button"
+                                  ref={optionsEntryId === entry.id ? optionsTriggerRef : undefined}
+                                  onClick={() =>
+                                    setOptionsEntryId(prev => (prev === entry.id ? null : entry.id))
+                                  }
+                                  className={`flex items-center justify-center rounded-lg border p-2 text-xs transition ${
+                                    isLightTheme
+                                      ? "border-slate-300 text-slate-600 hover:border-emerald-500 hover:text-emerald-600"
+                                      : "border-slate-700 text-slate-200 hover:border-emerald-500 hover:text-emerald-300"
+                                  }`}
+                                  title="Upload settings"
+                                >
+                                  <SettingsIcon size={16} aria-hidden="true" />
+                                  <span className="sr-only">Upload settings</span>
+                                </button>
+                                <button
+                                  type="button"
                                   onClick={() => removeEntry(entry.id)}
                                   className={`flex items-center justify-center rounded-lg border p-2 text-xs transition disabled:cursor-not-allowed disabled:opacity-40 ${
                                     isLightTheme
@@ -1951,6 +1907,124 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
                                   <TrashIcon size={16} aria-hidden="true" />
                                   <span className="sr-only">Remove</span>
                                 </button>
+                                {optionsEntryId === entry.id ? (
+                                  <div
+                                    ref={optionsPopoverRef}
+                                    className={`absolute right-0 top-full z-30 mt-2 w-72 rounded-xl border shadow-xl ${
+                                      isLightTheme
+                                        ? "border-slate-200 bg-white text-slate-700"
+                                        : "border-slate-700 bg-slate-900/95 text-slate-100 backdrop-blur"
+                                    }`}
+                                    role="dialog"
+                                    aria-label="Upload options"
+                                  >
+                                    <div
+                                      className={`flex items-center justify-between border-b px-3 py-2 ${
+                                        isLightTheme ? "border-slate-200" : "border-slate-700"
+                                      }`}
+                                    >
+                                      <span className="text-[11px] font-semibold uppercase tracking-wide">
+                                        Upload options
+                                      </span>
+                                      <button
+                                        type="button"
+                                        onClick={() => setOptionsEntryId(null)}
+                                        className={`rounded-lg border p-1 transition ${
+                                          isLightTheme
+                                            ? "border-transparent text-slate-500 hover:border-slate-200 hover:text-slate-700"
+                                            : "border-transparent text-slate-400 hover:border-slate-700 hover:text-slate-100"
+                                        }`}
+                                        title="Close upload options"
+                                      >
+                                        <CloseIcon size={14} aria-hidden="true" />
+                                        <span className="sr-only">Close upload options</span>
+                                      </button>
+                                    </div>
+                                    <div className="space-y-4 px-3 py-3 text-xs">
+                                      <div className="space-y-2">
+                                        <label className="flex items-center justify-between gap-3">
+                                          <span className="inline-flex items-center gap-2 font-medium">
+                                            <LockIcon size={14} aria-hidden="true" />
+                                            <span>Private upload</span>
+                                          </span>
+                                          <input
+                                            type="checkbox"
+                                            className={`h-4 w-4 rounded focus:outline-none focus:ring-1 focus:ring-emerald-500 ${
+                                              isLightTheme
+                                                ? "border-slate-300 bg-white text-emerald-600"
+                                                : "border-slate-600 bg-slate-950 text-emerald-400"
+                                            }`}
+                                            checked={entry.isPrivate}
+                                            onChange={event => setEntryPrivacy(entry.id, event.target.checked)}
+                                            disabled={isEntryUploading || readOnlyMode}
+                                          />
+                                        </label>
+                                        <p
+                                          className={`${
+                                            isLightTheme ? "text-[11px] text-slate-500" : "text-[11px] text-slate-400"
+                                          }`}
+                                        >
+                                          Encrypts the file on your device so only you can decrypt it later.
+                                        </p>
+                                      </div>
+                                      {imageOptions ? (
+                                        <div className="space-y-3">
+                                          {canOptimizeToWebp ? (
+                                            <label className="flex items-center justify-between gap-3">
+                                              <span className="font-medium">Optimize for web (WebP)</span>
+                                              <input
+                                                type="checkbox"
+                                                checked={imageOptions.optimizeForWeb}
+                                                onChange={event =>
+                                                  updateEntryImageOptions(entry.id, {
+                                                    optimizeForWeb: event.target.checked,
+                                                  })
+                                                }
+                                                disabled={isEntryUploading || readOnlyMode}
+                                              />
+                                            </label>
+                                          ) : null}
+                                          <label className="flex items-center justify-between gap-3">
+                                            <span className="font-medium">Remove EXIF metadata</span>
+                                            <input
+                                              type="checkbox"
+                                              checked={imageOptions.removeMetadata}
+                                              onChange={event =>
+                                                updateEntryImageOptions(entry.id, {
+                                                  removeMetadata: event.target.checked,
+                                                })
+                                              }
+                                              disabled={isEntryUploading || readOnlyMode}
+                                            />
+                                          </label>
+                                          <label className="flex items-center justify-between gap-3">
+                                            <span className="font-medium">Resize</span>
+                                            <select
+                                              value={imageOptions.resizeOption}
+                                              onChange={event =>
+                                                updateEntryImageOptions(entry.id, {
+                                                  resizeOption: Number(event.target.value),
+                                                })
+                                              }
+                                              disabled={isEntryUploading || readOnlyMode}
+                                              className={`w-32 rounded-lg border px-2 py-1 text-xs ${
+                                                isLightTheme
+                                                  ? "border-slate-300 bg-white text-slate-700"
+                                                  : "border-slate-700 bg-slate-900 text-slate-200"
+                                              }`}
+                                            >
+                                              {RESIZE_OPTIONS.map(option => (
+                                                <option key={option.id} value={option.id}>
+                                                  {option.label}
+                                                </option>
+                                              ))}
+                                            </select>
+                                          </label>
+                                        </div>
+                                      ) : null}
+                                    </div>
+                                  </div>
+                                ) : null}
                               </div>
                             ) : null}
                           </div>
@@ -2017,44 +2091,6 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
                             })}
                           </div>
                         ) : null}
-                        <div
-                          className={`rounded-xl border px-4 py-3 ${
-                            isLightTheme
-                              ? "border-slate-200 bg-slate-50"
-                              : "border-slate-700 bg-slate-900/80"
-                          }`}
-                        >
-                          <label
-                            className={`flex items-start gap-3 text-sm ${
-                              isLightTheme ? "text-slate-700" : "text-slate-200"
-                            }`}
-                          >
-                            <input
-                              type="checkbox"
-                              className={`mt-1 h-4 w-4 rounded focus:outline-none focus:ring-1 focus:ring-emerald-500 ${
-                                isLightTheme
-                                  ? "border-slate-300 bg-white text-emerald-600"
-                                  : "border-slate-600 bg-slate-950 text-emerald-400"
-                              }`}
-                              checked={entry.isPrivate}
-                              onChange={event => setEntryPrivacy(entry.id, event.target.checked)}
-                              disabled={isEntryUploading || readOnlyMode}
-                            />
-                            <span className="flex flex-col gap-1 text-left">
-                              <span
-                                className={`font-medium ${isLightTheme ? "text-slate-900" : "text-slate-100"}`}
-                              >
-                                Private upload
-                              </span>
-                              <span
-                                className={`text-xs leading-relaxed ${isLightTheme ? "text-slate-500" : "text-slate-400"}`}
-                              >
-                                Encrypts the file on your device. Private files cannot be shared
-                                publicly as they require your private key to decrypt.
-                              </span>
-                            </span>
-                          </label>
-                        </div>
                         {showMetadata ? (
                           <div className="space-y-3">
                             {metadata.kind === "audio" ? (
@@ -2104,33 +2140,7 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
             )}
           </div>
         ) : null}
-        {showSetupContent && entries.length > 0 && hasImageEntries && (
-          <div className="flex flex-wrap gap-4 text-sm text-slate-300">
-            <label className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                checked={cleanMetadata}
-                onChange={e => setCleanMetadata(e.target.checked)}
-              />
-              Remove EXIF metadata from images
-            </label>
-            <label className="flex items-center gap-2">
-              <span>Resize:</span>
-              <select
-                value={resizeOption}
-                onChange={e => setResizeOption(Number(e.target.value))}
-                className="bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-sm"
-              >
-                {RESIZE_OPTIONS.map(opt => (
-                  <option key={opt.id} value={opt.id}>
-                    {opt.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
-        )}
-        {showSetupContent ? (
+        {showSetupContent && entries.length > 0 ? (
           <div className="flex justify-end gap-3">
             <button
               onClick={() => handleUpload()}

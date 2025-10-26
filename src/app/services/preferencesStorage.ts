@@ -2,6 +2,8 @@ import type { FilterMode } from "../../shared/types/filter";
 import type { UserPreferences } from "../../shared/types/preferences";
 import { normalizeEpochSeconds } from "../../shared/utils/time";
 
+const RESIZE_OPTIONS_MAX_ID = 3;
+
 export const DEFAULT_PREFERENCES: UserPreferences = {
   defaultServerUrl: null,
   defaultViewMode: "list",
@@ -12,6 +14,9 @@ export const DEFAULT_PREFERENCES: UserPreferences = {
   showListPreviews: true,
   keepSearchExpanded: false,
   theme: "dark",
+  optimizeImageUploadsByDefault: false,
+  stripImageMetadataByDefault: true,
+  defaultImageResizeOption: 0,
 };
 
 const STORAGE_KEY = "bloom:user-preferences";
@@ -81,6 +86,19 @@ export const loadStoredPreferences = (): UserPreferences => {
         ? parsed.defaultServerUrl.trim()
         : null;
     const theme = isTheme(parsed?.theme) ? parsed!.theme : "dark";
+    const optimizeImageUploadsByDefault =
+      typeof parsed?.optimizeImageUploadsByDefault === "boolean"
+        ? parsed.optimizeImageUploadsByDefault
+        : DEFAULT_PREFERENCES.optimizeImageUploadsByDefault;
+    const stripImageMetadataByDefault =
+      typeof parsed?.stripImageMetadataByDefault === "boolean"
+        ? parsed.stripImageMetadataByDefault
+        : true;
+    const rawResizeOption = parsed?.defaultImageResizeOption;
+    const defaultImageResizeOption =
+      typeof rawResizeOption === "number" && Number.isFinite(rawResizeOption)
+        ? Math.max(0, Math.min(RESIZE_OPTIONS_MAX_ID, Math.trunc(rawResizeOption)))
+        : 0;
     return {
       defaultServerUrl,
       defaultViewMode,
@@ -91,6 +109,9 @@ export const loadStoredPreferences = (): UserPreferences => {
       showListPreviews,
       keepSearchExpanded,
       theme,
+      optimizeImageUploadsByDefault,
+      stripImageMetadataByDefault,
+      defaultImageResizeOption,
     };
   } catch {
     return DEFAULT_PREFERENCES;
