@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { decode } from "blurhash";
 import { prettyBytes, prettyDate } from "../../../../shared/utils/format";
 import {
@@ -70,24 +70,34 @@ export const PreviewDialog: React.FC<{
   target: PreviewTarget;
   onClose: () => void;
   onDetect: (sha: string, kind: "image" | "video") => void;
-  onCopy: (blob: BlossomBlob) => void;
+  onCopy: (blob: BlossomBlob, options?: { url?: string; label?: string }) => void;
   onBlobVisible: (sha: string) => void;
 }> = ({ target, onClose, onDetect, onCopy, onBlobVisible }) => {
-  const { blob, displayName, previewUrl, requiresAuth, signTemplate, serverType, disablePreview } =
-    target;
+  const {
+    blob,
+    displayName,
+    previewUrl,
+    requiresAuth,
+    signTemplate,
+    serverType,
+    disablePreview,
+    directLinks,
+    baseUrl,
+  } = target;
   const derivedKind: FileKind =
     (target.kind as FileKind | undefined) ?? decideFileKind(blob, undefined);
   const blurhash = extractBlurhash(blob);
   const sizeLabel = typeof blob.size === "number" ? prettyBytes(blob.size) : null;
   const updatedLabel = typeof blob.uploaded === "number" ? prettyDate(blob.uploaded) : null;
   const typeLabel = blob.type || "Unknown";
-  const originLabel = target.baseUrl ?? blob.serverUrl ?? null;
+  const originLabel = baseUrl ?? blob.serverUrl ?? null;
   const previewUnavailable = disablePreview || !previewUrl;
-
-  const handleDirectUrlCopy = useCallback(() => {
-    if (!blob.url) return;
-    onCopy(blob);
-  }, [blob, onCopy]);
+  const handleCopyLink = useCallback(
+    (link: { url: string; label: string }) => {
+      onCopy(blob, { url: link.url, label: link.label });
+    },
+    [blob, onCopy],
+  );
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -128,9 +138,9 @@ export const PreviewDialog: React.FC<{
   const closeButtonClass = isLightTheme
     ? "absolute right-4 top-4 rounded-full p-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-400 focus:ring-offset-2 focus:ring-offset-white"
     : "absolute right-4 top-4 rounded-full p-2 text-slate-300 transition hover:bg-slate-800 hover:text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-400 focus:ring-offset-2 focus:ring-offset-slate-900";
-  const footerContainerClass = isLightTheme
-    ? "flex flex-wrap gap-4 border-t border-slate-200 px-6 pt-4 text-[11px] text-slate-500"
-    : "flex flex-wrap gap-4 border-t border-slate-800/80 px-6 pt-4 text-[11px] text-slate-400";
+  const metaSecondaryRowClass = isLightTheme
+    ? "mt-2 flex flex-wrap items-center gap-2 text-[11px] text-slate-500"
+    : "mt-2 flex flex-wrap items-center gap-2 text-[11px] text-slate-400";
   const hashLabelClass = isLightTheme
     ? "font-mono break-all text-slate-600"
     : "font-mono break-all text-slate-400";
@@ -173,6 +183,36 @@ export const PreviewDialog: React.FC<{
                 </span>
               )}
             </div>
+            <div className={`${metaSecondaryRowClass} px-0`}>
+              <span className={metaLabelClass}>Hash:</span>
+              <span className={hashLabelClass}>{blob.sha256}</span>
+            </div>
+            {directLinks.length > 0 && (
+              <div className={`${metaSecondaryRowClass} px-0`}>
+                <span className={metaLabelClass}>Direct URL:</span>
+                {directLinks.map((link, index) => (
+                  <Fragment key={`${link.url}-${index}`}>
+                    {index > 0 && <span className={directUrlLabelClass}>/</span>}
+                    <a
+                      href={link.url}
+                      onClick={event => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        handleCopyLink(link);
+                      }}
+                      className={copyButtonClass}
+                      title={`Copy link from ${link.label}`}
+                      aria-label={`Copy link from ${link.label}`}
+                    >
+                      <span>Copy link from {link.label}</span>
+                      <span className="mt-[1px] text-current">
+                        <CopyIcon size={12} />
+                      </span>
+                    </a>
+                  </Fragment>
+                ))}
+              </div>
+            )}
           </div>
           <div className={contentAreaClass}>
             <div className={previewContainerClass}>
@@ -195,7 +235,7 @@ export const PreviewDialog: React.FC<{
                       : getBlobMetadataName(blob)) ?? blob.sha256
                   }
                   type={blob.type}
-                  serverUrl={target.baseUrl ?? blob.serverUrl}
+                  serverUrl={baseUrl ?? blob.serverUrl}
                   requiresAuth={requiresAuth}
                   signTemplate={requiresAuth ? signTemplate : undefined}
                   serverType={serverType}
@@ -207,28 +247,6 @@ export const PreviewDialog: React.FC<{
                   blurhash={blurhash}
                   blob={blob}
                 />
-              )}
-            </div>
-            <div className={footerContainerClass}>
-              <span className={hashLabelClass}>Hash: {blob.sha256}</span>
-              {blob.url && (
-                <button
-                  type="button"
-                  onClick={event => {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    handleDirectUrlCopy();
-                  }}
-                  className={copyButtonClass}
-                  title="Copy direct URL"
-                  aria-label="Copy direct URL"
-                >
-                  <span className={directUrlLabelClass}>Direct URL:</span>
-                  <span className="truncate font-mono">{blob.url}</span>
-                  <span className="mt-[1px] text-current">
-                    <CopyIcon size={12} />
-                  </span>
-                </button>
               )}
             </div>
           </div>

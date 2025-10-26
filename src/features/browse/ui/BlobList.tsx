@@ -7,6 +7,7 @@ import {
   type BlossomBlob,
   type SignTemplate,
 } from "../../../shared/api/blossomClient";
+import { deriveServerNameFromUrl } from "../../../shared/utils/serverName";
 import { buildNip98AuthHeader } from "../../../shared/api/nip98";
 import {
   decryptPrivateBlob,
@@ -85,7 +86,7 @@ export type BlobListProps = {
   onToggle: (sha: string) => void;
   onSelectMany?: (shas: string[], value: boolean) => void;
   onDelete: (blob: BlossomBlob) => void;
-  onCopy: (blob: BlossomBlob) => void;
+  onCopy: (blob: BlossomBlob, options?: { url?: string; label?: string }) => void;
   onPlay?: (blob: BlossomBlob) => void;
   onShare?: (blob: BlossomBlob, options?: { mode?: ShareMode }) => void;
   onRename?: (blob: BlossomBlob) => void;
@@ -471,6 +472,19 @@ export const BlobList: React.FC<BlobListProps> = ({
     defaultServerType: serverType,
     defaultSignTemplate: signTemplate,
   });
+
+  useEffect(() => {
+    if (!previewTarget) return;
+    const targetSha = previewTarget.blob.sha256;
+    if (!targetSha) {
+      closePreview();
+      return;
+    }
+    if (!blobs.some(candidate => candidate.sha256 === targetSha)) {
+      closePreview();
+    }
+  }, [blobs, closePreview, previewTarget]);
+
   const [shareDialogTarget, setShareDialogTarget] = useState<BlossomBlob | null>(null);
   const shareDialogTargetSha = shareDialogTarget?.sha256 ?? null;
   const openShareDialog = useCallback((blob: BlossomBlob) => {
@@ -657,6 +671,101 @@ export const BlobList: React.FC<BlobListProps> = ({
       const previewUrl = !isPdf && !isDocLike && canPreview ? rawPreviewUrl : null;
       const disablePreview = isPdf || isDocLike || !canPreview;
 
+      const directLinks: { url: string; label: string }[] = [];
+      const seenLinks = new Set<string>();
+      const summary = replicaInfo?.get(blob.sha256);
+      const normalizedSha = typeof blob.sha256 === "string" ? blob.sha256.trim() : "";
+
+      const summaryOriginNames = new Map<string, string>();
+      const recordServerLabel = (value?: string | null, name?: string | null) => {
+        if (!value) return;
+        const trimmed = value.trim();
+        if (!trimmed) return;
+        try {
+          const parsed = new URL(trimmed);
+          const origin = parsed.origin.replace(/\/+$/, "");
+          if (!summaryOriginNames.has(origin)) {
+            summaryOriginNames.set(
+              origin,
+              name?.trim() || deriveServerNameFromUrl(origin) || parsed.host || origin,
+            );
+          }
+        } catch {
+          const normalized = trimmed.replace(/\/+$/, "");
+          if (!normalized) return;
+          if (!summaryOriginNames.has(normalized)) {
+            summaryOriginNames.set(
+              normalized,
+              name?.trim() || deriveServerNameFromUrl(normalized) || normalized,
+            );
+          }
+        }
+      };
+
+      summary?.servers.forEach(server => recordServerLabel(server.url, server.name));
+      if (blob.serverUrl) {
+        const matchingName =
+          summary?.servers.find(server => server.url === blob.serverUrl)?.name ?? undefined;
+        recordServerLabel(blob.serverUrl, matchingName);
+      }
+      if (Array.isArray(blob.privateData?.servers)) {
+        blob.privateData?.servers?.forEach(server => recordServerLabel(server));
+      }
+      if (fallbackBaseUrl) {
+        recordServerLabel(fallbackBaseUrl);
+      }
+
+      const addLink = (linkUrl?: string | null, labelHint?: string | null) => {
+        if (!linkUrl) return;
+        const trimmedUrl = linkUrl.trim();
+        if (!trimmedUrl) return;
+        if (seenLinks.has(trimmedUrl)) return;
+        let label = labelHint?.trim();
+        if (!label) {
+          try {
+            const parsed = new URL(trimmedUrl);
+            const origin = parsed.origin.replace(/\/+$/, "");
+            label =
+              summaryOriginNames.get(origin) ||
+              deriveServerNameFromUrl(origin) ||
+              parsed.host ||
+              trimmedUrl;
+        } catch {
+          label = trimmedUrl;
+        }
+        }
+        seenLinks.add(trimmedUrl);
+        directLinks.push({ url: trimmedUrl, label });
+      };
+
+      const addServerLink = (baseUrl?: string | null, nameHint?: string | null) => {
+        if (!normalizedSha || !baseUrl) return;
+        const trimmedBase = baseUrl.trim();
+        if (!trimmedBase) return;
+        const normalizedBase = trimmedBase.replace(/\/+$/, "");
+        if (!normalizedBase) return;
+        addLink(
+          `${normalizedBase}/${normalizedSha}`,
+          nameHint ??
+            summaryOriginNames.get(normalizedBase) ??
+            deriveServerNameFromUrl(normalizedBase) ??
+            normalizedBase,
+        );
+      };
+
+      summary?.servers.forEach(({ url, name }) => addServerLink(url, name));
+
+      if (Array.isArray(blob.privateData?.servers)) {
+        blob.privateData.servers.forEach(url => addServerLink(url));
+      }
+
+      addServerLink(blob.serverUrl);
+      addServerLink(fallbackBaseUrl);
+
+      if (!directLinks.length) {
+        addLink(buildPreviewUrl(blob, fallbackBaseUrl));
+      }
+
       openPreview(blob, {
         displayName,
         requiresAuth: effectiveRequiresAuth,
@@ -664,9 +773,10 @@ export const BlobList: React.FC<BlobListProps> = ({
         baseUrl: fallbackBaseUrl ?? undefined,
         previewUrl,
         disablePreview,
+        directLinks,
       });
     },
-    [baseUrl, detectedKinds, openPreview, requiresAuth, serverType],
+    [baseUrl, detectedKinds, openPreview, replicaInfo, requiresAuth, serverType],
   );
 
   const handleDownload = useCallback(

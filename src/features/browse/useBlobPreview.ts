@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useState } from "react";
 import type { BlossomBlob, SignTemplate } from "../../shared/api/blossomClient";
+import { deriveServerNameFromUrl } from "../../shared/utils/serverName";
 
 type ServerType = "blossom" | "nip96" | "satellite";
 
@@ -13,6 +14,7 @@ export type PreviewTarget = {
   disablePreview: boolean;
   baseUrl?: string;
   kind?: string;
+  directLinks: ReadonlyArray<{ url: string; label: string }>;
 };
 
 export type OpenPreviewContext = {
@@ -23,6 +25,7 @@ export type OpenPreviewContext = {
   previewUrl?: string | null;
   disablePreview?: boolean;
   kind?: string;
+  directLinks?: ReadonlyArray<{ url: string; label: string }>;
 };
 
 type PreviewOptions = {
@@ -48,6 +51,29 @@ export const useBlobPreview = (options?: PreviewOptions) => {
         blob.url ??
         (baseUrl ? `${baseUrl.replace(/\/$/, "")}/${blob.sha256}` : null);
       const previewUrl = disablePreview ? null : rawUrl;
+      const resolvedDirectLinks =
+        context.directLinks && context.directLinks.length > 0
+          ? [...context.directLinks]
+          : blob.url
+            ? [
+                {
+                  url: blob.url,
+                  label: (() => {
+                    try {
+                      const parsed = new URL(blob.url);
+                      const origin = parsed.origin.replace(/\/+$/, "");
+                      return (
+                        deriveServerNameFromUrl(origin) ||
+                        parsed.host ||
+                        origin
+                      );
+                    } catch {
+                      return deriveServerNameFromUrl(blob.url) || blob.url;
+                    }
+                  })(),
+                },
+              ]
+            : [];
 
       setPreviewTarget({
         blob,
@@ -59,6 +85,7 @@ export const useBlobPreview = (options?: PreviewOptions) => {
         disablePreview: disablePreview || !previewUrl,
         baseUrl,
         kind: context.kind ?? context.detectedKind,
+        directLinks: resolvedDirectLinks,
       });
     },
     [defaultServerType, defaultSignTemplate],

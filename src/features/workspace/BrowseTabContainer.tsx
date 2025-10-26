@@ -3540,7 +3540,7 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
   );
 
   const handleCopyUrl = useCallback(
-    (blob: BlossomBlob) => {
+    (blob: BlossomBlob, options?: { url?: string; label?: string }) => {
       if (isPlaceholderBlob(blob)) {
         openPrivateList();
         return;
@@ -3550,9 +3550,19 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
         openFolderFromInfo(folderInfo);
         return;
       }
-      if (!blob.url) return;
-      navigator.clipboard.writeText(blob.url).catch(() => undefined);
-      showStatusMessage("URL copied to clipboard", "success", 1500);
+      const linkToCopy = options?.url ?? blob.url;
+      if (!linkToCopy) return;
+      navigator.clipboard
+        .writeText(linkToCopy)
+        .then(() => {
+          const label = options?.label?.trim();
+          showStatusMessage(
+            label ? `Copied link from ${label}` : "URL copied to clipboard",
+            "success",
+            1500,
+          );
+        })
+        .catch(() => undefined);
     },
     [extractFolderInfo, isPlaceholderBlob, openFolderFromInfo, openPrivateList, showStatusMessage],
   );
