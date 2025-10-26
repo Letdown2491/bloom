@@ -28,6 +28,7 @@ import {
   normalizeRelayUrl,
   loadSignerPreference,
   persistSignerPreference,
+  loadPersistedRelayTargets,
 } from "../services/ndkRelayPersistence";
 
 export type { RelayHealth } from "../services/ndkRelayPersistence";
@@ -71,6 +72,9 @@ const getNormalizedFallbackRelays = (): string[] => {
 
 const removeFallbackRelays = (instance: NdkInstance | null | undefined) => {
   if (!instance) return;
+  const explicitUrls = instance.explicitRelayUrls ?? [];
+  const hasNonFallback = explicitUrls.some(url => !isFallbackRelay(url));
+  if (!hasNonFallback) return;
   const fallbackSet = new Set(getNormalizedFallbackRelays());
   if (!fallbackSet.size) return;
   const pool = instance.pool;
@@ -129,6 +133,11 @@ export const NdkProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const lastRelayPersistAtRef = useRef<number>(0);
   const relayHealthQuotaLimitedRef = useRef(false);
   const relayManagerRef = useRef<RelayConnectionManager | null>(null);
+  const prepareRelayCacheRef = useRef<
+    Map<string, Promise<RelayPreparationResult>>
+  >(new Map());
+  const cachedRelayTargets = useMemo(() => loadPersistedRelayTargets(), []);
+  const cachedRelayTargetsRef = useRef<string[]>(cachedRelayTargets);
 
   useEffect(() => {
     const cached = loadPersistedRelayHealth();
@@ -154,7 +163,13 @@ export const NdkProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const mod = await ensureNdkModule();
 
     if (!ndkRef.current) {
-      ndkRef.current = new mod.default({ explicitRelayUrls: getNormalizedFallbackRelays() });
+      const fallbackRelays = getNormalizedFallbackRelays();
+      const cachedTargets = cachedRelayTargetsRef.current;
+      const initialRelays =
+        cachedTargets.length > 0
+          ? Array.from(new Set<string>([...cachedTargets, ...fallbackRelays]))
+          : fallbackRelays;
+      ndkRef.current = new mod.default({ explicitRelayUrls: initialRelays });
       setNdk(ndkRef.current);
       relayManagerRef.current = createRelayConnectionManager(ndkRef.current, ensureNdkModule);
     }
@@ -229,14 +244,41 @@ export const NdkProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       relayUrls: readonly string[],
       options?: RelayPreparationOptions,
     ): Promise<RelayPreparationResult> => {
-      const { ndk: instance } = await ensureNdkInstance();
-      if (!relayManagerRef.current && instance) {
-        relayManagerRef.current = createRelayConnectionManager(instance, ensureNdkModule);
+      const normalizedParts = Array.isArray(relayUrls)
+        ? relayUrls
+            .map(url => normalizeRelayUrl(url)?.replace(/\/+$/, ""))
+            .filter((value): value is string => Boolean(value))
+        : [];
+      const keyBase =
+        normalizedParts.length > 0
+          ? Array.from(new Set(normalizedParts)).sort().join(",")
+          : "none";
+      const waitKey = options?.waitForConnection ? "1" : "0";
+      const timeoutKey = options?.timeoutMs ? String(options.timeoutMs) : "0";
+      const cacheKey = `${keyBase}|${waitKey}|${timeoutKey}`;
+
+      const existing = prepareRelayCacheRef.current.get(cacheKey);
+      if (existing) {
+        return existing;
       }
-      if (!relayManagerRef.current) {
-        return { relaySet: null, connected: [], pending: [] };
+
+      const task = (async () => {
+        const { ndk: instance } = await ensureNdkInstance();
+        if (!relayManagerRef.current && instance) {
+          relayManagerRef.current = createRelayConnectionManager(instance, ensureNdkModule);
+        }
+        if (!relayManagerRef.current) {
+          return { relaySet: null, connected: [], pending: [] };
+        }
+        return relayManagerRef.current.prepareRelaySet(relayUrls, options);
+      })();
+
+      prepareRelayCacheRef.current.set(cacheKey, task);
+      try {
+        return await task;
+      } finally {
+        prepareRelayCacheRef.current.delete(cacheKey);
       }
-      return relayManagerRef.current.prepareRelaySet(relayUrls, options);
     },
     [ensureNdkInstance, ensureNdkModule],
   );
@@ -524,6 +566,11 @@ export const NdkProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   useEffect(() => {
     relayHealthRef.current = relayHealth;
   }, [relayHealth]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    void ensureNdkModule();
+  }, [ensureNdkModule]);
 
   useEffect(() => {
     return () => {

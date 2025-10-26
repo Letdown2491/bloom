@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { NDKRelay } from "@nostr-dev-kit/ndk";
 import { useCurrentPubkey, useNdk } from "../context/NdkContext";
+import { persistRelayTargets } from "../services/ndkRelayPersistence";
 import {
   collectRelayTargets,
   DEFAULT_PUBLIC_RELAYS,
@@ -50,7 +51,7 @@ export const usePreferredRelays = () => {
   const [loading, setLoading] = useState(false);
 
   const fetchRelayPolicies = useCallback(
-    async (options?: { waitForConnection?: boolean }): Promise<RelayPolicy[]> => {
+    async (options?: { waitForConnection?: boolean; timeoutMs?: number }): Promise<RelayPolicy[]> => {
       if (!ndk || !pubkey) return [];
 
       const sanitizedTargets = collectRelayTargets(ndk.explicitRelayUrls, DEFAULT_PUBLIC_RELAYS);
@@ -60,6 +61,7 @@ export const usePreferredRelays = () => {
         try {
           await prepareRelaySet(uniqueTargets, {
             waitForConnection: options?.waitForConnection ?? false,
+            timeoutMs: options?.timeoutMs ?? 2000,
           });
         } catch (_error) {
           // Ignore connection preparation failures; fallback to fetch attempt.
@@ -98,7 +100,7 @@ export const usePreferredRelays = () => {
       return;
     }
     setLoading(true);
-    const policies = await fetchRelayPolicies({ waitForConnection: true });
+    const policies = await fetchRelayPolicies({ waitForConnection: true, timeoutMs: 4000 });
     setRelayPolicies(policies);
     setLoading(false);
   }, [fetchRelayPolicies, ndk, pubkey]);
@@ -129,6 +131,7 @@ export const usePreferredRelays = () => {
       relayPolicies.length > 0 ? relayPolicies.map(policy => policy.url) : undefined;
     const unique = collectRelayTargets(preferredUrls, DEFAULT_PUBLIC_RELAYS);
     ndk.explicitRelayUrls = unique;
+    persistRelayTargets(unique);
 
     const pool = ndk.pool;
     if (!pool) return;
@@ -155,7 +158,9 @@ export const usePreferredRelays = () => {
     });
 
     if (unique.length > 0) {
-      void prepareRelaySet(unique, { waitForConnection: false }).catch(() => undefined);
+      void prepareRelaySet(unique, { waitForConnection: false, timeoutMs: 2000 }).catch(
+        () => undefined,
+      );
     }
   }, [ndk, prepareRelaySet, relayPolicies]);
 

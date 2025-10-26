@@ -81,7 +81,10 @@ export const useServers = () => {
       let relaySet = undefined;
       if (relayTargets.length > 0) {
         try {
-          const preparation = await prepareRelaySet(relayTargets, { waitForConnection: true });
+          const preparation = await prepareRelaySet(relayTargets, {
+            waitForConnection: false,
+            timeoutMs: 2000,
+          });
           relaySet = preparation.relaySet ?? undefined;
         } catch (error) {
           console.warn("Failed to prepare relays for server list fetch", error);
@@ -127,7 +130,10 @@ export const useServers = () => {
       let relaySet = undefined;
       if (relayTargets.length > 0) {
         try {
-          const preparation = await prepareRelaySet(relayTargets, { waitForConnection: true });
+          const preparation = await prepareRelaySet(relayTargets, {
+            waitForConnection: true,
+            timeoutMs: 5000,
+          });
           relaySet = preparation.relaySet ?? undefined;
         } catch (error) {
           console.warn("Failed to prepare relays for server list publish", error);

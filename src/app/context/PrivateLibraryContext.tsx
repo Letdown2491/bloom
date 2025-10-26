@@ -58,7 +58,10 @@ export const PrivateLibraryProvider: React.FC<{ children: React.ReactNode }> = (
       let relaySet = undefined;
       if (relayTargets.length > 0) {
         try {
-          const preparation = await prepareRelaySet(relayTargets, { waitForConnection: true });
+          const preparation = await prepareRelaySet(relayTargets, {
+            waitForConnection: false,
+            timeoutMs: 2000,
+          });
           relaySet = preparation.relaySet ?? undefined;
         } catch (prepError) {
           console.warn("Failed to prepare relays for private list load", prepError);

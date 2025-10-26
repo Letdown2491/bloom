@@ -29,6 +29,7 @@ export type RelayPersistenceResult = RelayPersistenceSnapshot & {
 };
 
 const RELAY_HEALTH_STORAGE_KEY = "bloom.ndk.relayHealth.v1";
+const RELAY_TARGET_STORAGE_KEY = "bloom.ndk.relays.v1";
 const RELAY_HEALTH_TTL_MS = 1000 * 60 * 60 * 24 * 14; // 14 days
 const RELAY_HEALTH_TTL_SECONDS = Math.round(RELAY_HEALTH_TTL_MS / 1000);
 const MAX_PERSISTED_RELAY_ENTRIES = 60;
@@ -44,6 +45,50 @@ export const normalizeRelayUrl = (url: string | undefined | null): string | null
   const sanitized = sanitizeRelayUrl(url);
   if (!sanitized) return null;
   return `${sanitized.replace(/\/+$/, "")}/`;
+};
+
+export const loadPersistedRelayTargets = (): string[] => {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(RELAY_TARGET_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    const set = new Set<string>();
+    parsed.forEach(entry => {
+      const normalized = sanitizeRelayUrl(entry);
+      if (normalized) {
+        set.add(normalized);
+      }
+    });
+    return Array.from(set);
+  } catch {
+    return [];
+  }
+};
+
+export const persistRelayTargets = (targets: readonly string[] | null | undefined) => {
+  if (typeof window === "undefined") return;
+  if (!targets || targets.length === 0) {
+    window.localStorage.removeItem(RELAY_TARGET_STORAGE_KEY);
+    return;
+  }
+  const set = new Set<string>();
+  targets.forEach(target => {
+    const normalized = sanitizeRelayUrl(target);
+    if (normalized) {
+      set.add(normalized);
+    }
+  });
+  if (set.size === 0) {
+    window.localStorage.removeItem(RELAY_TARGET_STORAGE_KEY);
+    return;
+  }
+  try {
+    window.localStorage.setItem(RELAY_TARGET_STORAGE_KEY, JSON.stringify(Array.from(set)));
+  } catch {
+    // If quota is exceeded or storage is unavailable, fall back silently.
+  }
 };
 
 const toEpochSeconds = (value: number | null | undefined): number | null => {
