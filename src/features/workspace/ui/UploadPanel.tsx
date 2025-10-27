@@ -42,9 +42,10 @@ import type { StatusMessageTone } from "../../../shared/types/status";
 
 const RESIZE_OPTIONS = [
   { id: 0, label: "Original" },
-  { id: 1, label: "Large (2048px)", size: 2048 },
-  { id: 2, label: "Medium (1280px)", size: 1280 },
-  { id: 3, label: "Small (720px)", size: 720 },
+  { id: 1, label: "Large (1280px)", size: 1280 },
+  { id: 2, label: "Medium (720px)", size: 720 },
+  { id: 3, label: "Small (480px)", size: 480 },
+  { id: 4, label: "Thumbnail (256px)", size: 256 },
 ];
 
 const isWebpConvertible = (file: File): boolean => {

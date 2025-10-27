@@ -2,7 +2,7 @@ import type { FilterMode } from "../../shared/types/filter";
 import type { UserPreferences } from "../../shared/types/preferences";
 import { normalizeEpochSeconds } from "../../shared/utils/time";
 
-const RESIZE_OPTIONS_MAX_ID = 3;
+const RESIZE_OPTIONS_MAX_ID = 4;
 
 export const DEFAULT_PREFERENCES: UserPreferences = {
   defaultServerUrl: null,
@@ -14,7 +14,7 @@ export const DEFAULT_PREFERENCES: UserPreferences = {
   showListPreviews: true,
   keepSearchExpanded: false,
   theme: "dark",
-  optimizeImageUploadsByDefault: false,
+  optimizeImageUploadsByDefault: true,
   stripImageMetadataByDefault: true,
   defaultImageResizeOption: 0,
 };

@@ -2,7 +2,7 @@ import type { FilterMode } from "../types/filter";
 import type { UserPreferences } from "../types/preferences";
 import { normalizeEpochSeconds } from "../utils/time";
 
-const RESIZE_OPTIONS_MAX_ID = 3;
+const RESIZE_OPTIONS_MAX_ID = 4;
 
 export const PREFERENCES_SYNC_KIND = 30078;
 export const PREFERENCES_SYNC_IDENTIFIER = "bloom:prefs:v1";
@@ -47,7 +47,7 @@ const DEFAULT_SERIALIZED_PREFERENCES: SerializedPreferences = {
   show_list_previews: true,
   keep_search_expanded: false,
   theme: "dark",
-  optimize_image_uploads_by_default: false,
+  optimize_image_uploads_by_default: true,
   strip_image_metadata_by_default: true,
   default_image_resize_option: 0,
 };

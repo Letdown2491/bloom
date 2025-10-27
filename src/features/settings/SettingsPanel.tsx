@@ -89,9 +89,10 @@ const VIEW_MODE_OPTIONS: SegmentedOption[] = [
 
 const IMAGE_RESIZE_OPTIONS = [
   { id: 0, label: "Original" },
-  { id: 1, label: "Large (2048px)" },
-  { id: 2, label: "Medium (1280px)" },
-  { id: 3, label: "Small (720px)" },
+  { id: 1, label: "Large (1280px)" },
+  { id: 2, label: "Medium (720px)" },
+  { id: 3, label: "Small (480px)" },
+  { id: 4, label: "Thumbnail (256px)" },
 ];
 
 const TONE_CLASS_BY_KEY: Record<StatusTone, string> = {
