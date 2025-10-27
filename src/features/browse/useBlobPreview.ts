@@ -62,11 +62,7 @@ export const useBlobPreview = (options?: PreviewOptions) => {
                     try {
                       const parsed = new URL(blob.url);
                       const origin = parsed.origin.replace(/\/+$/, "");
-                      return (
-                        deriveServerNameFromUrl(origin) ||
-                        parsed.host ||
-                        origin
-                      );
+                      return deriveServerNameFromUrl(origin) || parsed.host || origin;
                     } catch {
                       return deriveServerNameFromUrl(blob.url) || blob.url;
                     }

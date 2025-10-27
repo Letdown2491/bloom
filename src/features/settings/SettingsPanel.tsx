@@ -1162,8 +1162,8 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                       : "Choose metadata handling per upload"}
                   </p>
                   <p className="text-xs text-slate-400">
-                    Disabling this setting will not remove EXIF metadata. For additional privacy,
-                    it is recommended to keep this enabled.
+                    Disabling this setting will not remove EXIF metadata. For additional privacy, it
+                    is recommended to keep this enabled.
                   </p>
                 </div>
               </div>

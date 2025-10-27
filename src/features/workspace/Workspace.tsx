@@ -10,6 +10,7 @@ import {
   BrowseTabContainer,
   type BrowseActiveListState,
   type BrowseNavigationState,
+  type FolderRenameTarget,
 } from "./BrowseTabContainer";
 import type { FilterMode } from "../../shared/types/filter";
 import { useBrowseControls } from "../browse/useBrowseControls";
@@ -36,7 +37,7 @@ type WorkspaceProps = {
   onSyncStateChange: (snapshot: SyncStateSnapshot) => void;
   onProvideSyncStarter: (runner: () => void) => void;
   onRequestRename: (blob: BlossomBlob) => void;
-  onRequestFolderRename: (path: string) => void;
+  onRequestFolderRename: (target: FolderRenameTarget) => void;
   onRequestShare: (payload: SharePayload, options?: { mode?: ShareMode }) => void;
   onShareFolder: (request: ShareFolderRequest) => void;
   onUnshareFolder: (request: ShareFolderRequest) => void;

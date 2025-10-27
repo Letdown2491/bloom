@@ -26,7 +26,15 @@ import { encryptFileForPrivateUpload } from "../../../shared/domain/privateEncry
 import { usePrivateLibrary } from "../../../app/context/PrivateLibraryContext";
 import type { PrivateListEntry } from "../../../shared/domain/privateList";
 import { useFolderLists } from "../../../app/context/FolderListContext";
-import { LockIcon, WarningIcon, UploadIcon, EditIcon, TrashIcon, SettingsIcon, CloseIcon } from "../../../shared/ui/icons";
+import {
+  LockIcon,
+  WarningIcon,
+  UploadIcon,
+  EditIcon,
+  TrashIcon,
+  SettingsIcon,
+  CloseIcon,
+} from "../../../shared/ui/icons";
 import { useUserPreferences } from "../../../app/context/UserPreferencesContext";
 import { publishNip94Metadata } from "../../../shared/api/nip94Publisher";
 import { usePreferredRelays } from "../../../app/hooks/usePreferredRelays";
@@ -45,11 +53,7 @@ const isWebpConvertible = (file: File): boolean => {
     return true;
   }
   const name = file.name.toLowerCase();
-  return (
-    name.endsWith(".jpeg") ||
-    name.endsWith(".jpg") ||
-    name.endsWith(".png")
-  );
+  return name.endsWith(".jpeg") || name.endsWith(".jpg") || name.endsWith(".png");
 };
 
 const RESIZE_OPTIONS_MAX_ID = RESIZE_OPTIONS[RESIZE_OPTIONS.length - 1]?.id ?? 0;
@@ -619,13 +623,13 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
         if (!target) return prev;
         setFeedback({
           id: Date.now(),
-        message: `Removed ${target.file.name} from the queue.`,
+          message: `Removed ${target.file.name} from the queue.`,
+        });
+        return prev.filter(entry => entry.id !== id);
       });
-      return prev.filter(entry => entry.id !== id);
-    });
-    setTransfers(prev => prev.filter(item => !item.id.endsWith(`-${id}`)));
-    setOptionsEntryId(prev => (prev === id ? null : prev));
-  },
+      setTransfers(prev => prev.filter(item => !item.id.endsWith(`-${id}`)));
+      setOptionsEntryId(prev => (prev === id ? null : prev));
+    },
     [setFeedback, setOptionsEntryId],
   );
 
@@ -855,11 +859,9 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
           if (entry.id !== id || entry.kind !== "image") return entry;
           const current = entry.imageOptions ?? createImageOptions();
           const nextOptions: ImageUploadOptions = {
-            optimizeForWeb:
-              changes.optimizeForWeb ?? current.optimizeForWeb,
+            optimizeForWeb: changes.optimizeForWeb ?? current.optimizeForWeb,
             removeMetadata: changes.removeMetadata ?? current.removeMetadata,
-            resizeOption:
-              changes.resizeOption ?? current.resizeOption,
+            resizeOption: changes.resizeOption ?? current.resizeOption,
           };
           if (!RESIZE_OPTIONS.some(option => option.id === nextOptions.resizeOption)) {
             nextOptions.resizeOption = 0;
@@ -879,14 +881,13 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
     [createImageOptions],
   );
 
-const setEntryPrivacy = (id: string, value: boolean) => {
-  setEntries(prev =>
-    prev.map(entry =>
-      entry.id === id ? resetEntryProgress({ ...entry, isPrivate: value }) : entry,
-    ),
-  );
-};
-
+  const setEntryPrivacy = (id: string, value: boolean) => {
+    setEntries(prev =>
+      prev.map(entry =>
+        entry.id === id ? resetEntryProgress({ ...entry, isPrivate: value }) : entry,
+      ),
+    );
+  };
 
   const { effectiveRelays } = usePreferredRelays();
 
@@ -1003,16 +1004,10 @@ const setEntryPrivacy = (id: string, value: boolean) => {
           const { stripImageMetadata } = await ensureImageUtils();
           processed = await stripImageMetadata(processed);
         }
-        const resizeSetting = RESIZE_OPTIONS.find(
-          r => r.id === options.resizeOption && r.size,
-        );
+        const resizeSetting = RESIZE_OPTIONS.find(r => r.id === options.resizeOption && r.size);
         if (resizeSetting) {
           const { resizeImage } = await ensureImageUtils();
-          processed = await resizeImage(
-            processed,
-            resizeSetting.size!,
-            resizeSetting.size!,
-          );
+          processed = await resizeImage(processed, resizeSetting.size!, resizeSetting.size!);
         }
         if (options.optimizeForWeb && isWebpConvertible(entry.file)) {
           if (processed.type !== "image/webp") {
@@ -1682,7 +1677,7 @@ const setEntryPrivacy = (id: string, value: boolean) => {
                 </div>
               </div>
             ) : null}
-                        {sortedEntries.length === 0 ? (
+            {sortedEntries.length === 0 ? (
               <div className="mt-4 rounded-xl border border-slate-800 bg-slate-950/70 px-4 py-6 text-center text-xs text-slate-400">
                 No files match this view. Try switching filters or add new uploads.
               </div>
@@ -1706,9 +1701,8 @@ const setEntryPrivacy = (id: string, value: boolean) => {
                     }
                     const { file, metadata, kind, showMetadata } = entry;
                     const imageOptions =
-                      kind === "image" ? entry.imageOptions ?? createImageOptions() : null;
-                    const canOptimizeToWebp =
-                      kind === "image" && isWebpConvertible(entry.file);
+                      kind === "image" ? (entry.imageOptions ?? createImageOptions()) : null;
+                    const canOptimizeToWebp = kind === "image" && isWebpConvertible(entry.file);
                     const typeLabel = describeUploadEntryKind(kind);
                     const folderInputValue = metadata.folder?.trim() ?? "";
                     const normalizedFolderPreview = normalizeFolderPathInput(metadata.folder);
@@ -1955,23 +1949,30 @@ const setEntryPrivacy = (id: string, value: boolean) => {
                                                 : "border-slate-600 bg-slate-950 text-emerald-400"
                                             }`}
                                             checked={entry.isPrivate}
-                                            onChange={event => setEntryPrivacy(entry.id, event.target.checked)}
+                                            onChange={event =>
+                                              setEntryPrivacy(entry.id, event.target.checked)
+                                            }
                                             disabled={isEntryUploading || readOnlyMode}
                                           />
                                         </label>
                                         <p
                                           className={`${
-                                            isLightTheme ? "text-[11px] text-slate-500" : "text-[11px] text-slate-400"
+                                            isLightTheme
+                                              ? "text-[11px] text-slate-500"
+                                              : "text-[11px] text-slate-400"
                                           }`}
                                         >
-                                          Encrypts the file on your device so only you can decrypt it later.
+                                          Encrypts the file on your device so only you can decrypt
+                                          it later.
                                         </p>
                                       </div>
                                       {imageOptions ? (
                                         <div className="space-y-3">
                                           {canOptimizeToWebp ? (
                                             <label className="flex items-center justify-between gap-3">
-                                              <span className="font-medium">Optimize for web (WebP)</span>
+                                              <span className="font-medium">
+                                                Optimize for web (WebP)
+                                              </span>
                                               <input
                                                 type="checkbox"
                                                 checked={imageOptions.optimizeForWeb}
@@ -1985,7 +1986,9 @@ const setEntryPrivacy = (id: string, value: boolean) => {
                                             </label>
                                           ) : null}
                                           <label className="flex items-center justify-between gap-3">
-                                            <span className="font-medium">Remove EXIF metadata</span>
+                                            <span className="font-medium">
+                                              Remove EXIF metadata
+                                            </span>
                                             <input
                                               type="checkbox"
                                               checked={imageOptions.removeMetadata}

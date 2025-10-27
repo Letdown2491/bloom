@@ -7,7 +7,11 @@ import type { TabId } from "../../../shared/types/tabs";
 import type { FilterMode } from "../../../shared/types/filter";
 import type { DefaultSortOption, SortDirection } from "../../../app/context/UserPreferencesContext";
 import type { SyncStateSnapshot } from "../TransferTabContainer";
-import type { BrowseActiveListState, BrowseNavigationState } from "../BrowseTabContainer";
+import type {
+  BrowseActiveListState,
+  BrowseNavigationState,
+  FolderRenameTarget,
+} from "../BrowseTabContainer";
 import type { SharePayload, ShareCompletion, ShareMode } from "../../share/ui/ShareComposer";
 import type { ProfileMetadataPayload } from "../../profile/ProfilePanel";
 import type { NdkContextValue } from "../../../app/context/NdkContext";
@@ -59,8 +63,8 @@ export type WorkspaceSectionProps = {
   onSyncStateChange: (snapshot: SyncStateSnapshot) => void;
   onProvideSyncStarter: (runner: () => void) => void;
   onRequestRename: (blob: BlossomBlob) => void;
-  onRequestFolderRename: (path: string) => void;
-  folderRenamePath: string | null;
+  onRequestFolderRename: (target: FolderRenameTarget) => void;
+  folderRenameTarget: FolderRenameTarget | null;
   onCloseFolderRename: () => void;
   onRequestShare: (payload: SharePayload, options?: { mode?: ShareMode }) => void;
   onShareFolder: (request: ShareFolderRequest) => void;
@@ -134,7 +138,7 @@ export const WorkspaceSection = memo(function WorkspaceSection({
   onProvideSyncStarter,
   onRequestRename,
   onRequestFolderRename,
-  folderRenamePath,
+  folderRenameTarget,
   onCloseFolderRename,
   onRequestShare,
   onShareFolder,
@@ -286,9 +290,11 @@ export const WorkspaceSection = memo(function WorkspaceSection({
           </Suspense>
         )}
 
-        {folderRenamePath && (
+        {folderRenameTarget && (
           <FolderRenameDialog
-            path={folderRenamePath}
+            path={folderRenameTarget.path}
+            scope={folderRenameTarget.scope}
+            serverUrl={folderRenameTarget.serverUrl ?? null}
             onClose={onCloseFolderRename}
             onStatus={showStatusMessage}
           />

@@ -165,7 +165,7 @@ vi.mock("../../features/workspace/ui/WorkspaceSection", () => {
     browseRestoreKey: number | null;
     onBrowseRestoreHandled?: () => void;
     uploadFolderSuggestion?: string | null;
-  };
+  } & Record<string, unknown>;
 
   const WorkspaceSection = ({
     tab,

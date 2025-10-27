@@ -23,6 +23,7 @@ export type BrowseContentProps = {
   onShare: (blob: BlossomBlob) => void;
   onRename: (blob: BlossomBlob) => void;
   onMove: (blob: BlossomBlob) => void;
+  onCopyTo: (blob: BlossomBlob) => void;
   onPlay: (blob: BlossomBlob) => void;
   onShareFolder?: (hint: FolderShareHint) => void;
   folderRecords?: Map<string, FolderListRecord>;
@@ -59,6 +60,7 @@ export const BrowseContent: React.FC<BrowseContentProps> = ({
   onShare,
   onRename,
   onMove,
+  onCopyTo,
   onPlay,
   folderRecords,
   onShareFolder,
@@ -88,6 +90,7 @@ export const BrowseContent: React.FC<BrowseContentProps> = ({
     | "onShare"
     | "onRename"
     | "onMove"
+    | "onCopyTo"
     | "onPlay"
     | "resolvePrivateLink"
     | "onShareFolder"
@@ -113,6 +116,7 @@ export const BrowseContent: React.FC<BrowseContentProps> = ({
     onShare,
     onRename,
     onMove,
+    onCopyTo,
     onPlay,
     resolvePrivateLink,
     currentTrackUrl,

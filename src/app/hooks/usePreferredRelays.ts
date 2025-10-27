@@ -51,7 +51,10 @@ export const usePreferredRelays = () => {
   const [loading, setLoading] = useState(false);
 
   const fetchRelayPolicies = useCallback(
-    async (options?: { waitForConnection?: boolean; timeoutMs?: number }): Promise<RelayPolicy[]> => {
+    async (options?: {
+      waitForConnection?: boolean;
+      timeoutMs?: number;
+    }): Promise<RelayPolicy[]> => {
       if (!ndk || !pubkey) return [];
 
       const sanitizedTargets = collectRelayTargets(ndk.explicitRelayUrls, DEFAULT_PUBLIC_RELAYS);

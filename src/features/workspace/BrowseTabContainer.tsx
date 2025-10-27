@@ -32,6 +32,7 @@ import {
   applyFolderUpdate,
   getBlobMetadataName,
   normalizeFolderPathInput,
+  rememberFolderPath,
 } from "../../shared/utils/blobMetadataStore";
 import type { BlobAudioMetadata } from "../../shared/utils/blobMetadataStore";
 import {
@@ -915,7 +916,7 @@ export type BrowseTabContainerProps = {
   active: boolean;
   onStatusMetricsChange: (metrics: { count: number; size: number }) => void;
   onRequestRename: (blob: BlossomBlob) => void;
-  onRequestFolderRename: (path: string) => void;
+  onRequestFolderRename: (target: FolderRenameTarget) => void;
   onRequestShare: (payload: SharePayload, options?: { mode?: ShareMode }) => void;
   onShareFolder: (request: ShareFolderRequest) => void;
   onUnshareFolder: (request: ShareFolderRequest) => void;
@@ -948,6 +949,12 @@ export type BrowseActiveListState =
   | { type: "folder"; scope: FolderScope; path: string; serverUrl?: string | null };
 
 type ActiveListState = BrowseActiveListState;
+
+export type FolderRenameTarget = {
+  path: string;
+  scope: FolderScope;
+  serverUrl?: string | null;
+};
 
 export type BrowseNavigationSegment = {
   id: string;
@@ -1009,6 +1016,7 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
     selected: selectedBlobs,
     toggle: toggleBlob,
     selectMany: selectManyBlobs,
+    replace: replaceSelection,
     clear: clearSelection,
   } = useSelection();
   const audio = useAudio();
@@ -1077,7 +1085,12 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
   );
   const pubkey = useCurrentPubkey();
   const folderManifest = useFolderManifest();
-  const { entriesBySha, removeEntries, upsertEntries } = usePrivateLibrary();
+  const {
+    entriesBySha,
+    removeEntries,
+    upsertEntries,
+    refresh: refreshPrivateEntries,
+  } = usePrivateLibrary();
   const {
     folders,
     deleteFolder,
@@ -3319,7 +3332,105 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
         }
 
         if (folderInfo.scope === "private") {
-          showStatusMessage("Deleting private folders is not supported yet.", "info", 3000);
+          const normalizedPath = normalizeFolderPathInput(folderInfo.path ?? undefined);
+          if (!normalizedPath) {
+            showStatusMessage("Cannot delete the Private root.", "info", 3000);
+            return;
+          }
+
+          const impactedEntries = privateEntries.filter(entry => {
+            const entryPath = normalizeFolderPathInput(entry.metadata?.folderPath ?? undefined);
+            if (!entryPath) return false;
+            return entryPath === normalizedPath || entryPath.startsWith(`${normalizedPath}/`);
+          });
+
+          const itemCount = impactedEntries.length;
+          const displayName = formatPrivateFolderLabel(normalizedPath);
+          const message = itemCount
+            ? `Delete folder "${displayName}" and move ${
+                itemCount === 1 ? "its item" : `${itemCount} items`
+              } to Private?`
+            : `Delete folder "${displayName}"?`;
+          const confirmed = await confirm({
+            title: "Delete folder",
+            message,
+            confirmLabel: "Delete",
+            cancelLabel: "Cancel",
+            tone: "danger",
+          });
+          if (!confirmed) return;
+
+          try {
+            if (impactedEntries.length) {
+              const nowSeconds = Math.floor(Date.now() / 1000);
+              const privateBlobMap = new Map<string, BlossomBlob>();
+              privateBlobs.forEach(privateBlob => {
+                if (!privateBlob?.sha256) return;
+                privateBlobMap.set(privateBlob.sha256, privateBlob);
+              });
+              const metadataTargets: Array<{
+                serverUrl: string | undefined;
+                sha256: string;
+              }> = [];
+              const updates: PrivateListEntry[] = impactedEntries.map(entry => {
+                const targetEntry = entriesBySha.get(entry.sha256) ?? entry;
+                const privateBlob = privateBlobMap.get(targetEntry.sha256);
+                metadataTargets.push({
+                  serverUrl: privateBlob?.serverUrl ?? targetEntry.servers?.[0] ?? undefined,
+                  sha256: targetEntry.sha256,
+                });
+                return {
+                  sha256: targetEntry.sha256,
+                  encryption: targetEntry.encryption,
+                  metadata: {
+                    ...(targetEntry.metadata ?? {}),
+                    folderPath: null,
+                  },
+                  servers: targetEntry.servers,
+                  updatedAt: nowSeconds,
+                };
+              });
+              await upsertEntries(updates);
+              metadataTargets.forEach(target => {
+                rememberFolderPath(target.serverUrl, target.sha256, null, {
+                  updatedAt: nowSeconds * 1000,
+                });
+              });
+              await refreshPrivateEntries();
+            }
+
+            if (activeList?.type === "folder" && activeList.scope === "private") {
+              const activePath = normalizeFolderPathInput(activeList.path ?? undefined);
+              if (
+                activePath &&
+                (activePath === normalizedPath || activePath.startsWith(`${normalizedPath}/`))
+              ) {
+                const parentPath = getParentFolderPath(normalizedPath);
+                if (parentPath && parentPath.length > 0) {
+                  setActiveList({
+                    type: "folder",
+                    scope: "private",
+                    path: parentPath,
+                    serverUrl: activeList.serverUrl ?? null,
+                  });
+                } else {
+                  setActiveList({ type: "private", serverUrl: activeList.serverUrl ?? null });
+                }
+              }
+            }
+
+            clearSelection();
+            const statusLabel = itemCount
+              ? itemCount === 1
+                ? "Folder deleted. Item moved to Private."
+                : `Folder deleted. ${itemCount} items moved to Private.`
+              : "Folder deleted.";
+            showStatusMessage(statusLabel, "success", 3000);
+          } catch (error) {
+            const messageText =
+              error instanceof Error ? error.message : "Failed to delete private folder.";
+            showStatusMessage(messageText, "error", 4000);
+          }
           return;
         }
 
@@ -3517,7 +3628,9 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
       entriesBySha,
       extractFolderInfo,
       foldersByPath,
+      formatPrivateFolderLabel,
       getFolderDisplayName,
+      getParentFolderPath,
       hasPrivateFiles,
       isPlaceholderBlob,
       isPrivateView,
@@ -3525,6 +3638,7 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
       privateBlobs,
       privateEntries,
       privateVisibleBlobs,
+      upsertEntries,
       pubkey,
       queryClient,
       removeBlobFromFolder,
@@ -3535,6 +3649,7 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
       showStatusMessage,
       signEventTemplate,
       signer,
+      refreshPrivateEntries,
       visibleAggregatedBlobs,
     ],
   );
@@ -3691,6 +3806,18 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
       openPrivateList,
       showStatusMessage,
     ],
+  );
+
+  const handleCopyTo = useCallback(
+    (blob: BlossomBlob) => {
+      if (!blob?.sha256) return;
+      if (blob.__bloomFolderPlaceholder) return;
+      if (!selectedBlobs.has(blob.sha256)) {
+        replaceSelection([blob.sha256]);
+      }
+      onSetTab("transfer");
+    },
+    [selectedBlobs, replaceSelection, onSetTab],
   );
 
   const handleMoveRequest = useCallback(
@@ -4084,11 +4211,25 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
       const folderInfo = extractFolderInfo(blob);
       if (folderInfo) {
         if (folderInfo.scope === "private") {
-          openFolderFromInfo(folderInfo);
+          const normalizedPath = normalizeFolderPathInput(folderInfo.path ?? undefined);
+          if (!normalizedPath) {
+            openFolderFromInfo(folderInfo);
+            return;
+          }
+          onRequestFolderRename({
+            path: normalizedPath,
+            scope: "private",
+            serverUrl: folderInfo.serverUrl ?? null,
+          });
           return;
         }
         if (folderInfo.path) {
-          onRequestFolderRename(folderInfo.path);
+          const normalizedPath = normalizeFolderPathInput(folderInfo.path ?? undefined) ?? "";
+          onRequestFolderRename({
+            path: normalizedPath,
+            scope: folderInfo.scope,
+            serverUrl: folderInfo.serverUrl ?? null,
+          });
           return;
         }
         return;
@@ -4293,6 +4434,7 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
             onShare={handleShareBlob}
             onRename={handleRenameBlob}
             onMove={handleMoveRequest}
+            onCopyTo={handleCopyTo}
             onPlay={handlePlayBlob}
             resolvePrivateLink={resolvePrivateLink}
             currentTrackUrl={audio.current?.url}

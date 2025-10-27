@@ -133,9 +133,7 @@ export const NdkProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const lastRelayPersistAtRef = useRef<number>(0);
   const relayHealthQuotaLimitedRef = useRef(false);
   const relayManagerRef = useRef<RelayConnectionManager | null>(null);
-  const prepareRelayCacheRef = useRef<
-    Map<string, Promise<RelayPreparationResult>>
-  >(new Map());
+  const prepareRelayCacheRef = useRef<Map<string, Promise<RelayPreparationResult>>>(new Map());
   const cachedRelayTargets = useMemo(() => loadPersistedRelayTargets(), []);
   const cachedRelayTargetsRef = useRef<string[]>(cachedRelayTargets);
 
@@ -250,9 +248,7 @@ export const NdkProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             .filter((value): value is string => Boolean(value))
         : [];
       const keyBase =
-        normalizedParts.length > 0
-          ? Array.from(new Set(normalizedParts)).sort().join(",")
-          : "none";
+        normalizedParts.length > 0 ? Array.from(new Set(normalizedParts)).sort().join(",") : "none";
       const waitKey = options?.waitForConnection ? "1" : "0";
       const timeoutKey = options?.timeoutMs ? String(options.timeoutMs) : "0";
       const cacheKey = `${keyBase}|${waitKey}|${timeoutKey}`;

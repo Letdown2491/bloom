@@ -133,6 +133,43 @@ export const TransferTabContainer: React.FC<TransferTabContainerProps> = ({
     return selectedBlobs.size - selectedBlobSources.size;
   }, [selectedBlobs, selectedBlobSources]);
 
+  const syncCoverage = useMemo(() => {
+    if (selectedBlobItems.length === 0) {
+      return {
+        shared: new Set<string>(),
+        sharedKey: "",
+        universe: new Set<string>(),
+      };
+    }
+    const allServerUrls = new Set(servers.map(server => server.url));
+    let shared: Set<string> | null = null;
+    const universe = new Set<string>();
+
+    selectedBlobItems.forEach(item => {
+      const entry = distribution[item.blob.sha256];
+      const present = new Set(
+        (entry ? entry.servers : [item.server.url]).filter(url => allServerUrls.has(url)),
+      );
+      present.forEach(url => universe.add(url));
+      if (shared === null) {
+        shared = new Set(present);
+      } else {
+        shared.forEach(url => {
+          if (!present.has(url)) {
+            shared!.delete(url);
+          }
+        });
+      }
+    });
+
+    const effectiveShared = shared ?? new Set<string>();
+    return {
+      shared: effectiveShared,
+      sharedKey: Array.from(effectiveShared).sort().join("|"),
+      universe,
+    };
+  }, [distribution, selectedBlobItems, servers]);
+
   const transferFeedbackTone = useMemo<TransferFeedbackTone>(() => {
     if (!transferFeedback) return "text-slate-400";
     const normalized = transferFeedback.toLowerCase();
@@ -196,6 +233,9 @@ export const TransferTabContainer: React.FC<TransferTabContainerProps> = ({
     }
   }, [syncEnabledServerUrls]);
 
+  const syncedServerCount = syncCoverage.shared.size;
+  const syncedServerTotal = syncCoverage.universe.size;
+
   useEffect(() => {
     if (active) return;
     setTransferBusy(false);
@@ -205,30 +245,25 @@ export const TransferTabContainer: React.FC<TransferTabContainerProps> = ({
   useEffect(() => {
     if (!active) return;
     setTransferTargets(prev => {
-      const validTargetUrls = servers.map(server => server.url);
-      const filtered = prev.filter(url => validTargetUrls.includes(url));
+      const eligibleServers = servers.filter(
+        server => server.url !== selectedServer && !syncCoverage.shared.has(server.url),
+      );
+      const eligibleUrls = eligibleServers.map(server => server.url);
+      const filtered = prev.filter(url => eligibleUrls.includes(url));
       let next: string[] = [];
-      if (servers.length <= 1) {
+      if (eligibleUrls.length === 0) {
         next = [];
-      } else if (servers.length === 2) {
-        const fallback = servers.find(server => server.url !== selectedServer) ?? servers[0];
-        next = fallback?.url ? [fallback.url] : [];
       } else if (filtered.length > 0) {
         next = filtered;
       } else {
-        const preferred = servers.filter(server => !sourceServerUrls.has(server.url));
-        const firstPreferred = preferred[0];
-        if (firstPreferred?.url) {
-          next = [firstPreferred.url];
-        } else if (validTargetUrls[0]) {
-          next = [validTargetUrls[0]];
-        }
+        const fallback = eligibleUrls.find(Boolean);
+        next = fallback ? [fallback] : [];
       }
       const sameLength = next.length === prev.length;
       const sameOrder = sameLength && next.every((url, index) => url === prev[index]);
       return sameOrder ? prev : next;
     });
-  }, [active, servers, selectedServer, sourceServerUrls]);
+  }, [active, servers, selectedServer, syncCoverage.sharedKey]);
 
   useEffect(() => {
     const activeTransfers = syncTransfers.filter(
@@ -711,7 +746,8 @@ export const TransferTabContainer: React.FC<TransferTabContainerProps> = ({
 
   const toggleTransferTarget = (url: string) => {
     if (servers.length <= 1) return;
-    if (servers.length === 2 && selectedServer && url === selectedServer) return;
+    if (selectedServer && url === selectedServer) return;
+    if (syncCoverage.shared.has(url)) return;
     setTransferTargets(prev =>
       prev.includes(url) ? prev.filter(item => item !== url) : [...prev, url],
     );
@@ -1044,6 +1080,9 @@ export const TransferTabContainer: React.FC<TransferTabContainerProps> = ({
         handleStartTransfer={handleStartTransfer}
         onBackToBrowse={onBackToBrowse}
         currentSignerMissing={currentSignerMissing}
+        syncedServerCount={syncedServerCount}
+        syncedServerTotal={syncedServerTotal}
+        fullySyncedServerUrls={syncCoverage.shared}
       />
     </Suspense>
   );

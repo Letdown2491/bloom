@@ -49,6 +49,7 @@ import type { SyncStateSnapshot } from "../features/workspace/TransferTabContain
 import type {
   BrowseActiveListState,
   BrowseNavigationState,
+  FolderRenameTarget,
 } from "../features/workspace/BrowseTabContainer";
 import type { FilterMode } from "../shared/types/filter";
 import type { ProfileMetadataPayload } from "../features/profile/ProfilePanel";
@@ -352,7 +353,7 @@ export default function App() {
   const [connectSignerOpen, setConnectSignerOpen] = useState(false);
   const [pendingRemoteSignerConnect, setPendingRemoteSignerConnect] = useState(false);
   const [renameTarget, setRenameTarget] = useState<BlossomBlob | null>(null);
-  const [folderRenamePath, setFolderRenamePath] = useState<string | null>(null);
+  const [folderRenameTarget, setFolderRenameTarget] = useState<FolderRenameTarget | null>(null);
 
   const userMenuRef = useRef<HTMLDivElement | null>(null);
   const mainWidgetRef = useRef<HTMLDivElement | null>(null);
@@ -1912,8 +1913,8 @@ export default function App() {
     setRenameTarget(blob);
   }, []);
 
-  const handleRequestFolderRename = useCallback((path: string) => {
-    setFolderRenamePath(path);
+  const handleRequestFolderRename = useCallback((target: FolderRenameTarget) => {
+    setFolderRenameTarget(target);
   }, []);
 
   const handleRenameDialogClose = useCallback(() => {
@@ -1921,7 +1922,7 @@ export default function App() {
   }, []);
 
   const handleFolderRenameClose = useCallback(() => {
-    setFolderRenamePath(null);
+    setFolderRenameTarget(null);
   }, []);
 
   const handleBreadcrumbHome = useCallback(() => {
@@ -2665,7 +2666,7 @@ export default function App() {
                 onProvideSyncStarter={handleProvideSyncStarter}
                 onRequestRename={handleRequestRename}
                 onRequestFolderRename={handleRequestFolderRename}
-                folderRenamePath={folderRenamePath}
+                folderRenameTarget={folderRenameTarget}
                 onCloseFolderRename={handleFolderRenameClose}
                 onRequestShare={handleShareBlob}
                 onShareFolder={handleShareFolder}

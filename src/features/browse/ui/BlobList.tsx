@@ -30,6 +30,7 @@ import {
   LockIcon,
   TransferIcon,
   SettingsIcon,
+  CopyIcon,
 } from "../../../shared/ui/icons";
 import { PRIVATE_PLACEHOLDER_SHA } from "../../../shared/constants/private";
 import type { FileKind } from "../../../shared/ui/icons";
@@ -91,6 +92,7 @@ export type BlobListProps = {
   onShare?: (blob: BlossomBlob, options?: { mode?: ShareMode }) => void;
   onRename?: (blob: BlossomBlob) => void;
   onMove?: (blob: BlossomBlob) => void;
+  onCopyTo?: (blob: BlossomBlob) => void;
   onOpenList?: (blob: BlossomBlob) => void;
   resolvePrivateLink?: (
     blob: BlossomBlob,
@@ -371,6 +373,7 @@ export const BlobList: React.FC<BlobListProps> = ({
   onShare,
   onRename,
   onMove,
+  onCopyTo,
   onOpenList,
   resolvePrivateLink,
   folderRecords,
@@ -390,6 +393,12 @@ export const BlobList: React.FC<BlobListProps> = ({
       onMove?.(blob);
     },
     [onMove],
+  );
+  const handleCopyToAction = useCallback(
+    (blob: BlossomBlob) => {
+      onCopyTo?.(blob);
+    },
+    [onCopyTo],
   );
   const { resolvedMeta, detectedKinds, requestMetadata, reportDetectedKind } = useBlobMetadata(
     blobs,
@@ -730,9 +739,9 @@ export const BlobList: React.FC<BlobListProps> = ({
               deriveServerNameFromUrl(origin) ||
               parsed.host ||
               trimmedUrl;
-        } catch {
-          label = trimmedUrl;
-        }
+          } catch {
+            label = trimmedUrl;
+          }
         }
         seenLinks.add(trimmedUrl);
         directLinks.push({ url: trimmedUrl, label });
@@ -964,6 +973,7 @@ export const BlobList: React.FC<BlobListProps> = ({
           onShare={onShare}
           onRename={onRename}
           onMove={handleMove}
+          onCopyTo={handleCopyToAction}
           onOpenList={onOpenList}
           folderRecords={folderRecords}
           onShareFolder={onShareFolder}
@@ -1002,6 +1012,7 @@ export const BlobList: React.FC<BlobListProps> = ({
           onShare={onShare}
           onRename={onRename}
           onMove={handleMove}
+          onCopyTo={handleCopyToAction}
           onOpenList={onOpenList}
           folderRecords={folderRecords}
           onShareFolder={onShareFolder}
@@ -1059,6 +1070,7 @@ const ListLayout: React.FC<{
   onShare?: (blob: BlossomBlob, options?: { mode?: ShareMode }) => void;
   onRename?: (blob: BlossomBlob) => void;
   onMove?: (blob: BlossomBlob) => void;
+  onCopyTo?: (blob: BlossomBlob) => void;
   onOpenList?: (blob: BlossomBlob) => void;
   folderRecords?: Map<string, FolderListRecord>;
   onShareFolder?: (hint: FolderShareHint) => void;
@@ -1096,6 +1108,7 @@ const ListLayout: React.FC<{
   onShare,
   onRename,
   onMove,
+  onCopyTo,
   onOpenList,
   folderRecords,
   onShareFolder,
@@ -1251,6 +1264,7 @@ const ListLayout: React.FC<{
       onShare,
       onRename,
       onMove: handleMove,
+      onCopyTo,
       onOpenList,
       folderRecords,
       onShareFolder,
@@ -1290,6 +1304,7 @@ const ListLayout: React.FC<{
       onShare,
       onRename,
       handleMove,
+      onCopyTo,
       onOpenList,
       folderRecords,
       onShareFolder,
@@ -1341,6 +1356,7 @@ const ListLayout: React.FC<{
         onShare: rowOnShare,
         onRename: rowOnRename,
         onMove: rowOnMove,
+        onCopyTo: rowOnCopyTo,
         onOpenList: rowOnOpenList,
         currentTrackUrl: rowCurrentTrackUrl,
         currentTrackStatus: rowCurrentTrackStatus,
@@ -1406,6 +1422,7 @@ const ListLayout: React.FC<{
           onShare={rowOnShare}
           onRename={rowOnRename}
           onMove={rowOnMove}
+          onCopyTo={rowOnCopyTo}
           onOpenList={rowOnOpenList}
           folderRecords={rowFolderRecords}
           onShareFolder={rowOnShareFolder}
@@ -1596,6 +1613,7 @@ const GridLayout: React.FC<{
   onShare?: (blob: BlossomBlob, options?: { mode?: ShareMode }) => void;
   onRename?: (blob: BlossomBlob) => void;
   onMove?: (blob: BlossomBlob) => void;
+  onCopyTo?: (blob: BlossomBlob) => void;
   onOpenList?: (blob: BlossomBlob) => void;
   folderRecords?: Map<string, FolderListRecord>;
   onShareFolder?: (hint: FolderShareHint) => void;
@@ -1628,6 +1646,7 @@ const GridLayout: React.FC<{
   onShare,
   onRename,
   onMove: handleMove,
+  onCopyTo,
   onOpenList,
   folderRecords,
   onShareFolder,
@@ -1866,6 +1885,7 @@ const GridLayout: React.FC<{
               onShare={onShare}
               onRename={onRename}
               onMove={handleMove}
+              onCopyTo={onCopyTo}
               onOpenList={onOpenList}
               folderRecords={folderRecords}
               onShareFolder={onShareFolder}
@@ -1920,6 +1940,7 @@ type GridCardProps = {
   onShare?: (blob: BlossomBlob, options?: { mode?: ShareMode }) => void;
   onRename?: (blob: BlossomBlob) => void;
   onMove?: (blob: BlossomBlob) => void;
+  onCopyTo?: (blob: BlossomBlob) => void;
   onOpenList?: (blob: BlossomBlob) => void;
   folderRecords?: Map<string, FolderListRecord>;
   onShareFolder?: (hint: FolderShareHint) => void;
@@ -1983,6 +2004,7 @@ const GridCard = React.memo<GridCardProps>(
     onShare,
     onRename,
     onMove,
+    onCopyTo,
     onOpenList,
     folderRecords,
     onShareFolder,
@@ -2242,6 +2264,7 @@ const GridCard = React.memo<GridCardProps>(
       }
 
       const canMove = Boolean(onMove) && !isFolderParentLink && !isPrivateList;
+      const canCopyTo = Boolean(onCopyTo) && !isFolderParentLink && !isPrivateList && !isListBlob;
 
       if (canMove) {
         items.push({
@@ -2250,6 +2273,16 @@ const GridCard = React.memo<GridCardProps>(
           icon: <TransferIcon size={14} />,
           ariaLabel: isListBlob ? "Move folder" : "Move file",
           onSelect: () => onMove?.(blob),
+        });
+      }
+
+      if (canCopyTo) {
+        items.push({
+          key: "copy-to",
+          label: "Copy to…",
+          icon: <CopyIcon size={14} />,
+          ariaLabel: "Copy file",
+          onSelect: () => onCopyTo?.(blob),
         });
       }
 
@@ -2295,6 +2328,7 @@ const GridCard = React.memo<GridCardProps>(
       onDownload,
       onRename,
       onMove,
+      onCopyTo,
       onShare,
       isPrivateItem,
       isFolderParentLink,
@@ -2848,6 +2882,7 @@ type ListRowProps = {
   onShare?: (blob: BlossomBlob, options?: { mode?: ShareMode }) => void;
   onRename?: (blob: BlossomBlob) => void;
   onMove?: (blob: BlossomBlob) => void;
+  onCopyTo?: (blob: BlossomBlob) => void;
   onOpenList?: (blob: BlossomBlob) => void;
   folderRecords?: Map<string, FolderListRecord>;
   onShareFolder?: (hint: FolderShareHint) => void;
@@ -2892,6 +2927,7 @@ const ListRowComponent: React.FC<ListRowProps> = ({
   onShare,
   onRename,
   onMove,
+  onCopyTo,
   onOpenList,
   folderRecords,
   onShareFolder,
@@ -3276,6 +3312,8 @@ const ListRowComponent: React.FC<ListRowProps> = ({
   }
 
   const canMove = Boolean(onMove) && !folderInfo?.isParent && !isPrivateListEntry;
+  const canCopyTo =
+    Boolean(onCopyTo) && !folderInfo?.isParent && !isPrivateListEntry && !isListBlob;
 
   if (canMove) {
     dropdownItems.push({
@@ -3284,6 +3322,16 @@ const ListRowComponent: React.FC<ListRowProps> = ({
       icon: <TransferIcon size={14} />,
       ariaLabel: isListBlob ? "Move folder" : "Move file",
       onSelect: () => onMove?.(blob),
+    });
+  }
+
+  if (canCopyTo) {
+    dropdownItems.push({
+      key: "copy-to",
+      label: "Copy to…",
+      icon: <CopyIcon size={14} />,
+      ariaLabel: "Copy file",
+      onSelect: () => onCopyTo?.(blob),
     });
   }
 

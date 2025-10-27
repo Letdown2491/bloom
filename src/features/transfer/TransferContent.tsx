@@ -26,6 +26,9 @@ export type TransferContentProps = {
   handleStartTransfer: () => void;
   onBackToBrowse: () => void;
   currentSignerMissing: boolean;
+  syncedServerCount?: number;
+  syncedServerTotal?: number;
+  fullySyncedServerUrls?: Set<string>;
 };
 
 export const TransferContent: React.FC<TransferContentProps> = ({
@@ -44,6 +47,9 @@ export const TransferContent: React.FC<TransferContentProps> = ({
   handleStartTransfer,
   onBackToBrowse,
   currentSignerMissing,
+  syncedServerCount = 0,
+  syncedServerTotal = 0,
+  fullySyncedServerUrls = new Set<string>(),
 }) => {
   const serverNameMap = React.useMemo(
     () => new Map(localServers.map(server => [server.url, server.name])),
@@ -83,6 +89,23 @@ export const TransferContent: React.FC<TransferContentProps> = ({
                   .map(url => serverNameMap.get(url) || url)
                   .join(", ") || "unknown server"}
               </div>
+              {selectedBlobItems.length > 0 && syncedServerTotal > 1 && (
+                <div
+                  className={`text-xs ${
+                    syncedServerCount === syncedServerTotal
+                      ? "text-emerald-300"
+                      : syncedServerCount === 0
+                        ? "text-amber-300"
+                        : "text-slate-400"
+                  }`}
+                >
+                  {syncedServerCount === syncedServerTotal
+                    ? "Synced across all destination servers."
+                    : syncedServerCount === 0
+                      ? "No destination server currently has every selected file."
+                      : `All selected files are available on ${syncedServerCount} of ${syncedServerTotal} destination servers.`}
+                </div>
+              )}
               {missingSourceCount > 0 && (
                 <div className="text-xs text-amber-300">
                   {missingSourceCount} item{missingSourceCount === 1 ? "" : "s"} could not be
@@ -118,9 +141,8 @@ export const TransferContent: React.FC<TransferContentProps> = ({
                     const requiresSigner = Boolean(server.requiresAuth);
                     const disabled =
                       localServers.length <= 1 ||
-                      (localServers.length === 2 &&
-                        Boolean(selectedServer) &&
-                        server.url === selectedServer);
+                      server.url === selectedServer ||
+                      fullySyncedServerUrls.has(server.url);
                     return (
                       <label
                         key={server.url}
