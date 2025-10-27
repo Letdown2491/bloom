@@ -3580,6 +3580,7 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
         showStatusMessage("Connect your signer to delete from this server.", "error", 2000);
         return;
       }
+      let deleteHandled = false;
       try {
         const signTemplateForDelete = requiresSigner
           ? (signEventTemplate as SignTemplate | undefined)
@@ -3591,6 +3592,26 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
           targetServer.url,
           requiresSigner,
         );
+        deleteHandled = true;
+      } catch (error) {
+        const status =
+          typeof (error as { status?: number }).status === "number"
+            ? (error as { status?: number }).status
+            : (() => {
+                const text = error instanceof Error ? error.message : "";
+                const match = text.match(/status\s*(\d{3})/i);
+                return match ? Number(match[1]) : undefined;
+              })();
+        if (status === 404 || status === 500) {
+          deleteHandled = true;
+        } else {
+          const message = error instanceof Error ? error.message : "Delete failed";
+          showStatusMessage(message, "error", 5000);
+          return;
+        }
+      }
+
+      if (deleteHandled) {
         if (entriesBySha.has(blob.sha256)) {
           try {
             await removeEntries([blob.sha256]);
@@ -3599,6 +3620,38 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
           }
         }
         if (pubkey) {
+          queryClient.setQueryData(
+            ["server-blobs", targetServer.url, pubkey, targetServer.type],
+            (existing: unknown) => {
+              if (!existing) return existing;
+              const time = Date.now();
+              if (Array.isArray(existing)) {
+                return existing.filter(item => item?.sha256 !== blob.sha256);
+              }
+              if (
+                typeof existing === "object" &&
+                existing !== null &&
+                Array.isArray((existing as { items?: unknown[] }).items)
+              ) {
+                const source = existing as {
+                  items: BlossomBlob[];
+                  deleted?: string[];
+                  reset?: boolean;
+                  updatedAt?: number;
+                };
+                const filtered = source.items.filter(item => item?.sha256 !== blob.sha256);
+                const deleted = Array.isArray(source.deleted) ? [...source.deleted] : [];
+                if (!deleted.includes(blob.sha256)) deleted.push(blob.sha256);
+                return {
+                  ...source,
+                  items: filtered,
+                  deleted,
+                  updatedAt: time,
+                };
+              }
+              return existing;
+            },
+          );
           queryClient.invalidateQueries({
             queryKey: ["server-blobs", targetServer.url, pubkey, targetServer.type],
           });
@@ -3612,9 +3665,6 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
         }
         selectManyBlobs([blob.sha256], false);
         showStatusMessage("Blob deleted", "success", 2000);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : "Delete failed";
-        showStatusMessage(message, "error", 5000);
       }
     },
     [
