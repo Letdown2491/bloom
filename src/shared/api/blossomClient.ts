@@ -99,6 +99,13 @@ export type UploadStreamSource = {
 
 export type UploadSource = File | UploadStreamSource;
 
+export type BlobListResult = {
+  items: BlossomBlob[];
+  deleted?: string[];
+  reset?: boolean;
+  updatedAt?: number;
+};
+
 const isStreamSource = (value: UploadSource): value is UploadStreamSource =>
   typeof value === "object" && value !== null && (value as UploadStreamSource).kind === "stream";
 
@@ -351,10 +358,19 @@ export async function resolveUploadSource(file: UploadSource): Promise<ResolvedU
 export async function listUserBlobs(
   serverUrl: string,
   pubkey: string,
-  options?: { requiresAuth?: boolean; signTemplate?: SignTemplate },
-): Promise<BlossomBlob[]> {
+  options?: { requiresAuth?: boolean; signTemplate?: SignTemplate; since?: number },
+): Promise<BlobListResult> {
   const path = `/list/${pubkey}`;
-  const url = new URL(path, serverUrl).toString();
+  const urlObject = new URL(path, serverUrl);
+  if (
+    typeof options?.since === "number" &&
+    Number.isFinite(options.since) &&
+    options.since > 0 &&
+    !urlObject.searchParams.has("since")
+  ) {
+    urlObject.searchParams.set("since", String(Math.floor(options.since)));
+  }
+  const url = urlObject.toString();
   const headers: Record<string, string> = {};
   if (options?.requiresAuth) {
     if (!options.signTemplate)
@@ -385,17 +401,45 @@ export async function listUserBlobs(
     },
   });
 
-  const rawItems: BlossomBlob[] = (() => {
-    if (Array.isArray(data)) {
-      return data as BlossomBlob[];
-    }
-    if (data && typeof data === "object" && Array.isArray((data as { items?: unknown[] }).items)) {
-      return ((data as { items?: unknown[] }).items ?? []) as BlossomBlob[];
-    }
-    return [];
-  })();
+  let rawItems: BlossomBlob[] = [];
+  let deleted: string[] | undefined;
+  let reset = false;
+  let reportedUpdatedAt: number | undefined;
 
-  return rawItems.map(item => {
+  if (Array.isArray(data)) {
+    rawItems = data as BlossomBlob[];
+    reset = true;
+  } else if (data && typeof data === "object") {
+    const source = data as {
+      items?: unknown;
+      deleted?: unknown;
+      reset?: unknown;
+      updatedAt?: unknown;
+      updated_at?: unknown;
+    };
+    if (Array.isArray(source.items)) {
+      rawItems = source.items as BlossomBlob[];
+    }
+    if (Array.isArray(source.deleted)) {
+      deleted = (source.deleted as unknown[]).filter(
+        (value): value is string => typeof value === "string" && value.length > 0,
+      );
+    }
+    if (typeof source.reset === "boolean") {
+      reset = source.reset;
+    }
+    const candidateUpdated =
+      typeof source.updatedAt === "number"
+        ? source.updatedAt
+        : typeof source.updated_at === "number"
+          ? source.updated_at
+          : undefined;
+    if (typeof candidateUpdated === "number" && Number.isFinite(candidateUpdated)) {
+      reportedUpdatedAt = candidateUpdated;
+    }
+  }
+
+  const normalizedItems = rawItems.map(item => {
     const rawSize = item.size;
     const size = rawSize === undefined || rawSize === null ? undefined : Number(rawSize);
     return {
@@ -408,6 +452,21 @@ export async function listUserBlobs(
       serverType: "blossom",
     } as BlossomBlob;
   });
+
+  const updatedAtMs = (() => {
+    if (typeof reportedUpdatedAt === "number") {
+      return reportedUpdatedAt < 1_000_000_000_000 ? reportedUpdatedAt * 1000 : reportedUpdatedAt;
+    }
+    const newest = normalizedItems.reduce((max, blob) => Math.max(max, blob.uploaded ?? 0), 0);
+    return newest > 0 ? newest * 1000 : Date.now();
+  })();
+
+  return {
+    items: normalizedItems,
+    deleted,
+    reset,
+    updatedAt: updatedAtMs,
+  };
 }
 
 type UploadOptions = {

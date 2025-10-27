@@ -6,6 +6,7 @@ import {
   type BlossomBlob,
   type SignTemplate,
   type UploadSource,
+  type BlobListResult,
 } from "./blossomClient";
 
 export type Nip96ResolvedConfig = {
@@ -213,7 +214,7 @@ export async function listNip96Files(
   options: { requiresAuth: boolean; signTemplate?: SignTemplate; page?: number; count?: number } = {
     requiresAuth: true,
   },
-): Promise<BlossomBlob[]> {
+): Promise<BlobListResult> {
   const config = await getNip96Config(serverUrl);
   const page = options.page ?? 0;
   const count = options.count ?? 100;
@@ -256,7 +257,11 @@ export async function listNip96Files(
     const blob = nip94ToBlob(config, serverUrl, event, options.requiresAuth);
     if (blob) blobs.push(blob);
   }
-  return blobs;
+  return {
+    items: blobs,
+    reset: (options.page ?? 0) === 0,
+    updatedAt: Date.now(),
+  };
 }
 
 export async function uploadBlobToNip96(

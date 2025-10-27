@@ -6,6 +6,7 @@ import {
   type UploadSource,
   type SignedEvent,
   type EventTemplate,
+  type BlobListResult,
 } from "./blossomClient";
 import { canonicalizeSatelliteApiBase } from "../domain/satelliteUtils";
 
@@ -200,15 +201,20 @@ export async function getSatelliteAccount(
 export async function listSatelliteFiles(
   serverUrl: string,
   options: { signTemplate?: SignTemplate },
-): Promise<BlossomBlob[]> {
+): Promise<BlobListResult> {
   if (!options.signTemplate) {
     throw new Error("Satellite servers require a connected signer.");
   }
   const account = await getSatelliteAccount(serverUrl, options.signTemplate);
   const files = Array.isArray(account.files) ? account.files : [];
-  return files
+  const items = files
     .filter((item): item is SatelliteAccountFile => Boolean(item?.sha256))
     .map(file => satelliteFileToBlob(file, serverUrl));
+  return {
+    items,
+    reset: true,
+    updatedAt: Date.now(),
+  };
 }
 
 export async function uploadBlobToSatellite(

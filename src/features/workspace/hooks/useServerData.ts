@@ -7,6 +7,7 @@ import {
   type BlossomBlob,
   type PrivateBlobMetadata,
   type PrivateBlobEncryption,
+  type BlobListResult,
 } from "../../../shared/api/blossomClient";
 import { listNip96Files } from "../../../shared/api/nip96Client";
 import { listSatelliteFiles } from "../../../shared/api/satelliteClient";
@@ -68,7 +69,7 @@ type CachedSnapshotPayload = {
 
 type CachedServerSnapshot = {
   blobs: BlossomBlob[];
-  updatedAt?: number;
+  updatedAt: number;
 };
 
 const buildCacheKey = (url: string) => `${SERVER_CACHE_PREFIX}:${encodeURIComponent(url)}`;
@@ -163,17 +164,18 @@ const migrateLegacySnapshot = (url: string): CachedServerSnapshot | null => {
     } else {
       blobs = (payload.blobs as CachedBlobSnapshot[]).map(decodeCachedBlob);
     }
+    const normalizedUpdatedAt = updatedAt ?? Date.now();
     try {
       void setKv(buildCacheKey(url), {
         version: CACHE_VERSION,
-        updatedAt: updatedAt ?? Date.now(),
+        updatedAt: normalizedUpdatedAt,
         blobs: blobs.map(sanitizeCacheableBlob),
       });
     } catch {
       // Ignore migration failures.
     }
     window.localStorage.removeItem(buildCacheKey(url));
-    return { blobs, updatedAt };
+    return { blobs, updatedAt: normalizedUpdatedAt };
   } catch (error) {
     window.localStorage.removeItem(buildCacheKey(url));
     return null;
@@ -190,14 +192,14 @@ const loadCachedSnapshot = async (url: string): Promise<CachedServerSnapshot | n
     const blobs = payload.blobs.map(decodeCachedBlob);
     return {
       blobs,
-      updatedAt: typeof payload.updatedAt === "number" ? payload.updatedAt : undefined,
+      updatedAt: typeof payload.updatedAt === "number" ? payload.updatedAt : Date.now(),
     };
   } catch (error) {
     return migrateLegacySnapshot(url);
   }
 };
 
-const persistSnapshotCacheNow = async (url: string, blobs: BlossomBlob[]) => {
+const persistSnapshotCacheNow = async (url: string, blobs: BlossomBlob[], updatedAt: number) => {
   if (typeof window === "undefined") return;
   const trimmedLimit = (() => {
     if (snapshotStorageBlocked) return MAX_CACHED_BLOBS_EMERGENCY;
@@ -206,7 +208,7 @@ const persistSnapshotCacheNow = async (url: string, blobs: BlossomBlob[]) => {
   const trimmed = blobs.slice(0, trimmedLimit).map(sanitizeCacheableBlob);
   const payload: CachedSnapshotPayload = {
     version: CACHE_VERSION,
-    updatedAt: Date.now(),
+    updatedAt,
     blobs: trimmed,
   };
   try {
@@ -223,7 +225,7 @@ const persistSnapshotCacheNow = async (url: string, blobs: BlossomBlob[]) => {
   }
 };
 
-const persistSnapshotCache = (url: string, blobs: BlossomBlob[]) => {
+const persistSnapshotCache = (url: string, blobs: BlossomBlob[], updatedAt: number) => {
   if (typeof window === "undefined") return;
   const cancelExisting = pendingSnapshotPersistCancels.get(url);
   if (cancelExisting) {
@@ -233,7 +235,7 @@ const persistSnapshotCache = (url: string, blobs: BlossomBlob[]) => {
   const snapshot = blobs.slice();
   const cancel = scheduleIdleWork(() => {
     pendingSnapshotPersistCancels.delete(url);
-    void persistSnapshotCacheNow(url, snapshot);
+    void persistSnapshotCacheNow(url, snapshot, updatedAt);
   });
   if (cancel) {
     pendingSnapshotPersistCancels.set(url, cancel);
@@ -248,6 +250,72 @@ const areBlobListsEqual = (a: BlossomBlob[] | undefined, b: BlossomBlob[] | unde
     if (a[index]?.uploaded !== b[index]?.uploaded) return false;
   }
   return true;
+};
+
+type ServerQueryResult = BlobListResult & { requestedSince?: number };
+
+const normalizeUpdatedAt = (input: number | undefined, fallback: number) => {
+  if (typeof input !== "number" || !Number.isFinite(input)) return fallback;
+  return input < 1_000_000_000_000 ? input * 1000 : input;
+};
+
+const sortBlobsByUploaded = (blobs: BlossomBlob[]) =>
+  blobs.slice().sort((left, right) => {
+    const rightUploaded = right.uploaded ?? 0;
+    const leftUploaded = left.uploaded ?? 0;
+    if (rightUploaded !== leftUploaded) {
+      return rightUploaded - leftUploaded;
+    }
+    return left.sha256.localeCompare(right.sha256);
+  });
+
+const mergeServerSnapshotData = (
+  previous: BlossomBlob[],
+  payload: ServerQueryResult | undefined,
+  fallbackUpdatedAt: number,
+): { blobs: BlossomBlob[]; updatedAt: number; changed: boolean } => {
+  if (!payload) {
+    return { blobs: previous, updatedAt: fallbackUpdatedAt, changed: false };
+  }
+
+  const normalizedUpdatedAt = normalizeUpdatedAt(payload.updatedAt, fallbackUpdatedAt);
+  const prevLength = previous.length;
+  const sinceProvided = Boolean(payload.requestedSince);
+  const deletedCount = Array.isArray(payload.deleted) ? payload.deleted.length : 0;
+  const effectiveReset =
+    payload.reset === true ||
+    !prevLength ||
+    !sinceProvided ||
+    payload.items.length >= prevLength + deletedCount;
+
+  const buildMerged = () => {
+    const map = new Map<string, BlossomBlob>();
+    if (!effectiveReset) {
+      previous.forEach(blob => map.set(blob.sha256, blob));
+    }
+    payload.items.forEach((item: BlossomBlob) => {
+      if (item?.sha256) {
+        map.set(item.sha256, item);
+      }
+    });
+    if (!effectiveReset && Array.isArray(payload.deleted)) {
+      payload.deleted.forEach((sha: string) => {
+        if (typeof sha === "string" && sha) {
+          map.delete(sha);
+        }
+      });
+    }
+    const merged = Array.from(map.values());
+    return sortBlobsByUploaded(merged);
+  };
+
+  const merged = buildMerged();
+  const changed = !areBlobListsEqual(previous, merged);
+  return {
+    blobs: changed ? merged : previous,
+    updatedAt: normalizedUpdatedAt,
+    changed,
+  };
 };
 
 export type ServerSnapshot = {
@@ -330,10 +398,11 @@ export const useServerData = (servers: ManagedServer[], options?: UseServerDataO
         if (cached) {
           map.set(server.url, cached);
           const queryKey = ["server-blobs", server.url, pubkey, server.type];
-          queryClient.setQueryData(
-            queryKey,
-            mergeBlobsWithStoredMetadata(server.url, cached.blobs),
-          );
+          queryClient.setQueryData(queryKey, {
+            items: cached.blobs,
+            reset: true,
+            updatedAt: cached.updatedAt,
+          } as ServerQueryResult);
         }
       }
       if (!cancelled) {
@@ -559,6 +628,10 @@ export const useServerData = (servers: ManagedServer[], options?: UseServerDataO
     queries: servers.map(server => {
       const isActive = activeServerUrls.has(server.url);
       const cached = cachedSnapshots.get(server.url);
+      const sinceSeconds =
+        cached?.updatedAt && Number.isFinite(cached.updatedAt)
+          ? Math.floor(cached.updatedAt / 1000)
+          : undefined;
       const hasCachedData = Boolean(cached?.blobs?.length);
       return {
         queryKey: ["server-blobs", server.url, pubkey, server.type],
@@ -569,78 +642,134 @@ export const useServerData = (servers: ManagedServer[], options?: UseServerDataO
           (server.type === "satellite"
             ? Boolean(signEventTemplate)
             : !server.requiresAuth || !!signer),
-        placeholderData: cached ? () => cached.blobs : undefined,
+        placeholderData: cached
+          ? () =>
+              ({
+                items: cached.blobs,
+                reset: true,
+                updatedAt: cached.updatedAt,
+              }) as ServerQueryResult
+          : undefined,
         staleTime: 60_000,
         refetchOnMount: hasCachedData ? false : "always",
         refetchOnWindowFocus: false,
         refetchOnReconnect: false,
-        queryFn: async (): Promise<BlossomBlob[]> => {
-          if (!pubkey) return cached?.blobs ?? [];
+        queryFn: async (): Promise<ServerQueryResult> => {
+          if (!pubkey) {
+            return {
+              items: cached?.blobs ?? [],
+              reset: true,
+              updatedAt: cached?.updatedAt ?? Date.now(),
+            };
+          }
           if (server.type === "blossom") {
-            const blobs = await listUserBlobs(
+            const response = await listUserBlobs(
               server.url,
               pubkey,
               server.requiresAuth && signer
-                ? { requiresAuth: true, signTemplate: signEventTemplate }
-                : undefined,
+                ? {
+                    requiresAuth: true,
+                    signTemplate: signEventTemplate,
+                    since: sinceSeconds,
+                  }
+                : {
+                    requiresAuth: Boolean(server.requiresAuth),
+                    since: sinceSeconds,
+                  },
             );
-            return filterHiddenBlobTypes(blobs);
+            return {
+              ...response,
+              items: filterHiddenBlobTypes(response.items),
+              requestedSince: sinceSeconds,
+            };
           }
           if (server.type === "nip96") {
-            const blobs = await listNip96Files(server.url, {
+            const response = await listNip96Files(server.url, {
               requiresAuth: Boolean(server.requiresAuth),
               signTemplate: server.requiresAuth ? signEventTemplate : undefined,
             });
-            return filterHiddenBlobTypes(blobs);
+            return {
+              ...response,
+              items: filterHiddenBlobTypes(response.items),
+              reset: true,
+            };
           }
           if (server.type === "satellite") {
-            const blobs = await listSatelliteFiles(server.url, {
+            const response = await listSatelliteFiles(server.url, {
               signTemplate: signEventTemplate,
             });
-            return filterHiddenBlobTypes(blobs);
+            return {
+              ...response,
+              items: filterHiddenBlobTypes(response.items),
+              reset: true,
+            };
           }
-          return [];
+          return {
+            items: [],
+            reset: true,
+            updatedAt: Date.now(),
+          };
         },
       };
     }),
   });
 
-  const snapshots: ServerSnapshot[] = useMemo(() => {
+  const computedSnapshots = useMemo(() => {
     return servers.map((server, index) => {
       const query = queries[index];
+      const payload = query?.data as ServerQueryResult | undefined;
       const cached = cachedSnapshots.get(server.url);
-      const rawBlobs = (query?.data as BlossomBlob[] | undefined) ?? cached?.blobs ?? [];
+      const previous = cached?.blobs ?? [];
+      const previousUpdatedAt = cached?.updatedAt ?? 0;
+      const merged = mergeServerSnapshotData(previous, payload, previousUpdatedAt);
       const fetchStatus = query?.fetchStatus;
       const isActive = activeServerUrls.has(server.url);
       return {
         server,
-        blobs: mergeBlobsWithStoredMetadata(server.url, rawBlobs),
+        mergedBlobs: merged.blobs,
+        updatedAt: merged.updatedAt,
+        changed: merged.changed,
         isLoading: isActive && (fetchStatus === "fetching" || query?.isLoading || false),
         isError: query?.isError ?? false,
         error: query?.error ?? null,
       };
     });
-  }, [servers, queries, metadataVersion, activeServerUrls, cachedSnapshots]);
+  }, [servers, queries, cachedSnapshots, activeServerUrls]);
+
+  const snapshots: ServerSnapshot[] = useMemo(() => {
+    return computedSnapshots.map(item => ({
+      server: item.server,
+      blobs: mergeBlobsWithStoredMetadata(item.server.url, item.mergedBlobs),
+      isLoading: item.isLoading,
+      isError: item.isError,
+      error: item.error,
+    }));
+  }, [computedSnapshots, metadataVersion]);
 
   useEffect(() => {
-    snapshots.forEach(snapshot => {
-      if (snapshot.isError) return;
-      if (!snapshot.blobs.length) return;
-      const cached = cachedSnapshots.get(snapshot.server.url);
-      if (areBlobListsEqual(cached?.blobs, snapshot.blobs)) return;
-      persistSnapshotCache(snapshot.server.url, snapshot.blobs);
-      setCachedSnapshots(prev => {
-        const existing = prev.get(snapshot.server.url);
-        if (areBlobListsEqual(existing?.blobs, snapshot.blobs)) return prev;
-        const next = new Map(prev);
-        next.set(snapshot.server.url, {
-          blobs: snapshot.blobs,
-          updatedAt: Date.now(),
-        });
-        return next;
+    if (computedSnapshots.length === 0) return;
+    setCachedSnapshots(prev => {
+      let changed = false;
+      const next = new Map(prev);
+      computedSnapshots.forEach(item => {
+        if (!item.mergedBlobs.length) return;
+        const existing = next.get(item.server.url);
+        const shouldUpdate =
+          !existing ||
+          existing.updatedAt !== item.updatedAt ||
+          !areBlobListsEqual(existing.blobs, item.mergedBlobs);
+        if (shouldUpdate) {
+          persistSnapshotCache(item.server.url, item.mergedBlobs, item.updatedAt);
+          next.set(item.server.url, {
+            blobs: item.mergedBlobs,
+            updatedAt: item.updatedAt,
+          });
+          changed = true;
+        }
       });
+      return changed ? next : prev;
     });
-  }, [snapshots, cachedSnapshots]);
+  }, [computedSnapshots]);
 
   const lastMetadataVersionRef = useRef(metadataVersion);
   useEffect(() => {

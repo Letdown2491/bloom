@@ -94,13 +94,14 @@ export const SyncPipelineProvider: React.FC<{ children: React.ReactNode }> = ({ 
     if (!isSignedIn) return;
     if (hasStartedRef.current) return;
     hasStartedRef.current = true;
-    setStage("settings");
+    setStage("server");
     setStatusMessage(SETTINGS_MESSAGE);
     setStatusTone("syncing");
+    setAllowServerFetch(true);
   }, [isSignedIn]);
 
   useEffect(() => {
-    if (!isSignedIn || stage !== "settings" || preferencesReady) {
+    if (!isSignedIn || preferencesReady) {
       clearTimeoutRef(settingsTimeoutRef);
       return;
     }
@@ -110,34 +111,24 @@ export const SyncPipelineProvider: React.FC<{ children: React.ReactNode }> = ({ 
       if (!isSignedIn || preferencesReady) return;
       setStatusTone("warning");
       setStatusMessage(SETTINGS_TIMEOUT_MESSAGE);
-      setSettingsReady(true);
-      setAllowServerFetch(true);
-      setStage(prev => (prev === "settings" ? "server" : prev));
     }, SETTINGS_TIMEOUT_MS);
     return () => {
       clearTimeoutRef(settingsTimeoutRef);
     };
-  }, [isSignedIn, preferencesReady, stage]);
+  }, [isSignedIn, preferencesReady]);
 
   useEffect(() => {
     if (!isSignedIn) return;
     if (!preferencesReady) return;
     setSettingsReady(true);
     setAllowServerFetch(true);
-    if (stage === "settings") {
-      clearTimeoutRef(settingsTimeoutRef);
+    clearTimeoutRef(settingsTimeoutRef);
+    if (statusMessage === SETTINGS_MESSAGE || statusMessage === SETTINGS_TIMEOUT_MESSAGE) {
       setStatusTone("syncing");
       setStatusMessage(SERVER_MESSAGE);
-      setStage("server");
-    } else if (statusMessage === SETTINGS_TIMEOUT_MESSAGE) {
+    } else if (statusMessage === RELAY_TIMEOUT_MESSAGE && stage === "relays") {
       setStatusTone("syncing");
-      if (stage === "server") {
-        setStatusMessage(SERVER_MESSAGE);
-      } else if (stage === "relays") {
-        setStatusMessage(RELAY_MESSAGE);
-      } else if (stage === "complete") {
-        setStatusMessage(null);
-      }
+      setStatusMessage(RELAY_MESSAGE);
     }
   }, [isSignedIn, preferencesReady, stage, statusMessage]);
 
