@@ -2264,7 +2264,7 @@ const GridCard = React.memo<GridCardProps>(
       }
 
       const canMove = Boolean(onMove) && !isFolderParentLink && !isPrivateList;
-      const canCopyTo = Boolean(onCopyTo) && !isFolderParentLink && !isPrivateList && !isListBlob;
+      const canCopyTo = Boolean(onCopyTo) && !isFolderParentLink && !isPrivateList;
 
       if (canMove) {
         items.push({
@@ -3312,8 +3312,7 @@ const ListRowComponent: React.FC<ListRowProps> = ({
   }
 
   const canMove = Boolean(onMove) && !folderInfo?.isParent && !isPrivateListEntry;
-  const canCopyTo =
-    Boolean(onCopyTo) && !folderInfo?.isParent && !isPrivateListEntry && !isListBlob;
+  const canCopyTo = Boolean(onCopyTo) && !folderInfo?.isParent && !isPrivateListEntry;
 
   if (canMove) {
     dropdownItems.push({

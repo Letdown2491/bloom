@@ -3810,14 +3810,128 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
 
   const handleCopyTo = useCallback(
     (blob: BlossomBlob) => {
+      const resolveNormalizedServer = (value: string | null | undefined) =>
+        (value ?? "").trim().replace(/\/+$/, "").toLowerCase();
+
+      const gatherFolderShas = (
+        scope: FolderScope,
+        rawPath: string,
+        serverUrl?: string | null,
+      ): { shas: string[]; missing: number } => {
+        const shas = new Set<string>();
+        let normalizedPath =
+          normalizeFolderPathInput(rawPath ?? undefined) ?? (rawPath ? rawPath.trim() : "");
+        if (scope !== "private") {
+          const canonical = normalizedPath ? resolveFolderPath(normalizedPath) : null;
+          if (!canonical) {
+            return { shas: [], missing: 0 };
+          }
+          normalizedPath = canonical;
+          const prefix = `${canonical}/`;
+          foldersByPath.forEach(record => {
+            const recordPath = normalizeFolderPathInput(record.path) ?? record.path;
+            if (!recordPath) return;
+            if (recordPath === canonical || recordPath.startsWith(prefix)) {
+              record.shas.forEach(sha => {
+                if (sha) shas.add(sha);
+              });
+            }
+          });
+        } else {
+          const targetPath = normalizeFolderPathInput(rawPath) ?? null;
+          if (targetPath === null) {
+            return { shas: [], missing: 0 };
+          }
+          const prefix = `${targetPath}/`;
+          privateEntries.forEach(entry => {
+            const entryPath =
+              normalizeFolderPathInput(entry.metadata?.folderPath ?? undefined) ?? null;
+            if (!entryPath) return;
+            if (entryPath === targetPath || entryPath.startsWith(prefix)) {
+              shas.add(entry.sha256);
+            }
+          });
+        }
+
+        if (shas.size === 0) return { shas: [], missing: 0 };
+
+        const targetServerNormalized = resolveNormalizedServer(serverUrl);
+        const resolved: string[] = [];
+        let missing = 0;
+        shas.forEach(sha => {
+          const match = resolveBlobBySha(sha);
+          if (!match) {
+            missing += 1;
+            return;
+          }
+          if (
+            scope === "server" &&
+            serverUrl &&
+            resolveNormalizedServer(match.serverUrl) !== targetServerNormalized
+          ) {
+            return;
+          }
+          resolved.push(match.sha256);
+        });
+        return { shas: resolved, missing };
+      };
+
+      const handleFolderSelection = (
+        scope: FolderScope,
+        path: string,
+        serverUrl?: string | null,
+      ) => {
+        const { shas, missing } = gatherFolderShas(scope, path, serverUrl);
+        if (shas.length === 0) {
+          showStatusMessage("No files in that folder are available right now.", "info", 3500);
+          return;
+        }
+        if (missing > 0) {
+          showStatusMessage(
+            `${missing} item${missing === 1 ? "" : "s"} in this folder could not be loaded. Copying the rest.`,
+            "warning",
+            4000,
+          );
+        }
+        replaceSelection(shas);
+        onSetTab("transfer");
+      };
+
+      const folderInfo = extractFolderInfo(blob);
+      if (blob.__bloomFolderPlaceholder && folderInfo) {
+        handleFolderSelection(folderInfo.scope, folderInfo.path ?? "", folderInfo.serverUrl);
+        return;
+      }
+
+      if (isListLikeBlob(blob)) {
+        const scope = folderInfo?.scope ?? "aggregated";
+        const path =
+          folderInfo?.path ??
+          blob.folderPath ??
+          (blob.__bloomMetadataName && blob.__bloomMetadataName !== blob.sha256
+            ? blob.__bloomMetadataName
+            : "");
+        handleFolderSelection(scope, path ?? "", folderInfo?.serverUrl ?? blob.serverUrl);
+        return;
+      }
+
       if (!blob?.sha256) return;
-      if (blob.__bloomFolderPlaceholder) return;
       if (!selectedBlobs.has(blob.sha256)) {
         replaceSelection([blob.sha256]);
       }
       onSetTab("transfer");
     },
-    [selectedBlobs, replaceSelection, onSetTab],
+    [
+      extractFolderInfo,
+      foldersByPath,
+      onSetTab,
+      privateEntries,
+      replaceSelection,
+      resolveBlobBySha,
+      resolveFolderPath,
+      selectedBlobs,
+      showStatusMessage,
+    ],
   );
 
   const handleMoveRequest = useCallback(

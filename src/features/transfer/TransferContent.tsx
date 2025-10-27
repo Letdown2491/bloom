@@ -55,6 +55,13 @@ export const TransferContent: React.FC<TransferContentProps> = ({
     () => new Map(localServers.map(server => [server.url, server.name])),
     [localServers],
   );
+  const pendingServerCount = React.useMemo(() => {
+    if (transferTargets.length === 0) return 0;
+    return transferTargets.reduce(
+      (count, url) => (fullySyncedServerUrls.has(url) ? count : count + 1),
+      0,
+    );
+  }, [fullySyncedServerUrls, transferTargets]);
   const disableTransferAction =
     transferBusy ||
     transferTargets.length === 0 ||
@@ -106,6 +113,11 @@ export const TransferContent: React.FC<TransferContentProps> = ({
                       : `All selected files are available on ${syncedServerCount} of ${syncedServerTotal} destination servers.`}
                 </div>
               )}
+              <div className="text-xs text-slate-400">
+                {pendingServerCount === 0
+                  ? "All selected destination servers already have these files."
+                  : `Transferring files to ${pendingServerCount} destination ${pendingServerCount === 1 ? "server" : "servers"}.`}
+              </div>
               {missingSourceCount > 0 && (
                 <div className="text-xs text-amber-300">
                   {missingSourceCount} item{missingSourceCount === 1 ? "" : "s"} could not be

@@ -13,11 +13,19 @@ import {
 import { uploadBlobToNip96 } from "../../shared/api/nip96Client";
 import { uploadBlobToSatellite } from "../../shared/api/satelliteClient";
 import { buildNip98AuthHeader } from "../../shared/api/nip98";
-import { getBlobMetadataName } from "../../shared/utils/blobMetadataStore";
+import {
+  getBlobMetadataName,
+  normalizeFolderPathInput,
+} from "../../shared/utils/blobMetadataStore";
 import type { TransferState } from "./ui/UploadPanel";
 import { BloomHttpError } from "../../shared/api/httpService";
 import { useNdk, useCurrentPubkey } from "../../app/context/NdkContext";
 import type { SignTemplate } from "../../shared/api/blossomClient";
+import { publishNip94Metadata, extractExtraNip94Tags } from "../../shared/api/nip94Publisher";
+import { useFolderLists } from "../../app/context/FolderListContext";
+import { usePrivateLibrary } from "../../app/context/PrivateLibraryContext";
+import { usePreferredRelays } from "../../app/hooks/usePreferredRelays";
+import type { PrivateListEntry } from "../../shared/domain/privateList";
 
 const TransferContentLazy = React.lazy(() =>
   import("../transfer/TransferContent").then(module => ({ default: module.TransferContent })),
@@ -68,7 +76,7 @@ export const TransferTabContainer: React.FC<TransferTabContainerProps> = ({
     syncEnabledServerUrls,
   } = useWorkspace();
   const { selected: selectedBlobs } = useSelection();
-  const { signer, signEventTemplate } = useNdk();
+  const { signer, signEventTemplate, ndk } = useNdk();
   const pubkey = useCurrentPubkey();
   const queryClient = useQueryClient();
 
@@ -86,6 +94,9 @@ export const TransferTabContainer: React.FC<TransferTabContainerProps> = ({
   const unsupportedMirrorTargetsRef = useRef<Set<string>>(new Set());
   const unauthorizedSyncTargetsRef = useRef<Set<string>>(new Set());
   const blockedSyncTargetsRef = useRef<Set<string>>(new Set());
+  const { setBlobFolderMembership } = useFolderLists();
+  const { entriesBySha, upsertEntries } = usePrivateLibrary();
+  const { effectiveRelays } = usePreferredRelays();
 
   useEffect(() => {
     if (signer) {
@@ -132,6 +143,84 @@ export const TransferTabContainer: React.FC<TransferTabContainerProps> = ({
     if (selectedBlobs.size === selectedBlobSources.size) return 0;
     return selectedBlobs.size - selectedBlobSources.size;
   }, [selectedBlobs, selectedBlobSources]);
+
+  const ensurePostTransferMetadata = useCallback(
+    async (blob: BlossomBlob, target: ManagedServer) => {
+      const normalizeServerUrl = (value: string) => value.replace(/\/+$/, "");
+      const rawFolder = blob.privateData?.metadata?.folderPath ?? blob.folderPath ?? undefined;
+      const normalizedFolder = normalizeFolderPathInput(rawFolder);
+      const folderPathForMetadata =
+        typeof normalizedFolder === "string" && normalizedFolder.length > 0
+          ? normalizedFolder
+          : undefined;
+      const folderPathForPrivate =
+        normalizedFolder === undefined ? undefined : (normalizedFolder ?? null);
+
+      if (blob.privateData) {
+        const entry = entriesBySha.get(blob.sha256);
+        if (!entry) return;
+        const normalizedTargetUrl = normalizeServerUrl(target.url);
+        const existingServers = new Set(
+          (entry.servers ?? []).map(server => normalizeServerUrl(server)),
+        );
+        let needsServerUpdate = false;
+        if (!existingServers.has(normalizedTargetUrl)) {
+          existingServers.add(normalizedTargetUrl);
+          needsServerUpdate = true;
+        }
+        const existingFolder =
+          normalizeFolderPathInput(entry.metadata?.folderPath ?? undefined) ?? null;
+        const needsFolderUpdate =
+          folderPathForPrivate !== undefined && existingFolder !== folderPathForPrivate;
+        if (!needsServerUpdate && !needsFolderUpdate) return;
+        const nowSeconds = Math.floor(Date.now() / 1000);
+        const nextEntry: PrivateListEntry = {
+          ...entry,
+          servers: Array.from(existingServers),
+          metadata:
+            folderPathForPrivate === undefined
+              ? entry.metadata
+              : {
+                  ...(entry.metadata ?? {}),
+                  folderPath: folderPathForPrivate,
+                },
+          updatedAt: nowSeconds,
+        };
+        try {
+          await upsertEntries([nextEntry]);
+        } catch (error) {
+          console.warn("Failed to update private folder metadata after transfer", error);
+        }
+        return;
+      }
+
+      if (folderPathForMetadata) {
+        try {
+          await setBlobFolderMembership(blob.sha256, folderPathForMetadata);
+        } catch (error) {
+          console.warn("Failed to update folder membership after transfer", error);
+        }
+      }
+
+      if (!ndk || !signer) return;
+      try {
+        const extraTags = extractExtraNip94Tags(blob.nip94);
+        const alias = getBlobMetadataName(blob) ?? blob.name ?? null;
+        await publishNip94Metadata({
+          ndk,
+          signer,
+          blob,
+          relays: effectiveRelays,
+          alias,
+          folderPath: folderPathForMetadata,
+          extraTags,
+        });
+      } catch (error) {
+        console.warn("Failed to publish NIP-94 metadata after transfer", error);
+      }
+    },
+    [entriesBySha, effectiveRelays, ndk, setBlobFolderMembership, signer, upsertEntries],
+  );
 
   const syncCoverage = useMemo(() => {
     if (selectedBlobItems.length === 0) {
@@ -810,6 +899,11 @@ export const TransferTabContainer: React.FC<TransferTabContainerProps> = ({
 
           const existing = distribution[sha];
           if (existing?.servers.includes(target.url)) {
+            try {
+              await ensurePostTransferMetadata(blob, target);
+            } catch (metadataError) {
+              console.warn("Failed to refresh metadata for existing blob", metadataError);
+            }
             setManualTransfers(prev => {
               const filtered = prev.filter(item => item.id !== transferId);
               const completedTransfer: TransferState = {
@@ -974,6 +1068,12 @@ export const TransferTabContainer: React.FC<TransferTabContainerProps> = ({
               throw new Error("Unknown transfer completion state");
             }
 
+            try {
+              await ensurePostTransferMetadata(blob, target);
+            } catch (metadataError) {
+              console.warn("Failed to update metadata after transfer", metadataError);
+            }
+
             setManualTransfers(prev =>
               prev.map(item =>
                 item.id === transferId
@@ -1027,6 +1127,7 @@ export const TransferTabContainer: React.FC<TransferTabContainerProps> = ({
     }
   }, [
     distribution,
+    ensurePostTransferMetadata,
     missingSourceCount,
     queryClient,
     selectedBlobItems,
