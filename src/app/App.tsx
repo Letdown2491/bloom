@@ -22,24 +22,16 @@ import { useSelection } from "../features/selection/SelectionContext";
 import { LoggedOutPrompt } from "./components/LoggedOutPrompt";
 import { MainNavigation, type NavigationTab } from "./components/MainNavigation";
 import { deriveServerNameFromUrl } from "../shared/utils/serverName";
-import {
-  collectRelayTargets,
-  DEFAULT_PUBLIC_RELAYS,
-  normalizeRelayUrls,
-  sanitizeRelayUrl,
-} from "../shared/utils/relays";
-import { buildNip94EventTemplate } from "../shared/api/nip94";
+import { collectRelayTargets, normalizeRelayUrls } from "../shared/utils/relays";
 import type { ShareFolderRequest } from "../shared/types/shareFolder";
 import { type ShareFolderItem } from "../shared/types/shareFolder";
 import { usePrivateLinks } from "../features/privateLinks/hooks/usePrivateLinks";
 import type { PrivateLinkRecord } from "../shared/domain/privateLinks";
 import {
   buildItemsFromRecord,
-  buildShareableItemHints,
   buildShareItemsFromRequest,
   filterItemsByPolicy,
 } from "../shared/domain/folderShareHelpers";
-import type { NdkEventInstance, NdkRelayInstance } from "../shared/api/ndkModule";
 
 import type { ShareCompletion, SharePayload, ShareMode } from "../features/share/ui/ShareComposer";
 import type { BlossomBlob } from "../shared/api/blossomClient";
@@ -63,16 +55,19 @@ import { WorkspaceSection } from "../features/workspace/ui/WorkspaceSection";
 import {
   encodeFolderNaddr,
   isPrivateFolderName,
-  buildFolderEventTemplate,
   type FolderListRecord,
   type FolderSharePolicy,
 } from "../shared/domain/folderList";
 import type {
   FolderSharePhases,
-  PublishOperationSummary,
   PublishPhaseState,
   RelayPublishFailure,
 } from "../features/share/ui/folderShareStatus";
+import {
+  createFolderSharePublisher,
+  resolveRelayUniverse,
+} from "../features/share/services/folderSharePublisher";
+import { useAutoRepublishSharedFolders } from "../features/share/hooks/useAutoRepublishSharedFolders";
 
 const ConnectSignerDialogLazy = React.lazy(() =>
   import("../features/nip46/ConnectSignerDialog").then(module => ({
@@ -89,8 +84,6 @@ const AudioPlayerCardLazy = React.lazy(() =>
 );
 
 const NAV_TABS: NavigationTab[] = [{ id: "upload" as const, label: "Upload", icon: UploadIcon }];
-const FOLDER_METADATA_FETCH_TIMEOUT_MS = 7000;
-
 const ALL_SERVERS_VALUE = "__all__";
 
 type StatusMetrics = {
@@ -222,6 +215,38 @@ export default function App() {
     [effectiveRelays, preferredWriteRelays],
   );
 
+  const folderSharePublisher = useMemo(
+    () =>
+      createFolderSharePublisher({
+        ndk,
+        signer,
+        user,
+        getModule,
+        prepareRelaySet,
+      }),
+    [ndk, signer, user, getModule, prepareRelaySet],
+  );
+
+  const ensureFolderListOnRelays = useCallback(
+    (
+      record: FolderListRecord,
+      relayUrls: readonly string[],
+      blobs?: BlossomBlob[],
+      options?: {
+        allowedShas?: ReadonlySet<string> | null;
+        sharePolicy?: FolderSharePolicy | null;
+        items?: ShareFolderItem[] | null;
+      },
+    ) => folderSharePublisher.ensureFolderListOnRelays(record, relayUrls, blobs, options),
+    [folderSharePublisher],
+  );
+
+  const ensureFolderMetadataOnRelays = useCallback(
+    (record: FolderListRecord, relayUrls: readonly string[], blobs?: BlossomBlob[]) =>
+      folderSharePublisher.ensureFolderMetadataOnRelays(record, relayUrls, blobs),
+    [folderSharePublisher],
+  );
+
   const keepSearchExpanded = preferences.keepSearchExpanded;
 
   const [localServers, setLocalServers] = useState<ManagedServer[]>(servers);
@@ -288,6 +313,21 @@ export default function App() {
     useState<FolderShareRelayPromptState | null>(null);
   const [folderShareDialog, setFolderShareDialog] = useState<FolderShareDialogState | null>(null);
 
+  useAutoRepublishSharedFolders({
+    privateLinkServiceConfigured,
+    privateLinksLoading,
+    privateLinksFetching,
+    privateLinkRecords,
+    privateLinkHost,
+    foldersByPath,
+    shareRelayCandidates,
+    ensureFolderListOnRelays,
+    folderShareBusyPath,
+    ndk,
+    signer,
+    user,
+  });
+
   const {
     enabled: syncEnabled,
     loading: syncLoading,
@@ -346,8 +386,6 @@ export default function App() {
   const pendingSaveRef = useRef<PendingSave | null>(null);
   const retryPendingSaveTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [pendingSaveVersion, setPendingSaveVersion] = useState(0);
-  const autoRepublishInFlightRef = useRef<Set<string>>(new Set());
-
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const [connectSignerOpen, setConnectSignerOpen] = useState(false);
@@ -563,539 +601,6 @@ export default function App() {
     [],
   );
 
-  const ensureFolderListOnRelays = useCallback(
-    async (
-      record: FolderListRecord,
-      relayUrls: readonly string[],
-      blobs?: BlossomBlob[],
-      options?: {
-        allowedShas?: ReadonlySet<string> | null;
-        sharePolicy?: FolderSharePolicy | null;
-        items?: ShareFolderItem[] | null;
-      },
-    ): Promise<{ record: FolderListRecord; summary: PublishOperationSummary }> => {
-      const sanitizedRelays = collectRelayTargets(relayUrls, DEFAULT_PUBLIC_RELAYS);
-      const baseSummary: PublishOperationSummary = {
-        total: sanitizedRelays.length,
-        succeeded: 0,
-        failed: [],
-      };
-      if (!ndk || !signer || !user) {
-        return {
-          record,
-          summary: {
-            ...baseSummary,
-            error: "Signer unavailable",
-          },
-        };
-      }
-      if (!sanitizedRelays.length) {
-        return {
-          record,
-          summary: {
-            ...baseSummary,
-            error: "No relays configured",
-          },
-        };
-      }
-      const { relaySet } = await prepareRelaySet(sanitizedRelays, { waitForConnection: true });
-      if (!relaySet) {
-        return {
-          record,
-          summary: {
-            ...baseSummary,
-            error: "Unable to connect to relays",
-            failed: sanitizedRelays.map(url => ({ url, message: "Connection pending" })),
-          },
-        };
-      }
-
-      const allowedInput = options?.allowedShas;
-      const allowedSet = allowedInput
-        ? new Set(
-            Array.from(allowedInput)
-              .map(value => value.toLowerCase())
-              .filter(value => value.length === 64),
-          )
-        : null;
-      const isAllowedSha = (sha: string) => {
-        if (!allowedSet) return true;
-        return allowedSet.has(sha);
-      };
-
-      const policyRaw = options?.sharePolicy ?? record.sharePolicy ?? "all";
-      const sharePolicy: FolderSharePolicy =
-        policyRaw === "private-only" || policyRaw === "public-only" ? policyRaw : "all";
-
-      const candidateItems =
-        options?.items && options.items.length > 0
-          ? options.items
-          : Array.isArray(blobs)
-            ? blobs
-                .filter((blob): blob is BlossomBlob =>
-                  Boolean(blob && typeof blob.sha256 === "string"),
-                )
-                .map(blob => ({
-                  blob,
-                  privateLinkAlias: null,
-                  privateLinkUrl: null,
-                }))
-            : [];
-
-      const normalizedItems = candidateItems
-        .filter(item => item && item.blob && typeof item.blob.sha256 === "string")
-        .map(item => ({
-          blob: item.blob,
-          privateLinkAlias: item.privateLinkAlias ?? null,
-          privateLinkUrl: item.privateLinkUrl ?? null,
-        }))
-        .filter(item => {
-          const sha = item.blob.sha256?.toLowerCase();
-          if (!sha || sha.length !== 64) return false;
-          if (!isAllowedSha(sha)) return false;
-          return true;
-        });
-
-      const { shas, hints } = buildShareableItemHints({
-        record,
-        items: normalizedItems,
-        sharePolicy,
-      });
-
-      const shareRecord: FolderListRecord = {
-        ...record,
-        shas,
-        pubkey: record.pubkey ?? user.pubkey,
-        fileHints: Object.keys(hints).length > 0 ? hints : record.fileHints,
-        sharePolicy,
-      };
-
-      const summary: PublishOperationSummary = {
-        total: sanitizedRelays.length,
-        succeeded: 0,
-        failed: [],
-      };
-
-      try {
-        const module = await getModule();
-        const createdAt = Math.floor(Date.now() / 1000);
-        const template = buildFolderEventTemplate(shareRecord, shareRecord.pubkey ?? user.pubkey, {
-          createdAt,
-          fileHints: shareRecord.fileHints ? Object.values(shareRecord.fileHints) : undefined,
-          sharePolicy: shareRecord.sharePolicy ?? null,
-        });
-        const event = new module.NDKEvent(ndk);
-        event.kind = template.kind;
-        event.pubkey = template.pubkey;
-        event.created_at = template.created_at;
-        event.tags = template.tags;
-        event.content = template.content;
-        await event.sign();
-        try {
-          const publishedRelays = await event.publish(relaySet, undefined, sanitizedRelays.length);
-          const successUrls = new Set<string>();
-          publishedRelays.forEach(relay => {
-            const normalized = sanitizeRelayUrl(relay.url);
-            if (normalized) {
-              successUrls.add(normalized);
-            }
-          });
-          summary.succeeded = successUrls.size;
-          summary.failed = sanitizedRelays
-            .filter(url => !successUrls.has(url))
-            .map(url => ({ url, message: "No acknowledgement" }));
-          summary.error = summary.failed.length
-            ? "Some relays did not acknowledge the folder list."
-            : undefined;
-        } catch (publishError) {
-          const successUrls = new Set<string>();
-          const failedMap = new Map<string, string | undefined>();
-          if (
-            publishError &&
-            typeof publishError === "object" &&
-            "publishedToRelays" in publishError &&
-            publishError.publishedToRelays instanceof Set
-          ) {
-            (publishError.publishedToRelays as Set<NdkRelayInstance>).forEach(relay => {
-              const normalized = sanitizeRelayUrl(relay.url);
-              if (normalized) {
-                successUrls.add(normalized);
-              }
-            });
-          }
-          if (
-            publishError &&
-            typeof publishError === "object" &&
-            "errors" in publishError &&
-            publishError.errors instanceof Map
-          ) {
-            (publishError.errors as Map<NdkRelayInstance, Error>).forEach((err, relayInstance) => {
-              const normalized = sanitizeRelayUrl(relayInstance.url);
-              if (normalized) {
-                failedMap.set(normalized, err instanceof Error ? err.message : String(err));
-              }
-            });
-          }
-          summary.succeeded = successUrls.size;
-          const failedUrls = sanitizedRelays.filter(url => !successUrls.has(url));
-          summary.failed = failedUrls.map(url => ({
-            url,
-            message:
-              failedMap.get(url) ??
-              (publishError instanceof Error ? publishError.message : "Publish failed"),
-          }));
-          summary.error =
-            summary.failed.length > 0
-              ? publishError instanceof Error
-                ? publishError.message
-                : "Failed to publish to some relays"
-              : publishError instanceof Error
-                ? publishError.message
-                : "Publish error";
-          console.warn("Failed to republish folder list to share relays", publishError);
-        }
-      } catch (error) {
-        summary.error = error instanceof Error ? error.message : "Unexpected error";
-        summary.failed =
-          sanitizedRelays.length > 0
-            ? sanitizedRelays.map(url => ({
-                url,
-                message: summary.error ?? "Unexpected error",
-              }))
-            : [];
-        console.warn("Failed to republish folder list to share relays", error);
-      }
-
-      return { record: shareRecord, summary };
-    },
-    [getModule, ndk, prepareRelaySet, signer, user],
-  );
-
-  const ensureFolderMetadataOnRelays = useCallback(
-    async (
-      record: FolderListRecord,
-      relayUrls: readonly string[],
-      blobs?: BlossomBlob[],
-    ): Promise<PublishOperationSummary> => {
-      const sanitizedRelays = collectRelayTargets(relayUrls, DEFAULT_PUBLIC_RELAYS);
-      const summary: PublishOperationSummary = {
-        total: sanitizedRelays.length,
-        succeeded: 0,
-        failed: [],
-      };
-      if (!ndk) {
-        summary.error = "Nostr connection unavailable";
-        return summary;
-      }
-      if (!sanitizedRelays.length) {
-        summary.error = "No relays configured";
-        return summary;
-      }
-      const { relaySet } = await prepareRelaySet(sanitizedRelays, { waitForConnection: true });
-      if (!relaySet) {
-        summary.error = "Unable to prepare relays";
-        summary.failed = sanitizedRelays.map(url => ({ url, message: "Connection pending" }));
-        return summary;
-      }
-      const module = await getModule();
-      const shas = Array.from(
-        new Set(record.shas.map(sha => sha?.toLowerCase()).filter(Boolean) as string[]),
-      );
-      if (!shas.length) {
-        summary.succeeded = sanitizedRelays.length;
-        return summary;
-      }
-
-      const blobLookup = new Map<string, BlossomBlob>();
-      blobs?.forEach(blob => {
-        if (blob?.sha256) {
-          blobLookup.set(blob.sha256.toLowerCase(), blob);
-        }
-      });
-
-      let fetchedEvents: Set<NdkEventInstance> = new Set<NdkEventInstance>();
-      let metadataFetchTimedOut = false;
-      let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
-      try {
-        const metadataFetch = ndk.fetchEvents(
-          [
-            { kinds: [1063], "#x": shas, limit: shas.length },
-            { kinds: [1063], "#ox": shas, limit: shas.length },
-          ],
-          { closeOnEose: true, groupable: false },
-          relaySet,
-        ) as Promise<Set<NdkEventInstance>>;
-        fetchedEvents = (await Promise.race([
-          metadataFetch.finally(() => {
-            if (timeoutHandle) {
-              clearTimeout(timeoutHandle);
-              timeoutHandle = null;
-            }
-          }),
-          new Promise<Set<NdkEventInstance>>(resolve => {
-            timeoutHandle = setTimeout(() => {
-              metadataFetchTimedOut = true;
-              timeoutHandle = null;
-              resolve(new Set<NdkEventInstance>());
-            }, FOLDER_METADATA_FETCH_TIMEOUT_MS);
-          }),
-        ])) as Set<NdkEventInstance>;
-      } catch (error) {
-        console.warn("Unable to fetch existing file metadata for share", error);
-      } finally {
-        if (timeoutHandle) {
-          clearTimeout(timeoutHandle);
-          timeoutHandle = null;
-        }
-      }
-      if (metadataFetchTimedOut) {
-        console.warn(
-          `Timed out after ${FOLDER_METADATA_FETCH_TIMEOUT_MS}ms while fetching metadata events for shared items`,
-        );
-      }
-
-      const found = new Set<string>();
-      const eventsToPublish: NdkEventInstance[] = [];
-
-      fetchedEvents.forEach(eventInstance => {
-        if (!eventInstance || !Array.isArray(eventInstance.tags)) return;
-        const shaTag = eventInstance.tags.find(
-          (tag: unknown) =>
-            Array.isArray(tag) && (tag[0] === "x" || tag[0] === "ox") && typeof tag[1] === "string",
-        ) as string[] | undefined;
-        if (!shaTag || typeof shaTag[1] !== "string") return;
-        const sha = shaTag[1].toLowerCase();
-        if (!shas.includes(sha)) return;
-        found.add(sha);
-        eventsToPublish.push(eventInstance);
-      });
-
-      const missing = shas.filter(sha => !found.has(sha));
-      if (missing.length && signer) {
-        missing.forEach(sha => {
-          const blob = blobLookup.get(sha);
-          if (!blob || !blob.url) return;
-          const template = buildNip94EventTemplate({ blob });
-          const event = new module.NDKEvent(ndk, template);
-          eventsToPublish.push(event);
-          found.add(sha);
-        });
-      }
-
-      if (!eventsToPublish.length) {
-        summary.succeeded = sanitizedRelays.length;
-        return summary;
-      }
-
-      const relayFailures = new Map<string, string>();
-      const relaySuccesses = new Map<string, number>();
-
-      const trackSuccess = (url: string) => {
-        relaySuccesses.set(url, (relaySuccesses.get(url) ?? 0) + 1);
-      };
-      const trackFailure = (url: string, message: string) => {
-        if (relayFailures.has(url)) return;
-        relayFailures.set(url, message);
-      };
-
-      for (const event of eventsToPublish) {
-        try {
-          if (!event.sig) {
-            await event.sign();
-          }
-          const published = await event.publish(relaySet, undefined, sanitizedRelays.length);
-          published.forEach(relay => {
-            const normalized = sanitizeRelayUrl(relay.url);
-            if (normalized) {
-              trackSuccess(normalized);
-            }
-          });
-        } catch (publishError) {
-          const successUrls = new Set<string>();
-          const failureMap = new Map<string, string | undefined>();
-          if (
-            publishError &&
-            typeof publishError === "object" &&
-            "publishedToRelays" in publishError &&
-            publishError.publishedToRelays instanceof Set
-          ) {
-            (publishError.publishedToRelays as Set<NdkRelayInstance>).forEach(relay => {
-              const normalized = sanitizeRelayUrl(relay.url);
-              if (normalized) {
-                successUrls.add(normalized);
-                trackSuccess(normalized);
-              }
-            });
-          }
-          if (
-            publishError &&
-            typeof publishError === "object" &&
-            "errors" in publishError &&
-            publishError.errors instanceof Map
-          ) {
-            (publishError.errors as Map<NdkRelayInstance, Error>).forEach((err, relayInstance) => {
-              const normalized = sanitizeRelayUrl(relayInstance.url);
-              if (normalized) {
-                failureMap.set(normalized, err instanceof Error ? err.message : String(err));
-              }
-            });
-          }
-          const fallbackMessage =
-            publishError instanceof Error
-              ? publishError.message
-              : "Failed to publish metadata event";
-          sanitizedRelays.forEach(url => {
-            if (successUrls.has(url)) return;
-            trackFailure(url, failureMap.get(url) ?? fallbackMessage);
-          });
-          console.warn("Failed to publish metadata event to all relays", publishError);
-        }
-      }
-
-      const succeededRelays = sanitizedRelays.filter(
-        url => !relayFailures.has(url) && (relaySuccesses.get(url) ?? 0) >= eventsToPublish.length,
-      );
-      summary.succeeded = succeededRelays.length;
-      summary.failed = sanitizedRelays
-        .filter(url => !succeededRelays.includes(url))
-        .map(url => ({
-          url,
-          message: relayFailures.get(url) ?? "No acknowledgement",
-        }));
-      summary.error =
-        summary.failed.length > 0 ? "Some relays did not receive file metadata." : undefined;
-
-      if (shas.some(sha => !found.has(sha))) {
-        console.warn(
-          "Some shared items are missing metadata events",
-          shas.filter(sha => !found.has(sha)),
-        );
-      }
-
-      return summary;
-    },
-    [getModule, ndk, prepareRelaySet, signer],
-  );
-
-  useEffect(() => {
-    if (!privateLinkServiceConfigured) return;
-    if (privateLinksLoading || privateLinksFetching) return;
-    if (!ndk || !signer || !user) return;
-    if (!shareRelayCandidates.length) return;
-    if (!privateLinkHost) return;
-    if (folderShareBusyPath) return;
-
-    const activeLinks = new Map<string, PrivateLinkRecord>();
-    privateLinkRecords.forEach(record => {
-      if (!record || record.status !== "active" || record.isExpired) return;
-      const sha = record.target?.sha256;
-      if (!sha || sha.length !== 64) return;
-      activeLinks.set(sha.toLowerCase(), record);
-    });
-
-    const folderRecords = Array.from(foldersByPath.values());
-    folderRecords.forEach(record => {
-      if (!record || record.visibility !== "public") return;
-      const policy: FolderSharePolicy =
-        record.sharePolicy === "private-only" || record.sharePolicy === "public-only"
-          ? record.sharePolicy
-          : "all";
-      const allItems = buildItemsFromRecord(record, activeLinks, privateLinkHost);
-      const filteredItems = filterItemsByPolicy(allItems, policy);
-      const desiredShaSet = new Set(filteredItems.map(item => item.blob.sha256.toLowerCase()));
-      const currentShaSet = new Set(
-        (record.shas ?? []).map(sha => (typeof sha === "string" ? sha.toLowerCase() : String(sha))),
-      );
-
-      let needsRepublish = false;
-      if (desiredShaSet.size !== currentShaSet.size) {
-        needsRepublish = true;
-      } else {
-        for (const sha of desiredShaSet) {
-          if (!currentShaSet.has(sha)) {
-            needsRepublish = true;
-            break;
-          }
-        }
-      }
-
-      if (!needsRepublish) {
-        const hints = record.fileHints ?? {};
-        for (const item of filteredItems) {
-          const sha = item.blob.sha256.toLowerCase();
-          const hint = hints[sha];
-          const currentAlias = hint?.privateLinkAlias ?? null;
-          const expectedAlias = item.privateLinkAlias ?? null;
-          if (policy === "public-only") {
-            if (currentAlias) {
-              needsRepublish = true;
-              break;
-            }
-          } else {
-            if (Boolean(expectedAlias) !== Boolean(currentAlias)) {
-              needsRepublish = true;
-              break;
-            }
-            if (expectedAlias && currentAlias && expectedAlias !== currentAlias) {
-              needsRepublish = true;
-              break;
-            }
-          }
-        }
-      }
-
-      if (!needsRepublish) return;
-
-      const pathKey = record.path ?? record.identifier;
-      if (!pathKey) return;
-      if (autoRepublishInFlightRef.current.has(pathKey)) return;
-      autoRepublishInFlightRef.current.add(pathKey);
-
-      const blobs = filteredItems.map(item => item.blob);
-      const allowedShas = new Set(filteredItems.map(item => item.blob.sha256.toLowerCase()));
-
-      void (async () => {
-        try {
-          const result = await ensureFolderListOnRelays(record, shareRelayCandidates, blobs, {
-            allowedShas,
-            sharePolicy: policy,
-            items: filteredItems,
-          });
-          if (
-            result.summary.failed.length &&
-            result.summary.failed.length === result.summary.total
-          ) {
-            console.warn(
-              "Auto-republish failed for shared folder",
-              record.path || record.identifier,
-            );
-          }
-        } catch (error) {
-          console.warn(
-            "Auto-republish encountered an error for shared folder",
-            record.path || record.identifier,
-            error,
-          );
-        } finally {
-          autoRepublishInFlightRef.current.delete(pathKey);
-        }
-      })();
-    });
-  }, [
-    privateLinkServiceConfigured,
-    privateLinksLoading,
-    privateLinksFetching,
-    privateLinkRecords,
-    privateLinkHost,
-    foldersByPath,
-    shareRelayCandidates,
-    ensureFolderListOnRelays,
-    folderShareBusyPath,
-    ndk,
-    signer,
-    user,
-  ]);
-
   const shareFolderWithRelays = useCallback(
     async ({
       record,
@@ -1204,10 +709,7 @@ export default function App() {
             );
             setFolderShareDialog(current => {
               if (!current || current.record.path !== shareRecord.path) return current;
-              const relayUniverse =
-                current.relayHints && current.relayHints.length > 0
-                  ? normalizeRelayUrls(current.relayHints)
-                  : sanitizedHints;
+              const relayUniverse = resolveRelayUniverse(current.relayHints, sanitizedHints);
               const baseTotal = relayUniverse.length;
               const listPhase: PublishPhaseState = current.phases?.list ?? {
                 status: "ready",
@@ -1242,10 +744,7 @@ export default function App() {
             console.warn("Failed to publish folder metadata for share", metadataError);
             setFolderShareDialog(current => {
               if (!current || current.record.path !== shareRecord.path) return current;
-              const relayUniverse =
-                current.relayHints && current.relayHints.length > 0
-                  ? normalizeRelayUrls(current.relayHints)
-                  : sanitizedHints;
+              const relayUniverse = resolveRelayUniverse(current.relayHints, sanitizedHints);
               const baseTotal = relayUniverse.length;
               const nextPhases = current.phases ?? {
                 list: {
@@ -1451,10 +950,7 @@ export default function App() {
       if (!current || current.record.path !== record.path) return current;
       const existingList = current.phases?.list;
       const existingMetadata = current.phases?.metadata;
-      const relayUniverse =
-        current.relayHints && current.relayHints.length > 0
-          ? normalizeRelayUrls(current.relayHints)
-          : normalizeRelayUrls(shareRelayCandidates);
+      const relayUniverse = resolveRelayUniverse(current.relayHints, shareRelayCandidates);
       const baseTotal = relayUniverse.length;
       const succeededBefore = existingList
         ? Math.min(existingList.succeeded, baseTotal)
@@ -1514,10 +1010,7 @@ export default function App() {
       });
       setFolderShareDialog(current => {
         if (!current || current.record.path !== record.path) return current;
-        const relayUniverse =
-          current.relayHints && current.relayHints.length > 0
-            ? normalizeRelayUrls(current.relayHints)
-            : normalizeRelayUrls(shareRelayCandidates);
+        const relayUniverse = resolveRelayUniverse(current.relayHints, shareRelayCandidates);
         const baseTotal = relayUniverse.length;
         const currentMetadata = current.phases?.metadata ?? {
           status: "idle" as const,
@@ -1557,10 +1050,7 @@ export default function App() {
       const message = error instanceof Error ? error.message : "Failed to republish folder list.";
       setFolderShareDialog(current => {
         if (!current || current.record.path !== record.path) return current;
-        const relayUniverse =
-          current.relayHints && current.relayHints.length > 0
-            ? normalizeRelayUrls(current.relayHints)
-            : normalizeRelayUrls(shareRelayCandidates);
+        const relayUniverse = resolveRelayUniverse(current.relayHints, shareRelayCandidates);
         const baseTotal = relayUniverse.length;
         const currentMetadata = current.phases?.metadata ?? {
           status: "idle" as const,
@@ -1607,10 +1097,7 @@ export default function App() {
     }
     setFolderShareDialog(current => {
       if (!current || current.record.path !== record.path) return current;
-      const relayUniverse =
-        current.relayHints && current.relayHints.length > 0
-          ? normalizeRelayUrls(current.relayHints)
-          : normalizeRelayUrls(shareRelayCandidates);
+      const relayUniverse = resolveRelayUniverse(current.relayHints, shareRelayCandidates);
       const baseTotal = relayUniverse.length;
       const currentList = current.phases?.list ?? {
         status: "ready" as const,
@@ -1646,10 +1133,7 @@ export default function App() {
       );
       setFolderShareDialog(current => {
         if (!current || current.record.path !== record.path) return current;
-        const relayUniverse =
-          current.relayHints && current.relayHints.length > 0
-            ? normalizeRelayUrls(current.relayHints)
-            : normalizeRelayUrls(shareRelayCandidates);
+        const relayUniverse = resolveRelayUniverse(current.relayHints, shareRelayCandidates);
         const baseTotal = relayUniverse.length;
         const currentList = current.phases?.list ?? {
           status: "ready" as const,
@@ -1685,10 +1169,7 @@ export default function App() {
       const message = error instanceof Error ? error.message : "Failed to republish metadata.";
       setFolderShareDialog(current => {
         if (!current || current.record.path !== record.path) return current;
-        const relayUniverse =
-          current.relayHints && current.relayHints.length > 0
-            ? normalizeRelayUrls(current.relayHints)
-            : normalizeRelayUrls(shareRelayCandidates);
+        const relayUniverse = resolveRelayUniverse(current.relayHints, shareRelayCandidates);
         const baseTotal = relayUniverse.length;
         const currentList = current.phases?.list ?? {
           status: "ready" as const,

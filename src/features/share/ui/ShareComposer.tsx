@@ -1175,7 +1175,7 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
         for (const relayUrl of relays) {
           try {
             const relaySet = NDKRelaySet.fromRelayUrls([relayUrl], ndk);
-            await dmEvent.publish(relaySet, 7000, 1);
+            await dmEvent.publish(relaySet, 7000, 0);
             dmSuccessCount += 1;
             setRelayStatuses(prev => ({ ...prev, [relayUrl]: { status: "success" } }));
           } catch (error) {
@@ -1262,8 +1262,8 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
         for (const relayUrl of relays) {
           try {
             const relaySet = NDKRelaySet.fromRelayUrls([relayUrl], ndk);
-            await wrapForRecipient.publish(relaySet, 7000, 1);
-            await wrapForSender.publish(relaySet, 7000, 1);
+            await wrapForRecipient.publish(relaySet, 7000, 0);
+            await wrapForSender.publish(relaySet, 7000, 0);
             dmSuccessCount += 1;
             setRelayStatuses(prev => ({ ...prev, [relayUrl]: { status: "success" } }));
           } catch (error) {
@@ -1336,7 +1336,7 @@ export const ShareComposer: React.FC<ShareComposerProps> = ({
           });
           await event.sign();
           const relaySet = NDKRelaySet.fromRelayUrls([relayUrl], ndk);
-          await event.publish(relaySet, 7000, 1);
+          await event.publish(relaySet, 7000, 0);
           setRelayStatuses(prev => ({ ...prev, [relayUrl]: { status: "success" } }));
         } catch (error) {
           let message = "Failed to publish.";

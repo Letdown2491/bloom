@@ -120,7 +120,7 @@ export const publishNip94Metadata = async ({
     for (const relayUrl of relayList) {
       try {
         const relaySet = NDKRelaySet.fromRelayUrls([relayUrl], ndk);
-        await event.publish(relaySet, timeoutMs ?? 7000, 1);
+        await event.publish(relaySet, timeoutMs ?? 7000, 0);
         relayResults.push({ relayUrl, success: true });
       } catch (error: unknown) {
         if (error instanceof NDKPublishError) {

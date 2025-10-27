@@ -258,7 +258,7 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
   const { upsertEntries: upsertPrivateEntries, entries: privateLibraryEntries } =
     usePrivateLibrary();
   const pubkey = useCurrentPubkey();
-  const { folders, addBlobToFolder, resolveFolderPath } = useFolderLists();
+  const { folders, setBlobFolderMembership, resolveFolderPath } = useFolderLists();
   const normalizedFolderSuggestion = useMemo(() => {
     if (defaultFolderPath === undefined) return undefined;
     const normalized = normalizeFolderPathInput(defaultFolderPath);
@@ -1049,6 +1049,7 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
     >();
     const pendingPrivateUpdates = new Map<string, PrivateListEntry>();
     const pendingFolderUpdates = new Map<string, string>();
+    const pendingFolderServers = new Map<string, Set<string>>();
 
     let encounteredError = false;
     const entryHadError = new Map<string, boolean>();
@@ -1239,6 +1240,9 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
         rememberBlobMetadata(server.url, blob, { folderPath: folderPathValue });
         if (!isPrivate && folderPathValue) {
           pendingFolderUpdates.set(blob.sha256, folderPathValue);
+          const serverSet = pendingFolderServers.get(blob.sha256) ?? new Set<string>();
+          serverSet.add(server.url);
+          pendingFolderServers.set(blob.sha256, serverSet);
         }
         if (pubkey) {
           const queryKey = ["server-blobs", server.url, pubkey, server.type] as const;
@@ -1342,7 +1346,9 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
     if (pendingFolderUpdates.size > 0) {
       for (const [sha, path] of pendingFolderUpdates) {
         try {
-          await addBlobToFolder(path, sha);
+          await setBlobFolderMembership(sha, path, {
+            serverUrls: pendingFolderServers.get(sha),
+          });
         } catch (error) {
           console.warn("Failed to update folder list after upload", error);
         }
