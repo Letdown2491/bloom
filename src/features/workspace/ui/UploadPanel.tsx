@@ -1241,19 +1241,35 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
           pendingFolderUpdates.set(blob.sha256, folderPathValue);
         }
         if (pubkey) {
-          queryClient.setQueryData<BlossomBlob[]>(
-            ["server-blobs", server.url, pubkey, server.type],
-            prev => {
-              if (!prev) return [blob];
-              const index = prev.findIndex(item => item.sha256 === blob.sha256);
-              if (index >= 0) {
-                const next = [...prev];
-                next[index] = { ...prev[index], ...blob };
-                return next;
-              }
-              return [...prev, blob];
-            },
-          );
+          const queryKey = ["server-blobs", server.url, pubkey, server.type] as const;
+          const mergeIntoArray = (items: BlossomBlob[]) => {
+            const index = items.findIndex(item => item.sha256 === blob.sha256);
+            if (index >= 0) {
+              const next = [...items];
+              next[index] = { ...items[index], ...blob };
+              return next;
+            }
+            return [...items, blob];
+          };
+          queryClient.setQueryData(queryKey, previous => {
+            if (previous && Array.isArray(previous)) {
+              return mergeIntoArray(previous);
+            }
+            if (
+              previous &&
+              typeof previous === "object" &&
+              Array.isArray((previous as { items?: unknown }).items)
+            ) {
+              const cast = previous as { items: BlossomBlob[]; [key: string]: unknown };
+              const nextItems = mergeIntoArray(cast.items);
+              return cast.items === nextItems ? previous : { ...cast, items: nextItems };
+            }
+            return {
+              items: mergeIntoArray([]),
+              reset: false,
+              updatedAt: Date.now(),
+            };
+          });
         }
         setEntryServerStatus(entry.id, serverUrl, "success");
         setTransfers(prev =>

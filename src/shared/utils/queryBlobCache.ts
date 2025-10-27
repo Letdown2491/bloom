@@ -13,19 +13,42 @@ export const updateCachedBlobEntries = (
   if (!sha256) return;
   const cache = queryClient.getQueryCache();
   const queries = cache.findAll({ queryKey: ["server-blobs"] });
+
+  const resolveArray = (value: unknown): BlossomBlob[] | null => {
+    if (Array.isArray(value)) {
+      return value as BlossomBlob[];
+    }
+    if (value && typeof value === "object" && Array.isArray((value as { items?: unknown }).items)) {
+      return (value as { items: BlossomBlob[] }).items;
+    }
+    return null;
+  };
+
   queries.forEach(query => {
     const queryKey = query.queryKey;
-    queryClient.setQueryData<BlossomBlob[]>(queryKey, previous => {
-      if (!Array.isArray(previous)) return previous;
-      const index = previous.findIndex(blob => blob?.sha256 === sha256);
+    queryClient.setQueryData(queryKey, previous => {
+      const blobs = resolveArray(previous);
+      if (!blobs) return previous;
+      const index = blobs.findIndex(blob => blob?.sha256 === sha256);
       if (index === -1) return previous;
-      const current = previous[index];
+      const current = blobs[index];
       if (!current) return previous;
       const next = updater(current, queryKey);
       if (!next || next === current) return previous;
-      const updated = [...previous];
-      updated[index] = next;
-      return updated;
+      if (Array.isArray(previous)) {
+        const updated = [...previous];
+        updated[index] = next;
+        return updated;
+      }
+      if (previous && typeof previous === "object") {
+        const nextItems = [...blobs];
+        nextItems[index] = next;
+        return {
+          ...previous,
+          items: nextItems,
+        };
+      }
+      return previous;
     });
   });
 };

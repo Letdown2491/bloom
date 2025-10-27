@@ -56,7 +56,11 @@ type FolderListContextValue = {
     visibility: FolderListVisibility,
   ) => Promise<FolderListRecord | null>;
   getFoldersForBlob: (sha256: string) => string[];
-  setBlobFolderMembership: (sha256: string, targetPath: string | null) => Promise<void>;
+  setBlobFolderMembership: (
+    sha256: string,
+    targetPath: string | null,
+    options?: { serverUrls?: Iterable<string | null | undefined> },
+  ) => Promise<void>;
 };
 
 const FolderListContext = createContext<FolderListContextValue | undefined>(undefined);
@@ -322,7 +326,11 @@ export const FolderListProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   );
 
   const setBlobFolderMembership = useCallback(
-    async (sha256: string, targetPath: string | null) => {
+    async (
+      sha256: string,
+      targetPath: string | null,
+      options?: { serverUrls?: Iterable<string | null | undefined> },
+    ) => {
       const normalizedSha = sha256.trim();
       if (!normalizedSha) return;
       const currentPaths = foldersByShaRef.current.get(normalizedSha) ?? [];
@@ -350,8 +358,29 @@ export const FolderListProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       for (const task of tasks) {
         await task;
       }
+
+      const serverUrls = new Set<string>();
+      if (options?.serverUrls) {
+        for (const url of options.serverUrls) {
+          if (!url) continue;
+          const trimmed = url.trim();
+          if (!trimmed) continue;
+          serverUrls.add(trimmed.replace(/\/+$/, ""));
+        }
+      }
+
+      let updated = applyFolderUpdate(undefined, normalizedSha, normalizedTarget, undefined);
+      serverUrls.forEach(url => {
+        const changed = applyFolderUpdate(url, normalizedSha, normalizedTarget, undefined);
+        if (changed) {
+          updated = true;
+        }
+      });
+      if (updated) {
+        reconcileBlobWithStoredMetadata(queryClient, normalizedSha);
+      }
     },
-    [addBlobToFolder, removeBlobFromFolder, resolveFolderPath],
+    [addBlobToFolder, queryClient, removeBlobFromFolder, resolveFolderPath],
   );
 
   const renameFolder = useCallback(

@@ -544,7 +544,11 @@ export const RenameDialog: React.FC<RenameDialogProps> = ({
           });
         }
         if (!isPrivate && folderChanged) {
-          await setBlobFolderMembership(blob.sha256, desiredFolder);
+          const serverUrls = new Set<string>();
+          if (blob.serverUrl) {
+            serverUrls.add(blob.serverUrl);
+          }
+          await setBlobFolderMembership(blob.sha256, desiredFolder, { serverUrls });
           setCurrentFolderPath(desiredFolder);
         }
       }

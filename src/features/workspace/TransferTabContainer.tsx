@@ -59,6 +59,8 @@ type TransferFeedbackTone =
   | "text-amber-300"
   | "text-red-400";
 
+type TransferPhase = "idle" | "transferring" | "completed" | "attention";
+
 export const TransferTabContainer: React.FC<TransferTabContainerProps> = ({
   active,
   onBackToBrowse,
@@ -83,6 +85,7 @@ export const TransferTabContainer: React.FC<TransferTabContainerProps> = ({
   const [transferTargets, setTransferTargets] = useState<string[]>([]);
   const [transferBusy, setTransferBusy] = useState(false);
   const [transferFeedback, setTransferFeedback] = useState<string | null>(null);
+  const [transferPhase, setTransferPhase] = useState<TransferPhase>("idle");
   const [manualTransfers, setManualTransfers] = useState<TransferState[]>([]);
   const [syncTransfers, setSyncTransfers] = useState<TransferState[]>([]);
   const [autoSyncedServers, setAutoSyncedServers] = useState<string[]>([]);
@@ -196,7 +199,13 @@ export const TransferTabContainer: React.FC<TransferTabContainerProps> = ({
 
       if (folderPathForMetadata) {
         try {
-          await setBlobFolderMembership(blob.sha256, folderPathForMetadata);
+          const serverUrls = new Set<string>();
+          if (blob.serverUrl) {
+            serverUrls.add(blob.serverUrl);
+          }
+          await setBlobFolderMembership(blob.sha256, folderPathForMetadata, {
+            serverUrls,
+          });
         } catch (error) {
           console.warn("Failed to update folder membership after transfer", error);
         }
@@ -875,6 +884,8 @@ export const TransferTabContainer: React.FC<TransferTabContainerProps> = ({
       return;
     }
 
+    setTransferPhase("transferring");
+    setManualTransfers([]);
     setTransferBusy(true);
     setTransferFeedback(null);
     let encounteredError = false;
@@ -1122,6 +1133,7 @@ export const TransferTabContainer: React.FC<TransferTabContainerProps> = ({
       } else {
         setTransferFeedback("Transfer finished with some issues. Review the activity log below.");
       }
+      setTransferPhase(encounteredError ? "attention" : "completed");
     } finally {
       setTransferBusy(false);
     }
@@ -1156,6 +1168,11 @@ export const TransferTabContainer: React.FC<TransferTabContainerProps> = ({
   }, [onProvideSyncStarter, startSync]);
 
   const currentSignerMissing = !signer || !signEventTemplate;
+  const handleResetTransfer = useCallback(() => {
+    setTransferPhase("idle");
+    setTransferFeedback(null);
+    setManualTransfers([]);
+  }, []);
 
   return (
     <Suspense
@@ -1177,9 +1194,12 @@ export const TransferTabContainer: React.FC<TransferTabContainerProps> = ({
         transferFeedback={transferFeedback}
         transferFeedbackTone={transferFeedbackTone}
         transferActivity={transferActivity}
+        currentTransfers={manualTransfers}
+        transferPhase={transferPhase}
         toggleTransferTarget={toggleTransferTarget}
         handleStartTransfer={handleStartTransfer}
         onBackToBrowse={onBackToBrowse}
+        onResetTransfer={handleResetTransfer}
         currentSignerMissing={currentSignerMissing}
         syncedServerCount={syncedServerCount}
         syncedServerTotal={syncedServerTotal}

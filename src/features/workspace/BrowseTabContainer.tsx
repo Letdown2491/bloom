@@ -4183,7 +4183,19 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
               setMoveState(null);
               return;
             }
-            await setBlobFolderMembership(moveState.blob.sha256, targetCanonical);
+            const replica = blobReplicaInfo.get(moveState.blob.sha256);
+            const serverUrls = new Set<string>();
+            if (moveState.blob.serverUrl) {
+              serverUrls.add(moveState.blob.serverUrl);
+            }
+            replica?.servers.forEach(server => {
+              if (server?.url) {
+                serverUrls.add(server.url);
+              }
+            });
+            await setBlobFolderMembership(moveState.blob.sha256, targetCanonical, {
+              serverUrls,
+            });
             const destinationLabel = formatFolderLabel(targetCanonical);
             showStatusMessage(`Moved to ${destinationLabel}. Syncing metadata…`, "success", 3000);
             queueMetadataSync([{ blob: moveState.blob, folderPath: targetCanonical ?? null }], {
