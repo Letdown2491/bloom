@@ -980,14 +980,14 @@ export default function App() {
         shareItems && shareItems.length > 0
           ? shareItems
           : (shareBlobs ?? [])
-              .filter((blob): blob is BlossomBlob =>
-                Boolean(blob && typeof blob.sha256 === "string"),
-              )
-              .map(blob => ({
-                blob,
-                privateLinkAlias: null,
-                privateLinkUrl: null,
-              }));
+            .filter((blob): blob is BlossomBlob =>
+              Boolean(blob && typeof blob.sha256 === "string"),
+            )
+            .map(blob => ({
+              blob,
+              privateLinkAlias: null,
+              privateLinkUrl: null,
+            }));
 
       const allowedShaSet = new Set<string>();
       retryItems.forEach(item => {
@@ -1991,11 +1991,10 @@ export default function App() {
     "relative flex flex-1 min-h-0 flex-col overflow-hidden rounded-3xl border border-slate-800/70";
   const shellClass = showAuthPrompt
     ? `${shellBaseClass} ${isLightTheme ? "bg-slate-900/70" : "bg-slate-900/70"}`
-    : `${shellBaseClass} ${
-        isLightTheme
-          ? "bg-white surface-sheet shadow-panel noise-layer"
-          : "bg-slate-900 surface-sheet shadow-panel noise-layer"
-      }`;
+    : `${shellBaseClass} ${isLightTheme
+      ? "bg-white surface-sheet shadow-panel noise-layer"
+      : "bg-slate-900 surface-sheet shadow-panel noise-layer"
+    }`;
   const userMenuButtonClass = isLightTheme
     ? "relative flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 bg-white/90 p-0 text-xs text-slate-700 transition hover:border-blue-400 hover:text-blue-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/70 focus-visible:ring-offset-2 focus-visible:ring-offset-white"
     : "relative flex h-10 w-10 items-center justify-center rounded-full border border-slate-800/80 bg-slate-900/80 p-0 text-xs text-slate-200 transition hover:border-emerald-400 hover:text-emerald-300 focus:outline-none focus-visible:focus-emerald-ring";
@@ -2009,7 +2008,7 @@ export default function App() {
   const shouldShowFloatingPlayer = Boolean(audio.current);
 
   return (
-    <div className="surface-window flex min-h-screen max-h-screen w-full flex-col overflow-hidden text-slate-100">
+    <div className="surface-window flex h-full w-full flex-col overflow-hidden text-slate-100 pt-[var(--sat)] pb-[var(--sab)] pl-[var(--sal)] pr-[var(--sar)]">
       <div className="flex w-full flex-1 min-h-0 flex-col gap-2 px-0 py-0 sm:px-6 sm:py-8 lg:mx-auto lg:max-w-7xl">
         <header className="relative z-30 flex flex-col gap-4 rounded-3xl border border-slate-800/70 bg-slate-900/80 p-4 shadow-toolbar backdrop-blur">
           <div className="flex items-center gap-3">
@@ -2050,11 +2049,10 @@ export default function App() {
                     </span>
                   )}
                   <span
-                    className={`pointer-events-none absolute -bottom-1.5 -right-1.5 z-10 flex h-5 w-5 items-center justify-center rounded-full border shadow-toolbar ${
-                      preferences.theme === "light"
-                        ? "border-slate-200 bg-white text-slate-900"
-                        : "border-slate-900 bg-slate-950 text-emerald-300"
-                    }`}
+                    className={`pointer-events-none absolute -bottom-1.5 -right-1.5 z-10 flex h-5 w-5 items-center justify-center rounded-full border shadow-toolbar ${preferences.theme === "light"
+                      ? "border-slate-200 bg-white text-slate-900"
+                      : "border-slate-900 bg-slate-950 text-emerald-300"
+                      }`}
                     aria-hidden="true"
                   >
                     <SettingsIcon size={12} />

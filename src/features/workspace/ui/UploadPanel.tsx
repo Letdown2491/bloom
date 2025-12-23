@@ -224,6 +224,8 @@ export type UploadPanelProps = {
   showStatusMessage?: (message: string, tone?: StatusMessageTone, duration?: number) => void;
 };
 
+import { useIsCompactScreen } from "../../../shared/hooks/useIsCompactScreen";
+
 export const UploadPanel: React.FC<UploadPanelProps> = ({
   servers,
   selectedServerUrl,
@@ -233,6 +235,7 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
   showStatusMessage,
 }) => {
   const { preferences } = useUserPreferences();
+  const isCompact = useIsCompactScreen();
   const isLightTheme = preferences.theme === "light";
   const [selectedServers, setSelectedServers] = useState<string[]>(() => {
     if (selectedServerUrl) {
@@ -604,12 +607,12 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
         prev.map(entry =>
           entry.id === id
             ? {
-                ...entry,
-                serverStatuses: {
-                  ...entry.serverStatuses,
-                  [serverUrl]: status,
-                },
-              }
+              ...entry,
+              serverStatuses: {
+                ...entry.serverStatuses,
+                [serverUrl]: status,
+              },
+            }
             : entry,
         ),
       );
@@ -1114,10 +1117,10 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
             prev.map(item =>
               item.id === transferKey
                 ? {
-                    ...item,
-                    transferred: progress.loaded,
-                    total: progress.total || serverFile.size,
-                  }
+                  ...item,
+                  transferred: progress.loaded,
+                  total: progress.total || serverFile.size,
+                }
                 : item,
             ),
           );
@@ -1264,7 +1267,7 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
               typeof previous === "object" &&
               Array.isArray((previous as { items?: unknown }).items)
             ) {
-              const cast = previous as { items: BlossomBlob[]; [key: string]: unknown };
+              const cast = previous as { items: BlossomBlob[];[key: string]: unknown };
               const nextItems = mergeIntoArray(cast.items);
               return cast.items === nextItems ? previous : { ...cast, items: nextItems };
             }
@@ -1323,10 +1326,10 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
           prev.map(item =>
             item.id === transferKey
               ? {
-                  ...item,
-                  status: "error",
-                  message: errorMessage,
-                }
+                ...item,
+                status: "error",
+                message: errorMessage,
+              }
               : item,
           ),
         );
@@ -1419,11 +1422,10 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
       <div className="space-y-3">
         {uploadPhase === "uploading" ? (
           <div
-            className={`rounded-xl border px-4 py-3 text-sm ${
-              isLightTheme
-                ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                : "border-emerald-500/40 bg-emerald-500/10 text-emerald-200"
-            }`}
+            className={`rounded-xl border px-4 py-3 text-sm ${isLightTheme
+              ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+              : "border-emerald-500/40 bg-emerald-500/10 text-emerald-200"
+              }`}
           >
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="flex flex-col gap-1">
@@ -1435,11 +1437,10 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
                 </span>
               </div>
               <span
-                className={`rounded-full px-3 py-1 text-xs font-semibold ${
-                  isLightTheme
-                    ? "bg-emerald-200 text-emerald-700"
-                    : "bg-emerald-500/30 text-emerald-100"
-                }`}
+                className={`rounded-full px-3 py-1 text-xs font-semibold ${isLightTheme
+                  ? "bg-emerald-200 text-emerald-700"
+                  : "bg-emerald-500/30 text-emerald-100"
+                  }`}
               >
                 {uploadCompletionPercent}% complete
               </span>
@@ -1487,11 +1488,10 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
                 {completedEntries.map(entry => (
                   <li
                     key={entry.id}
-                    className={`flex items-center justify-between rounded-lg border px-3 py-2 ${
-                      isLightTheme
-                        ? "border-emerald-200/70 bg-white/70 text-emerald-700"
-                        : "border-emerald-500/30 bg-emerald-500/10 text-emerald-100"
-                    }`}
+                    className={`flex items-center justify-between rounded-lg border px-3 py-2 ${isLightTheme
+                      ? "border-emerald-200/70 bg-white/70 text-emerald-700"
+                      : "border-emerald-500/30 bg-emerald-500/10 text-emerald-100"
+                      }`}
                   >
                     <span className="font-medium">{entry.file.name}</span>
                     <span className={isLightTheme ? "text-emerald-700/70" : "text-emerald-100/70"}>
@@ -1515,11 +1515,10 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
         ) : null}
         {uploadPhase === "attention" ? (
           <div
-            className={`rounded-xl border px-4 py-3 text-sm ${
-              isLightTheme
-                ? "border-amber-300 bg-amber-50 text-amber-700"
-                : "border-amber-400/70 bg-amber-500/10 text-amber-200"
-            }`}
+            className={`rounded-xl border px-4 py-3 text-sm ${isLightTheme
+              ? "border-amber-300 bg-amber-50 text-amber-700"
+              : "border-amber-400/70 bg-amber-500/10 text-amber-200"
+              }`}
           >
             <span className="text-sm font-semibold">Uploads need attention</span>
             <p
@@ -1537,11 +1536,10 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
                 {servers.map(server => (
                   <label
                     key={server.url}
-                    className={`px-3 py-2 rounded-xl border text-sm cursor-pointer ${
-                      selectedServers.includes(server.url)
-                        ? "border-emerald-500 bg-emerald-500/10"
-                        : "border-slate-800 bg-slate-900/60"
-                    }`}
+                    className={`px-3 py-2 rounded-xl border text-sm cursor-pointer ${selectedServers.includes(server.url)
+                      ? "border-emerald-500 bg-emerald-500/10"
+                      : "border-slate-800 bg-slate-900/60"
+                      }`}
                   >
                     <input
                       type="checkbox"
@@ -1569,13 +1567,12 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
                 onDragOver={handleDragOver}
                 onDragLeave={handleDragLeave}
                 onDrop={handleDrop}
-                className={`relative flex min-h-[32px] w-full flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed px-6 py-4 text-center transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 ${
-                  isDragActive
-                    ? "border-emerald-400 bg-emerald-500/10"
-                    : entries.length
-                      ? "border-emerald-500/40 bg-slate-900/60"
-                      : "border-slate-700 bg-slate-900/60"
-                } cursor-pointer hover:border-emerald-400 ${busy ? "opacity-60" : ""}`}
+                className={`relative flex min-h-[32px] w-full flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed px-6 py-4 text-center transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 ${isDragActive
+                  ? "border-emerald-400 bg-emerald-500/10"
+                  : entries.length
+                    ? "border-emerald-500/40 bg-slate-900/60"
+                    : "border-slate-700 bg-slate-900/60"
+                  } cursor-pointer hover:border-emerald-400 ${busy ? "opacity-60" : ""}`}
               >
                 <UploadIcon size={32} className="text-emerald-300" aria-hidden="true" />
                 <div className="text-sm font-semibold text-slate-100">
@@ -1635,11 +1632,10 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
                       key={filter.id}
                       type="button"
                       onClick={() => setEntryFilter(filter.id)}
-                      className={`inline-flex items-center gap-1 rounded-full border px-3 py-1 font-medium transition ${
-                        isActive
-                          ? "border-emerald-400 bg-emerald-500/20 text-emerald-200"
-                          : "border-slate-700 bg-slate-900/60 text-slate-300 hover:border-emerald-400 hover:text-emerald-200"
-                      }`}
+                      className={`inline-flex items-center gap-1 rounded-full border px-3 py-1 font-medium transition ${isActive
+                        ? "border-emerald-400 bg-emerald-500/20 text-emerald-200"
+                        : "border-slate-700 bg-slate-900/60 text-slate-300 hover:border-emerald-400 hover:text-emerald-200"
+                        }`}
                     >
                       <span>{filter.label}</span>
                       <span className="rounded-full bg-slate-800 px-2 py-0.5 text-[11px] text-slate-200">
@@ -1754,9 +1750,9 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
                         const percent =
                           transfer && transfer.total
                             ? Math.min(
-                                100,
-                                Math.round((transfer.transferred / transfer.total) * 100),
-                              )
+                              100,
+                              Math.round((transfer.transferred / transfer.total) * 100),
+                            )
                             : 0;
                         acc.push({ serverUrl, serverName, status, transfer, percent });
                         return acc;
@@ -1772,16 +1768,14 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
                     elements.push(
                       <div
                         key={entry.id}
-                        className={`rounded-xl border p-4 space-y-3 text-sm shadow-sm ${
-                          isLightTheme
-                            ? "border-slate-200 bg-white text-slate-700"
-                            : "border-slate-800 bg-slate-950/60 text-slate-200"
-                        }`}
+                        className={`rounded-xl border p-4 space-y-3 text-sm shadow-sm ${isLightTheme
+                          ? "border-slate-200 bg-white text-slate-700"
+                          : "border-slate-800 bg-slate-950/60 text-slate-200"
+                          }`}
                       >
                         <div
-                          className={`flex flex-wrap items-start justify-between gap-3 ${
-                            isLightTheme ? "text-slate-700" : "text-slate-200"
-                          }`}
+                          className={`flex flex-wrap items-start justify-between gap-3 ${isLightTheme ? "text-slate-700" : "text-slate-200"
+                            }`}
                         >
                           <div>
                             <div
@@ -1797,15 +1791,14 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
                             </div>
                             {folderInputValue ? (
                               <div
-                                className={`mt-1 text-xs ${
-                                  folderInvalid || !normalizedFolderPreview
-                                    ? isLightTheme
-                                      ? "text-amber-600"
-                                      : "text-amber-300"
-                                    : isLightTheme
-                                      ? "text-emerald-600"
-                                      : "text-emerald-300"
-                                }`}
+                                className={`mt-1 text-xs ${folderInvalid || !normalizedFolderPreview
+                                  ? isLightTheme
+                                    ? "text-amber-600"
+                                    : "text-amber-300"
+                                  : isLightTheme
+                                    ? "text-emerald-600"
+                                    : "text-emerald-300"
+                                  }`}
                               >
                                 {folderInvalid || !normalizedFolderPreview
                                   ? "Invalid folder path"
@@ -1818,11 +1811,10 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
                               </div>
                             ) : null}
                           </div>
-                          <div className="flex flex-col items-end gap-2">
+                          <div className="flex w-full flex-row items-center justify-between gap-2 sm:w-auto sm:flex-col sm:items-end sm:justify-start">
                             <div
-                              className={`flex flex-wrap items-center justify-end gap-2 text-xs ${
-                                isLightTheme ? "text-slate-500" : "text-slate-400"
-                              }`}
+                              className={`flex flex-wrap items-center justify-end gap-2 text-xs ${isLightTheme ? "text-slate-500" : "text-slate-400"
+                                }`}
                             >
                               <span
                                 className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-semibold ${entryStatusBadge}`}
@@ -1833,9 +1825,8 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
                                 <>
                                   {showFolderWarning ? (
                                     <span
-                                      className={`inline-flex items-center gap-1 ${
-                                        isLightTheme ? "text-amber-500" : "text-amber-300"
-                                      }`}
+                                      className={`inline-flex items-center gap-1 ${isLightTheme ? "text-amber-500" : "text-amber-300"
+                                        }`}
                                     >
                                       <WarningIcon
                                         size={16}
@@ -1847,9 +1838,8 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
                                   ) : null}
                                   {entry.isPrivate ? (
                                     <span
-                                      className={`inline-flex items-center gap-1 ${
-                                        isLightTheme ? "text-emerald-600" : "text-emerald-300"
-                                      }`}
+                                      className={`inline-flex items-center gap-1 ${isLightTheme ? "text-emerald-600" : "text-emerald-300"
+                                        }`}
                                     >
                                       <LockIcon
                                         size={16}
@@ -1867,11 +1857,10 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
                                 <button
                                   type="button"
                                   onClick={() => toggleMetadataVisibility(entry.id)}
-                                  className={`flex items-center justify-center rounded-lg border p-2 text-xs transition ${
-                                    isLightTheme
-                                      ? "border-slate-300 text-slate-600 hover:border-emerald-500 hover:text-emerald-600"
-                                      : "border-slate-700 text-slate-200 hover:border-emerald-500 hover:text-emerald-400"
-                                  }`}
+                                  className={`flex items-center justify-center rounded-lg border p-2 text-xs transition ${isLightTheme
+                                    ? "border-slate-300 text-slate-600 hover:border-emerald-500 hover:text-emerald-600"
+                                    : "border-slate-700 text-slate-200 hover:border-emerald-500 hover:text-emerald-400"
+                                    }`}
                                   title={showMetadata ? "Hide metadata" : "Edit metadata"}
                                 >
                                   <EditIcon size={16} aria-hidden="true" />
@@ -1883,11 +1872,10 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
                                   <button
                                     type="button"
                                     onClick={() => retryEntry(entry.id)}
-                                    className={`rounded-lg border px-3 py-1 text-xs font-medium uppercase tracking-wide transition disabled:cursor-not-allowed disabled:opacity-40 ${
-                                      isLightTheme
-                                        ? "border-amber-500 text-amber-600 hover:border-amber-400 hover:text-amber-500"
-                                        : "border-amber-500 text-amber-200 hover:border-amber-400 hover:text-amber-100"
-                                    }`}
+                                    className={`rounded-lg border px-3 py-1 text-xs font-medium uppercase tracking-wide transition disabled:cursor-not-allowed disabled:opacity-40 ${isLightTheme
+                                      ? "border-amber-500 text-amber-600 hover:border-amber-400 hover:text-amber-500"
+                                      : "border-amber-500 text-amber-200 hover:border-amber-400 hover:text-amber-100"
+                                      }`}
                                     disabled={isEntryUploading}
                                     title="Retry this upload"
                                   >
@@ -1900,11 +1888,10 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
                                   onClick={() =>
                                     setOptionsEntryId(prev => (prev === entry.id ? null : entry.id))
                                   }
-                                  className={`flex items-center justify-center rounded-lg border p-2 text-xs transition ${
-                                    isLightTheme
-                                      ? "border-slate-300 text-slate-600 hover:border-emerald-500 hover:text-emerald-600"
-                                      : "border-slate-700 text-slate-200 hover:border-emerald-500 hover:text-emerald-300"
-                                  }`}
+                                  className={`flex items-center justify-center rounded-lg border p-2 text-xs transition ${isLightTheme
+                                    ? "border-slate-300 text-slate-600 hover:border-emerald-500 hover:text-emerald-600"
+                                    : "border-slate-700 text-slate-200 hover:border-emerald-500 hover:text-emerald-300"
+                                    }`}
                                   title="Upload settings"
                                 >
                                   <SettingsIcon size={16} aria-hidden="true" />
@@ -1913,11 +1900,10 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
                                 <button
                                   type="button"
                                   onClick={() => removeEntry(entry.id)}
-                                  className={`flex items-center justify-center rounded-lg border p-2 text-xs transition disabled:cursor-not-allowed disabled:opacity-40 ${
-                                    isLightTheme
-                                      ? "border-slate-300 text-slate-500 hover:border-red-500 hover:text-red-500"
-                                      : "border-slate-700 text-slate-200 hover:border-red-500 hover:text-red-300"
-                                  }`}
+                                  className={`flex items-center justify-center rounded-lg border p-2 text-xs transition disabled:cursor-not-allowed disabled:opacity-40 ${isLightTheme
+                                    ? "border-slate-300 text-slate-500 hover:border-red-500 hover:text-red-500"
+                                    : "border-slate-700 text-slate-200 hover:border-red-500 hover:text-red-300"
+                                    }`}
                                   disabled={isEntryUploading}
                                   title="Remove from upload queue"
                                 >
@@ -1925,238 +1911,245 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
                                   <span className="sr-only">Remove</span>
                                 </button>
                                 {optionsEntryId === entry.id ? (
-                                  <div
-                                    ref={optionsPopoverRef}
-                                    className={`absolute right-0 top-full z-30 mt-2 w-72 rounded-xl border shadow-xl ${
-                                      isLightTheme
-                                        ? "border-slate-200 bg-white text-slate-700"
-                                        : "border-slate-700 bg-slate-900/95 text-slate-100 backdrop-blur"
-                                    }`}
-                                    role="dialog"
-                                    aria-label="Upload options"
-                                  >
-                                    <div
-                                      className={`flex items-center justify-between border-b px-3 py-2 ${
-                                        isLightTheme ? "border-slate-200" : "border-slate-700"
-                                      }`}
-                                    >
-                                      <span className="text-[11px] font-semibold uppercase tracking-wide">
-                                        Upload options
-                                      </span>
-                                      <button
-                                        type="button"
+                                  <>
+                                    {isCompact && (
+                                      <div
+                                        className="fixed inset-0 z-40 bg-black/50 backdrop-blur-sm"
                                         onClick={() => setOptionsEntryId(null)}
-                                        className={`rounded-lg border p-1 transition ${
-                                          isLightTheme
+                                      />
+                                    )}
+                                    <div
+                                      ref={optionsPopoverRef}
+                                      className={`${isCompact
+                                        ? "fixed left-4 right-4 top-1/2 z-50 mt-0 w-auto -translate-y-1/2 shadow-2xl"
+                                        : "absolute right-0 top-full z-30 mt-2 w-72 shadow-xl"
+                                        } rounded-xl border ${isLightTheme
+                                          ? "border-slate-200 bg-white text-slate-700"
+                                          : "border-slate-700 bg-slate-900/95 text-slate-100 backdrop-blur"
+                                        }`}
+                                      role="dialog"
+                                      aria-label="Upload options"
+                                    >
+                                      <div
+                                        className={`flex items-center justify-between border-b px-3 py-2 ${isLightTheme ? "border-slate-200" : "border-slate-700"
+                                          }`}
+                                      >
+                                        <span className="text-[11px] font-semibold uppercase tracking-wide">
+                                          Upload options
+                                        </span>
+                                        <button
+                                          type="button"
+                                          onClick={() => setOptionsEntryId(null)}
+                                          className={`rounded-lg border p-1 transition ${isLightTheme
                                             ? "border-transparent text-slate-500 hover:border-slate-200 hover:text-slate-700"
                                             : "border-transparent text-slate-400 hover:border-slate-700 hover:text-slate-100"
-                                        }`}
-                                        title="Close upload options"
-                                      >
-                                        <CloseIcon size={14} aria-hidden="true" />
-                                        <span className="sr-only">Close upload options</span>
-                                      </button>
-                                    </div>
-                                    <div className="space-y-4 px-3 py-3 text-xs">
-                                      <div className="space-y-2">
-                                        <label className="flex items-center justify-between gap-3">
-                                          <span className="inline-flex items-center gap-2 font-medium">
-                                            <LockIcon size={14} aria-hidden="true" />
-                                            <span>Private upload</span>
-                                          </span>
-                                          <input
-                                            type="checkbox"
-                                            className={`h-4 w-4 rounded focus:outline-none focus:ring-1 focus:ring-emerald-500 ${
-                                              isLightTheme
+                                            }`}
+                                          title="Close upload options"
+                                        >
+                                          <CloseIcon size={14} aria-hidden="true" />
+                                          <span className="sr-only">Close upload options</span>
+                                        </button>
+                                      </div>
+                                      <div className="space-y-4 px-3 py-3 text-xs">
+                                        <div className="space-y-2">
+                                          <label className="flex items-center justify-between gap-3">
+                                            <span className="inline-flex items-center gap-2 font-medium">
+                                              <LockIcon size={14} aria-hidden="true" />
+                                              <span>Private upload</span>
+                                            </span>
+                                            <input
+                                              type="checkbox"
+                                              className={`h-4 w-4 rounded focus:outline-none focus:ring-1 focus:ring-emerald-500 ${isLightTheme
                                                 ? "border-slate-300 bg-white text-emerald-600"
                                                 : "border-slate-600 bg-slate-950 text-emerald-400"
-                                            }`}
-                                            checked={entry.isPrivate}
-                                            onChange={event =>
-                                              setEntryPrivacy(entry.id, event.target.checked)
-                                            }
-                                            disabled={isEntryUploading || readOnlyMode}
-                                          />
-                                        </label>
-                                        <p
-                                          className={`${
-                                            isLightTheme
+                                                }`}
+                                              checked={entry.isPrivate}
+                                              onChange={event =>
+                                                setEntryPrivacy(entry.id, event.target.checked)
+                                              }
+                                              disabled={isEntryUploading || readOnlyMode}
+                                            />
+                                          </label>
+                                          <p
+                                            className={`${isLightTheme
                                               ? "text-[11px] text-slate-500"
                                               : "text-[11px] text-slate-400"
-                                          }`}
-                                        >
-                                          Encrypts the file on your device so only you can decrypt
-                                          it later.
-                                        </p>
-                                      </div>
-                                      {imageOptions ? (
-                                        <div className="space-y-3">
-                                          {canOptimizeToWebp ? (
+                                              }`}
+                                          >
+                                            Encrypts the file on your device so only you can decrypt
+                                            it later.
+                                          </p>
+                                        </div>
+                                        {imageOptions ? (
+                                          <div className="space-y-3">
+                                            {canOptimizeToWebp ? (
+                                              <label className="flex items-center justify-between gap-3">
+                                                <span className="font-medium">
+                                                  Optimize for web (WebP)
+                                                </span>
+                                                <input
+                                                  type="checkbox"
+                                                  checked={imageOptions.optimizeForWeb}
+                                                  onChange={event =>
+                                                    updateEntryImageOptions(entry.id, {
+                                                      optimizeForWeb: event.target.checked,
+                                                    })
+                                                  }
+                                                  disabled={isEntryUploading || readOnlyMode}
+                                                />
+                                              </label>
+                                            ) : null}
                                             <label className="flex items-center justify-between gap-3">
                                               <span className="font-medium">
-                                                Optimize for web (WebP)
+                                                Remove EXIF metadata
                                               </span>
                                               <input
                                                 type="checkbox"
-                                                checked={imageOptions.optimizeForWeb}
+                                                checked={imageOptions.removeMetadata}
                                                 onChange={event =>
                                                   updateEntryImageOptions(entry.id, {
-                                                    optimizeForWeb: event.target.checked,
+                                                    removeMetadata: event.target.checked,
                                                   })
                                                 }
                                                 disabled={isEntryUploading || readOnlyMode}
                                               />
                                             </label>
-                                          ) : null}
-                                          <label className="flex items-center justify-between gap-3">
-                                            <span className="font-medium">
-                                              Remove EXIF metadata
-                                            </span>
-                                            <input
-                                              type="checkbox"
-                                              checked={imageOptions.removeMetadata}
-                                              onChange={event =>
-                                                updateEntryImageOptions(entry.id, {
-                                                  removeMetadata: event.target.checked,
-                                                })
-                                              }
-                                              disabled={isEntryUploading || readOnlyMode}
-                                            />
-                                          </label>
-                                          <label className="flex items-center justify-between gap-3">
-                                            <span className="font-medium">Resize</span>
-                                            <select
-                                              value={imageOptions.resizeOption}
-                                              onChange={event =>
-                                                updateEntryImageOptions(entry.id, {
-                                                  resizeOption: Number(event.target.value),
-                                                })
-                                              }
-                                              disabled={isEntryUploading || readOnlyMode}
-                                              className={`w-32 rounded-lg border px-2 py-1 text-xs ${
-                                                isLightTheme
+                                            <label className="flex items-center justify-between gap-3">
+                                              <span className="font-medium">Resize</span>
+                                              <select
+                                                value={imageOptions.resizeOption}
+                                                onChange={event =>
+                                                  updateEntryImageOptions(entry.id, {
+                                                    resizeOption: Number(event.target.value),
+                                                  })
+                                                }
+                                                disabled={isEntryUploading || readOnlyMode}
+                                                className={`w-32 rounded-lg border px-2 py-1 text-xs ${isLightTheme
                                                   ? "border-slate-300 bg-white text-slate-700"
                                                   : "border-slate-700 bg-slate-900 text-slate-200"
-                                              }`}
-                                            >
-                                              {RESIZE_OPTIONS.map(option => (
-                                                <option key={option.id} value={option.id}>
-                                                  {option.label}
-                                                </option>
-                                              ))}
-                                            </select>
-                                          </label>
-                                        </div>
-                                      ) : null}
+                                                  }`}
+                                              >
+                                                {RESIZE_OPTIONS.map(option => (
+                                                  <option key={option.id} value={option.id}>
+                                                    {option.label}
+                                                  </option>
+                                                ))}
+                                              </select>
+                                            </label>
+                                          </div>
+                                        ) : null}
+                                      </div>
                                     </div>
-                                  </div>
+                                  </>
                                 ) : null}
                               </div>
                             ) : null}
                           </div>
                         </div>
-                        {serverDetails.length > 0 ? (
-                          <div
-                            className={`space-y-3 rounded-lg border p-3 text-xs ${
-                              isLightTheme
+                        {
+                          serverDetails.length > 0 ? (
+                            <div
+                              className={`space-y-3 rounded-lg border p-3 text-xs ${isLightTheme
                                 ? "border-slate-200 bg-slate-100 text-slate-600"
                                 : "border-slate-800 bg-slate-900/60 text-slate-300"
-                            }`}
-                          >
-                            {serverDetails.map(detail => {
-                              const indicatorClass =
-                                detail.status === "error"
-                                  ? "bg-red-500"
-                                  : detail.status === "success"
-                                    ? "bg-emerald-500"
-                                    : "bg-emerald-400/70";
-                              const progressWidth =
-                                detail.status === "success" || detail.status === "error"
-                                  ? 100
-                                  : detail.percent;
-                              return (
-                                <div key={`${entry.id}-${detail.serverUrl}`} className="space-y-1">
-                                  <div className="flex items-center justify-between">
-                                    <span
-                                      className={`font-medium ${isLightTheme ? "text-slate-700" : "text-slate-200"}`}
-                                    >
-                                      {detail.serverName}
-                                    </span>
-                                    <span
-                                      className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                                        isLightTheme
+                                }`}
+                            >
+                              {serverDetails.map(detail => {
+                                const indicatorClass =
+                                  detail.status === "error"
+                                    ? "bg-red-500"
+                                    : detail.status === "success"
+                                      ? "bg-emerald-500"
+                                      : "bg-emerald-400/70";
+                                const progressWidth =
+                                  detail.status === "success" || detail.status === "error"
+                                    ? 100
+                                    : detail.percent;
+                                return (
+                                  <div key={`${entry.id}-${detail.serverUrl}`} className="space-y-1">
+                                    <div className="flex items-center justify-between">
+                                      <span
+                                        className={`font-medium ${isLightTheme ? "text-slate-700" : "text-slate-200"}`}
+                                      >
+                                        {detail.serverName}
+                                      </span>
+                                      <span
+                                        className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${isLightTheme
                                           ? "bg-slate-200 text-slate-700"
                                           : "bg-slate-800 text-slate-200"
-                                      }`}
-                                    >
-                                      {ENTRY_STATUS_LABEL[detail.status]}
-                                      {detail.status === "uploading"
-                                        ? ` · ${detail.percent}%`
-                                        : null}
-                                    </span>
-                                  </div>
-                                  <div
-                                    className={`h-1.5 w-full overflow-hidden rounded ${
-                                      isLightTheme ? "bg-slate-200" : "bg-slate-800"
-                                    }`}
-                                  >
-                                    <div
-                                      className={`h-full ${indicatorClass}`}
-                                      style={{ width: `${progressWidth}%` }}
-                                    />
-                                  </div>
-                                  {detail.transfer && detail.transfer.status === "error" ? (
-                                    <div
-                                      className={`text-[11px] ${isLightTheme ? "text-red-500" : "text-red-300"}`}
-                                    >
-                                      {detail.transfer.message || "Upload failed"}
+                                          }`}
+                                      >
+                                        {ENTRY_STATUS_LABEL[detail.status]}
+                                        {detail.status === "uploading"
+                                          ? ` · ${detail.percent}%`
+                                          : null}
+                                      </span>
                                     </div>
-                                  ) : null}
-                                </div>
-                              );
-                            })}
-                          </div>
-                        ) : null}
-                        {showMetadata ? (
-                          <div className="space-y-3">
-                            {metadata.kind === "audio" ? (
-                              <AudioMetadataForm
-                                metadata={metadata}
-                                onChange={changes => updateAudioMetadata(entry.id, changes)}
-                                folderOptions={
-                                  entry.isPrivate ? privateFolderOptions : publicFolderOptions
-                                }
-                                isPrivate={entry.isPrivate}
-                                disabled={isEntryUploading || readOnlyMode}
-                              />
-                            ) : (
-                              <GenericMetadataForm
-                                metadata={metadata}
-                                onChange={changes => updateGenericMetadata(entry.id, changes)}
-                                folderOptions={
-                                  entry.isPrivate ? privateFolderOptions : publicFolderOptions
-                                }
-                                isPrivate={entry.isPrivate}
-                                disabled={isEntryUploading || readOnlyMode}
-                              />
-                            )}
-                          </div>
-                        ) : !readOnlyMode && metadata.kind === "audio" ? (
-                          <div
-                            className={`text-xs ${isLightTheme ? "text-slate-500" : "text-slate-400"}`}
-                          >
-                            Metadata detected
-                            {entry.extractedAudioMetadata ? " from the file." : "."} Click "Edit
-                            metadata" to review.
-                          </div>
-                        ) : !readOnlyMode ? (
-                          <div
-                            className={`text-xs ${isLightTheme ? "text-slate-500" : "text-slate-400"}`}
-                          >
-                            Click "Edit metadata" to override the display name, upload location, and
-                            other file specific metadata.
-                          </div>
-                        ) : null}
+                                    <div
+                                      className={`h-1.5 w-full overflow-hidden rounded ${isLightTheme ? "bg-slate-200" : "bg-slate-800"
+                                        }`}
+                                    >
+                                      <div
+                                        className={`h-full ${indicatorClass}`}
+                                        style={{ width: `${progressWidth}%` }}
+                                      />
+                                    </div>
+                                    {detail.transfer && detail.transfer.status === "error" ? (
+                                      <div
+                                        className={`text-[11px] ${isLightTheme ? "text-red-500" : "text-red-300"}`}
+                                      >
+                                        {detail.transfer.message || "Upload failed"}
+                                      </div>
+                                    ) : null}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          ) : null
+                        }
+                        {
+                          showMetadata ? (
+                            <div className="space-y-3" >
+                              {
+                                metadata.kind === "audio" ? (
+                                  <AudioMetadataForm
+                                    metadata={metadata}
+                                    onChange={changes => updateAudioMetadata(entry.id, changes)}
+                                    folderOptions={
+                                      entry.isPrivate ? privateFolderOptions : publicFolderOptions
+                                    }
+                                    isPrivate={entry.isPrivate}
+                                    disabled={isEntryUploading || readOnlyMode}
+                                  />
+                                ) : (
+                                  <GenericMetadataForm
+                                    metadata={metadata}
+                                    onChange={changes => updateGenericMetadata(entry.id, changes)}
+                                    folderOptions={
+                                      entry.isPrivate ? privateFolderOptions : publicFolderOptions
+                                    }
+                                    isPrivate={entry.isPrivate}
+                                    disabled={isEntryUploading || readOnlyMode}
+                                  />
+                                )
+                              }
+                            </div>
+                          ) : !readOnlyMode && metadata.kind === "audio" ? (
+                            <div
+                              className={`text-xs ${isLightTheme ? "text-slate-500" : "text-slate-400"}`}
+                            >
+                              Metadata detected
+                              {entry.extractedAudioMetadata ? " from the file." : "."} Click "Edit
+                              metadata" to review.
+                            </div>
+                          ) : !readOnlyMode ? (
+                            <div
+                              className={`text-xs ${isLightTheme ? "text-slate-500" : "text-slate-400"}`}
+                            >
+                              Click "Edit metadata" to override the display name, upload location, and
+                              other file specific metadata.
+                            </div>
+                          ) : null}
                       </div>,
                     );
                   }
@@ -2165,44 +2158,48 @@ export const UploadPanel: React.FC<UploadPanelProps> = ({
               </div>
             )}
           </div>
-        ) : null}
-        {showSetupContent && entries.length > 0 ? (
-          <div className="flex justify-end gap-3">
-            <button
-              onClick={() => handleUpload()}
-              disabled={
-                !entries.length ||
-                !selectedServers.length ||
-                busy ||
-                !canUpload ||
-                !hasPendingUploads
-              }
-              title="Upload selected files"
-              className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              <UploadIcon size={18} aria-hidden="true" />
-              <span>{busy ? "Uploading…" : "Upload"}</span>
-            </button>
-            <button
-              onClick={reset}
-              className="inline-flex items-center gap-2 rounded-xl bg-slate-800 px-4 py-2 text-sm font-semibold text-slate-100 transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
-              disabled={busy}
-              title="Reset upload queue"
-            >
-              <TrashIcon size={18} aria-hidden="true" />
-              <span>Reset</span>
-            </button>
+        ) : null
+        }
+        {
+          showSetupContent && entries.length > 0 ? (
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => handleUpload()}
+                disabled={
+                  !entries.length ||
+                  !selectedServers.length ||
+                  busy ||
+                  !canUpload ||
+                  !hasPendingUploads
+                }
+                title="Upload selected files"
+                className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <UploadIcon size={18} aria-hidden="true" />
+                <span>{busy ? "Uploading…" : "Upload"}</span>
+              </button>
+              <button
+                onClick={reset}
+                className="inline-flex items-center gap-2 rounded-xl bg-slate-800 px-4 py-2 text-sm font-semibold text-slate-100 transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
+                disabled={busy}
+                title="Reset upload queue"
+              >
+                <TrashIcon size={18} aria-hidden="true" />
+                <span>Reset</span>
+              </button>
+            </div>
+          ) : null
+        }
+      </div >
+      {
+        feedback ? (
+          <div className="pointer-events-none absolute bottom-4 right-4 z-50" >
+            <div className="pointer-events-auto rounded-lg border border-emerald-400/60 bg-slate-900/90 px-4 py-2 text-sm text-emerald-100 shadow-lg backdrop-blur">
+              {feedback.message}
+            </div>
           </div>
         ) : null}
-      </div>
-      {feedback ? (
-        <div className="pointer-events-none absolute bottom-4 right-4 z-50">
-          <div className="pointer-events-auto rounded-lg border border-emerald-400/60 bg-slate-900/90 px-4 py-2 text-sm text-emerald-100 shadow-lg backdrop-blur">
-            {feedback.message}
-          </div>
-        </div>
-      ) : null}
-    </section>
+    </section >
   );
 };
 
