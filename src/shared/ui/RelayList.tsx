@@ -17,6 +17,7 @@ import type { RelayPreparationResult } from "../api/ndkRelayManager";
 import type { StatusMessageTone } from "../types/status";
 import { useDialog } from "../../app/context/DialogContext";
 import { useUserPreferences } from "../../app/context/UserPreferencesContext";
+import { useIsCompactScreen } from "../hooks/useIsCompactScreen";
 
 const statusStyles: Record<RelayHealth["status"], { label: string; dot: string; text: string }> = {
   error: {
@@ -181,6 +182,8 @@ const RelayList: React.FC<RelayListProps> = ({
   const [refreshingStatus, setRefreshingStatus] = useState(false);
   const [refreshCooldownActive, setRefreshCooldownActive] = useState(false);
   const refreshCooldownTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isCompactScreen = useIsCompactScreen();
+  const showCardLayout = isCompactScreen || compact;
 
   useEffect(() => {
     setDrafts(policiesToDrafts(relayPolicies));
@@ -551,6 +554,181 @@ const RelayList: React.FC<RelayListProps> = ({
 
       {loading && drafts.length === 0 ? (
         <div className={loadingMessageClass}>Loading relay preferences…</div>
+      ) : showCardLayout ? (
+        <div className="space-y-3">
+          {drafts.length === 0 ? (
+            <div className="py-6 px-3 text-center text-sm text-slate-400">
+              No relays configured yet. Add a relay to get started.
+            </div>
+          ) : (
+            drafts.map(draft => {
+              const sanitized = sanitizeRelayUrl(draft.url);
+              const normalized = sanitized
+                ? (normalizeRelayOrigin(sanitized) ?? sanitized)
+                : null;
+              const health = normalized ? healthMap.get(normalized) : undefined;
+              const baseStyle = health ? statusStyles[health.status] : UNKNOWN_STATUS_STYLE;
+              const style =
+                health &&
+                  health.status === "error" &&
+                  (!health.lastError || health.lastError === "Not connected")
+                  ? NOT_CONNECTED_STATUS_STYLE
+                  : baseStyle;
+              const statusMessage =
+                health && health.status === "error"
+                  ? health.lastError && health.lastError !== "Not connected"
+                    ? health.lastError
+                    : "Connect your signer to refresh status."
+                  : null;
+              const statusMessageClass =
+                health &&
+                  health.status === "error" &&
+                  health.lastError &&
+                  health.lastError !== "Not connected"
+                  ? "text-[11px] text-red-300"
+                  : "text-[11px] text-slate-400";
+              const validationMessage = validationErrors.get(draft.id) ?? null;
+              const isEditing = editingId === draft.id;
+
+              if (isEditing) {
+                return (
+                  <div
+                    key={draft.id}
+                    className="flex flex-col gap-3 rounded-xl border border-slate-700 bg-slate-900/50 p-3"
+                  >
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <RelayIcon size={16} className="text-slate-400 shrink-0" aria-hidden />
+                        <input
+                          type="text"
+                          value={draft.url}
+                          onChange={event =>
+                            setDraftField(draft.id, { url: event.target.value })
+                          }
+                          className={`w-full rounded-lg px-3 py-2 text-sm text-slate-200 focus:border-emerald-500 focus:outline-none bg-slate-900 ${validationMessage
+                              ? "border border-red-700"
+                              : "border border-slate-700"
+                            }`}
+                          placeholder="wss://relay.example.com"
+                          autoComplete="off"
+                          spellCheck={false}
+                        />
+                      </div>
+                      {validationMessage ? (
+                        <p className="ml-6 text-[11px] text-red-300">{validationMessage}</p>
+                      ) : null}
+                    </div>
+
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex gap-4">
+                        <label className="flex items-center gap-2 text-sm text-slate-300">
+                          <input
+                            type="checkbox"
+                            checked={draft.read}
+                            onChange={event =>
+                              setDraftField(draft.id, { read: event.target.checked })
+                            }
+                            className="rounded border-slate-600 bg-slate-800 text-emerald-500 focus:ring-emerald-500/50"
+                          />
+                          Read
+                        </label>
+                        <label className="flex items-center gap-2 text-sm text-slate-300">
+                          <input
+                            type="checkbox"
+                            checked={draft.write}
+                            onChange={event =>
+                              setDraftField(draft.id, { write: event.target.checked })
+                            }
+                            className="rounded border-slate-600 bg-slate-800 text-emerald-500 focus:ring-emerald-500/50"
+                          />
+                          Write
+                        </label>
+                      </div>
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={handleEditSubmit}
+                          className="inline-flex items-center justify-center rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-slate-50 hover:bg-emerald-500"
+                          aria-label="Save relay"
+                        >
+                          Save
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleEditCancel}
+                          className="inline-flex items-center justify-center rounded-lg bg-slate-800 px-3 py-2 text-sm font-medium text-slate-200 hover:bg-slate-700"
+                          aria-label="Cancel editing"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              }
+
+              return (
+                <div
+                  key={draft.id}
+                  className="flex flex-col gap-2 rounded-xl border border-slate-800 bg-slate-900/30 p-3"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex flex-col min-w-0">
+                      <span className="inline-flex items-center gap-2 text-sm break-all font-medium text-slate-200">
+                        <RelayIcon size={16} className="text-slate-500 shrink-0" aria-hidden />
+                        {sanitized ?? draft.url}
+                      </span>
+                      {validationMessage ? (
+                        <p className="mt-1 text-[11px] text-red-300">{validationMessage}</p>
+                      ) : null}
+                    </div>
+                    <div className="flex shrink-0 gap-1">
+                      <button
+                        type="button"
+                        onClick={() => beginEdit(draft.id)}
+                        className="p-1.5 text-slate-400 hover:text-slate-200 disabled:opacity-40"
+                        disabled={!canEdit}
+                        aria-label="Edit relay"
+                      >
+                        <EditIcon size={16} />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void handleRemoveRelay(draft.id)}
+                        className="p-1.5 text-red-400 hover:text-red-300 disabled:opacity-40"
+                        disabled={!canEdit}
+                        aria-label="Remove relay"
+                      >
+                        <TrashIcon size={16} />
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between gap-2 border-t border-slate-800/50 pt-2 mt-1">
+                    <div className="flex flex-col">
+                      <div className={`inline-flex items-center gap-1.5 text-xs ${style.text}`}>
+                        <span className={`h-1.5 w-1.5 rounded-full ${style.dot}`} aria-hidden />
+                        {style.label}
+                      </div>
+                      {statusMessage ? (
+                        <span className={`mt-0.5 ${statusMessageClass}`}>{statusMessage}</span>
+                      ) : null}
+                    </div>
+                    <div className="flex gap-3 text-xs text-slate-400">
+                      <span className={draft.read ? "text-emerald-400 font-medium" : "opacity-50"}>
+                        Read
+                      </span>
+                      <span className="opacity-20">|</span>
+                      <span className={draft.write ? "text-emerald-400 font-medium" : "opacity-50"}>
+                        Write
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
       ) : (
         <div className="overflow-x-auto">
           <table className="min-w-full table-fixed text-sm text-slate-300">
@@ -590,8 +768,8 @@ const RelayList: React.FC<RelayListProps> = ({
                   const baseStyle = health ? statusStyles[health.status] : UNKNOWN_STATUS_STYLE;
                   const style =
                     health &&
-                    health.status === "error" &&
-                    (!health.lastError || health.lastError === "Not connected")
+                      health.status === "error" &&
+                      (!health.lastError || health.lastError === "Not connected")
                       ? NOT_CONNECTED_STATUS_STYLE
                       : baseStyle;
                   const statusMessage =
@@ -602,9 +780,9 @@ const RelayList: React.FC<RelayListProps> = ({
                       : null;
                   const statusMessageClass =
                     health &&
-                    health.status === "error" &&
-                    health.lastError &&
-                    health.lastError !== "Not connected"
+                      health.status === "error" &&
+                      health.lastError &&
+                      health.lastError !== "Not connected"
                       ? "text-[11px] text-red-300"
                       : "text-[11px] text-slate-400";
                   const validationMessage = validationErrors.get(draft.id) ?? null;
@@ -622,11 +800,10 @@ const RelayList: React.FC<RelayListProps> = ({
                               onChange={event =>
                                 setDraftField(draft.id, { url: event.target.value })
                               }
-                              className={`w-full rounded-lg px-3 py-2 text-sm text-slate-200 focus:border-emerald-500 focus:outline-none bg-slate-900 ${
-                                validationMessage
+                              className={`w-full rounded-lg px-3 py-2 text-sm text-slate-200 focus:border-emerald-500 focus:outline-none bg-slate-900 ${validationMessage
                                   ? "border border-red-700"
                                   : "border border-slate-700"
-                              }`}
+                                }`}
                               placeholder="wss://relay.example.com"
                               autoComplete="off"
                               spellCheck={false}

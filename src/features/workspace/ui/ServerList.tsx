@@ -19,6 +19,7 @@ import { prettyBytes } from "../../../shared/utils/format";
 import { matchesFilter } from "../../browse/browseUtils";
 import type { StatusMessageTone } from "../../../shared/types/status";
 import { useUserPreferences } from "../../../app/context/UserPreferencesContext";
+import { useIsCompactScreen } from "../../../shared/hooks/useIsCompactScreen";
 
 export type ServerListProps = {
   servers: ManagedServer[];
@@ -155,6 +156,9 @@ export const ServerList: React.FC<ServerListProps> = ({
   const activeControllersRef = useRef<Map<string, AbortController>>(new Map());
   const pendingStartRef = useRef<Set<string>>(new Set());
   const [expandedUsage, setExpandedUsage] = useState<Record<string, boolean>>({});
+  const isCompactScreen = useIsCompactScreen();
+  const showCardLayout = compact || isCompactScreen;
+
   const syncButtonDisabled = Boolean(syncDisabled || disabled || syncInProgress);
   const syncButtonLabel = syncInProgress ? "Syncing…" : "Sync Selected";
   const syncButtonTooltip = syncInProgress
@@ -312,31 +316,27 @@ export const ServerList: React.FC<ServerListProps> = ({
     });
   }, [servers]);
 
-  const renderUsageRow = useCallback(
-    (server: ManagedServer, rowId?: string) => {
+  const renderUsageContent = useCallback(
+    (server: ManagedServer) => {
       const snapshot = snapshotByUrl.get(server.url);
       const usage = usageByServer.get(server.url);
 
       const loading = Boolean(snapshot?.isLoading && (!usage || usage.totalBytes === 0));
       const errored = Boolean(snapshot?.isError);
 
-      let content: React.ReactNode;
-
       if (errored) {
         const message =
           snapshot?.error instanceof Error ? snapshot.error.message : "Unable to load file list.";
-        content = (
-          <div className="text-xs text-red-400">{message || "Unable to load file list."}</div>
-        );
+        return <div className="text-xs text-red-400">{message || "Unable to load file list."}</div>;
       } else if (loading) {
-        content = (
+        return (
           <div className="h-2 w-full overflow-hidden rounded-full bg-slate-800">
             <div className="h-full w-1/3 animate-pulse bg-slate-600" />
           </div>
         );
       } else if (!usage || usage.totalBytes === 0) {
         const missingOnlyCount = usage?.missingSizeCount ?? 0;
-        content = (
+        return (
           <div className="text-xs text-slate-400">
             {missingOnlyCount > 0
               ? `${missingOnlyCount} file${missingOnlyCount > 1 ? "s" : ""} detected, but size is unavailable.`
@@ -347,7 +347,7 @@ export const ServerList: React.FC<ServerListProps> = ({
         const segments = FILTER_SEGMENTS.filter(id => usage.buckets[id] > 0);
         const legendEntries = FILTER_SEGMENTS;
 
-        content = (
+        return (
           <div className="flex flex-col items-stretch gap-3">
             <div className="flex h-2 w-full overflow-hidden rounded-full bg-slate-800">
               {segments.map(id => (
@@ -390,16 +390,21 @@ export const ServerList: React.FC<ServerListProps> = ({
           </div>
         );
       }
+    },
+    [snapshotByUrl, usageByServer],
+  );
 
+  const renderUsageRow = useCallback(
+    (server: ManagedServer, rowId?: string) => {
       return (
         <tr className="border-t border-slate-900/60" id={rowId}>
           <td colSpan={6} className="px-3 pb-4 pt-2">
-            {content}
+            {renderUsageContent(server)}
           </td>
         </tr>
       );
     },
-    [snapshotByUrl, usageByServer],
+    [renderUsageContent],
   );
 
   const handleDraftKeyDown = (event: React.KeyboardEvent<HTMLElement>) => {
@@ -843,7 +848,7 @@ export const ServerList: React.FC<ServerListProps> = ({
 
   const containerClass = compact
     ? "rounded-xl border border-slate-800 bg-slate-900/60 p-4"
-    : "rounded-2xl border border-slate-800 bg-slate-900/70 p-4";
+    : "rounded-2xl border border-slate-800 bg-slate-900/70 p-4 flex-1 min-h-0";
 
   return (
     <section className={containerClass}>
@@ -856,11 +861,10 @@ export const ServerList: React.FC<ServerListProps> = ({
 
       {(validationError || saving) && (
         <div
-          className={`mb-3 rounded-xl border px-3 py-2 text-xs ${
-            validationError
-              ? "border-amber-600/40 bg-amber-500/5 text-amber-200"
-              : "border-emerald-600/30 bg-emerald-500/5 text-emerald-200"
-          }`}
+          className={`mb-3 rounded-xl border px-3 py-2 text-xs ${validationError
+            ? "border-amber-600/40 bg-amber-500/5 text-amber-200"
+            : "border-emerald-600/30 bg-emerald-500/5 text-emerald-200"
+            }`}
           role="alert"
         >
           {validationError || "Saving changes…"}
@@ -906,98 +910,71 @@ export const ServerList: React.FC<ServerListProps> = ({
           </ul>
         </div>
       ) : null}
+
       {(hasServers || isAdding) && (
-        <div className="overflow-x-auto">
-          <table className="min-w-full table-fixed text-sm text-slate-300">
-            <thead className="text-[11px] uppercase tracking-wide text-slate-300">
-              <tr>
-                <th scope="col" className="py-2 px-3 text-left font-semibold">
-                  Server
-                </th>
-                <th scope="col" className="py-2 px-3 text-left font-semibold">
-                  URL
-                </th>
-                <th scope="col" className="w-44 py-2 px-3 text-left font-semibold">
-                  Status
-                </th>
-                <th scope="col" className="w-32 py-2 px-3 text-left font-semibold">
-                  Type
-                </th>
-                <th scope="col" className="w-24 py-2 px-3 text-center font-semibold">
-                  Sync
-                </th>
-                <th scope="col" className="w-28 py-2 px-3 text-center font-semibold">
-                  Actions
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {isAdding && (
-                <tr className="border-t border-slate-800 bg-slate-900/70">
-                  <td className="py-3 px-3">
-                    <input
-                      type="text"
-                      value={draft.name}
-                      onChange={event => {
-                        setDraft(prev => ({ ...prev, name: event.target.value }));
-                        clearFieldError("name");
-                      }}
-                      className={`w-full rounded-lg bg-slate-900 px-3 py-2 text-sm text-slate-200 focus:outline-none ${
-                        fieldErrors?.name
-                          ? "border border-red-700 focus:border-red-500"
-                          : "border border-slate-700 focus:border-emerald-500"
+        showCardLayout ? (
+          <div className="space-y-3">
+            {(isAdding || editingUrl) && (
+              <div className="flex flex-col gap-3 rounded-xl border border-slate-700 bg-slate-900/50 p-3">
+                <div className="space-y-1">
+                  <label className="text-xs text-slate-400">Server Name</label>
+                  <input
+                    type="text"
+                    value={draft.name}
+                    onChange={event => {
+                      setDraft(prev => ({ ...prev, name: event.target.value }));
+                      clearFieldError("name");
+                    }}
+                    className={`w-full rounded-lg bg-slate-900 px-3 py-2 text-sm text-slate-200 focus:outline-none ${fieldErrors?.name
+                      ? "border border-red-700 focus:border-red-500"
+                      : "border border-slate-700 focus:border-emerald-500"
                       }`}
-                      placeholder="Server name"
-                      aria-label="Server name"
-                      onClick={event => event.stopPropagation()}
-                      onKeyDown={handleDraftKeyDown}
-                      autoComplete="off"
-                    />
-                    {fieldErrors?.name ? (
-                      <p className="mt-1 text-[11px] text-red-400">{fieldErrors.name}</p>
-                    ) : null}
-                  </td>
-                  <td className="py-3 px-3">
-                    <input
-                      ref={urlInputRef}
-                      type="url"
-                      value={draft.url}
-                      onChange={event => {
-                        const value = event.target.value;
-                        setDraft(prev => {
-                          const next = { ...prev, url: value };
-                          const previousDerived = deriveServerNameFromUrl(prev.url.trim());
-                          if (!prev.name || prev.name === previousDerived) {
-                            const derived = deriveServerNameFromUrl(value.trim());
-                            if (derived) next.name = derived;
-                          }
-                          return next;
-                        });
-                        clearFieldError("url");
-                      }}
-                      className={`w-full rounded-lg bg-slate-900 px-3 py-2 text-sm text-slate-200 focus:outline-none ${
-                        fieldErrors?.url
-                          ? "border border-red-700 focus:border-red-500"
-                          : "border border-slate-700 focus:border-emerald-500"
+                    placeholder="Server name"
+                    autoComplete="off"
+                  />
+                  {fieldErrors?.name ? (
+                    <p className="text-[11px] text-red-400">{fieldErrors.name}</p>
+                  ) : null}
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs text-slate-400">URL</label>
+                  <input
+                    ref={urlInputRef}
+                    type="url"
+                    value={draft.url}
+                    onChange={event => {
+                      const value = event.target.value;
+                      setDraft(prev => {
+                        const next = { ...prev, url: value };
+                        const previousDerived = deriveServerNameFromUrl(prev.url.trim());
+                        if (!prev.name || prev.name === previousDerived) {
+                          const derived = deriveServerNameFromUrl(value.trim());
+                          if (derived) next.name = derived;
+                        }
+                        return next;
+                      });
+                      clearFieldError("url");
+                    }}
+                    className={`w-full rounded-lg bg-slate-900 px-3 py-2 text-sm text-slate-200 focus:outline-none ${fieldErrors?.url
+                      ? "border border-red-700 focus:border-red-500"
+                      : "border border-slate-700 focus:border-emerald-500"
                       }`}
-                      placeholder={
-                        draft.type === "satellite"
-                          ? "https://satellite.earth/api/v1"
-                          : "https://example.com"
-                      }
-                      aria-label="Server URL"
-                      onClick={event => event.stopPropagation()}
-                      onKeyDown={handleDraftKeyDown}
-                      autoComplete="off"
-                    />
-                    {fieldErrors?.url ? (
-                      <p className="mt-1 text-[11px] text-red-400">{fieldErrors.url}</p>
-                    ) : null}
-                  </td>
-                  <td className="py-3 px-3 text-xs text-slate-300">
-                    Health check runs after saving
-                  </td>
-                  <td className="py-3 px-3">
+                    placeholder={
+                      draft.type === "satellite"
+                        ? "https://satellite.earth/api/v1"
+                        : "https://example.com"
+                    }
+                    autoComplete="off"
+                  />
+                  {fieldErrors?.url ? (
+                    <p className="text-[11px] text-red-400">{fieldErrors.url}</p>
+                  ) : null}
+                </div>
+
+                <div className="flex gap-3">
+                  <div className="flex-1 space-y-1">
+                    <label className="text-xs text-slate-400">Type</label>
                     <select
                       value={draft.type}
                       onChange={event => {
@@ -1009,18 +986,15 @@ export const ServerList: React.FC<ServerListProps> = ({
                         }));
                         clearFieldErrors();
                       }}
-                      className="w-full min-w-[8rem] rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-200 focus:border-emerald-500 focus:outline-none"
-                      aria-label="Server type"
-                      onClick={event => event.stopPropagation()}
-                      onKeyDown={handleDraftKeyDown}
+                      className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-200 focus:border-emerald-500 focus:outline-none"
                     >
                       <option value="blossom">Blossom</option>
                       <option value="nip96">NIP-96</option>
                       <option value="satellite">Satellite</option>
                     </select>
-                  </td>
-                  <td className="py-3 px-3 text-center">
-                    <div className="flex justify-center">
+                  </div>
+                  <div className="flex items-center pt-5">
+                    <label className="flex items-center gap-2 text-sm text-slate-300">
                       <input
                         type="checkbox"
                         checked={draft.sync}
@@ -1029,185 +1003,522 @@ export const ServerList: React.FC<ServerListProps> = ({
                           setDraft(prev => ({ ...prev, sync: event.target.checked }));
                           clearFieldErrors();
                         }}
-                        aria-label="Sync server"
-                        onClick={event => event.stopPropagation()}
-                        onKeyDown={handleDraftKeyDown}
                         disabled={saving || draft.type === "satellite"}
                         readOnly={draft.type === "satellite"}
+                        className="rounded border-slate-600 bg-slate-800 text-emerald-500 focus:ring-emerald-500/50"
                       />
-                    </div>
-                  </td>
-                  <td className="py-3 px-3 text-right">
-                    <div className="flex justify-end gap-2">
-                      <button
-                        type="button"
-                        className="inline-flex items-center justify-center gap-2 rounded-lg bg-emerald-600 px-3 py-2 text-xs text-slate-950 transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-60"
-                        disabled={saving}
-                        onClick={event => {
-                          event.stopPropagation();
-                          handleSubmit();
-                        }}
-                      >
-                        {saving ? <RefreshIcon size={16} className="animate-spin" /> : "Add"}
-                        {saving ? <span className="sr-only">Saving server</span> : null}
-                      </button>
-                      <button
-                        type="button"
-                        className="text-xs px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700"
-                        onClick={event => {
-                          event.stopPropagation();
-                          cancelDraft();
-                        }}
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              )}
-              {servers.map(server => {
-                const isEditing = editingUrl === server.url;
-                const isDefault = defaultServerUrl === server.url;
-                const usageRowId = `server-usage-${server.url.replace(/[^a-z0-9]/gi, "-")}`;
-                const rowHighlightClass =
-                  selected === server.url
-                    ? "bg-emerald-500/10"
-                    : isDefault
-                      ? "bg-slate-800/40"
-                      : "hover:bg-slate-800/50";
-                const isUsageExpanded = Boolean(expandedUsage[server.url]);
-                const usageRow = isUsageExpanded ? renderUsageRow(server, usageRowId) : null;
+                      Sync
+                    </label>
+                  </div>
+                </div>
 
-                if (isEditing) {
-                  return (
-                    <React.Fragment key={server.url}>
-                      <tr className="border-t border-slate-800 bg-slate-900/70">
-                        <td className="py-3 px-3">
-                          <input
-                            type="text"
-                            value={draft.name}
-                            onChange={event => {
-                              setDraft(prev => ({ ...prev, name: event.target.value }));
-                              clearFieldError("name");
-                            }}
-                            className={`w-full rounded-lg bg-slate-900 px-3 py-2 text-sm text-slate-200 focus:outline-none ${
-                              fieldErrors?.name
-                                ? "border border-red-700 focus:border-red-500"
-                                : "border border-slate-700 focus:border-emerald-500"
-                            }`}
-                            placeholder="Server name"
-                            aria-label="Server name"
-                            onClick={event => event.stopPropagation()}
-                            onKeyDown={handleDraftKeyDown}
-                            autoComplete="off"
+                <div className="flex justify-end gap-2 mt-2">
+                  <button
+                    type="button"
+                    className="flex items-center justify-center rounded-lg bg-emerald-600 px-4 py-2 text-sm text-slate-950 transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-60"
+                    disabled={saving}
+                    onClick={handleSubmit}
+                  >
+                    {saving ? <RefreshIcon size={16} className="animate-spin" /> : (editingUrl ? "Save" : "Add")}
+                  </button>
+                  <button
+                    type="button"
+                    className="rounded-lg bg-slate-800 px-4 py-2 text-sm text-slate-200 transition hover:bg-slate-700"
+                    onClick={cancelDraft}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {servers.filter(s => s.url !== editingUrl).map(server => {
+              const isDefault = defaultServerUrl === server.url;
+              const isUsageExpanded = Boolean(expandedUsage[server.url]);
+              const usageContent = isUsageExpanded ? renderUsageContent(server) : null;
+
+              return (
+                <div
+                  key={server.url}
+                  className={`flex flex-col gap-3 rounded-xl border border-slate-800 bg-slate-900/30 p-3 ${selected === server.url ? "border-emerald-500/30 bg-emerald-500/5" : ""}`}
+                  onClick={() => handleToggle(server)}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex flex-col min-w-0 flex-1">
+                      <div className="flex items-center gap-2 mb-1">
+                        <FolderIcon size={18} className="text-slate-300 shrink-0" />
+                        <span className="font-medium text-slate-100 truncate">{server.name}</span>
+                        {isDefault ? (
+                          <StarIcon
+                            size={16}
+                            className="text-emerald-300 shrink-0"
+                            aria-label="Default server"
                           />
-                          {fieldErrors?.name ? (
-                            <p className="mt-1 text-[11px] text-red-400">{fieldErrors.name}</p>
-                          ) : null}
-                        </td>
-                        <td className="py-3 px-3">
-                          <input
-                            ref={urlInputRef}
-                            type="url"
-                            value={draft.url}
-                            onChange={event => {
-                              const value = event.target.value;
-                              setDraft(prev => {
-                                const next = { ...prev, url: value };
-                                const previousDerived = deriveServerNameFromUrl(prev.url.trim());
-                                if (!prev.name || prev.name === previousDerived) {
-                                  const derived = deriveServerNameFromUrl(value.trim());
-                                  if (derived) next.name = derived;
-                                }
-                                return next;
-                              });
-                              clearFieldError("url");
-                            }}
-                            className={`w-full rounded-lg bg-slate-900 px-3 py-2 text-sm text-slate-200 focus:outline-none ${
-                              fieldErrors?.url
-                                ? "border border-red-700 focus:border-red-500"
-                                : "border border-slate-700 focus:border-emerald-500"
-                            }`}
-                            placeholder={
-                              draft.type === "satellite"
-                                ? "https://satellite.earth/api/v1"
-                                : "https://example.com"
+                        ) : null}
+                      </div>
+                      <span className="text-xs text-slate-400 break-all">{server.url}</span>
+                    </div>
+                    <div className="flex shrink-0 gap-1">
+                      <button
+                        type="button"
+                        className="p-1.5 text-slate-400 hover:text-slate-200"
+                        onClick={e => {
+                          e.stopPropagation();
+                          beginEdit(server);
+                        }}
+                      >
+                        <EditIcon size={16} />
+                      </button>
+                      <button
+                        type="button"
+                        className="p-1.5 text-red-400 hover:text-red-300"
+                        onClick={e => {
+                          e.stopPropagation();
+                          onRemove(server.url);
+                        }}
+                      >
+                        <TrashIcon size={16} />
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between gap-2 border-t border-slate-800/50 pt-2">
+                    <div className="flex flex-col">
+                      {renderHealthCell(server)}
+                    </div>
+                    <div className="flex flex-col items-end gap-1">
+                      <span className="text-[10px] uppercase tracking-wide text-slate-500">{server.type}</span>
+                      <div className="flex items-center gap-2">
+                        <label className="flex items-center gap-1.5 text-xs text-slate-400">
+                          <input type="checkbox" checked={Boolean(server.sync)} disabled readOnly />
+                          Sync
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="border-t border-slate-800/50 pt-2">
+                    <button
+                      type="button"
+                      onClick={event => {
+                        event.stopPropagation();
+                        toggleUsage(server.url);
+                      }}
+                      className={`text-xs font-medium transition ${isLightTheme
+                        ? "text-blue-800 hover:text-blue-600"
+                        : "text-emerald-300 hover:text-emerald-200"
+                        }`}
+                    >
+                      {isUsageExpanded ? "Hide usage" : "View usage"}
+                    </button>
+                    {isUsageExpanded ? <div className="mt-2 text-xs">{usageContent}</div> : null}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="min-w-full table-fixed text-sm text-slate-300">
+              <thead className="text-[11px] uppercase tracking-wide text-slate-300">
+                <tr>
+                  <th scope="col" className="py-2 px-3 text-left font-semibold">
+                    Server
+                  </th>
+                  <th scope="col" className="py-2 px-3 text-left font-semibold">
+                    URL
+                  </th>
+                  <th scope="col" className="w-44 py-2 px-3 text-left font-semibold">
+                    Status
+                  </th>
+                  <th scope="col" className="w-32 py-2 px-3 text-left font-semibold">
+                    Type
+                  </th>
+                  <th scope="col" className="w-24 py-2 px-3 text-center font-semibold">
+                    Sync
+                  </th>
+                  <th scope="col" className="w-28 py-2 px-3 text-center font-semibold">
+                    Actions
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {isAdding && (
+                  <tr className="border-t border-slate-800 bg-slate-900/70">
+                    <td className="py-3 px-3">
+                      <input
+                        type="text"
+                        value={draft.name}
+                        onChange={event => {
+                          setDraft(prev => ({ ...prev, name: event.target.value }));
+                          clearFieldError("name");
+                        }}
+                        className={`w-full rounded-lg bg-slate-900 px-3 py-2 text-sm text-slate-200 focus:outline-none ${fieldErrors?.name
+                          ? "border border-red-700 focus:border-red-500"
+                          : "border border-slate-700 focus:border-emerald-500"
+                          }`}
+                        placeholder="Server name"
+                        aria-label="Server name"
+                        onClick={event => event.stopPropagation()}
+                        onKeyDown={handleDraftKeyDown}
+                        autoComplete="off"
+                      />
+                      {fieldErrors?.name ? (
+                        <p className="mt-1 text-[11px] text-red-400">{fieldErrors.name}</p>
+                      ) : null}
+                    </td>
+                    <td className="py-3 px-3">
+                      <input
+                        ref={urlInputRef}
+                        type="url"
+                        value={draft.url}
+                        onChange={event => {
+                          const value = event.target.value;
+                          setDraft(prev => {
+                            const next = { ...prev, url: value };
+                            const previousDerived = deriveServerNameFromUrl(prev.url.trim());
+                            if (!prev.name || prev.name === previousDerived) {
+                              const derived = deriveServerNameFromUrl(value.trim());
+                              if (derived) next.name = derived;
                             }
-                            aria-label="Server URL"
-                            onClick={event => event.stopPropagation()}
-                            onKeyDown={handleDraftKeyDown}
-                            autoComplete="off"
-                          />
-                          {fieldErrors?.url ? (
-                            <p className="mt-1 text-[11px] text-red-400">{fieldErrors.url}</p>
-                          ) : null}
-                        </td>
-                        <td className="py-3 px-3">{renderHealthCell(server, true)}</td>
-                        <td className="py-3 px-3">
-                          <select
-                            value={draft.type}
-                            onChange={event => {
-                              const nextType = event.target.value as ManagedServer["type"];
-                              setDraft(prev => ({
-                                ...prev,
-                                type: nextType,
-                                sync: nextType === "satellite" ? false : prev.sync,
-                              }));
-                              clearFieldErrors();
-                            }}
-                            className="w-full min-w-[8rem] rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-200 focus:border-emerald-500 focus:outline-none"
-                            aria-label="Server type"
-                            onClick={event => event.stopPropagation()}
-                            onKeyDown={handleDraftKeyDown}
-                          >
-                            <option value="blossom">Blossom</option>
-                            <option value="nip96">NIP-96</option>
-                            <option value="satellite">Satellite</option>
-                          </select>
-                        </td>
-                        <td className="py-3 px-3 text-center">
-                          <div className="flex justify-center">
+                            return next;
+                          });
+                          clearFieldError("url");
+                        }}
+                        className={`w-full rounded-lg bg-slate-900 px-3 py-2 text-sm text-slate-200 focus:outline-none ${fieldErrors?.url
+                          ? "border border-red-700 focus:border-red-500"
+                          : "border border-slate-700 focus:border-emerald-500"
+                          }`}
+                        placeholder={
+                          draft.type === "satellite"
+                            ? "https://satellite.earth/api/v1"
+                            : "https://example.com"
+                        }
+                        aria-label="Server URL"
+                        onClick={event => event.stopPropagation()}
+                        onKeyDown={handleDraftKeyDown}
+                        autoComplete="off"
+                      />
+                      {fieldErrors?.url ? (
+                        <p className="mt-1 text-[11px] text-red-400">{fieldErrors.url}</p>
+                      ) : null}
+                    </td>
+                    <td className="py-3 px-3 text-xs text-slate-300">
+                      Health check runs after saving
+                    </td>
+                    <td className="py-3 px-3">
+                      <select
+                        value={draft.type}
+                        onChange={event => {
+                          const nextType = event.target.value as ManagedServer["type"];
+                          setDraft(prev => ({
+                            ...prev,
+                            type: nextType,
+                            sync: nextType === "satellite" ? false : prev.sync,
+                          }));
+                          clearFieldErrors();
+                        }}
+                        className="w-full min-w-[8rem] rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-200 focus:border-emerald-500 focus:outline-none"
+                        aria-label="Server type"
+                        onClick={event => event.stopPropagation()}
+                        onKeyDown={handleDraftKeyDown}
+                      >
+                        <option value="blossom">Blossom</option>
+                        <option value="nip96">NIP-96</option>
+                        <option value="satellite">Satellite</option>
+                      </select>
+                    </td>
+                    <td className="py-3 px-3 text-center">
+                      <div className="flex justify-center">
+                        <input
+                          type="checkbox"
+                          checked={draft.sync}
+                          onChange={event => {
+                            if (draft.type === "satellite") return;
+                            setDraft(prev => ({ ...prev, sync: event.target.checked }));
+                            clearFieldErrors();
+                          }}
+                          aria-label="Sync server"
+                          onClick={event => event.stopPropagation()}
+                          onKeyDown={handleDraftKeyDown}
+                          disabled={saving || draft.type === "satellite"}
+                          readOnly={draft.type === "satellite"}
+                        />
+                      </div>
+                    </td>
+                    <td className="py-3 px-3 text-right">
+                      <div className="flex justify-end gap-2">
+                        <button
+                          type="button"
+                          className="inline-flex items-center justify-center gap-2 rounded-lg bg-emerald-600 px-3 py-2 text-xs text-slate-950 transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-60"
+                          disabled={saving}
+                          onClick={event => {
+                            event.stopPropagation();
+                            handleSubmit();
+                          }}
+                        >
+                          {saving ? <RefreshIcon size={16} className="animate-spin" /> : "Add"}
+                          {saving ? <span className="sr-only">Saving server</span> : null}
+                        </button>
+                        <button
+                          type="button"
+                          className="text-xs px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700"
+                          onClick={event => {
+                            event.stopPropagation();
+                            cancelDraft();
+                          }}
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                )}
+                {servers.map(server => {
+                  const isEditing = editingUrl === server.url;
+                  const isDefault = defaultServerUrl === server.url;
+                  const usageRowId = `server-usage-${server.url.replace(/[^a-z0-9]/gi, "-")}`;
+                  const rowHighlightClass =
+                    selected === server.url
+                      ? "bg-emerald-500/10"
+                      : isDefault
+                        ? "bg-slate-800/40"
+                        : "hover:bg-slate-800/50";
+                  const isUsageExpanded = Boolean(expandedUsage[server.url]);
+                  const usageRow = isUsageExpanded ? renderUsageRow(server, usageRowId) : null;
+
+                  if (isEditing) {
+                    return (
+                      <React.Fragment key={server.url}>
+                        <tr className="border-t border-slate-800 bg-slate-900/70">
+                          <td className="py-3 px-3">
                             <input
-                              type="checkbox"
-                              checked={draft.sync}
+                              type="text"
+                              value={draft.name}
                               onChange={event => {
-                                if (draft.type === "satellite") return;
-                                setDraft(prev => ({ ...prev, sync: event.target.checked }));
-                                clearFieldErrors();
+                                setDraft(prev => ({ ...prev, name: event.target.value }));
+                                clearFieldError("name");
                               }}
-                              aria-label="Sync server"
+                              className={`w-full rounded-lg bg-slate-900 px-3 py-2 text-sm text-slate-200 focus:outline-none ${fieldErrors?.name
+                                ? "border border-red-700 focus:border-red-500"
+                                : "border border-slate-700 focus:border-emerald-500"
+                                }`}
+                              placeholder="Server name"
+                              aria-label="Server name"
                               onClick={event => event.stopPropagation()}
                               onKeyDown={handleDraftKeyDown}
-                              disabled={saving || draft.type === "satellite"}
+                              autoComplete="off"
                             />
+                            {fieldErrors?.name ? (
+                              <p className="mt-1 text-[11px] text-red-400">{fieldErrors.name}</p>
+                            ) : null}
+                          </td>
+                          <td className="py-3 px-3">
+                            <input
+                              ref={urlInputRef}
+                              type="url"
+                              value={draft.url}
+                              onChange={event => {
+                                const value = event.target.value;
+                                setDraft(prev => {
+                                  const next = { ...prev, url: value };
+                                  const previousDerived = deriveServerNameFromUrl(prev.url.trim());
+                                  if (!prev.name || prev.name === previousDerived) {
+                                    const derived = deriveServerNameFromUrl(value.trim());
+                                    if (derived) next.name = derived;
+                                  }
+                                  return next;
+                                });
+                                clearFieldError("url");
+                              }}
+                              className={`w-full rounded-lg bg-slate-900 px-3 py-2 text-sm text-slate-200 focus:outline-none ${fieldErrors?.url
+                                ? "border border-red-700 focus:border-red-500"
+                                : "border border-slate-700 focus:border-emerald-500"
+                                }`}
+                              placeholder={
+                                draft.type === "satellite"
+                                  ? "https://satellite.earth/api/v1"
+                                  : "https://example.com"
+                              }
+                              aria-label="Server URL"
+                              onClick={event => event.stopPropagation()}
+                              onKeyDown={handleDraftKeyDown}
+                              autoComplete="off"
+                            />
+                            {fieldErrors?.url ? (
+                              <p className="mt-1 text-[11px] text-red-400">{fieldErrors.url}</p>
+                            ) : null}
+                          </td>
+                          <td className="py-3 px-3">{renderHealthCell(server, true)}</td>
+                          <td className="py-3 px-3">
+                            <select
+                              value={draft.type}
+                              onChange={event => {
+                                const nextType = event.target.value as ManagedServer["type"];
+                                setDraft(prev => ({
+                                  ...prev,
+                                  type: nextType,
+                                  sync: nextType === "satellite" ? false : prev.sync,
+                                }));
+                                clearFieldErrors();
+                              }}
+                              className="w-full min-w-[8rem] rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-200 focus:border-emerald-500 focus:outline-none"
+                              aria-label="Server type"
+                              onClick={event => event.stopPropagation()}
+                              onKeyDown={handleDraftKeyDown}
+                            >
+                              <option value="blossom">Blossom</option>
+                              <option value="nip96">NIP-96</option>
+                              <option value="satellite">Satellite</option>
+                            </select>
+                          </td>
+                          <td className="py-3 px-3 text-center">
+                            <div className="flex justify-center">
+                              <input
+                                type="checkbox"
+                                checked={draft.sync}
+                                onChange={event => {
+                                  if (draft.type === "satellite") return;
+                                  setDraft(prev => ({ ...prev, sync: event.target.checked }));
+                                  clearFieldErrors();
+                                }}
+                                aria-label="Sync server"
+                                onClick={event => event.stopPropagation()}
+                                onKeyDown={handleDraftKeyDown}
+                                disabled={saving || draft.type === "satellite"}
+                              />
+                            </div>
+                          </td>
+                          <td className="py-3 px-3 text-right">
+                            <div className="flex justify-end gap-2">
+                              <button
+                                type="button"
+                                className="flex items-center justify-center rounded-lg bg-emerald-600 p-2 text-slate-50 transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-60"
+                                disabled={saving}
+                                onClick={event => {
+                                  event.stopPropagation();
+                                  handleSubmit();
+                                }}
+                                aria-label="Save server"
+                                title="Save server"
+                              >
+                                <SaveIcon size={16} />
+                              </button>
+                              <button
+                                type="button"
+                                className="flex items-center justify-center rounded-lg bg-slate-800 p-2 text-slate-200 transition hover:bg-slate-700"
+                                onClick={event => {
+                                  event.stopPropagation();
+                                  cancelDraft();
+                                }}
+                                aria-label="Cancel editing"
+                                title="Cancel editing"
+                              >
+                                <CancelIcon size={16} />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                        {usageRow}
+                      </React.Fragment>
+                    );
+                  }
+
+                  return (
+                    <React.Fragment key={server.url}>
+                      <tr
+                        role="button"
+                        tabIndex={0}
+                        aria-pressed={selected === server.url}
+                        onClick={() => handleToggle(server)}
+                        onKeyDown={e => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            handleToggle(server);
+                          }
+                        }}
+                        className={`border-t border-slate-800 first:border-t-0 cursor-pointer transition-colors focus:outline-none focus:ring-2 focus:ring-emerald-500/60 focus:ring-offset-2 focus:ring-offset-slate-900 ${rowHighlightClass}`}
+                      >
+                        <td className="py-3 px-3 font-medium text-slate-100">
+                          <div className="flex flex-col gap-2">
+                            <div className="flex items-center gap-2">
+                              <FolderIcon size={18} className="text-slate-300" />
+                              <span className="truncate">{server.name}</span>
+                              {isDefault ? (
+                                <StarIcon
+                                  size={16}
+                                  className="text-emerald-300"
+                                  aria-label="Default server"
+                                />
+                              ) : null}
+                            </div>
+                            <button
+                              type="button"
+                              onClick={event => {
+                                event.stopPropagation();
+                                toggleUsage(server.url);
+                              }}
+                              onKeyDown={event => event.stopPropagation()}
+                              className={`self-start text-[11px] font-medium transition ${isLightTheme
+                                ? "text-blue-800 hover:text-blue-600"
+                                : "text-emerald-300 hover:text-emerald-200"
+                                }`}
+                              style={isLightTheme ? { color: "#1e3a8a" } : undefined}
+                              aria-expanded={isUsageExpanded}
+                              aria-controls={usageRowId}
+                            >
+                              {isUsageExpanded ? "Hide server usage" : "View server usage"}
+                            </button>
                           </div>
+                        </td>
+                        <td className="py-3 px-3 text-xs text-slate-400">
+                          <span className="break-all">{server.url}</span>
+                        </td>
+                        <td className="py-3 px-3">{renderHealthCell(server)}</td>
+                        <td className="py-3 px-3 text-[11px] uppercase tracking-wide text-slate-300">
+                          {server.type}
+                        </td>
+                        <td className="py-3 px-3 text-center">
+                          <label
+                            className="inline-flex cursor-not-allowed items-center gap-2 text-xs text-slate-400 opacity-60"
+                            onClick={e => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                            }}
+                            onKeyDown={e => e.stopPropagation()}
+                            aria-disabled
+                            title="Edit this server to change sync"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={Boolean(server.sync)}
+                              disabled={server.type === "satellite"}
+                              readOnly
+                            />
+                            <span className="sr-only">Sync server</span>
+                          </label>
                         </td>
                         <td className="py-3 px-3 text-right">
                           <div className="flex justify-end gap-2">
                             <button
                               type="button"
-                              className="flex items-center justify-center rounded-lg bg-emerald-600 p-2 text-slate-50 transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-60"
-                              disabled={saving}
-                              onClick={event => {
-                                event.stopPropagation();
-                                handleSubmit();
+                              className="text-xs px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700"
+                              onClick={e => {
+                                e.stopPropagation();
+                                beginEdit(server);
                               }}
-                              aria-label="Save server"
-                              title="Save server"
                             >
-                              <SaveIcon size={16} />
+                              <EditIcon size={16} />
                             </button>
                             <button
                               type="button"
-                              className="flex items-center justify-center rounded-lg bg-slate-800 p-2 text-slate-200 transition hover:bg-slate-700"
-                              onClick={event => {
-                                event.stopPropagation();
-                                cancelDraft();
+                              className="text-xs px-2 py-1 rounded-lg bg-red-900/70 hover:bg-red-800"
+                              onClick={e => {
+                                e.stopPropagation();
+                                onRemove(server.url);
                               }}
-                              aria-label="Cancel editing"
-                              title="Cancel editing"
                             >
-                              <CancelIcon size={16} />
+                              <TrashIcon size={16} />
                             </button>
                           </div>
                         </td>
@@ -1215,122 +1526,18 @@ export const ServerList: React.FC<ServerListProps> = ({
                       {usageRow}
                     </React.Fragment>
                   );
-                }
-
-                return (
-                  <React.Fragment key={server.url}>
-                    <tr
-                      role="button"
-                      tabIndex={0}
-                      aria-pressed={selected === server.url}
-                      onClick={() => handleToggle(server)}
-                      onKeyDown={e => {
-                        if (e.key === "Enter" || e.key === " ") {
-                          e.preventDefault();
-                          handleToggle(server);
-                        }
-                      }}
-                      className={`border-t border-slate-800 first:border-t-0 cursor-pointer transition-colors focus:outline-none focus:ring-2 focus:ring-emerald-500/60 focus:ring-offset-2 focus:ring-offset-slate-900 ${rowHighlightClass}`}
-                    >
-                      <td className="py-3 px-3 font-medium text-slate-100">
-                        <div className="flex flex-col gap-2">
-                          <div className="flex items-center gap-2">
-                            <FolderIcon size={18} className="text-slate-300" />
-                            <span className="truncate">{server.name}</span>
-                            {isDefault ? (
-                              <StarIcon
-                                size={16}
-                                className="text-emerald-300"
-                                aria-label="Default server"
-                              />
-                            ) : null}
-                          </div>
-                          <button
-                            type="button"
-                            onClick={event => {
-                              event.stopPropagation();
-                              toggleUsage(server.url);
-                            }}
-                            onKeyDown={event => event.stopPropagation()}
-                            className={`self-start text-[11px] font-medium transition ${
-                              isLightTheme
-                                ? "text-blue-800 hover:text-blue-600"
-                                : "text-emerald-300 hover:text-emerald-200"
-                            }`}
-                            style={isLightTheme ? { color: "#1e3a8a" } : undefined}
-                            aria-expanded={isUsageExpanded}
-                            aria-controls={usageRowId}
-                          >
-                            {isUsageExpanded ? "Hide server usage" : "View server usage"}
-                          </button>
-                        </div>
-                      </td>
-                      <td className="py-3 px-3 text-xs text-slate-400">
-                        <span className="break-all">{server.url}</span>
-                      </td>
-                      <td className="py-3 px-3">{renderHealthCell(server)}</td>
-                      <td className="py-3 px-3 text-[11px] uppercase tracking-wide text-slate-300">
-                        {server.type}
-                      </td>
-                      <td className="py-3 px-3 text-center">
-                        <label
-                          className="inline-flex cursor-not-allowed items-center gap-2 text-xs text-slate-400 opacity-60"
-                          onClick={e => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                          }}
-                          onKeyDown={e => e.stopPropagation()}
-                          aria-disabled
-                          title="Edit this server to change sync"
-                        >
-                          <input
-                            type="checkbox"
-                            checked={Boolean(server.sync)}
-                            disabled={server.type === "satellite"}
-                            readOnly
-                          />
-                          <span className="sr-only">Sync server</span>
-                        </label>
-                      </td>
-                      <td className="py-3 px-3 text-right">
-                        <div className="flex justify-end gap-2">
-                          <button
-                            type="button"
-                            className="text-xs px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700"
-                            onClick={e => {
-                              e.stopPropagation();
-                              beginEdit(server);
-                            }}
-                          >
-                            <EditIcon size={16} />
-                          </button>
-                          <button
-                            type="button"
-                            className="text-xs px-2 py-1 rounded-lg bg-red-900/70 hover:bg-red-800"
-                            onClick={e => {
-                              e.stopPropagation();
-                              onRemove(server.url);
-                            }}
-                          >
-                            <TrashIcon size={16} />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                    {usageRow}
-                  </React.Fragment>
-                );
-              })}
-              {servers.length === 0 && !isAdding && !editingUrl && (
-                <tr>
-                  <td colSpan={6} className="py-6 px-3 text-sm text-center text-slate-400">
-                    No servers yet. Add your first Blossom or NIP-96 server.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+                })}
+                {servers.length === 0 && !isAdding && !editingUrl && (
+                  <tr>
+                    <td colSpan={6} className="py-6 px-3 text-sm text-center text-slate-400">
+                      No servers yet. Add your first Blossom or NIP-96 server.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        )
       )}
     </section>
   );
