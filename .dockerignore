@@ -7,7 +7,7 @@
 **/.classpath
 **/.dockerignore
 **/.env
-**/services/proxy-private-link/.env
+**/services/private-link-proxy/.env
 **/.git
 **/.gitignore
 **/.project

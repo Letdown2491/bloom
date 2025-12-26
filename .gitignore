@@ -23,7 +23,7 @@ lerna-debug.log*
 .env
 .env.*
 !.env.example
-services/private-proxy-link/.env
+services/private-link-proxy/.env
 
 # TypeScript incremental build info
 *.tsbuildinfo
