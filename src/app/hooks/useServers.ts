@@ -34,7 +34,7 @@ function parseServerTags(event: NdkEvent): ManagedServer[] {
     const flag = tag[3] || "";
     const note = tag[4];
     const customName = (tag[5] || "").trim();
-    const requiresAuth = rawType === "satellite" ? true : flag.includes("auth");
+    const requiresAuth = rawType === "satellite" ? true : !flag.includes("no-auth");
     const sync = flag.includes("sync");
     const derivedName = deriveServerNameFromUrl(url);
     const name = customName || derivedName || url.replace(/^https?:\/\//, "");
