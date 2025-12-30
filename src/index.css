@@ -134,7 +134,7 @@ button {
   @apply px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 transition shadow;
 }
 
-input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='color']),
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]),
 select,
 textarea {
   @apply bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 appearance-none;
@@ -193,18 +193,15 @@ textarea {
   .surface-window {
     background:
       radial-gradient(circle at 20% -10%, rgba(56, 189, 248, 0.11), transparent 55%),
-      radial-gradient(circle at 80% 0%, rgba(16, 185, 129, 0.12), transparent 62%),
-      #020617;
+      radial-gradient(circle at 80% 0%, rgba(16, 185, 129, 0.12), transparent 62%), #020617;
   }
 
   .surface-sheet {
-    background:
-      linear-gradient(180deg, rgba(15, 23, 42, 0.92), rgba(2, 6, 23, 0.92));
+    background: linear-gradient(180deg, rgba(15, 23, 42, 0.92), rgba(2, 6, 23, 0.92));
   }
 
   .surface-rail {
-    background:
-      linear-gradient(180deg, rgba(15, 23, 42, 0.96), rgba(15, 23, 42, 0.78));
+    background: linear-gradient(180deg, rgba(15, 23, 42, 0.96), rgba(15, 23, 42, 0.78));
     box-shadow: inset -1px 0 0 rgba(148, 163, 184, 0.08);
   }
 
@@ -606,8 +603,7 @@ textarea {
 :root[data-theme="light"] .surface-window {
   background:
     radial-gradient(circle at 20% -10%, rgba(59, 130, 246, 0.09), transparent 55%),
-    radial-gradient(circle at 80% 0%, rgba(37, 99, 235, 0.1), transparent 62%),
-    #f8fafc;
+    radial-gradient(circle at 80% 0%, rgba(37, 99, 235, 0.1), transparent 62%), #f8fafc;
 }
 
 :root[data-theme="light"] .surface-sheet {

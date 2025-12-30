@@ -563,15 +563,13 @@ const RelayList: React.FC<RelayListProps> = ({
           ) : (
             drafts.map(draft => {
               const sanitized = sanitizeRelayUrl(draft.url);
-              const normalized = sanitized
-                ? (normalizeRelayOrigin(sanitized) ?? sanitized)
-                : null;
+              const normalized = sanitized ? (normalizeRelayOrigin(sanitized) ?? sanitized) : null;
               const health = normalized ? healthMap.get(normalized) : undefined;
               const baseStyle = health ? statusStyles[health.status] : UNKNOWN_STATUS_STYLE;
               const style =
                 health &&
-                  health.status === "error" &&
-                  (!health.lastError || health.lastError === "Not connected")
+                health.status === "error" &&
+                (!health.lastError || health.lastError === "Not connected")
                   ? NOT_CONNECTED_STATUS_STYLE
                   : baseStyle;
               const statusMessage =
@@ -582,9 +580,9 @@ const RelayList: React.FC<RelayListProps> = ({
                   : null;
               const statusMessageClass =
                 health &&
-                  health.status === "error" &&
-                  health.lastError &&
-                  health.lastError !== "Not connected"
+                health.status === "error" &&
+                health.lastError &&
+                health.lastError !== "Not connected"
                   ? "text-[11px] text-red-300"
                   : "text-[11px] text-slate-400";
               const validationMessage = validationErrors.get(draft.id) ?? null;
@@ -602,13 +600,10 @@ const RelayList: React.FC<RelayListProps> = ({
                         <input
                           type="text"
                           value={draft.url}
-                          onChange={event =>
-                            setDraftField(draft.id, { url: event.target.value })
-                          }
-                          className={`w-full rounded-lg px-3 py-2 text-sm text-slate-200 focus:border-emerald-500 focus:outline-none bg-slate-900 ${validationMessage
-                              ? "border border-red-700"
-                              : "border border-slate-700"
-                            }`}
+                          onChange={event => setDraftField(draft.id, { url: event.target.value })}
+                          className={`w-full rounded-lg px-3 py-2 text-sm text-slate-200 focus:border-emerald-500 focus:outline-none bg-slate-900 ${
+                            validationMessage ? "border border-red-700" : "border border-slate-700"
+                          }`}
                           placeholder="wss://relay.example.com"
                           autoComplete="off"
                           spellCheck={false}
@@ -768,8 +763,8 @@ const RelayList: React.FC<RelayListProps> = ({
                   const baseStyle = health ? statusStyles[health.status] : UNKNOWN_STATUS_STYLE;
                   const style =
                     health &&
-                      health.status === "error" &&
-                      (!health.lastError || health.lastError === "Not connected")
+                    health.status === "error" &&
+                    (!health.lastError || health.lastError === "Not connected")
                       ? NOT_CONNECTED_STATUS_STYLE
                       : baseStyle;
                   const statusMessage =
@@ -780,9 +775,9 @@ const RelayList: React.FC<RelayListProps> = ({
                       : null;
                   const statusMessageClass =
                     health &&
-                      health.status === "error" &&
-                      health.lastError &&
-                      health.lastError !== "Not connected"
+                    health.status === "error" &&
+                    health.lastError &&
+                    health.lastError !== "Not connected"
                       ? "text-[11px] text-red-300"
                       : "text-[11px] text-slate-400";
                   const validationMessage = validationErrors.get(draft.id) ?? null;
@@ -800,10 +795,11 @@ const RelayList: React.FC<RelayListProps> = ({
                               onChange={event =>
                                 setDraftField(draft.id, { url: event.target.value })
                               }
-                              className={`w-full rounded-lg px-3 py-2 text-sm text-slate-200 focus:border-emerald-500 focus:outline-none bg-slate-900 ${validationMessage
+                              className={`w-full rounded-lg px-3 py-2 text-sm text-slate-200 focus:border-emerald-500 focus:outline-none bg-slate-900 ${
+                                validationMessage
                                   ? "border border-red-700"
                                   : "border border-slate-700"
-                                }`}
+                              }`}
                               placeholder="wss://relay.example.com"
                               autoComplete="off"
                               spellCheck={false}

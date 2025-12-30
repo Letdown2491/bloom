@@ -4422,6 +4422,56 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
     ],
   );
 
+  const handleRepublishMetadata = useCallback(
+    async (blob: BlossomBlob) => {
+      if (!ndk || !signer) {
+        showStatusMessage("Connect your signer to republish metadata.", "error", 3000);
+        return;
+      }
+      if (blob.privateData) {
+        showStatusMessage("Private files use a different metadata system.", "info", 3000);
+        return;
+      }
+      const serverUrl = blob.serverUrl;
+      if (!serverUrl) {
+        showStatusMessage("Server URL not available for this file.", "error", 3000);
+        return;
+      }
+
+      showStatusMessage("Republishing metadata…", "info", 0);
+
+      try {
+        const normalizedServerUrl = serverUrl.replace(/\/+$/, "");
+        const blobWithCorrectUrl: BlossomBlob = {
+          ...blob,
+          url: `${normalizedServerUrl}/${blob.sha256}`,
+          serverUrl: normalizedServerUrl,
+        };
+
+        const extraTags = extractExtraNip94Tags(blob.nip94);
+        const alias = getBlobMetadataName(blob) ?? blob.name ?? null;
+        const folderPath = blob.folderPath ?? undefined;
+
+        await publishNip94Metadata({
+          ndk,
+          signer,
+          blob: blobWithCorrectUrl,
+          relays: effectiveRelays,
+          alias,
+          folderPath,
+          extraTags,
+          timeoutMs: 10000,
+        });
+
+        showStatusMessage("Metadata republished successfully!", "success", 3000);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Failed to republish metadata";
+        showStatusMessage(message, "error", 4000);
+      }
+    },
+    [ndk, signer, effectiveRelays, showStatusMessage],
+  );
+
   const handleOpenListBlob = useCallback(
     (blob: BlossomBlob) => {
       if (isPlaceholderBlob(blob)) {
@@ -4609,6 +4659,7 @@ export const BrowseTabContainer: React.FC<BrowseTabContainerProps> = ({
             onCopy={handleCopyUrl}
             onShare={handleShareBlob}
             onRename={handleRenameBlob}
+            onRepublishMetadata={handleRepublishMetadata}
             onMove={handleMoveRequest}
             onCopyTo={handleCopyTo}
             onPlay={handlePlayBlob}

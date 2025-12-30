@@ -39,6 +39,8 @@ export type ServerListProps = {
   showStatusMessage?: (message: string, tone?: StatusMessageTone, duration?: number) => void;
   compact?: boolean;
   onProvideActions?: (actions: React.ReactNode | null) => void;
+  onRepublishServerMetadata?: (serverUrl: string) => void;
+  republishingServerUrl?: string | null;
 };
 
 type ServerDraft = {
@@ -141,6 +143,8 @@ export const ServerList: React.FC<ServerListProps> = ({
   showStatusMessage,
   compact = false,
   onProvideActions,
+  onRepublishServerMetadata,
+  republishingServerUrl,
 }) => {
   const {
     preferences: { theme },
@@ -861,10 +865,11 @@ export const ServerList: React.FC<ServerListProps> = ({
 
       {(validationError || saving) && (
         <div
-          className={`mb-3 rounded-xl border px-3 py-2 text-xs ${validationError
-            ? "border-amber-600/40 bg-amber-500/5 text-amber-200"
-            : "border-emerald-600/30 bg-emerald-500/5 text-emerald-200"
-            }`}
+          className={`mb-3 rounded-xl border px-3 py-2 text-xs ${
+            validationError
+              ? "border-amber-600/40 bg-amber-500/5 text-amber-200"
+              : "border-emerald-600/30 bg-emerald-500/5 text-emerald-200"
+          }`}
           role="alert"
         >
           {validationError || "Saving changes…"}
@@ -911,8 +916,8 @@ export const ServerList: React.FC<ServerListProps> = ({
         </div>
       ) : null}
 
-      {(hasServers || isAdding) && (
-        showCardLayout ? (
+      {(hasServers || isAdding) &&
+        (showCardLayout ? (
           <div className="space-y-3">
             {(isAdding || editingUrl) && (
               <div className="flex flex-col gap-3 rounded-xl border border-slate-700 bg-slate-900/50 p-3">
@@ -925,10 +930,11 @@ export const ServerList: React.FC<ServerListProps> = ({
                       setDraft(prev => ({ ...prev, name: event.target.value }));
                       clearFieldError("name");
                     }}
-                    className={`w-full rounded-lg bg-slate-900 px-3 py-2 text-sm text-slate-200 focus:outline-none ${fieldErrors?.name
-                      ? "border border-red-700 focus:border-red-500"
-                      : "border border-slate-700 focus:border-emerald-500"
-                      }`}
+                    className={`w-full rounded-lg bg-slate-900 px-3 py-2 text-sm text-slate-200 focus:outline-none ${
+                      fieldErrors?.name
+                        ? "border border-red-700 focus:border-red-500"
+                        : "border border-slate-700 focus:border-emerald-500"
+                    }`}
                     placeholder="Server name"
                     autoComplete="off"
                   />
@@ -956,10 +962,11 @@ export const ServerList: React.FC<ServerListProps> = ({
                       });
                       clearFieldError("url");
                     }}
-                    className={`w-full rounded-lg bg-slate-900 px-3 py-2 text-sm text-slate-200 focus:outline-none ${fieldErrors?.url
-                      ? "border border-red-700 focus:border-red-500"
-                      : "border border-slate-700 focus:border-emerald-500"
-                      }`}
+                    className={`w-full rounded-lg bg-slate-900 px-3 py-2 text-sm text-slate-200 focus:outline-none ${
+                      fieldErrors?.url
+                        ? "border border-red-700 focus:border-red-500"
+                        : "border border-slate-700 focus:border-emerald-500"
+                    }`}
                     placeholder={
                       draft.type === "satellite"
                         ? "https://satellite.earth/api/v1"
@@ -1019,7 +1026,13 @@ export const ServerList: React.FC<ServerListProps> = ({
                     disabled={saving}
                     onClick={handleSubmit}
                   >
-                    {saving ? <RefreshIcon size={16} className="animate-spin" /> : (editingUrl ? "Save" : "Add")}
+                    {saving ? (
+                      <RefreshIcon size={16} className="animate-spin" />
+                    ) : editingUrl ? (
+                      "Save"
+                    ) : (
+                      "Add"
+                    )}
                   </button>
                   <button
                     type="button"
@@ -1032,90 +1045,117 @@ export const ServerList: React.FC<ServerListProps> = ({
               </div>
             )}
 
-            {servers.filter(s => s.url !== editingUrl).map(server => {
-              const isDefault = defaultServerUrl === server.url;
-              const isUsageExpanded = Boolean(expandedUsage[server.url]);
-              const usageContent = isUsageExpanded ? renderUsageContent(server) : null;
+            {servers
+              .filter(s => s.url !== editingUrl)
+              .map(server => {
+                const isDefault = defaultServerUrl === server.url;
+                const isUsageExpanded = Boolean(expandedUsage[server.url]);
+                const usageContent = isUsageExpanded ? renderUsageContent(server) : null;
 
-              return (
-                <div
-                  key={server.url}
-                  className={`flex flex-col gap-3 rounded-xl border border-slate-800 bg-slate-900/30 p-3 ${selected === server.url ? "border-emerald-500/30 bg-emerald-500/5" : ""}`}
-                  onClick={() => handleToggle(server)}
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="flex flex-col min-w-0 flex-1">
-                      <div className="flex items-center gap-2 mb-1">
-                        <FolderIcon size={18} className="text-slate-300 shrink-0" />
-                        <span className="font-medium text-slate-100 truncate">{server.name}</span>
-                        {isDefault ? (
-                          <StarIcon
-                            size={16}
-                            className="text-emerald-300 shrink-0"
-                            aria-label="Default server"
-                          />
+                return (
+                  <div
+                    key={server.url}
+                    className={`flex flex-col gap-3 rounded-xl border border-slate-800 bg-slate-900/30 p-3 ${selected === server.url ? "border-emerald-500/30 bg-emerald-500/5" : ""}`}
+                    onClick={() => handleToggle(server)}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex flex-col min-w-0 flex-1">
+                        <div className="flex items-center gap-2 mb-1">
+                          <FolderIcon size={18} className="text-slate-300 shrink-0" />
+                          <span className="font-medium text-slate-100 truncate">{server.name}</span>
+                          {isDefault ? (
+                            <StarIcon
+                              size={16}
+                              className="text-emerald-300 shrink-0"
+                              aria-label="Default server"
+                            />
+                          ) : null}
+                        </div>
+                        <span className="text-xs text-slate-400 break-all">{server.url}</span>
+                      </div>
+                      <div className="flex shrink-0 gap-1">
+                        <button
+                          type="button"
+                          className="p-1.5 text-slate-400 hover:text-slate-200"
+                          onClick={e => {
+                            e.stopPropagation();
+                            beginEdit(server);
+                          }}
+                          title="Edit server"
+                        >
+                          <EditIcon size={16} />
+                        </button>
+                        {onRepublishServerMetadata ? (
+                          <button
+                            type="button"
+                            className="p-1.5 text-slate-400 hover:text-slate-200 disabled:opacity-50"
+                            onClick={e => {
+                              e.stopPropagation();
+                              onRepublishServerMetadata(server.url);
+                            }}
+                            disabled={republishingServerUrl === server.url}
+                            title="Republish metadata for all files"
+                          >
+                            <RefreshIcon
+                              size={16}
+                              className={republishingServerUrl === server.url ? "animate-spin" : ""}
+                            />
+                          </button>
                         ) : null}
-                      </div>
-                      <span className="text-xs text-slate-400 break-all">{server.url}</span>
-                    </div>
-                    <div className="flex shrink-0 gap-1">
-                      <button
-                        type="button"
-                        className="p-1.5 text-slate-400 hover:text-slate-200"
-                        onClick={e => {
-                          e.stopPropagation();
-                          beginEdit(server);
-                        }}
-                      >
-                        <EditIcon size={16} />
-                      </button>
-                      <button
-                        type="button"
-                        className="p-1.5 text-red-400 hover:text-red-300"
-                        onClick={e => {
-                          e.stopPropagation();
-                          onRemove(server.url);
-                        }}
-                      >
-                        <TrashIcon size={16} />
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center justify-between gap-2 border-t border-slate-800/50 pt-2">
-                    <div className="flex flex-col">
-                      {renderHealthCell(server)}
-                    </div>
-                    <div className="flex flex-col items-end gap-1">
-                      <span className="text-[10px] uppercase tracking-wide text-slate-500">{server.type}</span>
-                      <div className="flex items-center gap-2">
-                        <label className="flex items-center gap-1.5 text-xs text-slate-400">
-                          <input type="checkbox" checked={Boolean(server.sync)} disabled readOnly />
-                          Sync
-                        </label>
+                        <button
+                          type="button"
+                          className="p-1.5 text-red-400 hover:text-red-300"
+                          onClick={e => {
+                            e.stopPropagation();
+                            onRemove(server.url);
+                          }}
+                          title="Remove server"
+                        >
+                          <TrashIcon size={16} />
+                        </button>
                       </div>
                     </div>
-                  </div>
 
-                  <div className="border-t border-slate-800/50 pt-2">
-                    <button
-                      type="button"
-                      onClick={event => {
-                        event.stopPropagation();
-                        toggleUsage(server.url);
-                      }}
-                      className={`text-xs font-medium transition ${isLightTheme
-                        ? "text-blue-800 hover:text-blue-600"
-                        : "text-emerald-300 hover:text-emerald-200"
+                    <div className="flex items-center justify-between gap-2 border-t border-slate-800/50 pt-2">
+                      <div className="flex flex-col">{renderHealthCell(server)}</div>
+                      <div className="flex flex-col items-end gap-1">
+                        <span className="text-[10px] uppercase tracking-wide text-slate-500">
+                          {server.type}
+                        </span>
+                        <div className="flex items-center gap-2">
+                          <label className="flex items-center gap-1.5 text-xs text-slate-400">
+                            <input
+                              type="checkbox"
+                              checked={Boolean(server.sync)}
+                              disabled
+                              readOnly
+                            />
+                            Sync
+                          </label>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="border-t border-slate-800/50 pt-2">
+                      <button
+                        type="button"
+                        onClick={event => {
+                          event.stopPropagation();
+                          toggleUsage(server.url);
+                        }}
+                        className={`text-xs font-medium transition ${
+                          isLightTheme
+                            ? "text-blue-800 hover:text-blue-600"
+                            : "text-emerald-300 hover:text-emerald-200"
                         }`}
-                    >
-                      {isUsageExpanded ? "Hide usage" : "View usage"}
-                    </button>
-                    {isUsageExpanded ? <div className="mt-2 text-xs">{usageContent}</div> : null}
+                      >
+                        {isUsageExpanded ? "Hide usage" : "View usage"}
+                      </button>
+                      {isUsageExpanded ? <div className="mt-2 text-xs">{usageContent}</div> : null}
+                    </div>
                   </div>
-                </div>
-              );
-            })}
+                );
+              })}
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -1153,10 +1193,11 @@ export const ServerList: React.FC<ServerListProps> = ({
                           setDraft(prev => ({ ...prev, name: event.target.value }));
                           clearFieldError("name");
                         }}
-                        className={`w-full rounded-lg bg-slate-900 px-3 py-2 text-sm text-slate-200 focus:outline-none ${fieldErrors?.name
-                          ? "border border-red-700 focus:border-red-500"
-                          : "border border-slate-700 focus:border-emerald-500"
-                          }`}
+                        className={`w-full rounded-lg bg-slate-900 px-3 py-2 text-sm text-slate-200 focus:outline-none ${
+                          fieldErrors?.name
+                            ? "border border-red-700 focus:border-red-500"
+                            : "border border-slate-700 focus:border-emerald-500"
+                        }`}
                         placeholder="Server name"
                         aria-label="Server name"
                         onClick={event => event.stopPropagation()}
@@ -1185,10 +1226,11 @@ export const ServerList: React.FC<ServerListProps> = ({
                           });
                           clearFieldError("url");
                         }}
-                        className={`w-full rounded-lg bg-slate-900 px-3 py-2 text-sm text-slate-200 focus:outline-none ${fieldErrors?.url
-                          ? "border border-red-700 focus:border-red-500"
-                          : "border border-slate-700 focus:border-emerald-500"
-                          }`}
+                        className={`w-full rounded-lg bg-slate-900 px-3 py-2 text-sm text-slate-200 focus:outline-none ${
+                          fieldErrors?.url
+                            ? "border border-red-700 focus:border-red-500"
+                            : "border border-slate-700 focus:border-emerald-500"
+                        }`}
                         placeholder={
                           draft.type === "satellite"
                             ? "https://satellite.earth/api/v1"
@@ -1299,10 +1341,11 @@ export const ServerList: React.FC<ServerListProps> = ({
                                 setDraft(prev => ({ ...prev, name: event.target.value }));
                                 clearFieldError("name");
                               }}
-                              className={`w-full rounded-lg bg-slate-900 px-3 py-2 text-sm text-slate-200 focus:outline-none ${fieldErrors?.name
-                                ? "border border-red-700 focus:border-red-500"
-                                : "border border-slate-700 focus:border-emerald-500"
-                                }`}
+                              className={`w-full rounded-lg bg-slate-900 px-3 py-2 text-sm text-slate-200 focus:outline-none ${
+                                fieldErrors?.name
+                                  ? "border border-red-700 focus:border-red-500"
+                                  : "border border-slate-700 focus:border-emerald-500"
+                              }`}
                               placeholder="Server name"
                               aria-label="Server name"
                               onClick={event => event.stopPropagation()}
@@ -1331,10 +1374,11 @@ export const ServerList: React.FC<ServerListProps> = ({
                                 });
                                 clearFieldError("url");
                               }}
-                              className={`w-full rounded-lg bg-slate-900 px-3 py-2 text-sm text-slate-200 focus:outline-none ${fieldErrors?.url
-                                ? "border border-red-700 focus:border-red-500"
-                                : "border border-slate-700 focus:border-emerald-500"
-                                }`}
+                              className={`w-full rounded-lg bg-slate-900 px-3 py-2 text-sm text-slate-200 focus:outline-none ${
+                                fieldErrors?.url
+                                  ? "border border-red-700 focus:border-red-500"
+                                  : "border border-slate-700 focus:border-emerald-500"
+                              }`}
                               placeholder={
                                 draft.type === "satellite"
                                   ? "https://satellite.earth/api/v1"
@@ -1459,10 +1503,11 @@ export const ServerList: React.FC<ServerListProps> = ({
                                 toggleUsage(server.url);
                               }}
                               onKeyDown={event => event.stopPropagation()}
-                              className={`self-start text-[11px] font-medium transition ${isLightTheme
-                                ? "text-blue-800 hover:text-blue-600"
-                                : "text-emerald-300 hover:text-emerald-200"
-                                }`}
+                              className={`self-start text-[11px] font-medium transition ${
+                                isLightTheme
+                                  ? "text-blue-800 hover:text-blue-600"
+                                  : "text-emerald-300 hover:text-emerald-200"
+                              }`}
                               style={isLightTheme ? { color: "#1e3a8a" } : undefined}
                               aria-expanded={isUsageExpanded}
                               aria-controls={usageRowId}
@@ -1507,9 +1552,29 @@ export const ServerList: React.FC<ServerListProps> = ({
                                 e.stopPropagation();
                                 beginEdit(server);
                               }}
+                              title="Edit server"
                             >
                               <EditIcon size={16} />
                             </button>
+                            {onRepublishServerMetadata ? (
+                              <button
+                                type="button"
+                                className="text-xs px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:opacity-50"
+                                onClick={e => {
+                                  e.stopPropagation();
+                                  onRepublishServerMetadata(server.url);
+                                }}
+                                disabled={republishingServerUrl === server.url}
+                                title="Republish metadata for all files"
+                              >
+                                <RefreshIcon
+                                  size={16}
+                                  className={
+                                    republishingServerUrl === server.url ? "animate-spin" : ""
+                                  }
+                                />
+                              </button>
+                            ) : null}
                             <button
                               type="button"
                               className="text-xs px-2 py-1 rounded-lg bg-red-900/70 hover:bg-red-800"
@@ -1517,6 +1582,7 @@ export const ServerList: React.FC<ServerListProps> = ({
                                 e.stopPropagation();
                                 onRemove(server.url);
                               }}
+                              title="Remove server"
                             >
                               <TrashIcon size={16} />
                             </button>
@@ -1537,8 +1603,7 @@ export const ServerList: React.FC<ServerListProps> = ({
               </tbody>
             </table>
           </div>
-        )
-      )}
+        ))}
     </section>
   );
 };

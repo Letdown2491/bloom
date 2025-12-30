@@ -19,9 +19,11 @@
 - **Customization and Sync:** Personalize your interface and settings. Optionally sync preferences across devices using NIP-77, or keep them local for privacy.
 
 ## Before You Start
+
 - You need a browser with a Nostr extension such as Alby installed, or have a remote signer such as Amber available.
 
 ## Quick Start
+
 If you wish to set up the event proxy to serve private links (links to files without exposing the Blossom endpoints) follow the steps below. If you do not wish to serve private links, skip to the **Development Build** or **Production Build** sections further down.
 
 ### Setting up the private link proxy (Optional)
@@ -49,12 +51,13 @@ If you want to proxy private links, follow the instructions below. This is optio
    pnpm install
    pnpm build
    pnpm start
-   # The proxy will start listening at http://localhost:8787 by default. 
-   # Change this to the domain you will be using to serve proxy links. 
+   # The proxy will start listening at http://localhost:8787 by default.
+   # Change this to the domain you will be using to serve proxy links.
    # We recommend using a subdomain such as https://private.mydomain.com
    ```
 
 ### Development Build
+
 ```bash
 pnpm install
 pnpm dev
@@ -62,6 +65,7 @@ pnpm dev
 ```
 
 ### Production Build
+
 ```bash
 pnpm build
 pnpm preview
@@ -70,6 +74,7 @@ pnpm preview
 ```
 
 ### Docker
+
 You can build and run the production bundle inside a container without installing pnpm locally. Provide the proxy values as build arguments (replace them inline or export them in your shell) before running the container.
 
 ```bash
@@ -89,6 +94,7 @@ docker run --rm --env-file services/private-link-proxy/.env -p 8787:8787 bloom-p
 ```
 
 ### Docker Compose
+
 Docker Compose builds both containers with your `.env` values and starts them together. Make sure `.env` and `services/private-link-proxy/.env` exist from the earlier setup steps before running the command below.
 
 ```bash

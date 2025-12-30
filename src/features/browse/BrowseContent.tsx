@@ -22,6 +22,7 @@ export type BrowseContentProps = {
   onCopy: (blob: BlossomBlob, options?: { url?: string; label?: string }) => void;
   onShare: (blob: BlossomBlob) => void;
   onRename: (blob: BlossomBlob) => void;
+  onRepublishMetadata?: (blob: BlossomBlob) => void;
   onMove: (blob: BlossomBlob) => void;
   onCopyTo: (blob: BlossomBlob) => void;
   onPlay: (blob: BlossomBlob) => void;
@@ -59,6 +60,7 @@ export const BrowseContent: React.FC<BrowseContentProps> = ({
   onCopy,
   onShare,
   onRename,
+  onRepublishMetadata,
   onMove,
   onCopyTo,
   onPlay,
@@ -89,6 +91,7 @@ export const BrowseContent: React.FC<BrowseContentProps> = ({
     | "onCopy"
     | "onShare"
     | "onRename"
+    | "onRepublishMetadata"
     | "onMove"
     | "onCopyTo"
     | "onPlay"
@@ -115,6 +118,7 @@ export const BrowseContent: React.FC<BrowseContentProps> = ({
     onCopy,
     onShare,
     onRename,
+    onRepublishMetadata,
     onMove,
     onCopyTo,
     onPlay,

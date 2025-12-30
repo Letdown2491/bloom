@@ -20,12 +20,18 @@ const projectRoot = path.dirname(fileURLToPath(import.meta.url));
 const shouldAnalyze = process.env.ANALYZE === "true";
 
 export default defineConfig({
-  plugins: [react(), splitVendorChunkPlugin(), shouldAnalyze ? visualizer({
-    filename: path.resolve(projectRoot, "dist/bundle-visualizer.html"),
-    template: "treemap",
-    gzipSize: true,
-    brotliSize: true,
-  }) : null].filter(Boolean),
+  plugins: [
+    react(),
+    splitVendorChunkPlugin(),
+    shouldAnalyze
+      ? visualizer({
+          filename: path.resolve(projectRoot, "dist/bundle-visualizer.html"),
+          template: "treemap",
+          gzipSize: true,
+          brotliSize: true,
+        })
+      : null,
+  ].filter(Boolean),
   resolve: {
     alias: {
       tseep: path.resolve(projectRoot, "src/shims/tseep.ts"),
@@ -34,7 +40,7 @@ export default defineConfig({
   server: {
     port: 4173,
     strictPort: true,
-    allowedHosts: ['bloomapp.me'],
+    allowedHosts: ["bloomapp.me"],
   },
   build: {
     modulePreload: {

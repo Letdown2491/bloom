@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useCallback, useState } from "react";
 import type { FilterMode } from "../../shared/types/filter";
 import type { ManagedServer } from "../../shared/types/servers";
 import type { DefaultSortOption, SortDirection } from "../../app/context/UserPreferencesContext";
@@ -6,6 +6,9 @@ import type { StatusMessageTone } from "../../shared/types/status";
 import type { ShareFolderRequest } from "../../shared/types/shareFolder";
 import type { FolderListRecord } from "../../shared/domain/folderList";
 import { WorkspaceProvider } from "../workspace/WorkspaceContext";
+import { useNdk } from "../../app/context/NdkContext";
+import { republishBlobMetadata } from "../../shared/api/republishMetadata";
+import { listUserBlobs } from "../../shared/api/blossomClient";
 import {
   GridIcon,
   ListIcon,
@@ -467,9 +470,72 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const storageFeedbackId = React.useId();
   const [serverActions, setServerActions] = React.useState<React.ReactNode | null>(null);
   const [relayActions, setRelayActions] = React.useState<React.ReactNode | null>(null);
+  const [republishingServerUrl, setRepublishingServerUrl] = useState<string | null>(null);
   const { folders } = useFolderLists();
   const { effectiveRelays } = usePreferredRelays();
   const currentPubkey = useCurrentPubkey();
+  const { ndk, signer } = useNdk();
+
+  const handleRepublishServerMetadata = useCallback(
+    async (serverUrl: string) => {
+      if (!ndk || !signer || !currentPubkey) {
+        showStatusMessage?.("Connect your signer to republish metadata.", "error", 3000);
+        return;
+      }
+
+      setRepublishingServerUrl(serverUrl);
+      showStatusMessage?.("Fetching files from server…", "info", 0);
+
+      try {
+        const result = await listUserBlobs(serverUrl, currentPubkey);
+        const blobs = result.items;
+
+        if (blobs.length === 0) {
+          showStatusMessage?.("No files found on this server.", "info", 3000);
+          setRepublishingServerUrl(null);
+          return;
+        }
+
+        showStatusMessage?.(`Republishing metadata for ${blobs.length} files…`, "info", 0);
+
+        const republishResult = await republishBlobMetadata({
+          ndk,
+          signer,
+          blobs,
+          serverUrl,
+          relays: effectiveRelays,
+          onProgress: progress => {
+            showStatusMessage?.(
+              `Republishing metadata… ${progress.current}/${progress.total}`,
+              "info",
+              0,
+            );
+          },
+        });
+
+        if (republishResult.failed > 0) {
+          showStatusMessage?.(
+            `Republished ${republishResult.succeeded} files, ${republishResult.failed} failed.`,
+            "warning",
+            5000,
+          );
+        } else {
+          showStatusMessage?.(
+            `Republished metadata for ${republishResult.succeeded} files.`,
+            "success",
+            3000,
+          );
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Failed to republish metadata";
+        showStatusMessage?.(message, "error", 4000);
+      } finally {
+        setRepublishingServerUrl(null);
+      }
+    },
+    [ndk, signer, currentPubkey, effectiveRelays, showStatusMessage],
+  );
+
   const shareRelayHints = React.useMemo(
     () => normalizeRelayUrls(effectiveRelays.length > 0 ? effectiveRelays : DEFAULT_PUBLIC_RELAYS),
     [effectiveRelays],
@@ -1851,6 +1917,8 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
               showStatusMessage={showStatusMessage}
               compact
               onProvideActions={setServerActions}
+              onRepublishServerMetadata={handleRepublishServerMetadata}
+              republishingServerUrl={republishingServerUrl}
             />
           </WorkspaceProvider>,
         ],

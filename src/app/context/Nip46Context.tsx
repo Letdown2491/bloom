@@ -221,10 +221,19 @@ export const Nip46Provider: React.FC<{ children: React.ReactNode }> = ({ childre
 
     const current = activeSessionRef.current;
 
+    // Early exit: nothing to do if no candidate and no current session
+    if (!candidate && !current) return;
+
     if (!candidate) {
+      // Only clear the signer if the currently-adopted session has been explicitly removed.
+      // Don't clear for temporary errors or missing userPubkey - NIP-46 operations like
+      // nip44_decrypt can cause transient error states that shouldn't log the user out.
       if (current) {
-        activeSessionRef.current = null;
-        void adoptSigner(null);
+        const currentSession = snapshot.sessions.find(s => s.id === current);
+        if (!currentSession) {
+          activeSessionRef.current = null;
+          void adoptSigner(null);
+        }
       }
       return;
     }

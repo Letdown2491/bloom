@@ -31,6 +31,7 @@ import {
   TransferIcon,
   SettingsIcon,
   CopyIcon,
+  RefreshIcon,
 } from "../../../shared/ui/icons";
 import { PRIVATE_PLACEHOLDER_SHA } from "../../../shared/constants/private";
 import type { FileKind } from "../../../shared/ui/icons";
@@ -91,6 +92,7 @@ export type BlobListProps = {
   onPlay?: (blob: BlossomBlob) => void;
   onShare?: (blob: BlossomBlob, options?: { mode?: ShareMode }) => void;
   onRename?: (blob: BlossomBlob) => void;
+  onRepublishMetadata?: (blob: BlossomBlob) => void;
   onMove?: (blob: BlossomBlob) => void;
   onCopyTo?: (blob: BlossomBlob) => void;
   onOpenList?: (blob: BlossomBlob) => void;
@@ -372,6 +374,7 @@ export const BlobList: React.FC<BlobListProps> = ({
   onPlay,
   onShare,
   onRename,
+  onRepublishMetadata,
   onMove,
   onCopyTo,
   onOpenList,
@@ -972,6 +975,7 @@ export const BlobList: React.FC<BlobListProps> = ({
           onPlay={onPlay}
           onShare={onShare}
           onRename={onRename}
+          onRepublishMetadata={onRepublishMetadata}
           onMove={handleMove}
           onCopyTo={handleCopyToAction}
           onOpenList={onOpenList}
@@ -1011,6 +1015,7 @@ export const BlobList: React.FC<BlobListProps> = ({
           onPlay={onPlay}
           onShare={onShare}
           onRename={onRename}
+          onRepublishMetadata={onRepublishMetadata}
           onMove={handleMove}
           onCopyTo={handleCopyToAction}
           onOpenList={onOpenList}
@@ -1069,6 +1074,7 @@ const ListLayout: React.FC<{
   onPlay?: (blob: BlossomBlob) => void;
   onShare?: (blob: BlossomBlob, options?: { mode?: ShareMode }) => void;
   onRename?: (blob: BlossomBlob) => void;
+  onRepublishMetadata?: (blob: BlossomBlob) => void;
   onMove?: (blob: BlossomBlob) => void;
   onCopyTo?: (blob: BlossomBlob) => void;
   onOpenList?: (blob: BlossomBlob) => void;
@@ -1107,6 +1113,7 @@ const ListLayout: React.FC<{
   onPlay,
   onShare,
   onRename,
+  onRepublishMetadata,
   onMove,
   onCopyTo,
   onOpenList,
@@ -1263,6 +1270,7 @@ const ListLayout: React.FC<{
       onPlay,
       onShare,
       onRename,
+      onRepublishMetadata,
       onMove: handleMove,
       onCopyTo,
       onOpenList,
@@ -1303,6 +1311,7 @@ const ListLayout: React.FC<{
       onPlay,
       onShare,
       onRename,
+      onRepublishMetadata,
       handleMove,
       onCopyTo,
       onOpenList,
@@ -1355,6 +1364,7 @@ const ListLayout: React.FC<{
         onPlay: rowOnPlay,
         onShare: rowOnShare,
         onRename: rowOnRename,
+        onRepublishMetadata: rowOnRepublishMetadata,
         onMove: rowOnMove,
         onCopyTo: rowOnCopyTo,
         onOpenList: rowOnOpenList,
@@ -1421,6 +1431,7 @@ const ListLayout: React.FC<{
           onPlay={rowOnPlay}
           onShare={rowOnShare}
           onRename={rowOnRename}
+          onRepublishMetadata={rowOnRepublishMetadata}
           onMove={rowOnMove}
           onCopyTo={rowOnCopyTo}
           onOpenList={rowOnOpenList}
@@ -1612,6 +1623,7 @@ const GridLayout: React.FC<{
   onPlay?: (blob: BlossomBlob) => void;
   onShare?: (blob: BlossomBlob, options?: { mode?: ShareMode }) => void;
   onRename?: (blob: BlossomBlob) => void;
+  onRepublishMetadata?: (blob: BlossomBlob) => void;
   onMove?: (blob: BlossomBlob) => void;
   onCopyTo?: (blob: BlossomBlob) => void;
   onOpenList?: (blob: BlossomBlob) => void;
@@ -1645,6 +1657,7 @@ const GridLayout: React.FC<{
   onPlay,
   onShare,
   onRename,
+  onRepublishMetadata,
   onMove: handleMove,
   onCopyTo,
   onOpenList,
@@ -1884,6 +1897,7 @@ const GridLayout: React.FC<{
               onPlay={onPlay}
               onShare={onShare}
               onRename={onRename}
+              onRepublishMetadata={onRepublishMetadata}
               onMove={handleMove}
               onCopyTo={onCopyTo}
               onOpenList={onOpenList}
@@ -1939,6 +1953,7 @@ type GridCardProps = {
   onPlay?: (blob: BlossomBlob) => void;
   onShare?: (blob: BlossomBlob, options?: { mode?: ShareMode }) => void;
   onRename?: (blob: BlossomBlob) => void;
+  onRepublishMetadata?: (blob: BlossomBlob) => void;
   onMove?: (blob: BlossomBlob) => void;
   onCopyTo?: (blob: BlossomBlob) => void;
   onOpenList?: (blob: BlossomBlob) => void;
@@ -2003,6 +2018,7 @@ const GridCard = React.memo<GridCardProps>(
     onPlay,
     onShare,
     onRename,
+    onRepublishMetadata,
     onMove,
     onCopyTo,
     onOpenList,
@@ -2297,6 +2313,16 @@ const GridCard = React.memo<GridCardProps>(
         addedRename = true;
       }
 
+      if (onRepublishMetadata && !isPrivateList && !isListBlob) {
+        items.push({
+          key: "republish-metadata",
+          label: "Republish Metadata",
+          icon: <RefreshIcon size={14} />,
+          ariaLabel: "Republish file metadata to relays",
+          onSelect: () => onRepublishMetadata(blob),
+        });
+      }
+
       if (addedRename) {
         items.push({
           key: "delete-separator",
@@ -2327,6 +2353,7 @@ const GridCard = React.memo<GridCardProps>(
       onDelete,
       onDownload,
       onRename,
+      onRepublishMetadata,
       onMove,
       onCopyTo,
       onShare,
@@ -2881,6 +2908,7 @@ type ListRowProps = {
   onPlay?: (blob: BlossomBlob) => void;
   onShare?: (blob: BlossomBlob, options?: { mode?: ShareMode }) => void;
   onRename?: (blob: BlossomBlob) => void;
+  onRepublishMetadata?: (blob: BlossomBlob) => void;
   onMove?: (blob: BlossomBlob) => void;
   onCopyTo?: (blob: BlossomBlob) => void;
   onOpenList?: (blob: BlossomBlob) => void;
@@ -2926,6 +2954,7 @@ const ListRowComponent: React.FC<ListRowProps> = ({
   onPlay,
   onShare,
   onRename,
+  onRepublishMetadata,
   onMove,
   onCopyTo,
   onOpenList,
@@ -3341,6 +3370,16 @@ const ListRowComponent: React.FC<ListRowProps> = ({
       icon: <EditIcon size={14} />,
       ariaLabel: isMusicListView ? "Edit track details" : "Edit file details",
       onSelect: () => onRename(blob),
+    });
+  }
+
+  if (onRepublishMetadata && !isPrivateListEntry && !isListBlob) {
+    dropdownItems.push({
+      key: "republish-metadata",
+      label: "Republish Metadata",
+      icon: <RefreshIcon size={14} />,
+      ariaLabel: "Republish file metadata to relays",
+      onSelect: () => onRepublishMetadata(blob),
     });
   }
 
